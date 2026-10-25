@@ -186,7 +186,9 @@ class FullCompilerTests(unittest.TestCase):
         self.assertEqual(s['activated_loras'], [lora])
         self.assertEqual(s['loras_multipliers'], '1.0')
         self.assertEqual(s['guidance_scale'], 1.0)
-        self.assertTrue(s['prompt'].endswith(compiler.NO_SCREEN_TEXT))
+        self.assertTrue(s['prompt'].startswith(compiler.FILM_FRAME))
+        self.assertTrue(s['prompt'].endswith(compiler.CLEAN_FRAME))
+        self.assertNotIn(chr(10) * 2, s['prompt'])
         for steps in (4, 20):
             with self.assertRaisesRegex(ValueError, 'wangp_invalid_steps'):
                 compiler.compile_settings(
@@ -974,3 +976,32 @@ class FullHostInputsTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TurboPromptTests(unittest.TestCase):
+    def test_h3_three_field_prompt_is_framed_inside_its_description(self):
+        nl, v7 = chr(10), 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
+        authored = (
+            'integrated_multimodal_description: [Shot 1] Friends toast at a night market.'
+            ' (S1) <d>[Chinese] 干杯！</d>'
+            + nl
+            + 'overall_soundscape: crowd murmur.'
+            + nl
+            + 'non_diegetic_music: N/A'
+        )
+        framed = compiler.turbo_prompt(authored)
+        self.assertEqual(
+            framed,
+            'integrated_multimodal_description: '
+            + compiler.FILM_FRAME
+            + '[Shot 1] Friends toast at a night market. (S1) <d>[Chinese] 干杯！</d>'
+            + compiler.CLEAN_FRAME
+            + nl
+            + 'overall_soundscape: crowd murmur.'
+            + nl
+            + 'non_diegetic_music: N/A',
+        )
+        self.assertEqual(compiler._authored_prompt(framed, v7), authored)
+        for broken in (authored, framed.replace(compiler.CLEAN_FRAME, '')):
+            with self.assertRaisesRegex(ValueError, 'settings_mismatch'):
+                compiler._authored_prompt(broken, v7)
