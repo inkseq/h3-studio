@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 import hashlib
 import json
@@ -73,6 +74,10 @@ from . import capacity_market  # Read-only market cache; never authorizes capaci
 from . import (
     dstack_workspace,
 )  # Account-owned presentation metadata before schema creation.
+
+# Session checks wait up to 2 s for a free slot before answering 429.
+AUTH_SLOT_WAIT_SECONDS = 0.05
+AUTH_SLOT_WAIT_STEPS = 40
 
 COOKIE = "sixnine_session"
 # The opaque handle can outlive its authority: every request checks the SQL
@@ -422,7 +427,13 @@ def create_app(
         principal = None
         authorization = request.headers.get("authorization", "")
         lease = request.scope[ADMISSION_SCOPE_KEY]
-        if not lease.acquire("authentication"):
+        # A page opens several API reads at once; a short wait for a session-check
+        # slot beats an immediate 429 that the browser shows as a failed load.
+        for _ in range(AUTH_SLOT_WAIT_STEPS):
+            if lease.acquire("authentication"):
+                break
+            await asyncio.sleep(AUTH_SLOT_WAIT_SECONDS)
+        else:
             return admission_rejected(request.scope)
         try:
             if authorization:
