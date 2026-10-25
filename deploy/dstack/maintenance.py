@@ -914,7 +914,7 @@ def storyboard_receipt(root, *, filename=STORYBOARD_RECEIPT, purpose="storyboard
     release.regular(path, root_owned=True, maximum=32768)
     value = json.loads(path.read_text())
     release.require(type(value) is dict and set(value) == {"version", "purpose", "commit", "operation_id",
-        "status", "before", "after", "runtime_before"} | ({"profiles_sha256"} if purpose == "default-profile-only" else set()) and type(value["version"]) is int and value["version"] == 1
+        "status", "before", "after", "runtime_before"} | ({"profiles_sha256", "db_restarts"} if purpose == "default-profile-only" else set()) and type(value["version"]) is int and value["version"] == 1
         and value["purpose"] == purpose and type(value.get("commit")) is str
         and release.SHA.fullmatch(value["commit"]) and type(value.get("operation_id")) is str
         and release.DIGEST.fullmatch(value["operation_id"])
@@ -931,6 +931,14 @@ def storyboard_receipt(root, *, filename=STORYBOARD_RECEIPT, purpose="storyboard
     if purpose == "default-profile-only":
         release.require(type(value['profiles_sha256']) is str and release.DIGEST.fullmatch(value['profiles_sha256']),
                         'migration_default_profile_receipt_invalid')
+        restarts = value["db_restarts"]
+        release.require(type(restarts) is list and len(restarts) <= 8, "migration_default_profile_receipt_invalid")
+        for item in restarts:
+            release.require(type(item) is dict and set(item) == {"stop_time_us", "terminated", "connections"}
+                and type(item["stop_time_us"]) is str and re.fullmatch(r"[0-9]{15,20}", item["stop_time_us"])
+                and (item["terminated"] is None or type(item["terminated"]) is int and 0 <= item["terminated"] <= 256)
+                and (item["connections"] is None or type(item["connections"]) is dict),
+                "migration_default_profile_receipt_invalid")
     return value
 
 
@@ -1223,12 +1231,83 @@ print(json.dumps({'profiles_sha256':before,'modes':['FL','REF']}))
     return digest
 
 
-def _default_start(context, config, runtime):
+
+def _default_db_query(context, sql):
+    raw = compose(*context[:3], "exec", "-T", "--user", "postgres", "db",
+        "env", "PGOPTIONS=-c statement_timeout=20000 -c lock_timeout=3000",
+        "psql", "-X", "-U", "postgres", "-d", "sixnine", "-At", "-v", "ON_ERROR_STOP=1",
+        "-c", sql, timeout=30)
+    return json.loads(raw)
+
+
+def _default_record_stop(context, root, receipt):
+    # Use the DB clock, not a host/DB clock assumption. Persist before stopping.
+    stamp = _default_db_query(context,
+        "SELECT (floor(extract(epoch FROM clock_timestamp()) * 1000000)::bigint)::text;")
+    stamp = str(stamp)
+    release.require(re.fullmatch(r"[0-9]{15,20}", stamp) and len(receipt["db_restarts"]) < 8,
+                    "migration_default_profile_stop_time_invalid")
+    receipt["db_restarts"].append({"stop_time_us": stamp, "terminated": None, "connections": None})
+    atomic(root / "migration" / DEFAULT_PROFILE_RECEIPT, receipt)
+
+
+def _default_db_cleanup(context, root, receipt):
+    item = receipt["db_restarts"][-1]
+    stamp = item["stop_time_us"]
+    release.require(type(stamp) is str and re.fullmatch(r"[0-9]{15,20}", stamp),
+                    "migration_default_profile_stop_time_invalid")
+    # No query text, users or credentials are returned. Never terminate active or
+    # idle-in-transaction sessions, other roles, or sessions from new processes.
+    sql = f"""WITH candidates AS MATERIALIZED (
+ SELECT pid, backend_start FROM pg_stat_activity
+ WHERE usename IN ('sixnine_app','dstack_control') AND state='idle'
+ AND backend_start < to_timestamp({stamp}::numeric / 1000000)
+ AND pid <> pg_backend_pid() ORDER BY backend_start, pid LIMIT 257
+), ended AS MATERIALIZED (
+ SELECT pg_terminate_backend(a.pid) AS ok FROM candidates c
+ JOIN pg_stat_activity a ON a.pid=c.pid AND a.backend_start=c.backend_start
+ WHERE a.state='idle' AND a.usename IN ('sixnine_app','dstack_control')
+ AND (SELECT count(*) FROM candidates) <= 256
+) SELECT json_build_object('bounded',(SELECT count(*) FROM candidates)<=256,
+ 'terminated',(SELECT count(*) FROM ended WHERE ok));"""
+    result = _default_db_query(context, sql)
+    release.require(type(result) is dict and result.get("bounded") is True
+        and type(result.get("terminated")) is int and 0 <= result["terminated"] <= 256,
+        "migration_default_profile_db_cleanup_unproven")
+    item["terminated"] = result["terminated"]
+    atomic(root / "migration" / DEFAULT_PROFILE_RECEIPT, receipt)
+
+
+def _default_db_connected(context, root, receipt):
+    stamp = receipt["db_restarts"][-1]["stop_time_us"]
+    sql = f"""SELECT json_object_agg(rolname, json_build_object(
+ 'total', (SELECT count(*) FROM pg_stat_activity WHERE usename=rolname),
+ 'fresh', (SELECT count(*) FROM pg_stat_activity WHERE usename=rolname
+           AND backend_start >= to_timestamp({stamp}::numeric / 1000000)),
+ 'limit', CASE WHEN rolconnlimit > 0 THEN rolconnlimit
+ ELSE current_setting('max_connections')::int - current_setting('superuser_reserved_connections')::int END))
+ FROM pg_roles WHERE rolname IN ('sixnine_app','dstack_control');"""
+    result = _default_db_query(context, sql)
+    release.require(type(result) is dict and set(result) == {"sixnine_app", "dstack_control"},
+                    "migration_default_profile_db_connections_unproven")
+    for counts in result.values():
+        release.require(type(counts) is dict and set(counts) == {"total", "fresh", "limit"}
+            and all(type(v) is int for v in counts.values())
+            and 0 < counts["fresh"] <= counts["total"] < counts["limit"],
+            "migration_default_profile_db_connections_unproven")
+    receipt["db_restarts"][-1]["connections"] = result
+    atomic(root / "migration" / DEFAULT_PROFILE_RECEIPT, receipt)
+
+
+def _default_start(context, config, runtime, root, receipt):
     base, directory, environment, app, dispatch, checker = context
     shared = shared_services(directory_manifest(directory))
     # The previous app namespace is already stopped. Recreate it and wait for
     # health before reconnecting dstack/controller; never mutate provider nodes.
     compose(base, directory, environment, "up", "-d", "--no-deps", "--force-recreate", "app", timeout=300)
+    # The new app has started but may be waiting for a free role slot. Reap only
+    # pre-stop idle sessions before waiting for readiness; then prove new clients.
+    _default_db_cleanup(context, root, receipt)
     release.wait_ready(base, environment)
     compose(base, directory, environment, "up", "-d", "--no-deps", "--force-recreate", *shared, timeout=300)
     deadline = time.monotonic() + 180
@@ -1240,6 +1319,7 @@ def _default_start(context, config, runtime):
             checker.check(base / "compose.yaml", directory / "overlay.yaml", environment=environment,
                           host_memory_mib=config["host_memory_mib"], check_inputs=True, probe=True)
             release.wait_proxy_stable(base, environment)
+            _default_db_connected(context, root, receipt)
             return
         except (release.ReleaseError, ValueError):
             if time.monotonic() >= deadline:
@@ -1257,6 +1337,7 @@ def default_profile_receipt(root):
 
 
 def _default_restore(root, commit, receipt, *, stopped_unchanged=False):
+    receipt["status"] = "pending"
     other = storyboard_receipt(root)
     release.require(not other or other['status'] not in {'pending','failed'},
                     'migration_storyboard_maintenance_pending_restore_required')
@@ -1270,6 +1351,7 @@ def _default_restore(root, commit, receipt, *, stopped_unchanged=False):
     release.require(_default_profiles_digest(context) == receipt["profiles_sha256"],
                     "migration_default_profile_policy_changed")
     if not stopped_unchanged:
+        _default_record_stop(context, root, receipt)
         _default_stop(context)
         _default_idle(context)
     else:
@@ -1279,7 +1361,7 @@ def _default_restore(root, commit, receipt, *, stopped_unchanged=False):
     for name, path in paths.items():
         release.require(release.checksum(path) == current[name], "migration_default_profile_restore_unrelated_change")
         _storyboard_bytes(path, saved["before", name])
-    _default_start(context, old, receipt["runtime_before"])
+    _default_start(context, old, receipt["runtime_before"], root, receipt)
     _default_policy_probe(context, old["environment"][DEFAULT_PROFILE_FLAG], old["environment"][DEFAULT_PROFILE_FLAG])
     release.require({name:release.checksum(path) for name,path in paths.items()} == receipt["before"],
                     "migration_default_profile_restore_readback_failed")
@@ -1326,7 +1408,7 @@ def default_profile_only_locked(root, commit, old_profile, new_profile, paths_sh
              ("after","paths"):after_paths,
              ("after","active"):json.dumps({**active,"paths_sha256":after_digest},sort_keys=True).encode()}
     receipt = {"version":1,"purpose":"default-profile-only","commit":commit,"operation_id":operation,
-        "status":"pending","runtime_before":runtime,"profiles_sha256":policies_digest,
+        "status":"pending","runtime_before":runtime,"profiles_sha256":policies_digest,"db_restarts":[],
         **{phase:{name:hashlib.sha256(saved[phase,name]).hexdigest() for name in ("paths","active")}
            for phase in ("before","after")}}
     release.require(receipt["before"]=={"paths":paths_sha256,"active":active_sha256},
@@ -1340,6 +1422,7 @@ def default_profile_only_locked(root, commit, old_profile, new_profile, paths_sh
     changed = False
     stopped = False
     try:
+        _default_record_stop(context, root, receipt)
         _default_stop(context)
         stopped = True
         _default_idle(context)  # admission is now stopped: close the TOCTOU gap
@@ -1350,7 +1433,7 @@ def default_profile_only_locked(root, commit, old_profile, new_profile, paths_sh
         changed = True
         _storyboard_bytes(paths,saved["after","paths"])
         _storyboard_bytes(active_path,saved["after","active"])
-        _default_start(candidate_context,candidate,runtime)
+        _default_start(candidate_context,candidate,runtime,root,receipt)
         release.require(_default_policy_probe(candidate_context,new_profile,new_profile)==policies_digest,
                         "migration_default_profile_policy_changed")
         release.require(settings(root)[1]==after_digest and release.checksum(active_path)==receipt["after"]["active"],
@@ -1361,6 +1444,7 @@ def default_profile_only_locked(root, commit, old_profile, new_profile, paths_sh
         try:
             _default_restore(root,commit,receipt,stopped_unchanged=stopped and not changed)
         except Exception:
+            atomic(receipt_path,{**receipt,"status":"failed"})
             raise release.ReleaseError("migration_default_profile_failed_reconciliation_required") from None
         raise release.ReleaseError("migration_default_profile_failed_restored") from None
     return {"state":"approved_default_profile_updated","commit":commit,"old_profile":old_profile,

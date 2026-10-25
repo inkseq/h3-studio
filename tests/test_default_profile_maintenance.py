@@ -22,6 +22,14 @@ NEW = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
 class DefaultProfileMaintenance(unittest.TestCase):
     def setUp(self):
         fixture.StoryboardMaintenance.setUp(self)
+        self.real_cleanup = maintenance._default_db_cleanup
+        self.real_connected = maintenance._default_db_connected
+        self.db_query = self.stack.enter_context(patch.object(maintenance, '_default_db_query',
+            side_effect=lambda context, sql: (
+                1792944000123456 if 'floor(extract' in sql else
+                {'bounded': True, 'terminated': 2} if 'candidates AS' in sql else
+                {'sixnine_app': {'total': 4, 'fresh': 4, 'limit': 32},
+                 'dstack_control': {'total': 2, 'fresh': 2, 'limit': 32}})))
         self.real_idle = maintenance._default_idle
         self.real_probe = maintenance._default_policy_probe
         self.idle = self.stack.enter_context(patch.object(maintenance, '_default_idle'))
@@ -87,6 +95,8 @@ class DefaultProfileMaintenance(unittest.TestCase):
         self.assertEqual(self.probe.call_args_list[-1].args[1:], (NEW, NEW))
         receipt = self.receipt()
         self.assertEqual(receipt['status'], 'completed')
+        self.assertEqual(receipt['db_restarts'][0]['terminated'], 2)
+        self.assertEqual(receipt['db_restarts'][0]['connections']['sixnine_app']['fresh'], 4)
         saved, _, _ = maintenance._storyboard_backup(
             self.root,
             receipt,
@@ -99,6 +109,48 @@ class DefaultProfileMaintenance(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, 'original_binding_changed'):
             self.update(paths=receipt['before']['paths'])
         self.assertEqual(len(self.calls), 3)
+
+
+    def test_cleanup_targets_only_pre_stop_idle_roles_and_is_bounded(self):
+        self.update()
+        sql = next(c.args[1] for c in self.db_query.call_args_list if 'candidates AS' in c.args[1])
+        self.assertIn("state='idle'", sql)
+        self.assertIn("usename IN ('sixnine_app','dstack_control')", sql)
+        self.assertIn('backend_start < to_timestamp(1792944000123456::numeric / 1000000)', sql)
+        self.assertIn('a.backend_start=c.backend_start', sql)
+        self.assertIn('LIMIT 257', sql)
+        self.assertIn('(SELECT count(*) FROM candidates) <= 256', sql)
+        self.assertNotIn("idle in transaction", sql)
+        context = maintenance._storyboard_context(self.root, COMMIT, self.config)
+        for result in ({'bounded': False, 'terminated': 0}, {'bounded': True, 'terminated': 257}):
+            self.db_query.side_effect = None
+            self.db_query.return_value = result
+            with self.assertRaisesRegex(release.ReleaseError, 'cleanup_unproven'):
+                self.real_cleanup(context, self.root, self.receipt())
+
+    def test_db_capacity_requires_new_sessions_for_both_roles(self):
+        self.update()
+        context = maintenance._storyboard_context(self.root, COMMIT, self.config)
+        for counts in ({'total': 32, 'fresh': 1, 'limit': 32},
+                       {'total': 10, 'fresh': 0, 'limit': 32},
+                       {'total': 4, 'fresh': True, 'limit': 32}):
+            self.db_query.side_effect = None
+            self.db_query.return_value = {
+                'sixnine_app': counts, 'dstack_control': {'total': 1, 'fresh': 1, 'limit': 32}}
+            with self.assertRaisesRegex(release.ReleaseError, 'connections_unproven'):
+                self.real_connected(context, self.root, self.receipt())
+
+    def test_database_clock_is_durable_before_stop_and_new_on_restore(self):
+        stop = maintenance._default_stop
+        def check(context):
+            self.assertEqual(self.receipt()['db_restarts'][-1]['stop_time_us'], '1792944000123456')
+            self.assertIsNone(self.receipt()['db_restarts'][-1]['terminated'])
+            stop(context)
+        with patch.object(maintenance, '_default_stop', side_effect=check):
+            self.update()
+            maintenance._default_restore(self.root, COMMIT, self.receipt())
+        self.assertEqual(len(self.receipt()['db_restarts']), 2)
+        self.assertTrue(all(i['terminated'] == 2 for i in self.receipt()['db_restarts']))
 
     def test_cas_old_profile_and_unavailable_policy_refuse_before_intent(self):
         for kwargs in ({'old': 'other-profile'}, {'paths': 'f' * 64}):

@@ -310,3 +310,5 @@ policies are bound → Claude verifies one normal-path FL and REF job with no
 explicit profile → Claude promotes/binds v7 → repeat the exact guarded production
 switch at zero jobs. Claude owns production promotion and TaoMate switching.
 No manual edit of paths/active and no direct deployment of main.
+
+Default-profile restarts also record a PostgreSQL-clock stop cutoff before stopping CPU services. After recreating the app (before waiting for health), they reap at most 256 pre-stop idle sessions for only sixnine_app/dstack_control. Active, idle-in-transaction, fresh and other-role sessions are excluded. This unblocks app readiness when stale sessions exhausted its role limit. Success additionally requires fresh sessions for both roles and total counts below their role limits after reconnecting all CPU services. Each switch/restore records its cutoff, terminated count and final connection counts; an unknown cleanup result remains null in that restart record. This is a bounded restart repair, not the broader #588 R4 connection-hygiene change.
