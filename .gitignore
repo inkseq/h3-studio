@@ -804,5 +804,8 @@ inventory.json
 !studio_platform/script_windows_service.py
 !tests/test_script_windows.py
 !tests/script_windows_native_fixture.py
+# Domain HTTP routers (#588 R5).
+!studio_platform/auth_routes.py
+!studio_platform/project_routes.py
 !studio_platform/controller_liveness.py
 !tests/test_controller_liveness.py

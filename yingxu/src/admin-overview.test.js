@@ -131,3 +131,30 @@ test('formatting', () => {
   assert.equal(usd(850000), '$0.85');
   assert.equal(usd(null), '—');
 });
+
+test('records to review stay out of the live machines and hourly total (#572)', async () => {
+  const { machineRows, reviewRows } = await import('./admin-overview-model.js');
+  const workspace = {
+    nodes: [
+      { node_id: 'live', state: 'running', hourly_cost_microusd: 650000, gpu_type: 'RTX5090' },
+      {
+        node_id: 'old',
+        state: 'creation_unknown',
+        record_group: 'pending_review',
+        hourly_cost_microusd: 850000,
+        gpu_type: 'RTX5090',
+        owner_id: 'supervan',
+        provider: 'vast',
+      },
+    ],
+  };
+  const live = machineRows(workspace, 0, 'en');
+  assert.deepEqual(
+    live.map((row) => row.id),
+    ['live'],
+  );
+  assert.deepEqual(
+    reviewRows(workspace).map((row) => [row.id, row.owner]),
+    [['old', 'supervan']],
+  );
+});
