@@ -311,6 +311,37 @@ def _admin_download_details(node, now):
     }
 
 
+# Ended machines' usage and metrics change only when billing settles, yet the GPU console
+# polls every 5 s and each node costs several metric queries over jobs/artifacts/outbox
+# (~100 historical nodes kept the 2-vCPU host busy). Reuse an ended node's result for
+# ENDED_METRICS_TTL within the same Sydney day; live nodes are always recomputed.
+ENDED_METRICS_TTL = 600
+_ENDED_METRICS = {}
+
+
+def _cached_metrics(compute, connection, original, intent, workers, now):
+    ended = (
+        original.get("desired_state") == "stopped"
+        and original.get("runtime_state") == "stopped"
+    )
+    if not ended or not _finite(now):
+        return compute(connection, original, intent, workers, now)
+    key = (
+        original.get("intent_id"),
+        original.get("updated_at"),
+        tuple(sorted(str(worker.get("id")) for worker in workers)),
+        int((now + 10 * 3600) // 86400),  # Sydney-ish day bucket; TTL bounds the edge.
+    )
+    hit = _ENDED_METRICS.get(key)
+    if hit is not None and 0 <= now - hit[0] < ENDED_METRICS_TTL:
+        return copy.deepcopy(hit[1])
+    value = compute(connection, original, intent, workers, now)
+    if len(_ENDED_METRICS) > 4096:
+        _ENDED_METRICS.clear()
+    _ENDED_METRICS[key] = (now, copy.deepcopy(value))
+    return value
+
+
 class DstackWorkspace:
     def __init__(self, service):
         self.service, self.repo, self.settings = service, service.repo, service.settings
@@ -702,8 +733,13 @@ class DstackWorkspace:
                 if admin:
                     value.update(_admin_download_details(original, now))
                 value.update(
-                    machine_metrics(
-                        connection, original, intents[identity], workers, now
+                    _cached_metrics(
+                        machine_metrics,
+                        connection,
+                        original,
+                        intents[identity],
+                        workers,
+                        now,
                     )
                 )
                 result.append(value)
