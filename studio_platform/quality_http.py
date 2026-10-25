@@ -66,6 +66,59 @@ def error_response(request, app, value, *, status_code, headers=None):
     return JSONResponse(value, status_code=status_code, headers=headers)
 
 
+def projected_handler(original, path, app=None):
+    """Use the same public projection for flat and domain-router endpoints."""
+    from . import quality_views
+
+    async def project(request):
+        target = app if app is not None else request.app
+        response = await original(request)
+        content_type = response.headers.get("content-type", "").split(";", 1)[0]
+        if content_type != "application/json" or not hasattr(response, "body"):
+            return response
+        principal = principal_for(request, target)
+        value = json.loads(response.body)
+        if path == "/v1/capabilities":
+            visible = quality_views.capabilities(
+                value, principal, settings=target.state.settings
+            )
+        elif path == "/v1/generation-availability":
+            visible = quality_views.availability(
+                value, principal, settings=target.state.settings
+            )
+        elif path in {"/v1/guided-schema", "/v1/quick-chat/schema"}:
+            visible = quality_views.schema(
+                value, principal, settings=target.state.settings
+            )
+        else:
+            visible = quality_views.envelope(
+                value, principal, settings=target.state.settings
+            )
+        headers = {
+            key: item
+            for key, item in response.headers.items()
+            if key.lower() not in {"content-length", "content-type"}
+        }
+        return JSONResponse(
+            visible,
+            status_code=response.status_code,
+            headers=headers,
+            background=response.background,
+        )
+
+    return project
+
+
+class QualityRoute(APIRoute):
+    """Keep projections when FastAPI composes an included APIRouter handler."""
+
+    def get_route_handler(self):
+        original = super().get_route_handler()
+        return (
+            projected_handler(original, self.path) if _selected(self.path) else original
+        )
+
+
 def install(app):
     from . import quality_views
 
@@ -90,46 +143,12 @@ def install(app):
 
             route.app = request_response(openapi_response)
             continue
-        if not isinstance(route, APIRoute) or not _selected(route.path):
+        if (
+            not isinstance(route, APIRoute)
+            or isinstance(route, QualityRoute)
+            or not _selected(route.path)
+        ):
             continue
         original = route.get_route_handler()
 
-        def handler(original=original, path=route.path):
-            async def project(request):
-                response = await original(request)
-                content_type = response.headers.get("content-type", "").split(";", 1)[0]
-                if content_type != "application/json" or not hasattr(response, "body"):
-                    return response
-                principal = principal_for(request, app)
-                value = json.loads(response.body)
-                if path == "/v1/capabilities":
-                    visible = quality_views.capabilities(
-                        value, principal, settings=app.state.settings
-                    )
-                elif path == "/v1/generation-availability":
-                    visible = quality_views.availability(
-                        value, principal, settings=app.state.settings
-                    )
-                elif path in {"/v1/guided-schema", "/v1/quick-chat/schema"}:
-                    visible = quality_views.schema(
-                        value, principal, settings=app.state.settings
-                    )
-                else:
-                    visible = quality_views.envelope(
-                        value, principal, settings=app.state.settings
-                    )
-                headers = {
-                    key: item
-                    for key, item in response.headers.items()
-                    if key.lower() not in {"content-length", "content-type"}
-                }
-                return JSONResponse(
-                    visible,
-                    status_code=response.status_code,
-                    headers=headers,
-                    background=response.background,
-                )
-
-            return project
-
-        route.app = request_response(handler())
+        route.app = request_response(projected_handler(original, route.path, app))
