@@ -1,5 +1,6 @@
 """P4 ownership, durable group commands and exact queue-impact tests; no providers."""
 
+import unittest
 import copy
 import json
 from pathlib import Path
@@ -1195,3 +1196,46 @@ class WorkspaceTests(LedgerCase):
             self.assertEqual(result.json()["node_id"], node)
             self.assertIn("usage", result.json())
             load.assert_called_once()
+
+
+class EndedMetricsCacheTests(unittest.TestCase):
+    def test_ended_nodes_reuse_metrics_live_nodes_do_not(self):
+        from studio_platform import dstack_workspace as module
+
+        module._ENDED_METRICS.clear()
+        calls = []
+
+        def compute(connection, original, intent, workers, now):
+            calls.append(original["intent_id"])
+            return {"usage": {"n": len(calls)}}
+
+        ended = {
+            "intent_id": "a",
+            "updated_at": 5.0,
+            "desired_state": "stopped",
+            "runtime_state": "stopped",
+        }
+        live = {
+            **ended,
+            "intent_id": "b",
+            "desired_state": "running",
+            "runtime_state": "running",
+        }
+        workers = [{"id": "w"}]
+        first = module._cached_metrics(compute, None, ended, {}, workers, 1000.0)
+        again = module._cached_metrics(compute, None, ended, {}, workers, 1100.0)
+        self.assertEqual(first, again)
+        again["usage"]["n"] = 99  # callers get their own copy
+        self.assertEqual(
+            module._cached_metrics(compute, None, ended, {}, workers, 1200.0), first
+        )
+        module._cached_metrics(compute, None, live, {}, workers, 1000.0)
+        module._cached_metrics(compute, None, live, {}, workers, 1001.0)
+        self.assertEqual(calls, ["a", "b", "b"])
+        module._cached_metrics(
+            compute, None, ended, {}, workers, 1000.0 + module.ENDED_METRICS_TTL + 1
+        )
+        module._cached_metrics(
+            compute, None, {**ended, "updated_at": 6.0}, {}, workers, 1300.0
+        )
+        self.assertEqual(calls, ["a", "b", "b", "a", "a"])
