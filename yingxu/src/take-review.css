@@ -1,0 +1,159 @@
+/* Take review (TakeReview.jsx): a fixed header row, a mark bar, then the editor and list.
+   Tokens only; layout never shifts when a verdict or mark changes. */
+.take-review {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.take-review-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: var(--h-sm);
+}
+.take-review-title {
+  font-weight: 600;
+  font-size: var(--fs-sm);
+}
+.take-review-verdict {
+  display: inline-flex;
+  gap: 6px;
+}
+.take-review-pick {
+  min-height: var(--h-sm);
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+}
+.take-review-pick.keep.on {
+  background: var(--good-soft, var(--accent-soft));
+  border-color: var(--good, var(--accent));
+  color: var(--good, var(--accent));
+}
+.take-review-pick.redo.on {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.take-review-bar {
+  position: relative;
+  height: 22px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  cursor: crosshair;
+  touch-action: none;
+}
+.take-review-bar.unknown {
+  cursor: default;
+  opacity: 0.6;
+}
+.take-review-mark {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  min-width: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  box-shadow: none;
+  cursor: pointer;
+}
+.take-review-mark.change {
+  background: var(--warn);
+}
+.take-review-mark.keep {
+  background: var(--good, var(--accent));
+}
+.take-review-mark.draft {
+  background: color-mix(in srgb, var(--warn) 55%, transparent);
+  pointer-events: none;
+}
+.take-review-hint {
+  font-size: var(--fs-xs);
+}
+.take-review-editor {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+.take-review-editor-row,
+.take-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.take-review-actions .spacer {
+  flex: 1;
+}
+.take-review-range {
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-sm);
+}
+.take-review-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.take-review-tag {
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+}
+.take-review-tag.on {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.take-review-note input {
+  width: 100%;
+}
+.take-review-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.take-review-list > li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.take-review-row {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-start;
+  text-align: left;
+  font-size: var(--fs-sm);
+}
+.take-review-row-tags,
+.take-review-row-note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.take-review-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.take-review-dot.change {
+  background: var(--warn);
+}
+.take-review-dot.keep {
+  background: var(--good, var(--accent));
+}
