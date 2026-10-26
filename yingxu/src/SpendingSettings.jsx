@@ -374,7 +374,11 @@ export default function SpendingSettings({ account }) {
               api={api}
               active={pageActive && section === 'defaults'}
             />
-            <TakePreferencesSettings api={api} active={pageActive && section === 'defaults'} />
+            <TakePreferencesSettings
+              api={api}
+              account={account}
+              active={pageActive && section === 'defaults'}
+            />
           </div>
           {(!user || !draft) &&
             section !== 'account' &&

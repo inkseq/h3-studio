@@ -38,7 +38,7 @@
 }
 .ui-menu-item.danger,
 .ui-menu-item.danger svg {
-  color: var(--bad, #c0392b);
+  color: var(--bad);
 }
 .ui-menu-group {
   display: grid;

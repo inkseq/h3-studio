@@ -149,11 +149,11 @@
   cursor: pointer;
 }
 .ui-setting-error {
-  color: var(--bad, #d6453d);
+  color: var(--bad);
   font-size: 12px;
 }
 .ui-settings .ui-setting-control input[aria-invalid='true'] {
-  border-color: var(--bad, #d6453d);
+  border-color: var(--bad);
 }
 .ui-settings .ui-setting-control input.narrow {
   width: 56px;
