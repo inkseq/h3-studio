@@ -828,3 +828,4 @@ inventory.json
 # Explicit shot clip sound preference (#600).
 !studio_platform/clip_sound.py
 !tests/test_clip_sound.py
+!docs/REVIEW-LOOP-TELEMETRY.md
