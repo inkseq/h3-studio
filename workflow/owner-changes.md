@@ -577,3 +577,11 @@ This plan does not enable charging or Checkout, authorize new credentials, enlar
 GPU budgets, or bypass production gates. The #290 source audit and proposed metric
 contract are in `docs/REVIEW-LOOP-TELEMETRY.md`; they are not implementation or
 deployment receipts.
+
+Owner confirmation in this session and Claude's
+[#625/6409187825](https://github.com/inkseq/h3-studio/pull/625#issuecomment-6409187825)
+approve the metric definitions and existing-store Small approach. Add a separately
+named behavioural first-take-shipped rate; never merge it with explicit usability.
+Whole-take verdicts are explicit keep/redo/null with revision, CAS and actor kind;
+picks, stars and range-change marks do not set them. v1 reads one owner at a time;
+all-owners aggregate is a later, content-free view. Frontend remains Claude's lane.

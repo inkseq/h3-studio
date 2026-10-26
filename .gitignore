@@ -829,3 +829,5 @@ inventory.json
 !studio_platform/clip_sound.py
 !tests/test_clip_sound.py
 !docs/REVIEW-LOOP-TELEMETRY.md
+!studio_platform/review_loop.py
+!tests/test_review_loop.py

@@ -1,6 +1,8 @@
 # Review-loop telemetry proposal (#290)
 
-Status: proposed contract, not an implemented endpoint or production receipt.
+Status: approved contract; initial read-only projection implemented in PR #625,
+not a production receipt. Explicit-verdict/command writers and full-cost
+allocation remain subsequent slices; those metrics return null with reasons.
 Source audit: `f7638d710c2b760358d84e9fe823377b6efb1fa4`, 2026-10-26.
 Plan: [#580 review loop](https://github.com/inkseq/h3-studio/issues/580#issuecomment-6408772792).
 Codex owns backend; Claude owns frontend, acceptance and promotion.
@@ -22,6 +24,10 @@ This is a source audit, not a query of customer records. Existing #290 exporter
 installation receipts remain separate; no telemetry event or installation was replayed.
 
 ## Metric version 1
+
+Approval and additions: [Claude review](https://github.com/inkseq/h3-studio/pull/625#issuecomment-6409187825),
+confirmed by the owner in this session. The behavioural shipped metric below is
+separate from the three original metrics, never a replacement for explicit usability.
 
 Use a fixed UTC cohort `[from, to)` of logical shots whose first original generation
 job was accepted in that interval. Return `as_of` separately; subsequent attempts,
@@ -54,6 +60,17 @@ Imports with no generation history are a separate coverage category.
    overlapping per-shot counts. Report agent commands separately. This is not a
    click metric; PostHog owns UI clicks. Missing actor/command lineage makes the
    complete metric `null`, with the known command count reported separately.
+4. **First take shipped rate**, `first_take_shipped_rate`, is behavioural: of the
+   cohort's delivered shots, how many first delivered takes appeared in their
+   first completed film export without another original generation job by that
+   export time. Automatic attempts of the same job do not count as redo. Multiple
+   original generation jobs (including batch alternatives) conservatively fail
+   this strict no-additional-generation criterion. A later redo does not rewrite
+   an earlier export. Repeat exports/downloads count once; a later export of the
+   first take cannot erase an earlier export of another take. Trimming or editing
+   the source in the film is not a new take: this measures no regeneration, not
+   byte-identical output. Show exported-shot coverage beside the rate. Unexported
+   delivered shots stay in the denominator; an empty denominator is unknown.
 
 Each metric returns numerator, denominator, `value`, completeness and reason codes.
 Zero denominator returns `null` with `no_eligible_shots`. A known zero numerator
@@ -63,14 +80,14 @@ receipts where lawful, otherwise expose a history gap; never copy deleted conten
 to analytics. Completed export attribution comes from the frozen run, not today's
 project document. Repeated export downloads are not new exports.
 
-## Proposed API (not live)
+## Read-only API (initial implementation, not yet deployed)
 
 `GET /v1/operator/admin/review-loop?owner_id=OWNER&from=UTC&to=UTC`
 
 - Existing human-admin authorization; PATs denied. Tenant comes from the trusted
   principal/settings, never a caller-supplied tenant. Explicit owner filter is
   required for v1; no accidental all-customer join. Maximum interval 90 days.
-- Return `schema_version: 1`, `as_of`, cohort counts, the three named metrics and
+- Return `schema_version: 1`, `as_of`, cohort counts, the four named metrics and
   coverage (`reviewed_first_candidates`, `cost_components`, `command_lineage`,
   `unresolved_lineage`, `history_gaps`). `Cache-Control: no-store`.
 - Metric shape: `{value: null, numerator: null, denominator: 0,
@@ -80,9 +97,34 @@ project document. Repeated export downloads are not new exports.
 - Aggregate response only: no prompts, OCR, notes, titles, URLs, email, actor
   labels, raw requests or media. IDs stay in the scoped product store; no automatic
   forwarding to PostHog, Sentry or public GitHub.
-- Bound query work. If row limits or absent indexes prevent complete calculation,
+- Bound query work: 2000 lifetime generation jobs for that owner (so an older
+  shot's redo cannot become a first take), 8000 associated attempts, 4000 video
+  artifacts and 200 completed film documents. PostgreSQL uses one read-only
+  repeatable-read snapshot and a 3-second statement timeout; timeout returns
+  503 `review_loop_query_timeout`, never a partial number presented as complete.
+  If row limits or absent indexes prevent complete calculation,
   return explicit incompleteness rather than a deceptively precise rate. Set the
-  row budget from fixture/query-plan validation before implementing the endpoint.
+  budget conservatively and validate on disposable database fixtures.
+
+The initial projection computes the shipped metric, validates original export
+jobs/artifacts and current attempt fences, and reports the known attempt-cost
+subtotal. The three explicit-usability metrics remain `insufficient_data` until
+their writers/allocation evidence exist. Migration-bearing projects return
+`partial` with `migration_lineage_unresolved`, rather than counting aliases as
+distinct logical shots. Historical incomplete cost is never backfilled from a quote.
+The response exposes no per-shot/per-artifact IDs or customer content.
+
+## Explicit verdict frontend contract (next slice, not implemented here)
+
+Whole-take state is `{verdict: keep | redo | null, revision, actor_kind}` per
+artifact. Writes require expected revision and idempotency; actor kind is derived
+from the authenticated caller. Picking/starring never writes a verdict; a range
+mark `change` only suggests redo. The player/take-menu buttons are explicit
+"这条能用" / "这条要重做". Final routes and scoped CAS writer ship with the next
+take-review slice; do not call a proposed verdict endpoint as if it were live.
+
+An all-owners aggregate is deferred to v2: same human-admin gate, capped per-owner
+rows and aggregate numbers only. v1 always requires `owner_id`.
 
 ## Small implementation choice
 
@@ -100,7 +142,7 @@ source artifact; preserve original job IDs across automatic attempt recovery.
 Do not repurpose the job-delivery outbox as an analytics queue. Validate existing
 store indexes/retention before adding bounded receipt document kinds; if reuse
 cannot support them, return a concrete storage proposal instead of silently adding
-a table family. This audit adds no schema, endpoint or background collector.
+a table family. The initial implementation adds no schema, writer or background collector.
 
 **Larger:** new event warehouse, queue or vendor. Unnecessary now; outside this claim
 and requires separate authority. Sentry feedback from plan step 6 is a different
