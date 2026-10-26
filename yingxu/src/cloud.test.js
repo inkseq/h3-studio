@@ -9,7 +9,6 @@ import {
   cloudSystemMessage,
   blankCloudProject,
   freestyleProject,
-  removeFreestyleInput,
   copyForCloud,
   controlsForRecipe,
   selectedProfileRecipe,
@@ -804,32 +803,7 @@ test('freestyle uses the existing project schema and creates no plan or job', as
   assert.equal(h.storage.getItem('yingxu-studio-v4'), original);
   h.controller.destroy();
 });
-test('removing a freestyle zone preserves other uses, other shots and the original asset', () => {
-  const { store, shot, scene } = fixture(),
-    image = store.addEntity('image', null, { data: { fileId: 'keep-file' } }),
-    other = store.addEntity('shot', scene);
-  store.addLink(image, shot, 'firstFrame');
-  store.addLink(image, shot, 'lastFrame');
-  store.addLink(image, other, 'firstFrame');
-  const p = store.exportProject(),
-    version = p.entities.find((e) => e.id === shot).version;
-  assert.equal(removeFreestyleInput(p, shot, image, { roles: ['firstFrame'] }), true);
-  assert.equal(
-    p.links.some((l) => l.target === shot && l.role === 'firstFrame'),
-    false,
-  );
-  assert.equal(
-    p.links.some((l) => l.target === shot && l.role === 'lastFrame'),
-    true,
-  );
-  assert.equal(
-    p.links.some((l) => l.target === other),
-    true,
-  );
-  assert.equal(p.entities.find((e) => e.id === image).data.fileId, 'keep-file');
-  assert.equal(p.entities.find((e) => e.id === shot).version, version + 1);
-  assert.equal(removeFreestyleInput(p, shot, image, { roles: ['firstFrame'] }), false);
-});
+
 test('guide clip request uses the selected range and rejects replaced source file', async () => {
   const h = harness(),
     asset = h.store.addEntity('audio', null, {

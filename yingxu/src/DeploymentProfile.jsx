@@ -1,18 +1,7 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { modelsVisible, profileLabel } from './model-visibility.js';
-import { translate } from './i18n/locale.js';
+import { profileLabel } from './model-visibility.js';
 import React from 'react';
-import { duration } from './operator-model.js';
 
-export function deploymentLabel(capabilities, id, locale = 'zh') {
-  if (!id) return translate(locale, 'deployment.default');
-  const profile = (capabilities?.deployment_profiles || []).find((p) => p.id === id);
-  return profile
-    ? profileLabel(profile, locale)
-    : modelsVisible()
-      ? id
-      : translate(locale, 'deployment.private');
-}
 export function DeploymentProfileSelect({ capabilities, value, onChange, disabled = false, mode }) {
   const { t, locale } = useI18n();
   const profiles = capabilities?.deployment_profiles || [],
@@ -40,36 +29,5 @@ export function DeploymentProfileSelect({ capabilities, value, onChange, disable
       {support?.enabled === false && <small>{t('deployment.disabled')}</small>}
       <small>{t('deployment.help')}</small>
     </label>
-  );
-}
-export function HistoricalTiming({ hint }) {
-  const { t, locale } = useI18n();
-  if (!hint || hint.scope !== 'historical_exact_case' || !hint.cases?.length) return null;
-  return (
-    <details className="qc-timing-hint">
-      <summary>{t('deployment.history')}</summary>
-      <ul>
-        {hint.cases.flatMap((row) =>
-          (row.measurements || []).map((m, index) => (
-            <li key={row.id + '-' + index}>
-              {t('deployment.measurement', {
-                width: row.width,
-                height: row.height,
-                frames: row.frames,
-                steps: row.steps,
-              })}
-              <b>{duration(m.total_seconds, locale)}</b>
-              <small>
-                {t('deployment.samples', {
-                  date: m.measured_at?.slice(0, 10),
-                  count: m.sample_count,
-                })}
-              </small>
-            </li>
-          )),
-        )}
-      </ul>
-      <small>{t('deployment.historyHelp')}</small>
-    </details>
   );
 }

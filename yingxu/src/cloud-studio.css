@@ -399,22 +399,3 @@ button.brand {
 .api-integration {
   margin-top: 10px;
 }
-.input-usage {
-  background: var(--ink);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  padding: 12px;
-  font-size: 12px;
-  line-height: 1.65;
-}
-.input-usage p {
-  margin: 5px 0;
-}
-.input-usage ul {
-  padding-left: 20px;
-}
-.input-usage [role='status'] {
-  border-top: 1px solid var(--line-2);
-  padding-top: 8px;
-  color: var(--ink);
-}

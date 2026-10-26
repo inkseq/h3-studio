@@ -37,11 +37,12 @@ export function useModal({ focusFirst = false } = {}) {
         dialog.querySelector('[autofocus],input,textarea,select') ||
         dialog.querySelector('button:not(.qc-dialog-head button)')
       )?.focus();
+    const openerRef = opener;
     return () => {
       dialog.close();
       queueMicrotask(() => {
-        if (opener.current?.isConnected && !opener.current.closest('[inert]'))
-          opener.current.focus();
+        if (openerRef.current?.isConnected && !openerRef.current.closest('[inert]'))
+          openerRef.current.focus();
       });
     };
   }, [active, focusFirst]);

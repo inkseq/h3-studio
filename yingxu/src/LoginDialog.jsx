@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
+import { Button } from './ui/Button.jsx';
+import { Dialog } from './ui/Dialog.jsx';
 import { LogOut } from 'lucide-react';
 import HostedSignIn from './HostedSignIn.jsx';
 import { useAccountLabel } from './StudioHeader.jsx';
-import { ChatDialog } from './QuickChatControls.jsx';
 import { useCloud } from './CloudStudio.jsx';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -18,7 +19,7 @@ export function Login({ onClose, onDone, title, lead, passwordFirst = false }) {
     [password, setPassword] = useState(''),
     [error, setError] = useState('');
   return (
-    <ChatDialog
+    <Dialog
       title={c.account ? t('workspace.copy89') : title || t('workspace.copy90')}
       onClose={onClose}
     >
@@ -29,10 +30,10 @@ export function Login({ onClose, onDone, title, lead, passwordFirst = false }) {
             <b>{who.label}</b>
           </p>
           <p>{t('workspace.copy118')}</p>
-          <button onClick={() => quietly(cloud.logout().then(onClose))}>
+          <Button onClick={() => quietly(cloud.logout().then(onClose))}>
             <LogOut size={14} />
             {t('workspace.copy2')}
-          </button>
+          </Button>
         </>
       ) : (
         <form
@@ -80,19 +81,18 @@ export function Login({ onClose, onDone, title, lead, passwordFirst = false }) {
               {error}
             </p>
           )}
-          <button
+          <Button
+            type="submit"
             className="qc-primary"
             disabled={c.busy || !c.auth || c.auth.auth_ready === false}
           >
             {t('workspace.copy5')}
-          </button>
+          </Button>
           {!c.auth && (
-            <button type="button" onClick={() => quietly(cloud.initialize())}>
-              {t('workspace.copy6')}
-            </button>
+            <Button onClick={() => quietly(cloud.initialize())}>{t('workspace.copy6')}</Button>
           )}
         </form>
       )}
-    </ChatDialog>
+    </Dialog>
   );
 }

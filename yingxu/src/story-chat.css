@@ -430,14 +430,7 @@
     color-mix(in srgb, var(--sc-ink) 10%, transparent) calc(var(--made) * 100%)
   );
 }
-.sc-notice {
-  margin: 0 0 12px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--warn) 16%, var(--sc-paper));
-  color: var(--warn);
-  font-size: 13px;
-}
+
 .sc-group h3 {
   margin: 18px 0 8px;
   color: var(--sc-muted);
@@ -889,16 +882,7 @@
   border-color: color-mix(in srgb, var(--sc-green) 40%, transparent);
   background: var(--sc-panel);
 }
-.sc-direct-link {
-  margin-top: auto;
-  padding: 10px 6px 2px;
-  color: var(--sc-muted);
-  font-size: 12px;
-  text-decoration: none;
-}
-.sc-direct-link:hover {
-  color: var(--sc-ink);
-}
+
 /* Undo last round: a quiet text action under the latest reply. */
 .sc-shell .sc-undo {
   display: inline-flex;

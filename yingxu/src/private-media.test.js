@@ -122,7 +122,7 @@ function mediaLifecycle(Component, initialProps) {
         nodes,
         video: nodes.find((node) => node.type === 'video'),
         image: nodes.find((node) => node.type === 'img'),
-        retry: nodes.find((node) => node.type === 'button'),
+        retry: nodes.find((node) => node.type === 'button' || node.type?.name === 'Button'),
         alert: nodes.find((node) => node.props?.role === 'alert'),
       };
     },

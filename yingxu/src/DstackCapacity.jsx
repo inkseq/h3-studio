@@ -1,4 +1,5 @@
 import { Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
 import { dstackNodeStatus as rawDstackNodeStatus } from './dstack-presentation.js';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
@@ -119,9 +120,8 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
             <span className="op-field-label">{lo('legacyOp.copy4')}</span>
             <div className="op-mode-options" role="group" aria-label={lo('legacyOp.copy246')}>
               {['fl', 'ref'].map((value) => (
-                <button
+                <Button
                   key={value}
-                  type="button"
                   aria-pressed={mode === value}
                   disabled={
                     !profiles.some(
@@ -136,7 +136,7 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
                   }}
                 >
                   {dstackMode(value)}
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -207,10 +207,10 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
           {continuing ? lo('legacyOp.copy258') : lo('legacyOp.copy259')}
           {lo('legacyOp.copy260')}
         </Note>
-        <button disabled={!valid} onClick={check}>
+        <Button disabled={!valid} onClick={check}>
           <RefreshCw size={14} />
           {checking ? lo('legacyOp.copy261') : lo('legacyOp.copy262')}
-        </button>
+        </Button>
       </fieldset>
       {preview && (
         <div className="op-preview">
@@ -245,11 +245,11 @@ function Start({ profiles, lifecycleVersion, controller, busy, now, onClose }) {
       )}
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
-        <button onClick={onClose}>{lo('legacy.panel36')}</button>
-        <button className="op-primary" disabled={busy || checking || !current} onClick={start}>
+        <Button onClick={onClose}>{lo('legacy.panel36')}</Button>
+        <Button className="op-primary" disabled={busy || checking || !current} onClick={start}>
           <Play size={14} />
           {busy ? lo('legacyOp.copy125') : lo('legacyOp.copy126')}
-        </button>
+        </Button>
       </footer>
     </Dialog>
   );
@@ -373,7 +373,7 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
         </div>
       )}
       <div className="op-dstack-actions">
-        <button
+        <Button
           disabled={busy || !holdValid}
           onClick={() => {
             setAction('hold');
@@ -382,8 +382,8 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
         >
           <Clock size={14} />
           {continuing ? lo('legacyOp.copy289') : lo('legacyOp.copy290')}
-        </button>
-        <button
+        </Button>
+        <Button
           disabled={busy || !canStop}
           onClick={() => {
             setAction('stop');
@@ -391,7 +391,7 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
           }}
         >
           {lo('legacyOp.copy208')}
-        </button>
+        </Button>
       </div>
       {action && (
         <div className="op-preview">
@@ -413,18 +413,18 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
                 ? lo('legacyOp.copy297', { x0: dollars(node.hourly_cost_microusd, { digits: 3 }) })
                 : lo('legacyOp.copy298', { x0: date(node.hard_deadline) })}
           </Note>
-          <button
+          <Button
             className="op-primary"
             disabled={busy || (action === 'hold' && !holdValid)}
             onClick={submit}
           >
             {busy ? lo('legacyOp.copy125') : lo('legacyOp.copy299')}
-          </button>
+          </Button>
         </div>
       )}
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
-        <button onClick={onClose}>{lo('storyboard.copy58')}</button>
+        <Button onClick={onClose}>{lo('storyboard.copy58')}</Button>
       </footer>
     </Dialog>
   );
@@ -493,21 +493,21 @@ export default function DstackCapacity({ account }) {
           <p>{lo('legacyOp.copy301')}</p>
         </div>
         <div className="op-dstack-actions">
-          <button
+          <Button
             aria-label={lo('legacyOp.copy302')}
             disabled={state.loading || state.busy}
             onClick={() => quietly(controller.refresh())}
           >
             <RefreshCw size={15} />
-          </button>
-          <button
+          </Button>
+          <Button
             className="op-primary"
             disabled={busy || !enabled || !catalog?.profiles?.length}
             onClick={() => setDialog({ type: 'start' })}
           >
             <Plus size={16} />
             {lo('legacyOp.copy181')}
-          </button>
+          </Button>
         </div>
       </div>
       {state.pending && (
@@ -517,9 +517,9 @@ export default function DstackCapacity({ account }) {
             <b>{lo('legacyOp.copy303')}</b>
             <p>{lo('legacyOp.copy304')}</p>
           </div>
-          <button disabled={state.busy} onClick={() => quietly(controller.recover())}>
+          <Button disabled={state.busy} onClick={() => quietly(controller.recover())}>
             {lo('legacyOp.copy233')}
-          </button>
+          </Button>
         </div>
       )}
       <FloatingMessage tone="error" text={state.error ? state.error : null} />
@@ -566,19 +566,19 @@ export default function DstackCapacity({ account }) {
             <small>{lo('legacyOp.copy314')}</small>
           </div>
           <div className="op-machine-tabs" role="group" aria-label={lo('legacyOp.copy315')}>
-            <button aria-pressed={view === 'current'} onClick={() => setView('current')}>
+            <Button aria-pressed={view === 'current'} onClick={() => setView('current')}>
               {lo('legacyOp.copy183')} <span>{groups.current.length + groups.review.length}</span>
-            </button>
-            <button aria-pressed={view === 'history'} onClick={() => setView('history')}>
+            </Button>
+            <Button aria-pressed={view === 'history'} onClick={() => setView('history')}>
               {lo('legacyOp.copy184')} <span>{groups.history.length}</span>
-            </button>
+            </Button>
           </div>
           {nodes.length ? (
             <div className="op-machine-list">
               {nodes.map((node) => {
                 const status = dstackNodeStatus(node, now);
                 return (
-                  <button
+                  <Button
                     key={node.id}
                     className="op-dstack-row"
                     onClick={() => setDialog({ type: 'node', node })}
@@ -599,7 +599,7 @@ export default function DstackCapacity({ account }) {
                       {dollars(node.hourly_cost_microusd, { digits: 3 })}
                       <small>{lo('legacyOp.copy317')}</small>
                     </span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>

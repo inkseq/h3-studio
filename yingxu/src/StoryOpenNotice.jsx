@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { createPortal } from 'react-dom';
 import { usePageActive } from './AppRouteCache.jsx';
@@ -131,11 +132,7 @@ export default function StoryOpenNotice({
               ? storyTitle(offer.record.project, t('legacy.visible24'))
               : t(opening?.status === 'error' ? 'storyOpen.errorHeading' : 'storyOpen.loading')}
         </h2>
-        {!waiting && (
-          <button type="button" onClick={close}>
-            {t('storyOpen.close')}
-          </button>
-        )}
+        {!waiting && <Button onClick={close}>{t('storyOpen.close')}</Button>}
       </div>
       {legacy ? (
         <>
@@ -148,12 +145,9 @@ export default function StoryOpenNotice({
             })}
           </small>
           <div className="story-open-actions">
-            <button
-              type="button"
-              onClick={() => jsonDownload(legacy.project, legacy.id + '.original.json')}
-            >
+            <Button onClick={() => jsonDownload(legacy.project, legacy.id + '.original.json')}>
               {t('storyOpen.downloadOriginal')}
-            </button>
+            </Button>
           </div>
           <details>
             <summary>{t('storyOpen.original')}</summary>
@@ -168,23 +162,21 @@ export default function StoryOpenNotice({
             <p>{t('storyOpen.versionConflict')}</p>
           )}
           <div className="story-open-actions">
-            <button
-              className="primary"
-              type="button"
+            <Button
+              variant="primary"
               disabled={c.busy || offer.draft.serverVersion !== offer.record.version}
               onClick={() => open({ restoreDraft: true })}
             >
               {t('storyOpen.continueDraft')}
-            </button>
-            <button type="button" disabled={c.busy} onClick={() => open({ keepDraft: true })}>
+            </Button>
+            <Button disabled={c.busy} onClick={() => open({ keepDraft: true })}>
               {t('storyOpen.openCloud')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               onClick={() => jsonDownload(offer.draft.project, offer.record.id + '.unsynced.json')}
             >
               {t('storyOpen.downloadDraft')}
-            </button>
+            </Button>
           </div>
         </>
       ) : opening?.status === 'error' ? (
@@ -193,23 +185,18 @@ export default function StoryOpenNotice({
             {t(opening.key, { status: opening.statusCode || opening.statusLabel || 'read' })}
           </p>
           <div className="story-open-actions">
-            {waiting && (
-              <button type="button" onClick={close}>
-                {t('storyOpen.back')}
-              </button>
-            )}
+            {waiting && <Button onClick={close}>{t('storyOpen.back')}</Button>}
             {opening.key !== 'storyOpen.removed' && (
-              <button type="button" disabled={c.busy} onClick={() => open()}>
+              <Button disabled={c.busy} onClick={() => open()}>
                 {t('storyOpen.retry')}
-              </button>
+              </Button>
             )}
             {retained?.dirty && (
-              <button
-                type="button"
+              <Button
                 onClick={() => jsonDownload(retained.project, opening.projectId + '.unsynced.json')}
               >
                 {t('storyOpen.downloadDraft')}
-              </button>
+              </Button>
             )}
           </div>
         </>
@@ -233,11 +220,8 @@ export function PreservedStoryDrafts({ account, projectId }) {
   if (!account || cloud.getState().account !== account) return null;
   const drafts = store.getPreservedCloudDrafts(account, projectId);
   return drafts.length ? (
-    <button
-      type="button"
-      onClick={() => jsonDownload(drafts, projectId + '.preserved-drafts.json')}
-    >
+    <Button onClick={() => jsonDownload(drafts, projectId + '.preserved-drafts.json')}>
       {t('storyOpen.downloadKept')}
-    </button>
+    </Button>
   ) : null;
 }

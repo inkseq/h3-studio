@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Button } from './ui/Button.jsx';
 import { AlertTriangle, Check, Loader2 } from 'lucide-react';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
@@ -101,15 +102,14 @@ export function CloudSaveStatus({ className = '', plain = false }) {
     tone = 'busy';
   }
   return action && !plain ? (
-    <button
-      type="button"
+    <Button
       className={'autosave-status ' + tone + ' ' + className}
       title={s.error || undefined}
       onClick={action}
     >
       {icon}
       {label}
-    </button>
+    </Button>
   ) : (
     <span className={'autosave-status ' + tone + ' ' + className} role="status">
       {icon}
