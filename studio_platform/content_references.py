@@ -278,6 +278,15 @@ def cleanup_plan(
             and row["tenant_id"] == tenant
             and row["owner_id"] == owner
         ):
+            # Reviews are annotations of this exact owned purge target, not a
+            # second use of its media. Current notes are redacted by finish_purge;
+            # receipts contain only IDs/scalars/hashes. Foreign records still
+            # participate in the conservative reference closure below.
+            if row["kind"] in {"take_review", "take_review_receipt"} and (
+                row["payload"].get("artifact_id") in candidate_artifacts
+                or row["project_id"] in purged_projects
+            ):
+                continue
             # Only explicit universal purge may ignore this owner's completed
             # import audit capsule. Live documents and accepted inputs remain below.
             if (

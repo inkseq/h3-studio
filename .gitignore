@@ -653,6 +653,9 @@ inventory.json
 !studio_platform/story_risk.py
 !tests/test_story_risk.py
 !docs/STORY-RISK-LINT.md
+!studio_platform/take_reviews.py
+!tests/test_take_reviews.py
+!docs/TAKE-REVIEWS.md
 !tests/test_storyboard_versions.py
 !studio_platform/story_chat.py
 !studio_platform/story_chat_routes.py

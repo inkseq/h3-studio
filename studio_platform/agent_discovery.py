@@ -234,6 +234,7 @@ def public_guide():
     """Relative URLs deliberately keep discovery and credentials on one origin."""
     from .quick_chat_routes import agent_contract
     from .storyboard_versions import contract as storyboard_versions_contract
+    from .take_reviews import contract as take_reviews_contract
     from .caption_server import MAX_LINE_CHARACTERS
     from .story_risk import contract as story_risk_contract
 
@@ -248,6 +249,7 @@ def public_guide():
         "discovery_is_authorization": False,
         "quick_chat": agent_contract(),
         "storyboard_versions": storyboard_versions_contract(),
+        "take_reviews": take_reviews_contract(),
         "story_film": {
             "capability": "GET /v1/capabilities → story_film.enabled",
             "preflight": "POST /v1/projects/{project_id}/films/preflights; Idempotency-Key; {expected_version,resolution,aspect?,burn_subtitles}",
