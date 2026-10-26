@@ -101,10 +101,12 @@ def create_guided_router(app, service) -> APIRouter:
     @router.get("/v1/guided-schema")
     def schema():
         from .take_reviews import contract as take_reviews_contract
+        from .take_redo import contract as take_redo_contract
         from .product_feedback import contract as feedback_contract
 
         return {
             "take_reviews": take_reviews_contract(),
+            "take_redo": take_redo_contract(),
             "feedback": feedback_contract(),
             "version": 1,
             "entity_types": sorted(TYPES),
@@ -171,6 +173,7 @@ def create_guided_router(app, service) -> APIRouter:
             "generation_availability": public_guide()["generation_availability"],
             "story_risk_review": public_guide()["story_risk_review"],
             "take_reviews": public_guide()["take_reviews"],
+            "take_redo": public_guide()["take_redo"],
             "feedback": public_guide()["feedback"],
             "steps": [
                 "Browser account creates scoped API key; pass Bearer on API calls only",

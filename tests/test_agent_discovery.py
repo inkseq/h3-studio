@@ -139,6 +139,17 @@ class AgentDiscoveryTests(unittest.TestCase):
         for path in paths:
             self.assertEqual(self.client.get(path).content, anonymous[path])
 
+    def test_redo_preview_discovery_and_route_require_authentication(self):
+        public = self.client.get("/for-agents/guide.json").json()["take_redo"]
+        self.assertEqual(public["method"], "POST")
+        path = public["path"].format(project_id="p", shot_id="s", artifact_id="a")
+        body = {"expected_project_version": 1, "expected_review_revision": 0}
+        self.assertEqual(self.client.post(path, json=body).status_code, 401)
+        self.login()
+        for route in ("/v1/guided-schema", "/v1/agent-guide"):
+            self.assertEqual(self.client.get(route).json()["take_redo"], public)
+        self.assertEqual(self.client.post(path, json=body).status_code, 404)
+
     def test_feedback_contract_and_authenticated_routes_keep_private_receipts_private(
         self,
     ):
