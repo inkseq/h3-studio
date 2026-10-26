@@ -165,7 +165,7 @@ class CreatorControlsTests(unittest.TestCase):
         self,
     ):
         original = {"steps": 50, "duration": 5}
-        self.assertEqual(controls(fixture.PROFILE, original), original)
+        self.assertEqual(controls(fixture.OLD_PROFILE, original), original)
         self.assertIsNone(controls(TAOMATE, None))
 
     def test_creator_output_choices_keep_native_validation(self):
