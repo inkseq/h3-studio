@@ -59,6 +59,9 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
         updated_at: receipt.updated_at,
       }));
       setMessage(t('review.saved'));
+      void client.invalidateQueries({
+        queryKey: ['take-review-summaries', state.contextId, shotId],
+      });
     },
     onError: (error) => {
       setMessage(

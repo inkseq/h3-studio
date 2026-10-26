@@ -1,14 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { FloatingMessage } from './floating-notice.js';
-import {
-  ArrowRight,
-  Clapperboard,
-  Cloud,
-  PenLine,
-  Receipt,
-  Scissors,
-  UserRound,
-} from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
 import InkMark from './InkMark.jsx';
 import { dailyInkMark } from './ink-mark-daily.js';
 import { PublicFooter } from './PublicPages.jsx';
@@ -20,39 +12,8 @@ import { useCloud } from './CloudStudio.jsx';
 import { hostedSignInEnabled, hostedSignInUrl } from './account-access.js';
 import './landing.css';
 
-// A still storyboard drawn in CSS, so the page needs no image downloads.
-function DemoBoard() {
-  const { t } = useI18n();
-  const shots = [
-    ['landing.demoShot1', '0:06', 'a'],
-    ['landing.demoShot2', '0:04', 'b'],
-    ['landing.demoShot3', '0:05', 'c'],
-  ];
-  return (
-    <figure className="landing-demo" aria-label={t('landing.demoLabel')}>
-      <div className="landing-demo-chapter">{t('landing.demoChapter')}</div>
-      <div className="landing-demo-cards">
-        {shots.map(([title, time, tone], index) => (
-          <div key={title} className="landing-demo-card">
-            <div className={'landing-demo-frame tone-' + tone}>
-              <span>{String(index + 1).padStart(2, '0')}</span>
-              <span>{time}</span>
-            </div>
-            <b>{t(title)}</b>
-          </div>
-        ))}
-      </div>
-      <div className="landing-demo-timeline" aria-hidden="true">
-        <span className="tone-a" style={{ flexGrow: 6 }} />
-        <span className="tone-b" style={{ flexGrow: 4 }} />
-        <span className="tone-c" style={{ flexGrow: 5 }} />
-        <i className="landing-demo-playhead" />
-      </div>
-    </figure>
-  );
-}
+import { LandingStage, LandingChatDemo, LandingFlow, LandingBeforeAfter } from './LandingParts.jsx';
 
-const RETRY_KEY = 'inkseq.signinRetryAt';
 function retryAllowed() {
   try {
     return Date.now() - Number(sessionStorage.getItem(RETRY_KEY) || 0) > 120000;
@@ -108,16 +69,6 @@ export default function Landing() {
       : code === 'rate_limited'
         ? t('landing.errorRateLimited')
         : t('landing.errorSignIn');
-  const steps = [
-    [PenLine, 'landing.step1Title', 'landing.step1Body'],
-    [Clapperboard, 'landing.step2Title', 'landing.step2Body'],
-    [Scissors, 'landing.step3Title', 'landing.step3Body'],
-  ];
-  const more = [
-    [UserRound, 'landing.more1Title', 'landing.more1Body'],
-    [Cloud, 'landing.more2Title', 'landing.more2Body'],
-    [Receipt, 'landing.more3Title', 'landing.more3Body'],
-  ];
   return (
     <div className="landing">
       <header className="landing-bar">
@@ -155,73 +106,87 @@ export default function Landing() {
         </button>
       </header>
       <main>
-        <section className="landing-hero">
-          <div className="landing-hero-copy">
-            <h1>{t('landing.title')}</h1>
-            <p className="landing-lede">{t('landing.lede')}</p>
-            <FloatingMessage tone="error" text={signinError ? signinError : null} />
-            <div className="landing-ctas">
+        {/* Owner 2026-10-26: one page — the ink drop explains the idea, the studio proves it,
+            seven steps map it, the slider shows "only the marked part changes". */}
+        <section className="lp-hero">
+          <h1>{t('landing.v2.title')}</h1>
+          <p className="landing-lede">{t('landing.v2.lede')}</p>
+          <FloatingMessage tone="error" text={signinError ? signinError : null} />
+          <div className="landing-ctas">
+            <button
+              type="button"
+              className="primary landing-big"
+              disabled={opening}
+              onClick={() => start()}
+            >
+              {t('landing.start')}
+              <ArrowRight size={18} />
+            </button>
+            <a className="landing-secondary" href="#how">
+              {t('landing.v2.howLink')}
+            </a>
+          </div>
+          {hostedSignInEnabled(c.auth) && (
+            <small className="muted">
+              {t('landing.noAccount')}{' '}
               <button
                 type="button"
-                className="primary landing-big"
-                disabled={opening}
-                onClick={() => start()}
+                className="linkish"
+                onClick={() => {
+                  setPasswordFirst(true);
+                  setLogin(true);
+                }}
               >
-                {t('landing.start')}
-                <ArrowRight size={18} />
+                {t('landing.passwordSignIn')}
               </button>
-            </div>
-            {hostedSignInEnabled(c.auth) && (
-              <small className="muted">
-                {t('landing.noAccount')}{' '}
-                <button
-                  type="button"
-                  className="linkish"
-                  onClick={() => {
-                    setPasswordFirst(true);
-                    setLogin(true);
-                  }}
-                >
-                  {t('landing.passwordSignIn')}
-                </button>
-              </small>
-            )}
-          </div>
-          <DemoBoard />
+            </small>
+          )}
         </section>
-        <section className="landing-section">
-          <h2>{t('landing.howTitle')}</h2>
-          <ol className="landing-steps">
-            {steps.map(([Icon, title, body], index) => (
-              <li key={title}>
-                <span className="landing-step-n">{index + 1}</span>
-                <Icon size={22} aria-hidden="true" />
-                <h3>{t(title)}</h3>
-                <p className="muted">{t(body)}</p>
-              </li>
-            ))}
-          </ol>
+        <LandingStage />
+        <section id="demo" className="lp-section">
+          <header className="lp-head">
+            <span className="lp-eyebrow">{t('landing.v2.demoEyebrow')}</span>
+            <h2>{t('landing.v2.demoTitle')}</h2>
+            <p className="muted">{t('landing.v2.demoLede')}</p>
+          </header>
+          <LandingChatDemo />
         </section>
-        <section className="landing-section">
-          <h2>{t('landing.moreTitle')}</h2>
-          <ul className="landing-more">
-            {more.map(([Icon, title, body]) => (
-              <li key={title}>
-                <Icon size={18} aria-hidden="true" />
-                <div>
-                  <h3>{t(title)}</h3>
-                  <p className="muted">{t(body)}</p>
-                </div>
-              </li>
+        <section id="how" className="lp-section">
+          <header className="lp-head">
+            <span className="lp-eyebrow">{t('landing.v2.flowEyebrow')}</span>
+            <h2>{t('landing.v2.flowTitle')}</h2>
+          </header>
+          <LandingFlow />
+        </section>
+        <section className="lp-section">
+          <LandingBeforeAfter />
+        </section>
+        <section className="lp-section lp-agents">
+          <p>{t('landing.v2.agents')}</p>
+          <ul aria-label={t('landing.v2.agentsLabel')}>
+            {['landing.v2.agentBuiltIn', 'Claude', 'Codex', 'ChatGPT', 'Telegram'].map((name) => (
+              <li key={name}>{name.startsWith('landing.') ? t(name) : name}</li>
             ))}
           </ul>
         </section>
         <section className="landing-final">
-          <h2>{t('landing.finalTitle')}</h2>
-          <button type="button" className="primary landing-big" onClick={() => start()}>
-            {t('landing.start')}
-            <ArrowRight size={18} />
-          </button>
+          <h2>{t('landing.v2.finalTitle')}</h2>
+          <div className="landing-ctas">
+            <button type="button" className="primary landing-big" onClick={() => start()}>
+              {t('landing.start')}
+              <ArrowRight size={18} />
+            </button>
+            <a
+              className="landing-secondary"
+              href="/pricing"
+              onClick={(event) => {
+                event.preventDefault();
+                navigateApp('/pricing');
+              }}
+            >
+              {t('landing.v2.pricingLink')}
+            </a>
+          </div>
         </section>
       </main>
       <PublicFooter />
