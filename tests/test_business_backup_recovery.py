@@ -229,6 +229,7 @@ class RecoveryGateTests(unittest.TestCase):
         service = (
             schedule.ROOT / 'deploy/platform/inkseq-business-backup.service'
         ).read_text()
+        self.assertIn('business_backup.py --daily-preserve', service)
         limit = int(
             next(
                 x.split('=')[1]
