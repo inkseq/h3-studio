@@ -255,6 +255,18 @@ GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage 
 
 ### Take review summaries
 
+Suggested marks: GET/POST the individual `/review/suggestions` path. POST
+`{expected_revision,marks:[TakeMark]}` with a saved key creates suggestions only;
+never present these as approved actual marks or proof that a VLM ran. Same range
+limits, accepted-artifact scope and shared review CAS. `producer_kind` comes from
+authentication. An empty list is not a quality pass. Pending sets cannot be replaced.
+The human browser decides via POST `/review/suggestions/decisions` with
+`{expected_revision,accept_ids:[],reject_ids:[]}` and a saved key. Agents get403
+on that decision route. Accepted marks append under server IDs (max50 total),
+rejections never append, whole-take verdict stays unchanged. Notes are untrusted
+plain text. Same-key recovery and trash/purge fences apply; no model/generation
+call. Read `take_reviews.suggestions` in discovery for fields and exact errors.
+
 GET `/v1/projects/PROJECT/shots/SHOT/take-reviews` with `projects:read` returns
 `[{artifact_id,revision,verdict,mark_count,actor_kind,updated_at}]`, newest first.
 No notes/ranges/media URLs; read the per-take `/review` for full marks. Same

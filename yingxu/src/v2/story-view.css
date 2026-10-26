@@ -174,9 +174,20 @@
   font-size: 11px;
   font-style: normal;
   background: var(--good);
-  color: #062014;
+  color: var(--good-ink);
   border-radius: 4px;
   padding: 1px 4px;
+}
+/* The old-Quick-Create tag is quieter and sits at the bottom; reset the top inset, otherwise
+   top + bottom stretch it over the whole thumbnail. */
+.sb-workspace .storyboard-takes .ver > em.ver-legacy {
+  top: auto;
+  bottom: 30px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.sb-workspace .storyboard-takes .ver > .take-review-badges {
+  padding: 0 5px 5px;
 }
 .sb-workspace .storyboard-takes .ver.viewing {
   border-color: var(--ink);
@@ -306,7 +317,7 @@
   top: 6px;
   right: 6px;
   opacity: 0;
-  background: #17211bd9;
+  background: var(--media-scrim);
   color: white;
 }
 .sb-workspace .dock-screen:hover .screen-expand,
@@ -360,7 +371,7 @@
   position: absolute;
   right: 14px;
   top: 14px;
-  background: #17211bdd;
+  background: var(--media-scrim);
   color: white;
   z-index: 2;
 }
@@ -408,7 +419,7 @@
   padding: 4px;
   opacity: 0;
   border-radius: 50%;
-  background: #17211bdd;
+  background: var(--media-scrim);
   color: var(--white);
 }
 .sb-workspace .card:hover .workbench-select,
@@ -488,7 +499,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px;
-  background: #17211bee;
+  background: var(--media-scrim-strong);
   color: var(--ink);
   border: 1px solid var(--line-2);
   border-radius: 8px;
@@ -523,7 +534,7 @@
   font-size: 11px;
   color: var(--white);
   text-shadow: 0 1px 2px var(--black);
-  background: linear-gradient(transparent, #000b);
+  background: linear-gradient(transparent, var(--media-scrim-strong));
   bottom: 0;
   padding: 8px 4px 3px;
   left: 0;

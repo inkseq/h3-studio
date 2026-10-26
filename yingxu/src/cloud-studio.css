@@ -10,12 +10,12 @@
 }
 .cloud-entry {
   white-space: nowrap;
-  background: #f3f0e9;
-  border-color: #ddd5c8;
+  background: var(--surface-2);
+  border-color: var(--line-2);
 }
 .cloud-workspace-bar {
   padding: 10px 22px;
-  border-bottom: 1px solid #ded9cf;
+  border-bottom: 1px solid var(--line-2);
   background: var(--ink);
   display: flex;
   flex-wrap: wrap;
@@ -69,14 +69,14 @@
   gap: 5px;
 }
 .cloud-project-list small {
-  color: #78736b;
+  color: var(--muted);
 }
 .cloud-error {
-  color: #a33a30 !important;
+  color: var(--bad) !important;
 }
 .cloud-warning {
-  background: #fff3d9;
-  color: #76551f;
+  background: var(--warn-soft);
+  color: var(--ink);
   padding: 11px;
   border-radius: 8px;
   font-size: 12px;
@@ -84,9 +84,9 @@
 }
 .cloud-shot-panel {
   padding: 18px;
-  border: 1px solid #dbd6c9;
+  border: 1px solid var(--line-2);
   border-radius: 12px;
-  background: #fffdf8;
+  background: var(--surface);
   margin: 18px 0;
 }
 .cloud-shot-panel > p {
@@ -99,8 +99,8 @@
 }
 .cloud-badge {
   font-size: 10px;
-  color: #59715f;
-  background: #e9eee5;
+  color: var(--good);
+  background: var(--good-soft);
   padding: 5px 8px;
   border-radius: 20px;
 }
@@ -127,7 +127,7 @@
   height: 18px;
 }
 .cloud-control small {
-  color: #827c72;
+  color: var(--muted);
   font-size: 10px;
   line-height: 1.5;
 }
@@ -136,7 +136,7 @@
 }
 .cloud-shot-panel details {
   margin: 12px 0;
-  border-top: 1px solid #e8e3d8;
+  border-top: 1px solid var(--line);
   padding-top: 12px;
 }
 .cloud-shot-panel summary {
@@ -185,7 +185,7 @@
   font-size: 12px;
 }
 .cloud-plan.ready {
-  background: #edf3e9;
+  background: var(--good-soft);
 }
 .cloud-plan pre {
   max-height: 260px;
@@ -204,7 +204,7 @@
   gap: 10px;
   flex-wrap: wrap;
   justify-content: space-between;
-  border: 1px solid #e0ddd4;
+  border: 1px solid var(--line-2);
   border-radius: 9px;
   padding: 12px;
   font-size: 12px;
@@ -218,7 +218,7 @@
   overflow-wrap: anywhere;
 }
 .cloud-job-list small {
-  color: #827c72;
+  color: var(--muted);
 }
 .cloud-batch-shots {
   display: grid;
@@ -230,7 +230,7 @@
   gap: 10px;
   justify-content: space-between;
   align-items: center;
-  border-bottom: 1px solid #e7e3da;
+  border-bottom: 1px solid var(--line);
   padding: 10px 0;
 }
 .cloud-batch-shots label {
@@ -243,7 +243,7 @@
 .cloud-batch-shots small {
   grid-column: 2;
   font-size: 11px;
-  color: #7c756b;
+  color: var(--muted);
 }
 .cloud-batch {
   justify-content: space-between;
@@ -287,7 +287,7 @@ button.brand {
 }
 .cloud-storage {
   width: 100%;
-  border-top: 1px solid #e2ded3;
+  border-top: 1px solid var(--line);
   padding-top: 8px;
 }
 .cloud-storage summary {
@@ -308,7 +308,7 @@ button.brand {
   gap: 10px;
   align-items: center;
   justify-content: space-between;
-  border: 1px solid #e1ddce;
+  border: 1px solid var(--line-2);
   padding: 10px;
   border-radius: 8px;
   flex-wrap: wrap;
@@ -321,7 +321,7 @@ button.brand {
 }
 .cloud-storage-list small {
   font-size: 11px;
-  color: #736e63;
+  color: var(--muted);
 }
 .cloud-storage-list button {
   white-space: normal;
@@ -351,7 +351,7 @@ button.brand {
 .shot-prompt-preview {
   padding: 12px;
   margin-top: 12px;
-  border: 1px solid #ddd7ca;
+  border: 1px solid var(--line-2);
   border-radius: 8px;
 }
 .shot-prompt-draft pre {
@@ -370,7 +370,7 @@ button.brand {
 .service-status {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid var(--line, #d7dcd8);
+  border: 1px solid var(--line);
   border-radius: 10px;
   padding: 10px 12px;
   background: var(--panel, var(--ink));
@@ -385,8 +385,8 @@ button.brand {
 .service-status.simulation,
 .service-status.offline,
 .service-status.unknown {
-  border-color: #c6a566;
-  background: #fff8e8;
+  border-color: var(--warn);
+  background: var(--warn-soft);
 }
 .service-status p,
 .service-status li {
@@ -401,7 +401,7 @@ button.brand {
 }
 .input-usage {
   background: var(--ink);
-  border: 1px solid #ccdbd1;
+  border: 1px solid var(--line-2);
   border-radius: 10px;
   padding: 12px;
   font-size: 12px;
@@ -414,7 +414,7 @@ button.brand {
   padding-left: 20px;
 }
 .input-usage [role='status'] {
-  border-top: 1px solid #ccdbd1;
+  border-top: 1px solid var(--line-2);
   padding-top: 8px;
-  color: #745323;
+  color: var(--ink);
 }
