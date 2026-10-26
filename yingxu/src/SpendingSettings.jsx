@@ -1,3 +1,4 @@
+import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
 import { FloatingMessage } from './floating-notice.js';
@@ -236,19 +237,14 @@ export default function SpendingSettings({ account }) {
     }
   }
   const field = (label, value, onChange) => (
-    <label className="limit-row">
-      <div>
-        <b>{t(label)}</b>
-      </div>
-      <span className="limit-input">
-        <input
-          inputMode="decimal"
-          value={value}
-          disabled={busy}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      </span>
-    </label>
+    <SettingRow label={t(label)}>
+      <input
+        inputMode="decimal"
+        value={value}
+        disabled={busy}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    </SettingRow>
   );
   const exposure = admissionExposure(user?.usage, user?.value?.daily_limit_microusd);
   return (
@@ -418,19 +414,25 @@ export default function SpendingSettings({ account }) {
                   {t('settings.creditsToday', { count: user.usage.exposure_credits })}
                 </p>
               )}
-              <section id="my-budget" className="card-box limits" aria-label={t('settings.budget')}>
-                {field(
-                  creditMode ? 'settings.dailyCredits' : 'settings.daily',
-                  draft.daily,
-                  (value) => setDraft((previous) => ({ ...previous, daily: value })),
-                )}
-                {field(creditMode ? 'settings.askCredits' : 'settings.ask', draft.ask, (value) =>
-                  setDraft((previous) => ({ ...previous, ask: value })),
-                )}
-              </section>
-              <p className="muted">
-                {t(creditMode ? 'settings.zeroCredits' : 'settings.zero')} · {t('settings.day')}
-              </p>
+              <SettingsSection
+                className="limits"
+                help={
+                  t(creditMode ? 'settings.zeroCredits' : 'settings.zero') +
+                  ' · ' +
+                  t('settings.day')
+                }
+              >
+                <div id="my-budget" aria-label={t('settings.budget')}>
+                  {field(
+                    creditMode ? 'settings.dailyCredits' : 'settings.daily',
+                    draft.daily,
+                    (value) => setDraft((previous) => ({ ...previous, daily: value })),
+                  )}
+                  {field(creditMode ? 'settings.askCredits' : 'settings.ask', draft.ask, (value) =>
+                    setDraft((previous) => ({ ...previous, ask: value })),
+                  )}
+                </div>
+              </SettingsSection>
               <div className="row tight" style={{ justifyContent: 'flex-end' }}>
                 <button className="primary" disabled={busy}>
                   {t(busy ? 'settings.saving' : 'settings.save')}

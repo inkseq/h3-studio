@@ -373,13 +373,26 @@ export function createCloudController({
   };
   globalThis.window?.addEventListener('focus', focusSession);
   globalThis.document?.addEventListener('visibilitychange', visibleSession);
-  // `quiet` operations (story edits through /actions) still run one at a time but do not
-  // flag the whole page busy, so other buttons stay usable (owner, 2026-10-26).
-  async function action(fn, { projectId, quiet = false } = {}) {
-    if (operation) throw Error('上一项云操作还在处理中。');
-    operation = true;
-    emit(quiet ? { error: '', message: '' } : { busy: true, error: '', message: '' });
+  // One rule for every cloud operation (owner, 2026-10-26): operations run one after another.
+  // - blocking: switching what the page shows (open a story, sign in/out, create, copy, upload
+  //   all). Only these mark the page busy, so controls wait.
+  // - exclusive: submits and cancels. A second press while anything runs is refused, never
+  //   queued, so one click can never become two jobs.
+  // - everything else (autosave, refresh, lists, story edits, frames) waits its turn quietly:
+  //   nothing greys out and nothing fails because another operation is running.
+  let chain = Promise.resolve(),
+    queued = 0;
+  async function action(fn, { projectId, blocking = false, exclusive = blocking } = {}) {
+    if (exclusive && queued) throw Error('上一项云操作还在处理中。');
+    // With nothing running the operation starts right away (same tick), as before.
+    const previous = queued ? chain : null;
+    queued += 1;
+    let release;
+    chain = new Promise((resolve) => (release = resolve));
     try {
+      if (previous) await previous;
+      operation = true;
+      if (blocking) emit({ busy: true, error: '', message: '' });
       return await fn();
     } catch (error) {
       if (projectId) {
@@ -396,7 +409,9 @@ export function createCloudController({
       throw error;
     } finally {
       operation = false;
-      if (!quiet) emit({ busy: false });
+      queued -= 1;
+      if (blocking) emit({ busy: false });
+      release();
     }
   }
   const emptyProjectList = {
@@ -1979,9 +1994,7 @@ export function createCloudController({
         .then(async () => {
           workbenchRunning = true;
           try {
-            return await action(() => workbenchCommand(kind, body, options), {
-              quiet: kind === 'actions',
-            });
+            return await action(() => workbenchCommand(kind, body, options));
           } finally {
             workbenchRunning = false;
           }
@@ -2000,45 +2013,58 @@ export function createCloudController({
       return result;
     },
     login: (username, password) =>
-      action(async () => {
-        const observedEpoch = epoch,
-          result = await api.login(username, password);
-        if (observedEpoch !== epoch) throw Error('登录期间会话已经改变，请重新核对。');
-        const me = identity(result);
-        if (typeof me !== 'string') throw Error('登录响应缺少账户身份。');
-        replaceIdentity(me);
-        announceSession();
-        await reloadProjects();
-        await reloadCapabilities();
-        offerResume();
-      }),
+      action(
+        async () => {
+          const observedEpoch = epoch,
+            result = await api.login(username, password);
+          if (observedEpoch !== epoch) throw Error('登录期间会话已经改变，请重新核对。');
+          const me = identity(result);
+          if (typeof me !== 'string') throw Error('登录响应缺少账户身份。');
+          replaceIdentity(me);
+          announceSession();
+          await reloadProjects();
+          await reloadCapabilities();
+          offerResume();
+        },
+        { blocking: true },
+      ),
     changePassword: (previous, next) =>
-      action(async () => {
-        const ctx = accountContext();
-        await api.changePassword(previous, next);
-        guardAccount(ctx);
-        rememberVisit({ mode: 'local' });
-        replaceIdentity(null, '密码已修改，请重新登录；原 API Key 已撤销，云草稿仍按账户保留。');
-        announceSession();
-      }),
+      action(
+        async () => {
+          const ctx = accountContext();
+          await api.changePassword(previous, next);
+          guardAccount(ctx);
+          rememberVisit({ mode: 'local' });
+          replaceIdentity(null, '密码已修改，请重新登录；原 API Key 已撤销，云草稿仍按账户保留。');
+          announceSession();
+        },
+        { blocking: true },
+      ),
     logout: () =>
-      action(async () => {
-        void clearVideoCache().catch(() => {});
-        const result = await api.logout();
-        rememberVisit({ mode: 'local' });
-        replaceIdentity(null, '已退出。云草稿仍按原账户保留，本机作品已恢复。');
-        announceSession();
-        const providerLogout = providerLogoutUrl(result);
-        if (providerLogout && typeof window !== 'undefined') window.location.assign(providerLogout);
-      }),
+      action(
+        async () => {
+          void clearVideoCache().catch(() => {});
+          const result = await api.logout();
+          rememberVisit({ mode: 'local' });
+          replaceIdentity(null, '已退出。云草稿仍按原账户保留，本机作品已恢复。');
+          announceSession();
+          const providerLogout = providerLogoutUrl(result);
+          if (providerLogout && typeof window !== 'undefined')
+            window.location.assign(providerLogout);
+        },
+        { blocking: true },
+      ),
     logoutEverywhere: () =>
-      action(async () => {
-        void clearVideoCache().catch(() => {});
-        await api.revokeAllSessions('sessions-' + uid());
-        rememberVisit({ mode: 'local' });
-        replaceIdentity(null, '已在所有设备退出。云草稿仍按原账户保留。');
-        announceSession();
-      }),
+      action(
+        async () => {
+          void clearVideoCache().catch(() => {});
+          await api.revokeAllSessions('sessions-' + uid());
+          rememberVisit({ mode: 'local' });
+          replaceIdentity(null, '已在所有设备退出。云草稿仍按原账户保留。');
+          announceSession();
+        },
+        { blocking: true },
+      ),
     leave() {
       epoch++;
       projectOpenRequest++;
@@ -2079,32 +2105,35 @@ export function createCloudController({
       installMedia();
     },
     resume: () =>
-      action(async () => {
-        const ctx = accountContext(),
-          offer = state.resumeOffer;
-        if (!offer || current().workspace.mode !== 'local')
-          throw Error('请重新核对当前账户与上次作品。');
-        try {
-          const done = await open(offer.projectId);
-          emit({ resumeError: '' });
-          return done;
-        } catch (error) {
-          guardAccount(ctx);
-          if ([403, 404].includes(error.status)) {
-            rememberVisit({ mode: 'local' });
-            emit({
-              resumeOffer: null,
-              resumeError:
-                '上次云作品已不存在，或当前账户无权读取。当前本机作品和已有草稿均未改变。',
-            });
-          } else
-            emit({
-              resumeError:
-                '上次云作品暂时无法读取。可稍后重试或从云项目列表打开；当前本机作品未改变。',
-            });
-          throw error;
-        }
-      }),
+      action(
+        async () => {
+          const ctx = accountContext(),
+            offer = state.resumeOffer;
+          if (!offer || current().workspace.mode !== 'local')
+            throw Error('请重新核对当前账户与上次作品。');
+          try {
+            const done = await open(offer.projectId);
+            emit({ resumeError: '' });
+            return done;
+          } catch (error) {
+            guardAccount(ctx);
+            if ([403, 404].includes(error.status)) {
+              rememberVisit({ mode: 'local' });
+              emit({
+                resumeOffer: null,
+                resumeError:
+                  '上次云作品已不存在，或当前账户无权读取。当前本机作品和已有草稿均未改变。',
+              });
+            } else
+              emit({
+                resumeError:
+                  '上次云作品暂时无法读取。可稍后重试或从云项目列表打开；当前本机作品未改变。',
+              });
+            throw error;
+          }
+        },
+        { blocking: true },
+      ),
     dismissResume() {
       rememberVisit({ mode: 'local' });
       emit({ resumeOffer: null, resumeError: '', draftOffer: null });
@@ -2113,49 +2142,58 @@ export function createCloudController({
     loadMoreProjects: () => action(loadMoreProjects),
     reloadCapabilities: () => action(reloadCapabilities),
     reloadAvailability: () => reloadAvailability({ fresh: true }),
-    open: (id, options) => action(() => open(id, options), { projectId: id }),
+    open: (id, options) => action(() => open(id, options), { projectId: id, blocking: true }),
     save: () => action(save),
     create: (title, { copy = false } = {}) =>
-      action(async () => {
-        if (!state.account) throw Error('先登录云工作室。');
-        const ctx = accountContext(),
-          project = copy ? copyForCloud(store.exportProject()) : blankCloudProject(title);
-        if (copy && title) project.title = title;
-        const record = checkedProjectRecord(
-          await api.createProject(project, intent('create', project.id)),
-        );
-        guardAccount(ctx);
-        await reloadProjects();
-        guardAccount(ctx);
-        return open(record.id);
-      }),
+      action(
+        async () => {
+          if (!state.account) throw Error('先登录云工作室。');
+          const ctx = accountContext(),
+            project = copy ? copyForCloud(store.exportProject()) : blankCloudProject(title);
+          if (copy && title) project.title = title;
+          const record = checkedProjectRecord(
+            await api.createProject(project, intent('create', project.id)),
+          );
+          guardAccount(ctx);
+          await reloadProjects();
+          guardAccount(ctx);
+          return open(record.id);
+        },
+        { blocking: true },
+      ),
     createQuick: (title) =>
-      action(async () => {
-        if (!state.account) throw Error('先登录云工作室。');
-        const ctx = accountContext(),
-          project = freestyleProject(title || '快速创作 · ' + new Date().toLocaleDateString());
-        const record = checkedProjectRecord(
-          await api.createProject(project, intent('create', project.id)),
-        );
-        guardAccount(ctx);
-        await reloadProjects();
-        guardAccount(ctx);
-        return open(record.id);
-      }),
+      action(
+        async () => {
+          if (!state.account) throw Error('先登录云工作室。');
+          const ctx = accountContext(),
+            project = freestyleProject(title || '快速创作 · ' + new Date().toLocaleDateString());
+          const record = checkedProjectRecord(
+            await api.createProject(project, intent('create', project.id)),
+          );
+          guardAccount(ctx);
+          await reloadProjects();
+          guardAccount(ctx);
+          return open(record.id);
+        },
+        { blocking: true },
+      ),
     saveCopy: () =>
-      action(async () => {
-        requireCloud();
-        const ctx = accountContext(),
-          project = copyForCloud(store.exportProject());
-        project.title = project.title.slice(0, 145) + ' · 冲突草稿副本';
-        const record = checkedProjectRecord(
-          await api.createProject(project, intent('create', project.id)),
-        );
-        guardAccount(ctx);
-        await reloadProjects();
-        guardAccount(ctx);
-        return open(record.id);
-      }),
+      action(
+        async () => {
+          requireCloud();
+          const ctx = accountContext(),
+            project = copyForCloud(store.exportProject());
+          project.title = project.title.slice(0, 145) + ' · 冲突草稿副本';
+          const record = checkedProjectRecord(
+            await api.createProject(project, intent('create', project.id)),
+          );
+          guardAccount(ctx);
+          await reloadProjects();
+          guardAccount(ctx);
+          return open(record.id);
+        },
+        { blocking: true },
+      ),
     assetInventory: () => action(assetInventory),
     resumeAsset: (id) =>
       action(async () => {
@@ -2185,18 +2223,21 @@ export function createCloudController({
       }),
     upload,
     syncAll: () =>
-      action(async () => {
-        requireCloud();
-        for (const asset of [...current().project.entities])
-          if (
-            ['image', 'video', 'audio'].includes(asset.type) &&
-            asset.data.fileId &&
-            !asset.data.cloudArtifactId
-          )
-            await syncEntity(asset.id);
-        await save();
-        emit({ message: '可读取的本机素材已同步，项目版本已保存。' });
-      }),
+      action(
+        async () => {
+          requireCloud();
+          for (const asset of [...current().project.entities])
+            if (
+              ['image', 'video', 'audio'].includes(asset.type) &&
+              asset.data.fileId &&
+              !asset.data.cloudArtifactId
+            )
+              await syncEntity(asset.id);
+          await save();
+          emit({ message: '可读取的本机素材已同步，项目版本已保存。' });
+        },
+        { blocking: true },
+      ),
     prepare: (shotId) => action(() => prepare(shotId)),
     prepareStoryboard: (shotId, options) => action(() => prepareStoryboard(shotId, options)),
     saveFrame: (artifactId, selection) => action(() => extractFrame(artifactId, selection)),
@@ -2210,7 +2251,7 @@ export function createCloudController({
           throw Error('任务不属于当前项目。');
         return job;
       }),
-    submit: (shotId) => action(() => submit(shotId)),
+    submit: (shotId) => action(() => submit(shotId), { exclusive: true }),
     refresh: () => action(refreshJobs),
     loadMoreJobs: () => action(loadMoreJobs),
     loadMoreBatches: () => action(loadMoreBatches),
@@ -2219,7 +2260,7 @@ export function createCloudController({
       emit({ renderOptions: { ...state.renderOptions, [chapterId]: clone(options) } });
     },
     prepareRender: (chapterId, options) => action(() => prepareRender(chapterId, options)),
-    submitRender: (chapterId) => action(() => submitRender(chapterId)),
+    submitRender: (chapterId) => action(() => submitRender(chapterId), { exclusive: true }),
     prepareBatch: (shotIds) =>
       action(async () => {
         requireCloud();
@@ -2260,27 +2301,33 @@ export function createCloudController({
             emit({ batchChecking: null });
         }
       }),
-    submitBatch: (shotIds) => action(() => submitBatch(shotIds)),
-    recoverBatch: () => action(() => submitBatch([], { recover: true })),
+    submitBatch: (shotIds) => action(() => submitBatch(shotIds), { exclusive: true }),
+    recoverBatch: () => action(() => submitBatch([], { recover: true }), { exclusive: true }),
     cancel: (id) =>
-      action(async () => {
-        requireCloud();
-        const ctx = context();
-        await api.cancel(id);
-        guard(ctx);
-        await refreshJobs();
-        guard(ctx);
-        emit({ message: '取消请求已提交。以任务最终状态为准，已执行部分可能已产生费用。' });
-      }),
+      action(
+        async () => {
+          requireCloud();
+          const ctx = context();
+          await api.cancel(id);
+          guard(ctx);
+          await refreshJobs();
+          guard(ctx);
+          emit({ message: '取消请求已提交。以任务最终状态为准，已执行部分可能已产生费用。' });
+        },
+        { exclusive: true },
+      ),
     cancelBatch: (id) =>
-      action(async () => {
-        requireCloud();
-        const ctx = context(),
-          batch = await api.cancelBatch(id);
-        guard(ctx);
-        emit({ batches: state.batches.map((b) => (b.id === id ? batch : b)) });
-        await refreshJobs();
-      }),
+      action(
+        async () => {
+          requireCloud();
+          const ctx = context(),
+            batch = await api.cancelBatch(id);
+          guard(ctx);
+          emit({ batches: state.batches.map((b) => (b.id === id ? batch : b)) });
+          await refreshJobs();
+        },
+        { exclusive: true },
+      ),
     clearError() {
       emit({ error: '', message: '' });
     },

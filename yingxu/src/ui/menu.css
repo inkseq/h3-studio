@@ -1,0 +1,96 @@
+/* Shared floating menu (ui/Menu.jsx). Tokens only, so every skin restyles it. */
+.ui-menu {
+  z-index: 1000;
+  min-width: 180px;
+  max-width: min(300px, calc(100vw - 16px));
+  max-height: var(--radix-dropdown-menu-content-available-height);
+  overflow: auto;
+  padding: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r, 10px);
+  box-shadow: 0 16px 46px rgba(0, 0, 0, 0.32);
+  font-size: 13px;
+}
+.ui-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: calc(var(--r, 10px) - 4px);
+  color: var(--ink);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+}
+.ui-menu-item svg {
+  flex: none;
+  color: var(--ink-2);
+}
+.ui-menu-item[data-highlighted] {
+  background: var(--surface-3, var(--accent-soft));
+}
+.ui-menu-item[data-disabled] {
+  opacity: 0.45;
+  cursor: default;
+}
+.ui-menu-item.danger,
+.ui-menu-item.danger svg {
+  color: var(--bad, #c0392b);
+}
+.ui-menu-group {
+  display: grid;
+  gap: 1px;
+}
+.ui-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--line);
+}
+.ui-menu-label {
+  padding: 8px 10px;
+}
+.ui-tooltip {
+  z-index: 1001;
+  max-width: 280px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.3);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+}
+.ui-popover {
+  z-index: 1000;
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+  max-width: min(340px, calc(100vw - 16px));
+  max-height: var(--radix-popover-content-available-height);
+  overflow: auto;
+  padding: 10px;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r, 10px);
+  box-shadow: 0 16px 46px rgba(0, 0, 0, 0.32);
+  font-size: 13px;
+}
+.ui-popover > button {
+  justify-content: flex-start;
+  width: 100%;
+}
+.ui-popover p {
+  margin: 0;
+}
+.ui-menu-item small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}

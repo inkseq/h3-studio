@@ -5165,7 +5165,6 @@ h4,
 .card-dur,
 .card-no,
 .agent-spend,
-.limit-input input,
 .qc-list small,
 .libp-side small {
   font-variant-numeric: tabular-nums;
@@ -5823,7 +5822,6 @@ h4,
           dialog,
           [role='menu'],
           .account-menu,
-          .v2-export-menu,
           .story-recent-menu,
           .item-menu-popover,
           .more-menu,
@@ -6019,38 +6017,6 @@ h4,
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-.limit-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0;
-  border-top: 1px solid var(--line);
-}
-.limit-row:first-of-type {
-  border-top: 0;
-}
-.limit-row > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.limit-row small {
-  font-size: 12px;
-}
-.limit-input {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.limit-input input {
-  width: 90px;
-  text-align: right;
-}
-.limit-row select {
-  width: auto;
 }
 .inline-select {
   width: auto;

@@ -23,6 +23,7 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { ChatDialog } from './QuickChatControls.jsx';
 import { store } from './store.js';
 import ItemMenu from './ItemMenu.jsx';
+import { MenuItem } from './ui/Menu.jsx';
 import {
   BookOpen,
   Box,
@@ -290,63 +291,33 @@ export function TrashProvider({ account, children }) {
 }
 export function TrashMenu({ target, onRename, onEdit, onChat, onTrashSettled, disabled = false }) {
   const ctx = useTrash(),
-    { t } = useI18n();
+    { t } = useI18n(),
+    anchor = useRef(null);
   if (!ctx?.account) return null;
   return (
-    <ItemMenu disabled={disabled || ctx.busy || !!ctx.pending}>
-      {(close) => (
-        <>
-          {onRename && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                close();
-                onRename();
-              }}
-            >
-              {t('trash.rename')}
-            </button>
-          )}
-          {onEdit && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                close();
-                onEdit();
-              }}
-            >
-              {t('trash.edit')}
-            </button>
-          )}
-          {onChat && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                close();
-                onChat();
-              }}
-            >
-              {t('trash.editInChat')}
-            </button>
-          )}
-          <button
-            role="menuitem"
-            onClick={async (event) => {
-              const dialog = event.currentTarget.closest('dialog');
-              close();
-              const receipt = await ctx.request('trash', [target]);
-              if (dialog?.isConnected) {
-                if (onTrashSettled) onTrashSettled();
-                else if (receipt?.state === 'completed')
-                  dialog.dispatchEvent(new Event('inkseq-close-after-trash'));
-              }
-            }}
-          >
-            {t('trash.move')}
-          </button>
-        </>
-      )}
-    </ItemMenu>
+    <span ref={anchor} className="trash-menu">
+      <ItemMenu disabled={disabled || ctx.busy || !!ctx.pending}>
+        {onRename && <MenuItem onSelect={onRename}>{t('trash.rename')}</MenuItem>}
+        {onEdit && <MenuItem onSelect={onEdit}>{t('trash.edit')}</MenuItem>}
+        {onChat && <MenuItem onSelect={onChat}>{t('trash.editInChat')}</MenuItem>}
+        <MenuItem
+          danger
+          onSelect={async () => {
+            // The menu row may sit in a dialog (the story item list); close it once the
+            // item has really moved to the trash.
+            const dialog = anchor.current?.closest('dialog');
+            const receipt = await ctx.request('trash', [target]);
+            if (dialog?.isConnected) {
+              if (onTrashSettled) onTrashSettled();
+              else if (receipt?.state === 'completed')
+                dialog.dispatchEvent(new Event('inkseq-close-after-trash'));
+            }
+          }}
+        >
+          {t('trash.move')}
+        </MenuItem>
+      </ItemMenu>
+    </span>
   );
 }
 // One-click "move to trash" for panels with a single obvious action (no menu).
