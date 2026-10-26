@@ -2254,14 +2254,24 @@ body.resizing-y video {
 .story-card.new span {
   display: inline-flex;
 }
+/* Sits on the cover image: white text on a dark scrim in every skin; the status colour is a dot. */
 .story-card .cover .badge {
-  background: rgba(0, 0, 0, 0.6);
+  background: var(--media-scrim);
+  color: var(--white);
 }
-.story-card .cover .badge.cloud {
-  color: var(--good);
+.story-card .cover .badge.cloud::before,
+.story-card .cover .badge.local::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--good);
 }
-.story-card .cover .badge.local {
-  color: var(--warn);
+.story-card .cover .badge.local::before {
+  background: var(--warn);
 }
 
 /* ---------- 算力 / 设置 ---------- */
