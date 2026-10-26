@@ -5,6 +5,9 @@
 // characters, logos or names from someone else's work.
 
 export const SKINS = [
+  // Brand look (owner, 2026-10-26): white or near-black with one coral accent; follows the system.
+  { id: 'coral', swatch: ['#ffffff', '#ff5a36', '#0f1115'], light: true },
+  { id: 'coral-dark', swatch: ['#0b0c0e', '#ff6b47', '#f4f4f5'] },
   { id: 'default', swatch: ['#0b0c0c', '#cdf26e'] },
   {
     id: 'taisho',
@@ -27,8 +30,8 @@ export const SKINS = [
 const KEY = 'inkseq.skin';
 // Light and dark base looks (owner, 2026-10-26): until the viewer picks one, the app follows
 // the system setting, live.
-export const LIGHT = 'nordic',
-  DARK = 'default';
+export const LIGHT = 'coral',
+  DARK = 'coral-dark';
 const systemDark = () => {
   try {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
