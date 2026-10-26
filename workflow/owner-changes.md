@@ -604,3 +604,27 @@ Review clarification #650/6415940764: existing `aspect_ratio` and
 `generate_audio` are creator output choices, not model-tuning controls. Preserve
 them with their existing enum/bool validation so portrait or silent output does
 not silently revert when hidden tuning overrides are filtered.
+
+## CR-20261027-70 — lean collaboration: review only what can hurt, batch staging, one promoter
+
+Owner, 2026-10-27 (to Claude): too much time went to approvals and queues for small work;
+"按你觉得最好的方法". Claude's decision, binding for both lanes:
+
+- **Tier2 is a closed list.** Only changes that touch money (charging, credits, Checkout,
+  provider spend/rental), database schema or deletion/purge of user data, auth/permissions/
+  credentials/secrets, or production host machinery (release/promotion helpers, backup/restore,
+  alerting installs) need the other agent's non-author review. One review pass: the reviewer
+  posts one comment at an exact head; the author fixes, merges and adopts without another
+  hand-back unless the fix changes the reviewed behaviour.
+- **Everything else is Tier0/1**: the author self-reviews, merges on exact-head green CI and
+  posts one short issue comment. No review request, no labels, no waiting on the other agent.
+  Both agents still read each other's merged changes when they touch their lane.
+- **Staging syncs are batched.** Claude merges inkseq-design PRs as they pass and syncs
+  yingxu to h3-studio at a batch end or at most every few hours, not once per PR.
+- **Infrastructure flakes get one automatic rerun** (runner capacity, the known DBOS
+  observation timeout). A flake seen twice becomes a Tier1 fix by the owning lane.
+- **Claude is the only production promoter**, any day as soon as staging is accepted, with a
+  one-line notice on #193 before each promotion. Work that pins the production release
+  (backup recovery, helper installs) posts a hold on #193; the promoter respects open holds.
+- Unchanged hard limits: ask the owner for budget overrun, permanent user-data deletion,
+  credential/provider-account changes and charging/Checkout changes.

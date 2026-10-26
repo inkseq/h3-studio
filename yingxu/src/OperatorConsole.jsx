@@ -2,7 +2,7 @@ import { Note } from './ui/Note.jsx';
 import StudioHeader from './StudioHeader.jsx';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
+import { operatorFormatters } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
 import React, {
   useEffect,
@@ -16,7 +16,6 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Clock,
-  Cpu,
   Info,
   LogOut,
   Play,
@@ -26,23 +25,14 @@ import {
   Server,
   Settings2,
   ShieldCheck,
-  X,
 } from 'lucide-react';
 import { useCloud } from './CloudStudio.jsx';
 import { cloudController as cloud } from './cloud-controller.js';
 import { createOperatorController } from './operator-controller.js';
 import {
-  age,
   allowed,
-  dollars,
-  duration,
   hasBoundOperatorSelection,
-  runtimeDuration,
-  reasonText,
   staleSnapshot,
-  stateLabel,
-  providerLabel,
-  operatorMarketProvider,
   operatorModels,
   operatorCandidateKey,
   operatorCandidateSelection,
@@ -50,8 +40,6 @@ import {
   operatorCandidatePreviewMatches,
   initialOperatorMarket,
   operatorMarketReducer,
-  operatorMarketSummary,
-  roundedSpec,
 } from './operator-model.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import './v2/ops-adapter.css';
@@ -141,7 +129,7 @@ function RecipeEvidence({ profile }) {
   );
 }
 function Login() {
-  const { t: lo, locale } = useI18n();
+  const { t: lo } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
@@ -371,7 +359,7 @@ function ExtensionDialog({ node, busy, controller, onClose, now }) {
   );
 }
 function PolicyDialog({ policy, busy, onSave, onClose }) {
-  const { t: lo, locale } = useI18n();
+  const { t: lo } = useI18n();
   const [draft, setDraft] = useState({ ...policy }),
     [error, setError] = useState('');
   const fields = [

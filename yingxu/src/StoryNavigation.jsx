@@ -45,7 +45,7 @@ import { navigateApp } from './app-navigation.js';
 import { storyTitle } from './story-open.js';
 
 export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSelect }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const c = useCloud(),
     [creating, setCreating] = useState(false),
     [title, setTitle] = useState(''),
@@ -389,7 +389,7 @@ function editedLabel(value, locale = 'zh') {
     : translate(locale, 'legacy.visible13');
 }
 function StoryLocation({ mode }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   // Stories live in the cloud by default; only browser-only ones need a label (owner, 2026-10-21).
   if (mode === 'cloud') return null;
   return (
@@ -1006,7 +1006,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
 }
 
 export function RecentStoriesDropdown({ state, onOpenCloud, onOpenLocal, onSelect }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const library = useStoryLibrary(state),
     details = useRef(),
     stories = [...library.stories]

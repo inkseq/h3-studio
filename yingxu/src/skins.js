@@ -40,10 +40,23 @@ const systemDark = () => {
   }
 };
 
+// Until 2026-10-26 the header light/dark toggle stored the old pair (nordic / default), which
+// would pin those viewers to the old look. Move that pair to coral once; a later deliberate
+// pick in the skin list is kept.
+const MIGRATED = 'inkseq.skin.coral-v1';
+const OLD_PAIR = { nordic: 'coral', default: 'coral-dark' };
+function migrateOldPair(id) {
+  if (localStorage.getItem(MIGRATED)) return id;
+  localStorage.setItem(MIGRATED, '1');
+  if (!OLD_PAIR[id]) return id;
+  localStorage.setItem(KEY, OLD_PAIR[id]);
+  return OLD_PAIR[id];
+}
+
 // The viewer's explicit choice, or '' when the app should follow the system.
 export function chosenSkin() {
   try {
-    const id = localStorage.getItem(KEY);
+    const id = migrateOldPair(localStorage.getItem(KEY));
     return SKINS.some((skin) => skin.id === id) ? id : '';
   } catch {
     return '';

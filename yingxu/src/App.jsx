@@ -19,27 +19,16 @@ import UniversalTrash, {
   TrashButton,
   StoryItemManager,
 } from './UniversalTrash.jsx';
-import { deletionImpact } from './entity-references.js';
-import { storyboardUrl } from './storyboard.js';
 import React, { useState, useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   Plus,
-  LayoutGrid,
   Workflow,
   ChevronRight,
   ChevronLeft,
-  Search,
   Undo2,
   Redo2,
   Download,
   Upload,
-  X,
-  Check,
-  ArrowUp,
-  ArrowDown,
-  Copy,
-  Trash2,
-  Link2,
   FolderOpen,
   BookOpen,
   Users,
@@ -47,10 +36,7 @@ import {
   Image,
   Clapperboard,
   Settings2,
-  HelpCircle,
-  PanelRightClose,
   Bot,
-  Activity,
 } from 'lucide-react';
 const ChapterRoughCut = React.lazy(() => import('./ChapterRoughCut.jsx'));
 const Freestyle = React.lazy(() => import('./Freestyle.jsx'));
@@ -59,7 +45,6 @@ const QuickCreateEntry = React.lazy(() => import('./QuickCreateEntry.jsx'));
 const LegacyQuickChatLink = React.lazy(() => import('./LegacyQuickChatLink.jsx'));
 import OperatorConsole from './P4OperatorConsole.jsx';
 import AdminHome from './AdminHome.jsx';
-import { navigateWorkspace } from './workspace-navigation.js';
 import { CloudProjects, useCloud } from './CloudStudio.jsx';
 import AgentConnect from './AgentConnect.jsx';
 import AgentLink from './AgentLink.jsx';
@@ -70,17 +55,8 @@ import StoryboardConnected from './StoryboardConnected.jsx';
 import { StoryLibraryHome, RecentStoriesDropdown } from './StoryNavigation.jsx';
 import { readAgentLink } from './agent-navigation.js';
 import { readLocalStoryLibrary, archiveLocalStory } from './story-navigation.js';
+import { store, typeLabels } from './store.js';
 import {
-  store,
-  typeLabels,
-  roleLabels,
-  children,
-  ancestors,
-  readiness,
-  validateLink,
-} from './store.js';
-import {
-  getFile,
   putFile,
   uploadFile,
   exportBundle,
@@ -987,7 +963,7 @@ function descendants(p, id) {
   return result;
 }
 function ProjectList({ currentId, onSelect }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { projects, raw, error } = readLocalLibrary();
   return (
     <div className="project-list">
@@ -1023,7 +999,7 @@ function ProjectList({ currentId, onSelect }) {
 }
 
 function AddForm({ project: p, state, initialKind, onDone }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [kind, setKind] = useState(initialKind || 'chapter'),
     [title, setTitle] = useState(''),
     [parent, setParent] = useState(''),
@@ -1217,7 +1193,7 @@ const storyPageFromUrl = (search = window.location.search) =>
     ? 'story'
     : 'library';
 function AppContent() {
-  const { t, locale } = useI18n(),
+  const { t } = useI18n(),
     c = useCloud(),
     account = c.account;
   useEffect(() => installPersistenceGuard(store), []);

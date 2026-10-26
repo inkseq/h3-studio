@@ -112,6 +112,14 @@ button.icon-button.small {
   width: var(--h-sm);
   padding: 0;
 }
+/* Inside chips and slot headers: remove / pick icons. */
+button.icon-button.xsmall {
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border-radius: 6px;
+}
 
 /* Fields: one look for text inputs, selects and text areas (use <Field> from ui/Field.jsx). */
 input,
