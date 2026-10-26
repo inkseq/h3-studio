@@ -667,6 +667,19 @@ class TakeReviewPurgeTests(LedgerCase):
             "verdict": "keep",
         }
         self.repo.put_document(self.scope, "take_review", artifact, review)
+        feedback_scope = Scope(self.scope.tenant_id, self.scope.owner_id, "__feedback")
+        self.repo.put_document(
+            feedback_scope,
+            "product_feedback",
+            "report",
+            {
+                "body": {
+                    "artifact_id": artifact,
+                    "project_id": self.scope.project_id,
+                    "summary": "PRIVATE PRODUCT REPORT",
+                },
+            },
+        )
         self.repo.put_document(
             self.scope,
             "take_review_receipt",
@@ -692,6 +705,12 @@ class TakeReviewPurgeTests(LedgerCase):
             {"content_deleted": True, "marks": [], "verdict": None},
         )
         self.assertEqual(
+            self.repo.get_document(feedback_scope, "product_feedback", "report")[
+                "payload"
+            ],
+            {"content_deleted": True},
+        )
+        self.assertEqual(
             self.repo.get_document(self.scope, "take_review_receipt", "receipt")[
                 "payload"
             ]["response"]["verdict"],
@@ -704,6 +723,18 @@ class TakeReviewPurgeTests(LedgerCase):
 
     def test_project_purge_redacts_even_review_for_retained_shared_artifact(self):
         self.activate()
+        feedback_scope = Scope(self.scope.tenant_id, self.scope.owner_id, "__feedback")
+        self.repo.put_document(
+            feedback_scope,
+            "product_feedback",
+            "report",
+            {
+                "body": {
+                    "project_id": self.scope.project_id,
+                    "summary": "PRIVATE PRODUCT REPORT",
+                },
+            },
+        )
         self.repo.put_document(
             self.scope,
             "take_review",
@@ -730,4 +761,10 @@ class TakeReviewPurgeTests(LedgerCase):
             json.dumps(
                 self.repo.get_document(self.scope, "take_review", "kept-artifact")
             ),
+        )
+        self.assertEqual(
+            self.repo.get_document(feedback_scope, "product_feedback", "report")[
+                "payload"
+            ],
+            {"content_deleted": True},
         )

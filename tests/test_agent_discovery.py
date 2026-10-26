@@ -150,6 +150,49 @@ class AgentDiscoveryTests(unittest.TestCase):
             self.assertEqual(self.client.get(route).json()["take_redo"], public)
         self.assertEqual(self.client.post(path, json=body).status_code, 404)
 
+    def test_feedback_contract_and_authenticated_routes_keep_private_receipts_private(
+        self,
+    ):
+        public = self.client.get("/for-agents/guide.json").json()["feedback"]
+        self.assertEqual(public["path"], "/v1/feedback")
+        self.assertIn("model_limit", public["categories"])
+        self.assertEqual(self.client.get("/v1/feedback").status_code, 401)
+        self.login()
+        for path in ("/v1/guided-schema", "/v1/agent-guide"):
+            self.assertEqual(self.client.get(path).json()["feedback"], public)
+        body = {
+            "category": "documentation",
+            "severity": "low",
+            "summary": "The usage example is unclear",
+            "source": "agent",
+        }
+        self.assertEqual(self.client.post("/v1/feedback", json=body).status_code, 422)
+        receipt = self.client.post(
+            "/v1/feedback", json=body, headers={"Idempotency-Key": "feedback-http"}
+        )
+        self.assertEqual(receipt.status_code, 200, receipt.text)
+        self.assertEqual(receipt.headers["Cache-Control"], "no-store")
+        self.assertEqual(receipt.json()["forwarding"], "disabled")
+        self.assertEqual(
+            self.client.get("/v1/feedback/" + receipt.json()["report_id"]).json(),
+            receipt.json(),
+        )
+        self.assertEqual(
+            self.client.get("/v1/feedback/settings").json()["enabled"], True
+        )
+        private = self.client.get(
+            "/v1/feedback?category=documentation&source=agent"
+        ).json()
+        self.assertEqual(len(private["reports"]), 1)
+        self.client.cookies.clear()
+        self.assertEqual(
+            self.client.get("/v1/feedback/" + receipt.json()["report_id"]).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.get("/for-agents/guide.json").json()["feedback"], public
+        )
+
     def test_take_suggestion_contract_is_shared_by_public_and_authenticated_guides(
         self,
     ):

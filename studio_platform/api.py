@@ -1472,6 +1472,10 @@ def create_app(
     from .take_redo import register_routes as register_take_redo
 
     register_take_redo(app)
+
+    from .product_feedback import register_routes as register_product_feedback
+
+    register_product_feedback(app)
     from .operator_host_routes import register_routes as register_operator_host_routes
 
     register_operator_host_routes(app)
