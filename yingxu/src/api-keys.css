@@ -1,7 +1,7 @@
 .api-key-panel {
   display: grid;
   gap: 14px;
-  border-top: 1px solid #ddd8cd;
+  border-top: 1px solid var(--line-2);
   padding-top: 18px;
 }
 .api-key-panel h3 {
@@ -15,7 +15,7 @@
 }
 .api-key-form {
   background: var(--ink);
-  border: 1px solid #dce2d5;
+  border: 1px solid var(--line-2);
   border-radius: 10px;
   padding: 14px;
 }
@@ -42,7 +42,7 @@
 .api-key-form fieldset {
   display: grid;
   gap: 8px;
-  border: 1px solid #d3daca;
+  border: 1px solid var(--line-2);
   max-height: 210px;
   overflow: auto;
   padding: 12px;
@@ -51,8 +51,8 @@
   padding: 14px;
   display: grid;
   gap: 12px;
-  border: 1px solid #aac183;
-  background: #f0f7e8;
+  border: 1px solid var(--line-2);
+  background: var(--good-soft);
   border-radius: 10px;
 }
 .api-key-created > div {
@@ -74,7 +74,7 @@
   justify-content: space-between;
   gap: 12px;
   padding: 13px;
-  border: 1px solid #ddd;
+  border: 1px solid var(--line-2);
   border-radius: 9px;
 }
 .api-key-list article > div:first-child {
@@ -105,14 +105,14 @@
 .api-key-hint {
   display: flex;
   gap: 8px;
-  color: #66725e;
+  color: var(--muted);
   font-size: 12px;
 }
 .cloud-remote-update {
   flex-basis: 100%;
   padding: 10px;
-  background: #eef4e4;
-  border: 1px solid #c3d3a5;
+  background: var(--good-soft);
+  border: 1px solid var(--line-2);
   border-radius: 8px;
 }
 .cloud-remote-update button {

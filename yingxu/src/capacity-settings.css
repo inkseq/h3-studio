@@ -45,10 +45,10 @@
   background: var(--surface);
 }
 .cap-today.warn {
-  border-left-color: #d9a400;
+  border-left-color: var(--warn);
 }
 .cap-today.bad {
-  border-left-color: #d6453d;
+  border-left-color: var(--bad);
 }
 .cap-today-head {
   display: flex;
@@ -80,17 +80,17 @@
   );
 }
 .cap-today.warn .cap-meter {
-  background: linear-gradient(90deg, #d9a400 calc(var(--used) * 100%), var(--line) 0);
+  background: linear-gradient(90deg, var(--warn) calc(var(--used) * 100%), var(--line) 0);
 }
 .cap-today.bad .cap-meter {
-  background: linear-gradient(90deg, #d6453d calc(var(--used) * 100%), var(--line) 0);
+  background: linear-gradient(90deg, var(--bad) calc(var(--used) * 100%), var(--line) 0);
 }
 .cap-unresolved summary {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-top: 6px;
-  color: #b9770e;
+  color: var(--warn);
   cursor: pointer;
   font-size: 13px;
 }
@@ -110,7 +110,7 @@
   gap: 8px 16px;
   padding: 12px 14px;
   border-radius: var(--r, 10px);
-  background: var(--warn-soft, #fff4d6);
+  background: var(--warn-soft);
   font-size: 13px;
 }
 .cap-banner p {
@@ -134,8 +134,8 @@
   font-size: 13px;
 }
 .cap-error-bar {
-  background: #d6453d1a;
-  color: #b3352e;
+  background: var(--bad-soft);
+  color: var(--bad);
 }
 .cap-notice {
   background: var(--accent-soft);
@@ -207,8 +207,8 @@
   color: var(--ink-2, var(--ink));
 }
 .cap-consequences li.bad {
-  border-left-color: #d6453d;
-  color: #b3352e;
+  border-left-color: var(--bad);
+  color: var(--bad);
   font-weight: 500;
 }
 .cap-consequences svg {
@@ -219,7 +219,7 @@
   margin: 0;
   padding: 8px 12px;
   border-radius: var(--r-sm, 6px);
-  background: var(--warn-soft, #fff4d6);
+  background: var(--warn-soft);
   font-size: 13px;
 }
 .cap-reason {

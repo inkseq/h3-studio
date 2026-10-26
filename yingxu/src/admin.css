@@ -198,7 +198,7 @@
   font-size: 11px;
 }
 .margin-table > div.bad {
-  color: var(--bad, #f07a6a);
+  color: var(--bad);
 }
 @media (max-width: 760px) {
   .margin-table > div {

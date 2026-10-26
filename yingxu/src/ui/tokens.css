@@ -49,6 +49,14 @@
   --white: #fff;
   --black: #000;
   --scrim: rgba(0, 0, 0, 0.6);
+  /* Over video and images: stays dark in every theme. */
+  --media-scrim: rgba(0, 0, 0, 0.6);
+  --media-scrim-strong: rgba(0, 0, 0, 0.8);
+  /* Text on a filled functional colour. Light skins with deep colours set white. */
+  --warn-ink: #1a1205;
+  --good-ink: #062014;
+  --fl-ink: #06142a;
+  --ref-ink: #1a0f2a;
   /* Type scale */
   --fs-2xs: 10px;
   --fs-xs: 11px;

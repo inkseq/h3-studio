@@ -335,7 +335,7 @@
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: #000c;
+  background: var(--media-scrim-strong);
 }
 .sc-compose-row {
   display: flex;
@@ -606,7 +606,7 @@
   overflow-y: auto;
   background: var(--sc-panel);
   border-left: 1px solid var(--sc-line);
-  box-shadow: -12px 0 32px #0008;
+  box-shadow: var(--shadow-lg);
   animation: sc-in 0.18s ease-out;
 }
 @keyframes sc-in {
