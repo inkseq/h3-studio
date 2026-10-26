@@ -229,6 +229,74 @@ class ClientTransactionTests(unittest.TestCase):
         self.assertEqual(same["id"], job["id"])
         self.assertEqual(len(self.workflows()), 1)
 
+    def test_drained_executor_recovers_same_sleeping_film_without_workflow_wait(self):
+        from dbos import DBOS
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from studio_platform.dbos_transport import DurableExecutor
+        from studio_platform.domain_turns import DomainTurns
+        from studio_platform.film_runs import VERSION as FILM_VERSION
+        from studio_platform.film_workflows import register_film_workflows
+        from studio_platform.workflow_schema import dbos_config
+
+        args = ("test", "superdan", "project", "drain-film")
+        finish, called, sleeping = threading.Event(), threading.Event(), threading.Event()
+        original_recv = DBOS.recv_async
+
+        async def observe_recv(*args, **kwargs):
+            sleeping.set()
+            return await original_recv(*args, **kwargs)
+
+        receiver = patch.object(DBOS, "recv_async", side_effect=observe_recv)
+        receiver.start()
+        self.addCleanup(receiver.stop)
+
+        def turn(*_):
+            called.set()
+            return {"terminal": finish.is_set(), "phase": "completed" if finish.is_set() else "authorization_required"}
+
+        service = SimpleNamespace(tenant="test", turn=turn)
+        self.transport.client.register_queue(FILM_VERSION, polling_interval_sec=1)
+
+        def launch():
+            turns = DomainTurns()
+            DBOS(config=dbos_config(self.url, executor_id="inkseq-workflows-staging"))
+            register_film_workflows(
+                DBOS, service, lambda *_: SimpleNamespace(owner="superdan"),
+                domain_turns=turns,
+            )
+            DBOS.launch()
+            executor = DurableExecutor.__new__(DurableExecutor)
+            executor.slots = Mock()
+            executor.domain_turns = turns
+            executor._DBOS = DBOS
+            return executor
+
+        executor = launch()
+        try:
+            with self.repo.transaction() as connection:
+                self.transport.enqueue_film(connection, *args)
+            self.assertTrue(called.wait(10))
+            self.assertTrue(sleeping.wait(10))
+            ident = self.workflows()[0]["workflow_uuid"]
+            started = time.monotonic()
+        finally:
+            executor.close()
+        self.assertLess(time.monotonic() - started, 25)
+        self.assertEqual(self.workflows()[0]["status"], "PENDING")
+        self.assertEqual(self.workflows()[0]["workflow_uuid"], ident)
+        finish.set()
+        executor = launch()
+        try:
+            deadline = time.monotonic() + 25
+            while time.monotonic() < deadline and self.workflows()[0]["status"] != "SUCCESS":
+                time.sleep(.05)
+            self.assertEqual(self.workflows()[0]["status"], "SUCCESS")
+            self.assertEqual(self.workflows()[0]["workflow_uuid"], ident)
+            self.assertEqual(len(self.workflows()), 1)
+        finally:
+            executor.close()
+
     def test_unknown_sdk_send_response_rolls_back_sdk_and_money_together(self):
         client = self.transport.client
         proxy = Mock(wraps=client)

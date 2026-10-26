@@ -21,6 +21,29 @@ from test_platform_repository import LedgerCase
 
 
 class DemandLoopTests(unittest.TestCase):
+    def test_maintenance_wait_is_interrupted_by_the_original_commit_hint(self):
+        stop, notified = threading.Event(), []
+        work = Mock()
+        waits = []
+
+        class Wake:
+            def subscribe(self):
+                pass
+
+            def wait(self, seconds):
+                waits.append(seconds)
+                if len(waits) == 1:
+                    notified.append(True)
+                    return "notified"
+                stop.set()
+
+        run_demand_loop(
+            stop, Wake(), lambda: True, work,
+            active_seconds=lambda: 15 if notified else 60,
+        )
+        self.assertEqual(waits, [60, 15])
+        self.assertEqual(work.call_count, 2)
+
     def test_idle_blocks_until_commit_hint_then_runs_original_demand(self):
         stop = threading.Event()
         state = {"active": False, "clock": 0, "sweeps": 0, "work": 0}

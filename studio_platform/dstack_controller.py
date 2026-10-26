@@ -1402,30 +1402,15 @@ def main(argv=None):
         if settings.generation_queue == "dbos":
             from .dbos_transport import DurableExecutor
             from .api import create_app
-            from .film_workflows import register_film_workflows
-            from .film_runs import VERSION as FILM_VERSION
+            from .film_workflows import setup_controller_film
 
             film_app = create_app(settings, repository=repo, dstack_operator=service)
-            film_service = film_app.state.film_runs
-
-            def film_setup(DBOS):
-                repo.generation_transport.client.register_queue(
-                    FILM_VERSION, polling_interval_sec=10
-                )
-
-                def principal_for(tenant, owner, project_id, run_id):
-                    grant = film_service.execution_context(
-                        tenant, owner, project_id, run_id
-                    )
-                    return film_app.state.auth.workflow_principal(owner, grant)
-
-                register_film_workflows(DBOS, film_service, principal_for)
 
             durable_executor = DurableExecutor(
                 repo,
                 settings,
                 work_dir,
-                film_setup=film_setup,
+                film_setup=lambda DBOS, turns: setup_controller_film(DBOS, turns, repo, film_app),
                 account_services=(
                     film_app.state.account_sessions,
                     film_app.state.account_deletion,
@@ -1465,8 +1450,10 @@ def main(argv=None):
             print(json.dumps(controller.tick(), sort_keys=True), flush=True)
             return 0
         from .demand_wakeup import DemandWakeup, run_demand_loop
+        from .controller_idle import IdleCadence
 
         wakeup = DemandWakeup(repo, stop)
+        cadence = IdleCadence()
         try:
             if threading.current_thread() is threading.main_thread():
                 for signum in (signal.SIGINT, signal.SIGTERM):
@@ -1476,7 +1463,7 @@ def main(argv=None):
                 wakeup,
                 controller.has_demand,
                 controller.tick,
-                active_seconds=15,
+                active_seconds=lambda: cadence.interval(controller),
                 safety=controller.safety_sweep,
                 heartbeat=progress.beat,
                 report=lambda value: print(

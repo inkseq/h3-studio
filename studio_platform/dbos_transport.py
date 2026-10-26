@@ -20,6 +20,7 @@ import threading
 from sqlalchemy import select, text
 
 from .repository import Conflict, Scope, identifier, jobs
+from .domain_turns import DomainTurns
 from .workflow_schema import (
     INKSEQ_WORKFLOW_SCHEMA as SCHEMA,
     WORKFLOW_APPLICATION_NAME as APPLICATION,
@@ -597,7 +598,8 @@ class DurableSlots:
         self.close()
 
 
-def register_generation_workflow(DBOS, slots):
+def register_generation_workflow(DBOS, slots, *, domain_turns=None):
+    domain_turns = domain_turns or DomainTurns()
     operation_limit = asyncio.Semaphore(4)
 
     @DBOS.step(name="inkseq.generation.domain-turn.v1", retries_allowed=False)
@@ -605,7 +607,7 @@ def register_generation_workflow(DBOS, slots):
         # DBOS persists this result. A process failure before that persistence
         # re-enters the ORIGINAL lease/attempt/native-tag reconciliation path.
         async with operation_limit:
-            return await asyncio.to_thread(slots.turn, tenant, owner, project, job_id)
+            return await domain_turns.call(slots.turn, tenant, owner, project, job_id)
 
     @DBOS.workflow(name=WORKFLOW, max_recovery_attempts=None)
     async def generation(tenant, owner, project, job_id):
@@ -628,6 +630,7 @@ class DurableExecutor:
         self.slots = DurableSlots(repo, settings, work_dir)
         self.film_setup = film_setup
         self.account_services = account_services
+        self.domain_turns = DomainTurns()
         self._DBOS = None
 
     def __enter__(self):
@@ -655,16 +658,19 @@ class DurableExecutor:
             self.repo.generation_transport.client.register_queue(
                 QUEUE, polling_interval_sec=POLL_SECONDS
             )
-            register_generation_workflow(DBOS, self.slots)
+            register_generation_workflow(DBOS, self.slots, domain_turns=self.domain_turns)
             from .payments_workflows import register_payment_workflows
 
-            register_payment_workflows(DBOS, self.repo, self.settings)
+            register_payment_workflows(
+                DBOS, self.repo, self.settings, domain_turns=self.domain_turns
+            )
             from .account_workflows import register_account_workflows
 
             register_account_workflows(
                 DBOS,
                 self.repo,
                 self.settings,
+                domain_turns=self.domain_turns,
                 **(
                     {
                         "sessions": self.account_services[0],
@@ -675,10 +681,11 @@ class DurableExecutor:
                 ),
             )
             if self.film_setup is not None:
-                self.film_setup(DBOS)
+                self.film_setup(DBOS, self.domain_turns)
             DBOS.launch()
             self._DBOS = DBOS
         except BaseException:
+            self.domain_turns.drain()
             DBOS.destroy(destroy_registry=True)
             self.slots.close()
             raise
@@ -717,12 +724,14 @@ class DurableExecutor:
 
     def close(self):
         self.slots._closing = True
+        self.domain_turns.drain()
         if self._DBOS is not None:
-            # SDK waits for whole workflows, capped within the existing210s
-            # controller grace. A durable wait may outlast this timeout; the
-            # original lease/native tag/CPU process fence then owns recovery.
+            # Finite domain calls have drained; durable sleeps need not finish.
+            # SDK cancellation leaves them recoverable, not business-cancelled.
+            # Keep slot/native fences until the executor has stopped. Existing
+            # container grace remains the fallback for a stuck external I/O.
             self._DBOS.destroy(
-                destroy_registry=True, workflow_completion_timeout_sec=180
+                destroy_registry=True, workflow_completion_timeout_sec=0
             )
             self._DBOS = None
         self.slots.close()
