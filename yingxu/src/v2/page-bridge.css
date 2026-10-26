@@ -490,12 +490,10 @@ dialog.modal.wide {
   top: 8px;
   z-index: 2;
 }
+/* On the cover image: the shared small icon button on a dark scrim. */
 .story-wrap > .item-menu > button {
-  width: 32px;
-  height: 28px;
-  justify-content: center;
   background: var(--media-scrim);
-  padding: 3px;
+  color: var(--white);
 }
 .home-foot {
   display: flex;
@@ -725,7 +723,50 @@ dialog.modal.wide {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Fixed columns, so hiding the picture (narrow sidebar) never shifts the name into the
+   picture's 46 px slot or stretches the add button. */
+.sb-workspace .library .pcard {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.sb-workspace .library .pcard > :is(.athumb, .profile-initial) {
+  grid-column: 1;
+}
+.sb-workspace .library .pcard > .pcard-body {
+  grid-column: 2;
+}
+.sb-workspace .library .pcard > .pcard-open {
+  grid-column: 3;
+}
+/* The card's "…" menu floats over its top-right corner on hover or focus, so the name and
+   details keep the full width at any sidebar size; touch screens always show it. */
+.sb-workspace .library .pcard > .item-menu {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: opacity var(--ease);
+}
+.sb-workspace .library .pcard:is(:hover, :focus-within) > .item-menu,
+.sb-workspace .library .pcard > .item-menu:has([aria-expanded='true']) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .sb-workspace .library .pcard > .item-menu {
+    opacity: 1;
+  }
+  .sb-workspace .library .pcard-body {
+    padding-right: var(--h-sm);
+  }
+}
 @container sb-library (max-width: 240px) {
+  /* Narrow: the name may take two lines instead of cutting to a few letters. */
+  .sb-workspace .library .pcard-body > b {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+  }
   .sb-workspace .library .lib-tabs {
     grid-template-columns: minmax(0, 1fr);
   }

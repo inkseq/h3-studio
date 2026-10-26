@@ -1581,158 +1581,7 @@ small {
   box-shadow: var(--shadow-lg);
 }
 
-/* ---------- overlays: profile, picker, dialogs ---------- */
-.profile-overlay {
-  position: absolute;
-  top: 0;
-  bottom: 22px;
-  left: calc(var(--libw, 260px) + 8px);
-  right: 0;
-  z-index: 40;
-  background: rgba(5, 6, 5, 0.6);
-  backdrop-filter: blur(3px);
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 24px;
-  overflow: auto;
-}
-.profile {
-  width: min(780px, 100%);
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
-  box-shadow: var(--shadow-lg);
-  padding: 18px 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  animation: pop 0.16s ease-out;
-}
-.vtabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.vtabs button {
-  border-radius: 999px;
-}
-.vtabs button.on {
-  background: var(--ink);
-  color: var(--bg);
-  border-color: var(--ink);
-}
-.vtabs button em {
-  font-style: normal;
-  font-size: 10px;
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-radius: 6px;
-  padding: 0 5px;
-}
-.vtabs button small {
-  opacity: 0.6;
-}
-.variant {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: var(--surface-2);
-}
-.vimages {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
-  gap: 10px;
-  border-radius: var(--r);
-  padding: 2px;
-}
-.vimg {
-  position: relative;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 5px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: var(--surface);
-}
-.vimg img {
-  width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
-  border-radius: 8px;
-}
-.vimg em {
-  font-style: normal;
-  font-size: 11px;
-  color: var(--accent);
-}
-.vimg .x {
-  position: absolute;
-  top: 9px;
-  right: 9px;
-  background: rgba(0, 0, 0, 0.6);
-}
-.vimg small {
-  font-size: 10px;
-  color: var(--muted);
-}
-.vimg.add {
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  color: var(--muted);
-  border-style: dashed;
-  min-height: 140px;
-  font-size: 12px;
-  cursor: pointer;
-  background: transparent;
-}
-.vimg.add:hover {
-  color: var(--accent);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-.voices {
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: var(--surface-2);
-}
-.voice {
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 8px 10px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  background: var(--surface);
-}
-.voice.main {
-  border-color: rgba(99, 214, 158, 0.45);
-}
-.voice input[type='range'] {
-  flex: 1;
-  min-width: 80px;
-}
-.note-in {
-  font-size: 12px;
-  padding: 4px 8px;
-}
-.drop-line {
-  font-size: 11px;
-  color: var(--muted);
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r-sm);
-  padding: 7px;
-  text-align: center;
-}
+/* ---------- overlays: picker, dialogs ---------- */
 .play {
   padding: 2px 9px;
   font-size: 11px;
@@ -1743,16 +1592,6 @@ small {
   background: var(--accent);
   color: var(--accent-ink);
   border-color: transparent;
-}
-.usedin {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-  font-size: 12px;
-}
-.usedin small {
-  flex-basis: 100%;
 }
 .picker {
   position: fixed;
@@ -5803,12 +5642,6 @@ h4,
     width: auto;
     margin: 0;
   }
-  .profile-overlay .profile {
-    width: 100vw;
-    max-width: none;
-    height: 100%;
-    border-radius: 0;
-  }
 }
 
 /* phone: icon+text buttons show only the icon (hold for the label); primary actions and menu items keep their text */
@@ -5843,7 +5676,6 @@ h4,
           .choose,
           .modal-card,
           .purge-confirm,
-          .profile .vtabs,
           .story-menu,
           .chapter-menu
         )
