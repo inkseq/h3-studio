@@ -423,6 +423,7 @@ class MonitorTests(unittest.TestCase):
                     return_value={key: None for key in monitor.SERVICES},
                 ),
                 patch.object(monitor, 'retention_service_failed', return_value=None),
+                patch.object(monitor, 'backup_observation', return_value={}),
             ):
                 _, host, cpu = monitor.observe({'total': 500, 'idle': 400}, proc=proc)
                 self.assertAlmostEqual(host['cpu_percent'], 20)
@@ -598,6 +599,29 @@ class MonitorTests(unittest.TestCase):
         )
         self.tick(1240, retention_service_failed=False)
         self.assertEqual(self.sns.publish.call_count, 2)
+
+    def test_backup_failure_and_missing_copy_use_existing_sns_outbox(self):
+        self.tick(1000, business_backup_failed=True, business_backup_missing=True)
+        self.assertEqual(self.sns.publish.call_count, 2)
+        self.assertEqual(
+            {
+                json.loads(call.kwargs['Message'])['code']
+                for call in self.sns.publish.call_args_list
+            },
+            {'business_backup_failed', 'business_backup_missing'},
+        )
+        self.state = json.loads(monitor.encode(self.state))
+        self.tick(1060, business_backup_failed=True, business_backup_missing=True)
+        self.tick(1120, business_backup_failed=None, business_backup_missing=None)
+        self.assertEqual(self.sns.publish.call_count, 2)
+        self.tick(1180, business_backup_failed=False, business_backup_missing=False)
+        self.assertEqual(self.sns.publish.call_count, 4)
+        self.assertTrue(
+            all(
+                json.loads(call.kwargs['Message'])['transition'] == 'resolved'
+                for call in self.sns.publish.call_args_list[2:]
+            )
+        )
 
     def test_disk_80_90_use_actual_filesystem_sample_metric_and_sns_dedup(self):
         statvfs = Mock(

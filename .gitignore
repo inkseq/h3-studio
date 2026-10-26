@@ -849,3 +849,5 @@ inventory.json
 !tests/test_creator_controls.py
 !tools/audit_creator_controls.py
 !docs/CREATOR-CONTROLS.md
+!tests/test_backup_observation.py
+!docs/BACKUP-RECOVERY-655.md
