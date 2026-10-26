@@ -14,6 +14,7 @@ import './landing.css';
 
 import { LandingStage, LandingChatDemo, LandingFlow, LandingBeforeAfter } from './LandingParts.jsx';
 
+const RETRY_KEY = 'inkseq.signinRetryAt';
 function retryAllowed() {
   try {
     return Date.now() - Number(sessionStorage.getItem(RETRY_KEY) || 0) > 120000;
