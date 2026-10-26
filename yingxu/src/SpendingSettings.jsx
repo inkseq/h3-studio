@@ -1,5 +1,6 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import { Button } from './ui/Button.jsx';
+import { SideNav, SideNavItem } from './ui/SideNav.jsx';
 import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
@@ -242,7 +243,7 @@ export default function SpendingSettings({ account }) {
     <div className="home ops-adapter">
       <StudioHeader account={account} active="settings" />
       <main className="home-main settings-page">
-        <aside className="snav" aria-label={t('settings.title')}>
+        <SideNav as="aside" className="snav" aria-label={t('settings.title')}>
           {[
             ['account', 'settings.account', UserRound],
             ['defaults', 'settings.defaults', SlidersHorizontal],
@@ -254,17 +255,17 @@ export default function SpendingSettings({ account }) {
               ? [['budget', creditMode ? 'settings.limits' : 'settings.budget', Wallet]]
               : []),
           ].map(([id, label, Icon]) => (
-            <Button
+            <SideNavItem
               key={id}
-              className={section === id ? 'on' : ''}
+              active={section === id}
+              icon={Icon}
               aria-current={section === id ? 'page' : undefined}
               onClick={() => openSection(id)}
             >
-              <Icon size={16} />
               {t(label)}
-            </Button>
+            </SideNavItem>
           ))}
-        </aside>
+        </SideNav>
         <section className="spanel">
           <div className="row tight">
             <h2>

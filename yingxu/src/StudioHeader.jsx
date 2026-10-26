@@ -1,5 +1,6 @@
 import { setPreviewAsUser } from './preview-as-user.js';
 import { Button } from './ui/Button.jsx';
+import { AppNav } from './ui/AppNav.jsx';
 import React, { useEffect, useState } from 'react';
 import {
   Cpu,
@@ -118,19 +119,12 @@ export default function StudioHeader({
           <InkMark size={26} variant={dailyInkMark()} />
           <span>{t('app.name')}</span>
         </a>
-        <nav aria-label={t('nav.mobile')}>
-          {links.map(([id, href, label, Icon]) => (
-            <Button
-              key={id}
-              className={active === id ? 'on' : ''}
-              aria-current={active === id ? 'page' : undefined}
-              onClick={() => navigateApp(href)}
-            >
-              <Icon className="nav-ico" size={20} aria-hidden="true" />
-              <span>{t(label)}</span>
-            </Button>
-          ))}
-        </nav>
+        <AppNav
+          label={t('nav.mobile')}
+          items={links.map(([id, href, label, icon]) => ({ id, href, label: t(label), icon }))}
+          active={active}
+          onNavigate={navigateApp}
+        />
         <div className="spacer" />
         <CreditsChip account={account} />
         <ThemeToggle />

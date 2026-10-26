@@ -25,6 +25,7 @@ import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { readAccessFor } from './account-access.js';
 import { Badge, EmptyState, Note } from './ui/Note.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
+import { SideNav, SideNavItem } from './ui/SideNav.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { FloatingMessage } from './floating-notice.js';
@@ -631,20 +632,20 @@ export default function AdminHome({ account }) {
         </main>
       ) : (
         <div className="ah-shell">
-          <nav className="ah-nav" aria-label={t('adminHome.title')}>
+          <SideNav className="ah-nav" aria-label={t('adminHome.title')}>
             <h1>{t('adminHome.title')}</h1>
             {SECTIONS.map(([id, label, Icon]) => (
-              <Button
+              <SideNavItem
                 key={id}
-                className={section === id ? 'on' : ''}
+                active={section === id}
+                icon={Icon}
                 aria-current={section === id ? 'page' : undefined}
                 onClick={() => go(id)}
               >
-                <Icon size={16} aria-hidden="true" />
                 {t(label)}
-              </Button>
+              </SideNavItem>
             ))}
-          </nav>
+          </SideNav>
           <main className="ah-main">
             <header className="ah-head">
               <div>

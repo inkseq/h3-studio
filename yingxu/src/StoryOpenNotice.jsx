@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
 import { Button } from './ui/Button.jsx';
+import { Dialog } from './ui/Dialog.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { createPortal } from 'react-dom';
 import { usePageActive } from './AppRouteCache.jsx';
@@ -70,8 +71,6 @@ export default function StoryOpenNotice({
     cloud.dismissProjectOpen();
     onClose?.();
   };
-  // A version choice or an open error needs an answer: show it as a centred dialog
-  // instead of a banner at the top of the page that is easy to miss.
   const choice = matching && (c.draftOffer || c.legacyOffer?.record || opening?.status === 'error');
   // Waiting for an opening only holds the dialog while it loads; a failed open must
   // always have a way out (owner, 2026-10-24: a link to another account's story trapped him).
@@ -80,12 +79,6 @@ export default function StoryOpenNotice({
   // Server rendering and tests have no document: keep the inline notice there.
   const portal = typeof document !== 'undefined';
   const ownsDialog = useDialogOwner(portal && pageActive && !!choice) || !portal;
-  useEffect(() => {
-    if (!choice || !ownsDialog || holding) return undefined;
-    const onKey = (event) => event.key === 'Escape' && close();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
   if (!matching && !waiting) return null;
   if (choice && !ownsDialog) return null;
   const floating = (label) => {
@@ -110,30 +103,13 @@ export default function StoryOpenNotice({
   // nothing where the page already shows its own opening indicator.
   if (!choice && (!opening || opening.status === 'loading'))
     return floating(t('storyOpen.loading'));
-  const notice = (
-    <section
-      className={'story-open-notice' + (choice && portal ? ' story-open-dialog' : '')}
-      role={choice && portal ? 'dialog' : undefined}
-      aria-modal={choice && portal ? 'true' : undefined}
-      onClick={choice && portal ? (event) => event.stopPropagation() : undefined}
-      aria-label={
-        legacy
-          ? t('storyOpen.legacyTitle')
-          : offer
-            ? t('storyOpen.draftTitle')
-            : t('storyOpen.loading')
-      }
-    >
-      <div className="story-open-heading">
-        <h2>
-          {legacy
-            ? storyTitle(legacy.project, t('legacy.visible24'))
-            : offer
-              ? storyTitle(offer.record.project, t('legacy.visible24'))
-              : t(opening?.status === 'error' ? 'storyOpen.errorHeading' : 'storyOpen.loading')}
-        </h2>
-        {!waiting && <Button onClick={close}>{t('storyOpen.close')}</Button>}
-      </div>
+  const heading = legacy
+    ? storyTitle(legacy.project, t('legacy.visible24'))
+    : offer
+      ? storyTitle(offer.record.project, t('legacy.visible24'))
+      : t(opening?.status === 'error' ? 'storyOpen.errorHeading' : 'storyOpen.loading');
+  const body = (
+    <>
       {legacy ? (
         <>
           <b>{t('storyOpen.legacyTitle')}</b>
@@ -203,16 +179,33 @@ export default function StoryOpenNotice({
       ) : (
         <p role="status">{t('storyOpen.loading')}</p>
       )}
+    </>
+  );
+  // A version choice or an open error needs an answer: a centred dialog, not a banner.
+  if (choice && portal)
+    return (
+      <Dialog title={heading} onClose={close} busy={holding} portal className="story-open-dialog">
+        {body}
+      </Dialog>
+    );
+  return (
+    <section
+      className="story-open-notice"
+      aria-label={
+        legacy
+          ? t('storyOpen.legacyTitle')
+          : offer
+            ? t('storyOpen.draftTitle')
+            : t('storyOpen.loading')
+      }
+    >
+      <div className="story-open-heading">
+        <h2>{heading}</h2>
+        {!waiting && <Button onClick={close}>{t('storyOpen.close')}</Button>}
+      </div>
+      {body}
     </section>
   );
-  return choice && portal
-    ? createPortal(
-        <div className="story-open-overlay" onClick={holding ? undefined : close}>
-          {notice}
-        </div>,
-        document.body,
-      )
-    : notice;
 }
 
 export function PreservedStoryDrafts({ account, projectId }) {
