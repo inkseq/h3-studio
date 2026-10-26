@@ -409,9 +409,17 @@ class StoryboardVersionTests(unittest.TestCase):
         summary_path = '/v1/projects/story-one/shots/shot-one/take-reviews'
         summaries = self.client.get(summary_path)
         self.assertEqual(summaries.status_code, 200, summaries.text)
-        self.assertIn({'artifact_id': artifact, 'revision': 1, 'verdict': 'keep',
-                       'mark_count': 0, 'actor_kind': 'human',
-                       'updated_at': result.json()['updated_at']}, summaries.json())
+        self.assertIn(
+            {
+                'artifact_id': artifact,
+                'revision': 1,
+                'verdict': 'keep',
+                'mark_count': 0,
+                'actor_kind': 'human',
+                'updated_at': result.json()['updated_at'],
+            },
+            summaries.json(),
+        )
         self.assertEqual(
             self.client.get('/v1/guided-schema').json()['take_reviews']['path'],
             self.client.get('/v1/agent-guide').json()['take_reviews']['path'],
