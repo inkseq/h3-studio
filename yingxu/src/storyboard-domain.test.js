@@ -626,3 +626,34 @@ test('an unrelated completed shot or profile never invalidates this shots frozen
   });
   assert.equal(await digest(shotSnapshot(p, 'shot')), before);
 });
+
+test('creator shape, keep-sound and another-version patches touch only their controls', () => {
+  const p = fixture(),
+    shot = shotOf(p),
+    cap = capabilities();
+  shot.data.h3 = { controls: { duration: 5, resolution: '480P' } };
+  assert.equal(view(p, cap).shots[0].aspect, '16:9');
+  assert.equal(view(p, cap).shots[0].keepAudio, true);
+  patchStoryboardShot(p, 'shot', { aspect: '9:16', keepAudio: false });
+  assert.deepEqual(shot.data.h3.controls, {
+    duration: 5,
+    resolution: '480P',
+    aspect_ratio: '9:16',
+    generate_audio: false,
+  });
+  assert.equal(view(p, cap).shots[0].aspect, '9:16');
+  assert.equal(view(p, cap).shots[0].keepAudio, false);
+  patchStoryboardShot(p, 'shot', { keepAudio: true });
+  assert.equal('generate_audio' in shot.data.h3.controls, false);
+  // A new version only changes a locked seed; an unlocked seed is random anyway.
+  patchStoryboardShot(p, 'shot', { newSeed: true });
+  assert.equal('seed' in shot.data.h3.controls, false);
+  shot.data.h3.controls.seed = '7';
+  patchStoryboardShot(p, 'shot', { newSeed: true });
+  assert.match(shot.data.h3.controls.seed, /^\d+$/);
+  assert.notEqual(shot.data.h3.controls.seed, '7');
+  assert.equal(
+    applyStoryboardAction(p, { type: 'update', id: 'shot', patch: { aspect: '4:3' } }),
+    false,
+  );
+});

@@ -5,18 +5,25 @@ import React, { useRef, useState } from 'react';
 import * as Primitive from '@radix-ui/react-tooltip';
 import './menu.css';
 
-export function Tooltip({ content, side = 'top', children }) {
+// With `tap`, a tap or click also toggles it, so help icons work on phones (no hover there).
+export function Tooltip({ content, side = 'top', tap = false, children }) {
   const triggerRef = useRef(null),
-    [container, setContainer] = useState(undefined);
+    [container, setContainer] = useState(undefined),
+    [open, setOpen] = useState(false);
   if (!content) return children;
+  const change = (next) => {
+    if (next) setContainer(triggerRef.current?.closest('dialog') || undefined);
+    setOpen(next);
+  };
   return (
     <Primitive.Provider delayDuration={150}>
-      <Primitive.Root
-        onOpenChange={(open) => {
-          if (open) setContainer(triggerRef.current?.closest('dialog') || undefined);
-        }}
-      >
-        <Primitive.Trigger ref={triggerRef} asChild>
+      <Primitive.Root open={open} onOpenChange={change}>
+        <Primitive.Trigger
+          ref={triggerRef}
+          asChild
+          onClick={tap ? () => change(!open) : undefined}
+          onPointerDown={tap ? (event) => event.preventDefault() : undefined}
+        >
           {children}
         </Primitive.Trigger>
         <Primitive.Portal container={container}>

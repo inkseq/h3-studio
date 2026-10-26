@@ -826,15 +826,6 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.item-menu > button {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-  justify-content: center;
-  border-radius: var(--r-sm);
-}
 .item-menu-popover button {
   height: 32px;
   min-height: 32px;

@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { FloatingMessage } from './floating-notice.js';
 import { ArrowRight } from 'lucide-react';
 import InkMark from './InkMark.jsx';
-import { dailyInkMark } from './ink-mark-daily.js';
 import { PublicFooter } from './PublicPages.jsx';
 import { Login } from './LoginDialog.jsx';
 import { navigateApp } from './app-navigation.js';
@@ -12,7 +11,7 @@ import { useCloud } from './CloudStudio.jsx';
 import { hostedSignInEnabled, hostedSignInUrl } from './account-access.js';
 import './landing.css';
 
-import { LandingStage, LandingChatDemo, LandingFlow, LandingBeforeAfter } from './LandingParts.jsx';
+import { LandingStage, LandingChatDemo, LandingFlow } from './LandingParts.jsx';
 
 const RETRY_KEY = 'inkseq.signinRetryAt';
 function retryAllowed() {
@@ -74,7 +73,7 @@ export default function Landing() {
     <div className="landing">
       <header className="landing-bar">
         <a className="logo" href="/">
-          <InkMark size={26} variant={dailyInkMark()} />
+          <InkMark size={26} />
           <span>{t('app.name')}</span>
         </a>
         <div className="spacer" />
@@ -159,13 +158,10 @@ export default function Landing() {
           </header>
           <LandingFlow />
         </section>
-        <section className="lp-section">
-          <LandingBeforeAfter />
-        </section>
         <section className="lp-section lp-agents">
           <p>{t('landing.v2.agents')}</p>
           <ul aria-label={t('landing.v2.agentsLabel')}>
-            {['landing.v2.agentBuiltIn', 'Claude', 'Codex', 'ChatGPT', 'Telegram'].map((name) => (
+            {['landing.v2.agentBuiltIn', 'Claude', 'ChatGPT', 'Telegram'].map((name) => (
               <li key={name}>{name.startsWith('landing.') ? t(name) : name}</li>
             ))}
           </ul>

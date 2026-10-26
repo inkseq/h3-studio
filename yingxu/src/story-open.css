@@ -114,12 +114,6 @@
   flex: 0 0 auto;
   display: inline-flex;
 }
-.cloud-project-list > div > .item-menu > button {
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  padding: 4px;
-}
 .cloud-project-list b {
   overflow-wrap: anywhere;
 }
