@@ -3,7 +3,6 @@ import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
 import { FloatingMessage } from './floating-notice.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
-import SettingsGenerationDefaults from './SettingsGenerationDefaults.jsx';
 import TakePreferencesSettings from './TakePreferencesSettings.jsx';
 import SpendingBreakdown from './SpendingBreakdown.jsx';
 import { admissionExposure } from './spending-breakdown.js';
@@ -369,11 +368,8 @@ export default function SpendingSettings({ account }) {
             )}
           </div>
           <div className="ops-tab-panel" hidden={section !== 'defaults'}>
-            <SettingsGenerationDefaults
-              account={account}
-              api={api}
-              active={pageActive && section === 'defaults'}
-            />
+            {/* Model parameters are not a creator setting: the quality tier picks them (owner,
+                2026-10-26; TaoMate fixes steps/sampler and refuses other values). */}
             <TakePreferencesSettings
               api={api}
               account={account}
