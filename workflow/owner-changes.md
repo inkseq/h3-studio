@@ -549,3 +549,58 @@ OCR text in public evidence. An unavailable/failed check is explicit, not a clea
 bill of health. Detection never re-rents, re-generates, changes a seed, or changes
 charging. Optional Gemini verification remains OFF. Claude owns warning UI,
 staging acceptance, production promotion and the TaoMate production switch.
+
+## CR-20261026-67 — human-agent review loop and privacy-safe improvement reports
+
+Owner direction relayed in the single plan:
+[#580/6408772792](https://github.com/inkseq/h3-studio/issues/580#issuecomment-6408772792),
+[#580/6408786752](https://github.com/inkseq/h3-studio/issues/580#issuecomment-6408786752),
+and the superseding feedback detail
+[#580/6408801323](https://github.com/inkseq/h3-studio/issues/580#issuecomment-6408801323).
+
+Codex's next bounded backend slices are #290 review-loop metrics, versioned
+take marks, suggested pre-generation risk checks and post-generation VLM marks,
+then redo from accepted marks. Record explicit review outcomes; selected/starred
+takes and partial cost records must not masquerade as usability or full cost.
+Reuse existing stores and account/project scopes. Suggestions never automatically
+apply edits, re-roll or spend. Claude owns the review UI, acceptance and promotion.
+
+Improvement reporting is a later thin API slice using existing authorization and
+Sentry feedback, with account/connection rate limits and idempotency. The latest
+category set is tool_error, missing_capability, confusing_output, documentation,
+other and model_limit. Prompts/media/credentials are excluded by default; optional
+context requires the owner's setting. Reports are not automatically posted to
+public GitHub. Take marks remain scoped product data. PostHog covers UI usage;
+no additional analytics vendor or infrastructure is authorized.
+
+This plan does not enable charging or Checkout, authorize new credentials, enlarge
+GPU budgets, or bypass production gates. The #290 source audit and proposed metric
+contract are in `docs/REVIEW-LOOP-TELEMETRY.md`; they are not implementation or
+deployment receipts.
+
+Owner confirmation in this session and Claude's
+[#625/6409187825](https://github.com/inkseq/h3-studio/pull/625#issuecomment-6409187825)
+approve the metric definitions and existing-store Small approach. Add a separately
+named behavioural first-take-shipped rate; never merge it with explicit usability.
+Whole-take verdicts are explicit keep/redo/null with revision, CAS and actor kind;
+picks, stars and range-change marks do not set them. v1 reads one owner at a time;
+all-owners aggregate is a later, content-free view. Frontend remains Claude's lane.
+
+## CR-20261026-69 — creator model controls belong to the TaoMate profile
+
+Owner, 2026-10-26, backend follow-up to inkseq-design#266, tracked in #649:
+creator requests retain quality tier, mode, duration, seed and copies; stored
+shot/story/account internal controls must not override TaoMate v7 defaults or
+cause stale steps=50 to fail new compilation. Filter new creator inputs before
+compiling; TaoMate remains five steps. Explicitly permitted human-admin internal
+API overrides continue to use strict profile validation. Preserve accepted
+requests and historical receipts. Report staging/production incompatibility
+counts read-only and propose cleanup separately; no production data write is
+authorized here. Tier2 independent review and usual release gates apply.
+Charging and Checkout remain OFF. CR68 is reserved by the separate maintainability
+ratchet PR #644; this change does not replace that pending decision.
+
+Review clarification #650/6415940764: existing `aspect_ratio` and
+`generate_audio` are creator output choices, not model-tuning controls. Preserve
+them with their existing enum/bool validation so portrait or silent output does
+not silently revert when hidden tuning overrides are filtered.

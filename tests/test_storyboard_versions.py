@@ -385,6 +385,49 @@ class StoryboardVersionTests(unittest.TestCase):
             )
         return made, project, receipt
 
+    def test_take_review_uses_verified_migration_alias_and_original_receipt(self):
+        made, _, _ = self.migration_versions_fixture()
+        repo = self.app.state.repository
+        job, artifact = made[1]
+        with repo.transaction() as conn:
+            attempt = conn.execute(
+                select(artifacts.c.attempt_id).where(artifacts.c.id == artifact)
+            ).scalar_one()
+            conn.execute(
+                update(jobs)
+                .where(jobs.c.id == job)
+                .values(current_attempt_id=attempt, result={"artifact_ids": [artifact]})
+            )
+        path = f'/v1/projects/story-one/shots/shot-one/takes/{artifact}/review'
+        result = self.client.patch(
+            path,
+            json={"expected_revision": 0, "verdict": "keep"},
+            headers={"Idempotency-Key": "alias-review"},
+        )
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(self.client.get(path).json()['verdict'], 'keep')
+        summary_path = '/v1/projects/story-one/shots/shot-one/take-reviews'
+        summaries = self.client.get(summary_path)
+        self.assertEqual(summaries.status_code, 200, summaries.text)
+        self.assertIn(
+            {
+                'artifact_id': artifact,
+                'revision': 1,
+                'verdict': 'keep',
+                'mark_count': 0,
+                'actor_kind': 'human',
+                'updated_at': result.json()['updated_at'],
+            },
+            summaries.json(),
+        )
+        self.assertEqual(
+            self.client.get('/v1/guided-schema').json()['take_reviews']['path'],
+            self.client.get('/v1/agent-guide').json()['take_reviews']['path'],
+        )
+        self.login('supervan')
+        self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.client.get(summary_path).status_code, 404)
+
     def test_migration_alias_versions_select_restore_and_star_preserve_original_jobs(
         self,
     ):
@@ -1062,6 +1105,28 @@ class StoryboardVersionTests(unittest.TestCase):
                 'plan'
             ]
             self.assertIn('"resolution": "' + resolution + '"', json.dumps(plan))
+
+    def test_quality_tier_sets_resolution_on_a_shot_without_storyboard(self):
+        self.prepare()
+        for operation, resolution in (('final', '768P'), ('draft', '480P')):
+            self.edit(
+                [
+                    {
+                        'op': 'storyboard.bulk',
+                        'shot_ids': ['shot-one'],
+                        'operation': operation,
+                    }
+                ],
+                version=self.current()['version'],
+            ).raise_for_status()
+            data = next(
+                e
+                for e in self.current()['project']['entities']
+                if e['id'] == 'shot-one'
+            )['data']
+            self.assertNotIn('storyboard', data)
+            self.assertEqual(data['qualityIntent'], operation)
+            self.assertEqual(data['h3']['controls']['resolution'], resolution)
 
     def test_preferences_and_preflight_are_owner_scoped(self):
         self.prepare()

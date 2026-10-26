@@ -21,14 +21,17 @@ import threading
 from sqlalchemy import or_, select
 
 from .control import WorkerControl, worker_spec_payload
-from .dstack_capacity import idle_action, _owns, _terminal_no_allocation_shape
+from .dstack_capacity import (
+    idle_action,
+    assert_run_owned,
+    terminal_no_allocation_shape,
+    request_from_document,
+)
+from .capacity_policy import cold_unadmitted_runtime, window_open
 from .demand_wakeup import IDLE_SAFETY_SECONDS
 from .dstack_preparation import download_timebox_due
 from .dstack_operator import (
     BACKEND_MARKER,
-    _request,
-    _cold_unadmitted_runtime,
-    _window_open,
 )
 from .operator_capacity import (
     advance_command_revision,
@@ -44,7 +47,7 @@ from .repository import (
     request_hash,
     scaler_actions,
 )
-from .worker import _slot_lock
+from .slot_lock import slot_lock
 from .telemetry import NullTelemetry, configured_telemetry
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
@@ -55,10 +58,10 @@ def _terminal_review_candidate(run, binding, project):
     try:
         from .dstack_allocation_proof import ATTEMPT_FIELDS, PREFIX, _unique_object
 
-        _owns(run, binding, project)
+        assert_run_owned(run, binding, project)
         if (
             run.get("id") != binding.get("run_id")
-            or not _terminal_no_allocation_shape(run, binding)
+            or not terminal_no_allocation_shape(run, binding)
             or run["jobs"][0].get("job_connection_info") is not None
         ):
             return False
@@ -662,7 +665,7 @@ class DstackController:
                                 "observation_fresh_seconds"
                             ],
                         )
-                        or not _cold_unadmitted_runtime(
+                        or not cold_unadmitted_runtime(
                             binding,
                             workers,
                             intent["provider_instance_id"],
@@ -732,6 +735,24 @@ class DstackController:
             if reviewed_instance_fenced(connection, intent, current):
                 return {"node_id": intent_id, "state": "stopped"}
         binding = self.capacity.store.load(intent_id)
+        recovered = self._reclaim_fenced_node(current, intent)
+        if recovered is not None:
+            return recovered
+        node, funded, terminal = self._fund_node_window(node, binding)
+        if terminal is not None:
+            return terminal
+        if not binding.get("apply_started"):
+            return self._start_unapplied_node(node)
+        if binding.get("stop_started"):
+            # Exact read + bounded journaled retry belongs to capacity.stop.
+            # stop_started alone cannot prove that its HTTP request arrived.
+            observation = self.capacity.stop(intent_id)
+            return {"node_id": intent_id, "state": observation["state"]}
+        return self._reconcile_observed_node(node, funded)
+
+    def _reclaim_fenced_node(self, current, intent):
+        """Commit/recheck the existing attempt fence before the original stop."""
+        intent_id = current["intent_id"]
         from .capacity_watchdog import fenced_node_stop, reclaim_node, report_reclaims
 
         recovery = reclaim_node(self.service, current, intent)
@@ -778,6 +799,11 @@ class DstackController:
                     "state": result["state"],
                     "code": recovery["reason"],
                 }
+        return None
+
+    def _fund_node_window(self, node, binding):
+        """Retain the original funding transaction before any native activity."""
+        intent_id = node["intent_id"]
         funded = True
         if (
             node["payload"].get("lifecycle", {}).get("version") == 2
@@ -804,7 +830,11 @@ class DstackController:
                 # refusal below before native activity can occur.
                 terminal = self.capacity.observe_terminal(intent_id)
                 if terminal is not None:
-                    return {"node_id": intent_id, "state": terminal["state"]}
+                    return (
+                        node,
+                        funded,
+                        {"node_id": intent_id, "state": terminal["state"]},
+                    )
             try:
                 # Funding precedes native bootstrap as well as admission. Time
                 # spent downloading/holding/uncertain still consumes runway.
@@ -854,55 +884,54 @@ class DstackController:
                     .mappings()
                     .one()
                 )
-        if not binding.get("apply_started"):
-            with self.repo.engine.connect() as connection:
-                intent = (
-                    connection.execute(
-                        select(instance_intents).where(
-                            instance_intents.c.id == intent_id
-                        )
-                    )
-                    .mappings()
-                    .one()
+        return node, funded, None
+
+    def _start_unapplied_node(self, node):
+        """Only both original journals may authorize the existing first apply."""
+        intent_id = node["intent_id"]
+        with self.repo.engine.connect() as connection:
+            intent = (
+                connection.execute(
+                    select(instance_intents).where(instance_intents.c.id == intent_id)
                 )
-                action = (
-                    connection.execute(
-                        select(scaler_actions).where(
-                            scaler_actions.c.intent_id == intent_id
-                        )
-                    )
-                    .mappings()
-                    .one()
-                )
-            # BOTH original journals must prove that no request was sent.
-            # begin_apply repeats these checks atomically before any mutation.
-            if intent["state"] != "reserved" or action["create_started_at"] is not None:
-                return {
-                    "node_id": intent_id,
-                    "state": "reconciliation_required",
-                    "code": "dstack_apply_journal_mismatch",
-                }
-            if node["desired_state"] == "stopped" or not _window_open(
-                intent, node, self.repo.clock()
-            ):
-                self._request_stop(node)
-                cancelled = self.capacity.store.cancel_unapplied(intent_id)
-                return {
-                    "node_id": intent_id,
-                    "state": "never_applied"
-                    if cancelled
-                    else "reconciliation_required",
-                }
-            observation = self.capacity.start(
-                _request(node["payload"]["request"]),
-                self.service.config["ssh_public_key"],
+                .mappings()
+                .one()
             )
-            return {"node_id": intent_id, "state": observation["state"]}
-        if binding.get("stop_started"):
-            # Exact read + bounded journaled retry belongs to capacity.stop.
-            # stop_started alone cannot prove that its HTTP request arrived.
-            observation = self.capacity.stop(intent_id)
-            return {"node_id": intent_id, "state": observation["state"]}
+            action = (
+                connection.execute(
+                    select(scaler_actions).where(
+                        scaler_actions.c.intent_id == intent_id
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        # BOTH original journals must prove that no request was sent.
+        # begin_apply repeats these checks atomically before any mutation.
+        if intent["state"] != "reserved" or action["create_started_at"] is not None:
+            return {
+                "node_id": intent_id,
+                "state": "reconciliation_required",
+                "code": "dstack_apply_journal_mismatch",
+            }
+        if node["desired_state"] == "stopped" or not window_open(
+            intent, node, self.repo.clock()
+        ):
+            self._request_stop(node)
+            cancelled = self.capacity.store.cancel_unapplied(intent_id)
+            return {
+                "node_id": intent_id,
+                "state": "never_applied" if cancelled else "reconciliation_required",
+            }
+        observation = self.capacity.start(
+            request_from_document(node["payload"]["request"]),
+            self.service.config["ssh_public_key"],
+        )
+        return {"node_id": intent_id, "state": observation["state"]}
+
+    def _reconcile_observed_node(self, node, funded):
+        """Observe once, re-read obligations, then use the existing drain rules."""
+        intent_id = node["intent_id"]
         observed = []
         observation = (
             self.capacity.observe(intent_id, _on_observed=observed.append)
@@ -1023,7 +1052,7 @@ class DstackController:
             # Cold model preparation has never admitted execution. It need not
             # finish downloading/loading merely to become eligible for stop.
             # begin_stop rechecks the same evidence under the capacity lock.
-            cold_unadmitted = _cold_unadmitted_runtime(
+            cold_unadmitted = cold_unadmitted_runtime(
                 binding,
                 workers,
                 intent.get("provider_instance_id"),
@@ -1041,6 +1070,11 @@ class DstackController:
                 result = self.capacity.stop(intent_id)
                 return {"node_id": intent_id, "state": result["state"]}
             return {"node_id": intent_id, "state": "draining"}
+        self._register_observed_worker(intent_id, binding, fresh, workers)
+        return {"node_id": intent_id, "state": observation["state"]}
+
+    def _register_observed_worker(self, intent_id, binding, fresh, workers):
+        """Restore the same ready/busy consumer; never submit another inference."""
         if binding.get("state") == "ready" and fresh:
             slot = self.runtime.slot(intent_id)
             try:
@@ -1071,7 +1105,6 @@ class DstackController:
             slot = self.runtime.slot(intent_id)
             if self.worker_process:
                 self.worker_process.ensure(intent_id, slot)
-        return {"node_id": intent_id, "state": observation["state"]}
 
     def _refresh_pending_removal(self, node, intent):
         """Bounded exact terminal read; no native boot, invoice or invented proof."""
@@ -1253,7 +1286,7 @@ class SlotProcesses:
 
     def __enter__(self):
         self.work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._supervisor_lock = _slot_lock(self.work_dir, "dstack-cpu-supervisor")
+        self._supervisor_lock = slot_lock(self.work_dir, "dstack-cpu-supervisor")
         if not self._supervisor_lock.__enter__():
             self._supervisor_lock.__exit__(None, None, None)
             self._supervisor_lock = None
@@ -1351,6 +1384,9 @@ def main(argv=None):
 
     settings = Settings.from_environment()
     repo = Repository(settings.database_url)
+    from .controller_liveness import Progress
+
+    progress = Progress(repo, settings.tenant_id)
     service = None
     runtime = None
     processes = None
@@ -1358,6 +1394,7 @@ def main(argv=None):
     error_client = None
     durable_executor = None
     try:
+        progress.beat(False, starting=True)
         service = from_environment(repo, settings)
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
@@ -1441,6 +1478,7 @@ def main(argv=None):
                 controller.tick,
                 active_seconds=15,
                 safety=controller.safety_sweep,
+                heartbeat=progress.beat,
                 report=lambda value: print(
                     json.dumps(value, sort_keys=True), flush=True
                 ),

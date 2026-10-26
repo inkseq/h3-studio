@@ -1,13 +1,13 @@
 ---
 name: inkseq
-description: Use an Inkseq / 映序 link to create video takes, organise an authorized story and references, and return editable drafts and results through the same business API as the website.
+description: Create video takes and organise authorized Inkseq / 映序 stories and references through the website's business API.
 ---
 
 # Inkseq / 映序
 
 Use the user's exact HTTPS origin (HTTP only for loopback). A link permits discovery, not editing or spending. Preserve user prompts, video quality/mode, references and accepted work. Relay outcomes in the user's language; keep API codes and IDs unchanged.
 
-Read [API fields/examples](reference/api.md) for requests and [recovery](reference/recovery.md) for uncertain writes/refusals; both use the same origin's `/for-agents/reference/`. Public discovery proves neither authentication nor capacity. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the release.
+Read [API](reference/api.md) and [recovery](reference/recovery.md) at the same origin's `/for-agents/reference/`. Public discovery proves neither authentication nor capacity. Authenticated `/v1/agent-guide`, `/v1/guided-schema`, `/v1/quick-chat/schema` and `/v1/capabilities` describe the release.
 
 ## Connect an assistant
 
@@ -22,7 +22,7 @@ python scripts/connect.py whoami --server ORIGIN --connection CONNECTION_ID
 python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GET /v1/agent-guide
 ```
 
-Replace placeholders with actual returned values. Example safe response projection: `{"status":"connected","connection_id":"CONNECTION_ID","owner":"OWNER"}`; never a token. Lost exchange? Resume the same saved connection; see recovery.
+Use actual returned values; never display tokens. Lost exchange? Resume the same saved connection; see recovery.
 
 ## Unified story cards: author → preflight → versions
 
@@ -34,7 +34,7 @@ Video uses `tier: standard|refine|fast`, `mode: fl|ref`; Fast is unavailable. Re
 4. For authorized multi-shot work, POST the story's `/storyboard/preflights` with `{expected_version,shot_ids,copies}` and one saved key. Inspect aggregate cost and retained per-copy plans before using the explicit-plan batch API. Copies share the owner's editable limit; only the first uses a fixed seed.
 5. Inspect results; adopt with `select:false` to retain the current choice. Use `shot.select` only when choosing that version is intended. For edits within that take, use [ordered shot segments](reference/api.md#ordered-shot-segments) through `shot.segments`; never change generation duration or regenerate to apply a cut. Return original receipts and story/shot links.
 
-For a person to continue in the website, return `ORIGIN/quick-chat?story=PROJECT` using the actual owned project ID. Attaching an ordinary story to chat uses the signed-in browser's `POST /v1/story-chats/PROJECT/open`; it is human-only. PATs must not call `/open`, impersonate a browser or put a token in that link. Creating/editing entities through `/actions` neither calls the conversation model nor generates media.
+Return `ORIGIN/quick-chat?story=PROJECT` with the owned project ID. Attaching a story uses browser-only `POST /v1/story-chats/PROJECT/open`. PATs must not call `/open`, impersonate a browser or put tokens in links. Entity `/actions` call no conversation model and generate no media.
 
 ```http
 POST /v1/batches
@@ -43,13 +43,13 @@ Idempotency-Key: saved-scene-batch-key
 {"client_project_id":"PROJECT","plan_ids":["READY_PLAN_A","READY_PLAN_B"]}
 ```
 
-Example response projection: `{"batch_id":"BATCH","status":"active"}`; inspect its actual per-item list. HTTP 202 means admission, not inference success. Observe the original batch/per-item jobs; partial admission retains its original identity.
+HTTP 202 is admission, not success. Observe the original batch/per-item jobs; partial admission retains its identity.
 
 Read a shot's `/versions` for immutable recipes; old missing recipes stay unknown. `storyboard.restore` restores known effective settings without generating. `storyboard.star`, atomic bulk draft/final/move, account→story→shot defaults and project-local profile forks use the [story contract](reference/api.md#storyboard-versions-and-bulk-work). Duration/seed stay per shot; no automatic deletion or global usage search.
 
 For an authorized whole-film request, check `capabilities.story_film.enabled`, then follow [one-click film](reference/api.md#one-click-film). Preflight freezes the story; inspect reuse, missing shots and cost before confirming. Observe/resume that original run, retaining per-shot budgets and grants. Read [film recovery](reference/recovery.md#one-click-film-recovery) after an uncertain response.
 
-Caption burn:2 nonempty lines ×18 characters/cue maximum. Confirmation/SRT cannot waive bounds; no silent trim/rewrap.
+Caption burn:2 lines ×18 chars/cue; no silent trim/rewrap. [Risk advice](reference/api.md#story-chat-risk-advice) never authorizes edits/generation.
 
 ## Legacy Quick Create compatibility
 
@@ -92,4 +92,16 @@ Example response projection: `{"preview_id":"PREVIEW","expires_at":1790000000}`;
 3. After admission, `/v1/generations/queue-position?job_id=JOB` gives advisory shared-queue information, no other owner's identity or ETA. Never rent a GPU to bypass unavailable capacity.
 4. Stop new paid work on cap/unknown-charge refusal. Return the same editable draft, stable error code and readable explanation; no replacement job/key or automatic retry. Zero connection cap adds no extra connection limit; owner credit and other safeguards remain. Sydney-day exposure includes unresolved prior obligations, not only invoices.
 
-See [recovery](reference/recovery.md) for stale settings, owner caps, confirmation and unknown charges.
+Shot `data.clipSound` is on/off; see [audio](reference/api.md) for defaults and legacy behavior.
+See [recovery](reference/recovery.md) for refusals.
+
+## Long-shot windows
+
+Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-windows).
+
+## Reviews and feedback
+
+[Verdicts, CAS, summaries and suggestions](reference/api.md#explicit-take-reviews).
+[Redo diff preview](reference/api.md#redo-from-marks).
+
+[Feedback](reference/api.md#feedback).

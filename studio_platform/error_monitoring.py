@@ -125,6 +125,7 @@ def sanitized_event(event, hint=None):
                 "capacity_paid_idle_queue",
                 "capacity_queue_age",
                 "capacity_demand_start_loop",
+                "capacity_controller_stale",
             }
             or type(tags.get("diagnosis")) is not str
             or tags["diagnosis"]
@@ -134,6 +135,7 @@ def sanitized_event(event, hint=None):
                 "dispatch_unobserved",
                 "queue_age",
                 "unserved_start_stop_loop",
+                "controller_stale",
             }
             or not isinstance(event.get("event_id"), str)
             or re.fullmatch(r"[0-9a-f]{32}", event["event_id"]) is None

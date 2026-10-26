@@ -48,6 +48,29 @@ class GuidedTests(unittest.TestCase):
             headers={**(headers or {}), **({"Idempotency-Key": key} if key else {})},
         )
 
+    def test_large_sound_track_edits_keep_cas_and_atomic_limit(self):
+        self.setup_project()
+        tracks = [{"id": f"track-{i}", "muted": True} for i in range(128)]
+        action = {"op": "sound.set", "chapter_id": "chapter-one", "tracks": tracks}
+        accepted = self.edit([action], version=1)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        self.assertEqual(self.edit([action], version=1).status_code, 409)
+        oversized = {**action, "tracks": tracks + [{"id": "extra", "muted": True}]}
+        refused = self.edit([oversized], version=2)
+        self.assertEqual(refused.status_code, 422, refused.text)
+        saved = self.client.get("/v1/projects/story-one").json()
+        self.assertEqual(saved["version"], 2)
+        self.assertEqual(
+            saved["project"]["journey"]["soundTracks"]["chapter-one"], tracks
+        )
+        schema = self.client.get("/v1/guided-schema").json()
+        self.assertEqual(
+            schema["operation_schemas"]["sound.set"]["properties"]["tracks"][
+                "maxItems"
+            ],
+            128,
+        )
+
     def test_shipped_story_card_example_uses_agent_actions_without_generation(self):
         reference = (
             Path(__file__).resolve().parents[1] / "skills/inkseq/reference/api.md"

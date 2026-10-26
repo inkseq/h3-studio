@@ -404,12 +404,14 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
         capabilities: c.capabilities,
         jobs: c.jobs,
         queue,
-        busy: busy || c.busy,
+        // Only page-switching cloud work locks the storyboard; generate and upload guard
+        // their own second press (serial) instead of greying out everything (owner, 2026-10-26).
+        busy: c.busy,
         error: error || c.error,
       }),
       lastAdded,
     }),
-    [s.project, s.scopeId, c.capabilities, c.jobs, queue, busy, c.busy, error, c.error, lastAdded],
+    [s.project, s.scopeId, c.capabilities, c.jobs, queue, c.busy, error, c.error, lastAdded],
   );
   const view = useMemo(
     () => ({
@@ -675,18 +677,35 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
         version = shot?.versions.find((v) => v.id === action.version);
       if (version?.status !== 'done' || !version.asset?.entity?.data.fileId)
         throw Error(at('adjunct.storyboardConnected.copy340'));
+      const review = {
+        ...shot.entity.data.uxReview,
+        chosen: null,
+        status: 'selected',
+        allRejected: false,
+      };
+      // A clean cloud story chooses through /actions, so the server also binds that take's
+      // own sound when clip sound is on (h3-studio#611). Unsaved edits keep the old path.
+      const ws = store.getState().workspace;
+      if (ws.mode === 'cloud' && !ws.dirty) {
+        await cloud.workbenchCommand('actions', {
+          actions: [
+            { op: 'shot.select', shot_id: shot.id, entity_id: version.id },
+            {
+              op: 'entity.update',
+              entity_id: shot.id,
+              patch: { status: 'draft', data: { acceptPlaceholder: false, uxReview: review } },
+            },
+          ],
+        });
+        return { ok: true };
+      }
       if (
         !store.updateEntity(shot.id, {
           status: 'draft',
           data: {
             selectedAssetId: version.id,
             acceptPlaceholder: false,
-            uxReview: {
-              ...shot.entity.data.uxReview,
-              chosen: null,
-              status: 'selected',
-              allRejected: false,
-            },
+            uxReview: review,
           },
         })
       )
@@ -767,6 +786,10 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     void dispatch({ type: 'choose', shot: shot.id, version: version.id }).catch(() => {});
   }, [view, busy]);
   const adapter = {
+    previewScriptWindows: (id, options) => cloud.previewScriptWindows(id, options),
+    readTakeReview: (shot, artifact) => cloud.readTakeReview(shot, artifact),
+    readTakeReviewSummaries: (shot) => cloud.readTakeReviewSummaries(shot),
+    saveTakeReview: (shot, artifact, body, key) => cloud.saveTakeReview(shot, artifact, body, key),
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),
     readVersions: async (id, { offset = 0 } = {}) => {

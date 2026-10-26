@@ -373,11 +373,26 @@ export function createCloudController({
   };
   globalThis.window?.addEventListener('focus', focusSession);
   globalThis.document?.addEventListener('visibilitychange', visibleSession);
-  async function action(fn, { projectId } = {}) {
-    if (operation) throw Error('上一项云操作还在处理中。');
-    operation = true;
-    emit({ busy: true, error: '', message: '' });
+  // One rule for every cloud operation (owner, 2026-10-26): operations run one after another.
+  // - blocking: switching what the page shows (open a story, sign in/out, create, copy, upload
+  //   all). Only these mark the page busy, so controls wait.
+  // - exclusive: submits and cancels. A second press while anything runs is refused, never
+  //   queued, so one click can never become two jobs.
+  // - everything else (autosave, refresh, lists, story edits, frames) waits its turn quietly:
+  //   nothing greys out and nothing fails because another operation is running.
+  let chain = Promise.resolve(),
+    queued = 0;
+  async function action(fn, { projectId, blocking = false, exclusive = blocking } = {}) {
+    if (exclusive && queued) throw Error('上一项云操作还在处理中。');
+    // With nothing running the operation starts right away (same tick), as before.
+    const previous = queued ? chain : null;
+    queued += 1;
+    let release;
+    chain = new Promise((resolve) => (release = resolve));
     try {
+      if (previous) await previous;
+      operation = true;
+      if (blocking) emit({ busy: true, error: '', message: '' });
       return await fn();
     } catch (error) {
       if (projectId) {
@@ -394,7 +409,9 @@ export function createCloudController({
       throw error;
     } finally {
       operation = false;
-      emit({ busy: false });
+      queued -= 1;
+      if (blocking) emit({ busy: false });
+      release();
     }
   }
   const emptyProjectList = {
@@ -638,7 +655,8 @@ export function createCloudController({
       conflict: null,
       draftOffer: null,
       unknown: pending,
-      message: restoreDraft ? '已恢复尚未同步的云草稿。' : '云项目已打开。',
+      // Only a restored draft is news; a plain open needs no message.
+      message: restoreDraft ? '已恢复尚未同步的云草稿。' : '',
     });
     installMedia();
     try {
@@ -1205,6 +1223,23 @@ export function createCloudController({
     );
     emit({ jobs: jobs.filter((job) => job.client_ref?.project_id === ctx.projectId) });
   }
+  // The server binds finished results into the story itself (h3-studio#588 R2) and bumps
+  // its version. Take that version now so this tab's next save is not a false conflict.
+  async function adoptServerBindings(jobs, ctx) {
+    const newest = Math.max(
+      0,
+      ...jobs
+        .map((job) => job.result?.project_collection)
+        .filter((item) => item?.status === 'bound' && Number.isInteger(item.project_version))
+        .map((item) => item.project_version),
+    );
+    if (!api.project || newest <= current().workspace.serverVersion) return;
+    const record = checkedProjectRecord(await api.project(ctx.projectId));
+    guard(ctx);
+    if (record.version <= current().workspace.serverVersion) return;
+    if (!store.rebaseCloud(record.project, { account: ctx.account, version: record.version }))
+      emit({ remoteUpdate: { id: record.id, version: record.version } });
+  }
   async function collectJobArtifacts(jobs, ctx) {
     for (const job of jobs)
       if (job.status === 'succeeded' && !job.artifacts?.length) {
@@ -1253,6 +1288,7 @@ export function createCloudController({
           }
       }
       const jobs = await collectJobArtifacts([...recent, ...retained], ctx);
+      await adoptServerBindings(jobs, ctx);
       await mergeJobs(jobs, ctx);
       const activity = aggregate?.value || null;
       emit({
@@ -1623,15 +1659,16 @@ export function createCloudController({
         throw Error('workbench.capabilities');
       const mode = recipe.mode,
         support = profile ? profile.generation_support?.[mode] : recipe;
+      // Shots made through the API or the AI assistant may carry no storyboard yet; the
+      // saved server draft is still the plan, so an absent storyboard reads as empty.
       const shot = current().project.entities.find((row) => row.id === shotId),
-        b = shot?.data.storyboard;
+        b = shot?.data.storyboard || {};
       if (!shot) throw Error('workbench.changed');
       if (shot.data.h3?.explicitReferences) {
         if (preview.project_version !== current().workspace.serverVersion || preview.issues?.length)
           throw Error('workbench.inputsInvalid');
         continue;
       }
-      if (!b) throw Error('workbench.changed');
       if (b.continuePrevious && (mode === 'fl' || support?.input_support?.first_frame === true)) {
         const project = current().project,
           chapter = project.entities.find(
@@ -1729,6 +1766,57 @@ export function createCloudController({
     requireCloud();
     const ctx = context();
     const value = await api.request(`/v1/projects/${encodeURIComponent(ctx.projectId)}/${suffix}`);
+    guard(ctx);
+    return value;
+  }
+  // Long-shot script windows (h3-studio#597): one Gemini split per key; replaying the same
+  // key reads the same outcome and never calls the model again.
+  async function previewScriptWindows(shotId, { windowSeconds = null, key }) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(
+      `/v1/projects/${encodeURIComponent(ctx.projectId)}/shots/${encodeURIComponent(shotId)}/script-windows/preview`,
+      {
+        method: 'POST',
+        key,
+        body: {
+          expected_version: current().workspace.serverVersion,
+          ...(windowSeconds ? { window_seconds: windowSeconds } : {}),
+        },
+      },
+    );
+    guard(ctx);
+    return value;
+  }
+  // Take reviews (h3-studio#626/#627): a whole-take verdict plus range marks on one artifact.
+  // Reads and writes are independent of the story version; the review has its own revision.
+  const takeReviewPath = (ctx, shotId, artifactId) =>
+    `/v1/projects/${encodeURIComponent(ctx.projectId)}/shots/${encodeURIComponent(shotId)}/takes/${encodeURIComponent(artifactId)}/review`;
+  async function readTakeReview(shotId, artifactId) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(takeReviewPath(ctx, shotId, artifactId));
+    guard(ctx);
+    return value;
+  }
+  async function readTakeReviewSummaries(shotId) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(
+      `/v1/projects/${encodeURIComponent(ctx.projectId)}/shots/${encodeURIComponent(shotId)}/take-reviews`,
+    );
+    guard(ctx);
+    if (!Array.isArray(value)) throw Error('review.unavailable');
+    return value;
+  }
+  async function saveTakeReview(shotId, artifactId, body, key) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(takeReviewPath(ctx, shotId, artifactId), {
+      method: 'PATCH',
+      key,
+      body,
+    });
     guard(ctx);
     return value;
   }
@@ -1928,6 +2016,11 @@ export function createCloudController({
       return value;
     },
     workbenchRead: (suffix) => workbenchRead(suffix),
+    previewScriptWindows: (shotId, options) => previewScriptWindows(shotId, options),
+    readTakeReview: (shotId, artifactId) => readTakeReview(shotId, artifactId),
+    readTakeReviewSummaries: (shotId) => readTakeReviewSummaries(shotId),
+    saveTakeReview: (shotId, artifactId, body, key) =>
+      saveTakeReview(shotId, artifactId, body, key),
     // Story edits share one version, so they run one after another: a quick second click
     // waits for the first instead of failing. While one is running its journal entry is
     // expected; the person is asked to check it only when it outlives the run.
@@ -1956,45 +2049,58 @@ export function createCloudController({
       return result;
     },
     login: (username, password) =>
-      action(async () => {
-        const observedEpoch = epoch,
-          result = await api.login(username, password);
-        if (observedEpoch !== epoch) throw Error('登录期间会话已经改变，请重新核对。');
-        const me = identity(result);
-        if (typeof me !== 'string') throw Error('登录响应缺少账户身份。');
-        replaceIdentity(me);
-        announceSession();
-        await reloadProjects();
-        await reloadCapabilities();
-        offerResume();
-      }),
+      action(
+        async () => {
+          const observedEpoch = epoch,
+            result = await api.login(username, password);
+          if (observedEpoch !== epoch) throw Error('登录期间会话已经改变，请重新核对。');
+          const me = identity(result);
+          if (typeof me !== 'string') throw Error('登录响应缺少账户身份。');
+          replaceIdentity(me);
+          announceSession();
+          await reloadProjects();
+          await reloadCapabilities();
+          offerResume();
+        },
+        { blocking: true },
+      ),
     changePassword: (previous, next) =>
-      action(async () => {
-        const ctx = accountContext();
-        await api.changePassword(previous, next);
-        guardAccount(ctx);
-        rememberVisit({ mode: 'local' });
-        replaceIdentity(null, '密码已修改，请重新登录；原 API Key 已撤销，云草稿仍按账户保留。');
-        announceSession();
-      }),
+      action(
+        async () => {
+          const ctx = accountContext();
+          await api.changePassword(previous, next);
+          guardAccount(ctx);
+          rememberVisit({ mode: 'local' });
+          replaceIdentity(null, '密码已修改，请重新登录；原 API Key 已撤销，云草稿仍按账户保留。');
+          announceSession();
+        },
+        { blocking: true },
+      ),
     logout: () =>
-      action(async () => {
-        void clearVideoCache().catch(() => {});
-        const result = await api.logout();
-        rememberVisit({ mode: 'local' });
-        replaceIdentity(null, '已退出。云草稿仍按原账户保留，本机作品已恢复。');
-        announceSession();
-        const providerLogout = providerLogoutUrl(result);
-        if (providerLogout && typeof window !== 'undefined') window.location.assign(providerLogout);
-      }),
+      action(
+        async () => {
+          void clearVideoCache().catch(() => {});
+          const result = await api.logout();
+          rememberVisit({ mode: 'local' });
+          replaceIdentity(null, '已退出。云草稿仍按原账户保留，本机作品已恢复。');
+          announceSession();
+          const providerLogout = providerLogoutUrl(result);
+          if (providerLogout && typeof window !== 'undefined')
+            window.location.assign(providerLogout);
+        },
+        { blocking: true },
+      ),
     logoutEverywhere: () =>
-      action(async () => {
-        void clearVideoCache().catch(() => {});
-        await api.revokeAllSessions('sessions-' + uid());
-        rememberVisit({ mode: 'local' });
-        replaceIdentity(null, '已在所有设备退出。云草稿仍按原账户保留。');
-        announceSession();
-      }),
+      action(
+        async () => {
+          void clearVideoCache().catch(() => {});
+          await api.revokeAllSessions('sessions-' + uid());
+          rememberVisit({ mode: 'local' });
+          replaceIdentity(null, '已在所有设备退出。云草稿仍按原账户保留。');
+          announceSession();
+        },
+        { blocking: true },
+      ),
     leave() {
       epoch++;
       projectOpenRequest++;
@@ -2035,32 +2141,35 @@ export function createCloudController({
       installMedia();
     },
     resume: () =>
-      action(async () => {
-        const ctx = accountContext(),
-          offer = state.resumeOffer;
-        if (!offer || current().workspace.mode !== 'local')
-          throw Error('请重新核对当前账户与上次作品。');
-        try {
-          const done = await open(offer.projectId);
-          emit({ resumeError: '' });
-          return done;
-        } catch (error) {
-          guardAccount(ctx);
-          if ([403, 404].includes(error.status)) {
-            rememberVisit({ mode: 'local' });
-            emit({
-              resumeOffer: null,
-              resumeError:
-                '上次云作品已不存在，或当前账户无权读取。当前本机作品和已有草稿均未改变。',
-            });
-          } else
-            emit({
-              resumeError:
-                '上次云作品暂时无法读取。可稍后重试或从云项目列表打开；当前本机作品未改变。',
-            });
-          throw error;
-        }
-      }),
+      action(
+        async () => {
+          const ctx = accountContext(),
+            offer = state.resumeOffer;
+          if (!offer || current().workspace.mode !== 'local')
+            throw Error('请重新核对当前账户与上次作品。');
+          try {
+            const done = await open(offer.projectId);
+            emit({ resumeError: '' });
+            return done;
+          } catch (error) {
+            guardAccount(ctx);
+            if ([403, 404].includes(error.status)) {
+              rememberVisit({ mode: 'local' });
+              emit({
+                resumeOffer: null,
+                resumeError:
+                  '上次云作品已不存在，或当前账户无权读取。当前本机作品和已有草稿均未改变。',
+              });
+            } else
+              emit({
+                resumeError:
+                  '上次云作品暂时无法读取。可稍后重试或从云项目列表打开；当前本机作品未改变。',
+              });
+            throw error;
+          }
+        },
+        { blocking: true },
+      ),
     dismissResume() {
       rememberVisit({ mode: 'local' });
       emit({ resumeOffer: null, resumeError: '', draftOffer: null });
@@ -2069,49 +2178,58 @@ export function createCloudController({
     loadMoreProjects: () => action(loadMoreProjects),
     reloadCapabilities: () => action(reloadCapabilities),
     reloadAvailability: () => reloadAvailability({ fresh: true }),
-    open: (id, options) => action(() => open(id, options), { projectId: id }),
+    open: (id, options) => action(() => open(id, options), { projectId: id, blocking: true }),
     save: () => action(save),
     create: (title, { copy = false } = {}) =>
-      action(async () => {
-        if (!state.account) throw Error('先登录云工作室。');
-        const ctx = accountContext(),
-          project = copy ? copyForCloud(store.exportProject()) : blankCloudProject(title);
-        if (copy && title) project.title = title;
-        const record = checkedProjectRecord(
-          await api.createProject(project, intent('create', project.id)),
-        );
-        guardAccount(ctx);
-        await reloadProjects();
-        guardAccount(ctx);
-        return open(record.id);
-      }),
+      action(
+        async () => {
+          if (!state.account) throw Error('先登录云工作室。');
+          const ctx = accountContext(),
+            project = copy ? copyForCloud(store.exportProject()) : blankCloudProject(title);
+          if (copy && title) project.title = title;
+          const record = checkedProjectRecord(
+            await api.createProject(project, intent('create', project.id)),
+          );
+          guardAccount(ctx);
+          await reloadProjects();
+          guardAccount(ctx);
+          return open(record.id);
+        },
+        { blocking: true },
+      ),
     createQuick: (title) =>
-      action(async () => {
-        if (!state.account) throw Error('先登录云工作室。');
-        const ctx = accountContext(),
-          project = freestyleProject(title || '快速创作 · ' + new Date().toLocaleDateString());
-        const record = checkedProjectRecord(
-          await api.createProject(project, intent('create', project.id)),
-        );
-        guardAccount(ctx);
-        await reloadProjects();
-        guardAccount(ctx);
-        return open(record.id);
-      }),
+      action(
+        async () => {
+          if (!state.account) throw Error('先登录云工作室。');
+          const ctx = accountContext(),
+            project = freestyleProject(title || '快速创作 · ' + new Date().toLocaleDateString());
+          const record = checkedProjectRecord(
+            await api.createProject(project, intent('create', project.id)),
+          );
+          guardAccount(ctx);
+          await reloadProjects();
+          guardAccount(ctx);
+          return open(record.id);
+        },
+        { blocking: true },
+      ),
     saveCopy: () =>
-      action(async () => {
-        requireCloud();
-        const ctx = accountContext(),
-          project = copyForCloud(store.exportProject());
-        project.title = project.title.slice(0, 145) + ' · 冲突草稿副本';
-        const record = checkedProjectRecord(
-          await api.createProject(project, intent('create', project.id)),
-        );
-        guardAccount(ctx);
-        await reloadProjects();
-        guardAccount(ctx);
-        return open(record.id);
-      }),
+      action(
+        async () => {
+          requireCloud();
+          const ctx = accountContext(),
+            project = copyForCloud(store.exportProject());
+          project.title = project.title.slice(0, 145) + ' · 冲突草稿副本';
+          const record = checkedProjectRecord(
+            await api.createProject(project, intent('create', project.id)),
+          );
+          guardAccount(ctx);
+          await reloadProjects();
+          guardAccount(ctx);
+          return open(record.id);
+        },
+        { blocking: true },
+      ),
     assetInventory: () => action(assetInventory),
     resumeAsset: (id) =>
       action(async () => {
@@ -2141,18 +2259,21 @@ export function createCloudController({
       }),
     upload,
     syncAll: () =>
-      action(async () => {
-        requireCloud();
-        for (const asset of [...current().project.entities])
-          if (
-            ['image', 'video', 'audio'].includes(asset.type) &&
-            asset.data.fileId &&
-            !asset.data.cloudArtifactId
-          )
-            await syncEntity(asset.id);
-        await save();
-        emit({ message: '可读取的本机素材已同步，项目版本已保存。' });
-      }),
+      action(
+        async () => {
+          requireCloud();
+          for (const asset of [...current().project.entities])
+            if (
+              ['image', 'video', 'audio'].includes(asset.type) &&
+              asset.data.fileId &&
+              !asset.data.cloudArtifactId
+            )
+              await syncEntity(asset.id);
+          await save();
+          emit({ message: '可读取的本机素材已同步，项目版本已保存。' });
+        },
+        { blocking: true },
+      ),
     prepare: (shotId) => action(() => prepare(shotId)),
     prepareStoryboard: (shotId, options) => action(() => prepareStoryboard(shotId, options)),
     saveFrame: (artifactId, selection) => action(() => extractFrame(artifactId, selection)),
@@ -2166,7 +2287,7 @@ export function createCloudController({
           throw Error('任务不属于当前项目。');
         return job;
       }),
-    submit: (shotId) => action(() => submit(shotId)),
+    submit: (shotId) => action(() => submit(shotId), { exclusive: true }),
     refresh: () => action(refreshJobs),
     loadMoreJobs: () => action(loadMoreJobs),
     loadMoreBatches: () => action(loadMoreBatches),
@@ -2175,7 +2296,7 @@ export function createCloudController({
       emit({ renderOptions: { ...state.renderOptions, [chapterId]: clone(options) } });
     },
     prepareRender: (chapterId, options) => action(() => prepareRender(chapterId, options)),
-    submitRender: (chapterId) => action(() => submitRender(chapterId)),
+    submitRender: (chapterId) => action(() => submitRender(chapterId), { exclusive: true }),
     prepareBatch: (shotIds) =>
       action(async () => {
         requireCloud();
@@ -2216,27 +2337,33 @@ export function createCloudController({
             emit({ batchChecking: null });
         }
       }),
-    submitBatch: (shotIds) => action(() => submitBatch(shotIds)),
-    recoverBatch: () => action(() => submitBatch([], { recover: true })),
+    submitBatch: (shotIds) => action(() => submitBatch(shotIds), { exclusive: true }),
+    recoverBatch: () => action(() => submitBatch([], { recover: true }), { exclusive: true }),
     cancel: (id) =>
-      action(async () => {
-        requireCloud();
-        const ctx = context();
-        await api.cancel(id);
-        guard(ctx);
-        await refreshJobs();
-        guard(ctx);
-        emit({ message: '取消请求已提交。以任务最终状态为准，已执行部分可能已产生费用。' });
-      }),
+      action(
+        async () => {
+          requireCloud();
+          const ctx = context();
+          await api.cancel(id);
+          guard(ctx);
+          await refreshJobs();
+          guard(ctx);
+          emit({ message: '取消请求已提交。以任务最终状态为准，已执行部分可能已产生费用。' });
+        },
+        { exclusive: true },
+      ),
     cancelBatch: (id) =>
-      action(async () => {
-        requireCloud();
-        const ctx = context(),
-          batch = await api.cancelBatch(id);
-        guard(ctx);
-        emit({ batches: state.batches.map((b) => (b.id === id ? batch : b)) });
-        await refreshJobs();
-      }),
+      action(
+        async () => {
+          requireCloud();
+          const ctx = context(),
+            batch = await api.cancelBatch(id);
+          guard(ctx);
+          emit({ batches: state.batches.map((b) => (b.id === id ? batch : b)) });
+          await refreshJobs();
+        },
+        { exclusive: true },
+      ),
     clearError() {
       emit({ error: '', message: '' });
     },

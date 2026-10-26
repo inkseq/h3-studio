@@ -303,3 +303,91 @@ accepts the exact legacy tuple for retained rollback and the complete new tuple,
 not partially changed timeouts. Hold merge/adoption until Claude coordinates this
 validator prerequisite and an idle staging window; otherwise normal staging will
 correctly fail closed against the old installed validator.
+## Capacity contract refactor (#588 R1, first slice)
+
+The existing `DstackCapacity.plan/start/observe/stop` and original ledger remain
+in charge of paid capacity. This slice does not create a second capacity service.
+`capacity_policy.window_open` and `cold_unadmitted_runtime` are pure eligibility
+checks over retained evidence: a true value alone never authorizes a rental,
+stop or settlement. Prior workers and ready/incarnation latches still exclude
+cold-start exceptions. `dstack_capacity.request_from_document` copies the original
+receipt, and `assert_run_owned` checks the immutable ownership/configuration subset.
+`terminal_no_allocation_shape` only recognizes shape; it is not removal or billing
+proof (use the existing complete proof validator).
+
+`slot_lock.slot_lock` owns the existing OS lock implementation. CPU supervisor,
+native runtime, DBOS, staging bootstrap and workers use the same hashed path and
+nonblocking lock; old worker/operator private exports remain aliases for retained
+callers, not duplicate implementations. The lock is local and is not a distributed
+lease. Imports of the shared lock/policy modules perform no IO and do not load the
+worker or operator stack. The larger controller/operator step decomposition is
+still pending. Qualification uses existing staged lifecycle tests; no fault
+injection, restart, rental or stop in production is part of this refactor.
+
+## Guarded creator-default change (#580 C0)
+
+`migration_maintenance.py default-profile-only COMMIT OLD_PROFILE NEW_PROFILE PATHS_SHA256 ACTIVE_SHA256`
+changes only `SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID` in protected migration paths.
+Use a full current platform commit and freshly read hashes, after independent
+review and the existing CAS installation of the helper/checker pair. The source
+compatibility map contains exact observed current/previous/pending tuples from
+SSM `20664d1c-0533-4d06-bacb-fbafbb1f54cd`; queued main candidates are labelled as
+such, not as accepted deployments. Unknown versions/pairs are refused.
+
+The installed helper verifies the current release, packaged profile, enabled
+current FL and REF policies, original configuration hashes and CPU image/mount/
+environment signatures. It requires zero nonterminal jobs before stopping CPU
+admission, then checks again after stopping app and namespace-sharing services.
+It never edits policies, budget, credentials, provider machines or user data.
+A new job admitted in the precheck gap causes the identical old runtime to resume
+without switching the configuration.
+
+Before mutation, four original/candidate paths+active byte copies and a durable
+intent are fsynced under `migration/default-profile-maintenance/OPERATION/`.
+After the new metadata is adopted, app becomes healthy before dstack/controller
+are reconnected. Runtime default, policy digest, images, mounts, all other
+environment fields and metadata digests are read back. Failure attempts exact
+restoration; if jobs appeared after startup or restoration cannot be proven, the
+failed receipt fences subsequent platform maintenance. Reconcile that original
+receipt; never replay a switch with guessed hashes.
+
+Explicit recovery/rollback uses
+`migration_maintenance.py restore-default-profile COMMIT RECEIPT_SHA256`.
+It takes the same lock, requires the original receipt and unchanged before/after
+metadata, checks zero nonterminal jobs, and restores saved bytes/current images.
+An unrelated config change or unknown outcome is refused.
+
+Deployment sequence: review helper → CAS install on staging → switch after v7
+policies are bound → Claude verifies one normal-path FL and REF job with no
+explicit profile → Claude promotes/binds v7 → repeat the exact guarded production
+switch at zero jobs. Claude owns production promotion and TaoMate switching.
+No manual edit of paths/active and no direct deployment of main.
+
+Default-profile restarts also record a PostgreSQL-clock stop cutoff before stopping CPU services. After recreating the app (before waiting for health), they reap at most 256 pre-stop idle sessions for only sixnine_app/dstack_control. Active, idle-in-transaction, fresh and other-role sessions are excluded. This unblocks app readiness when stale sessions exhausted its role limit. Success additionally requires fresh sessions for both roles and total counts below their role limits after reconnecting all CPU services. Each switch/restore records its cutoff, terminated count and final connection counts; an unknown cleanup result remains null in that restart record. This is a bounded restart repair, not the broader #588 R4 connection-hygiene change.
+
+### Controller progress observer (#588 R3)
+
+The controller writes one tenant-scoped row in the existing operator-heartbeat
+table after completing main-loop work and its demand scan, at most once per
+minute. A starting record gives initialization 180 seconds; a timer never advances
+progress while a provider call or reconciliation is stuck. Idle checkpoints do
+not run the provider safety sweep more often than its existing 900-second cadence.
+
+An independent Docker health process checks that row every minute, with bounded
+PostgreSQL connection/statement timeouts and a 20-second outer health timeout.
+Missing/stale/future/invalid progress produces a deterministic capacity-health
+outbox alert, reused through the existing Grafana/Sentry acknowledgement path.
+Recovery allows the next distinct stalled progress record to produce a new alert.
+Database unavailability exits unhealthy even if an alert cannot be persisted.
+The heartbeat row is diagnostic only; it grants no job lease or admission rights.
+
+This first slice alerts only. Docker unhealthy does not itself restart the
+container, and neither the health process nor its alerts stop/rent GPUs, requeue
+jobs, change budgets or prove a supplier bill. Whole-host/DB loss still requires
+the independent host alarms/restore plan. Automatic safe-node stop is deferred.
+
+Claude's staging check, with no test jobs/machines: briefly suspend the controller
+main process past the threshold, confirm the independent health process/outbox
+detects it once, then promptly resume it and verify recovery. Inspect only closed
+event codes; do not expose configuration or request content. Do not apply this
+fault injection on production.

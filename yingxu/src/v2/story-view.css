@@ -21,8 +21,21 @@
 }
 .sb-workspace .scene .card-title {
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sb-workspace .scene .card-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-workspace .scene .card-title .card-meta {
+  margin-left: auto;
+  flex: none;
+  flex-wrap: nowrap;
+  font-weight: 400;
+}
+.sb-workspace .scene .card-title .card-meta:empty {
+  display: none;
 }
 .sb-workspace .library .lib-tabs .sb-library-tab {
   appearance: none;
@@ -161,9 +174,20 @@
   font-size: 11px;
   font-style: normal;
   background: var(--good);
-  color: #062014;
+  color: var(--good-ink);
   border-radius: 4px;
   padding: 1px 4px;
+}
+/* The old-Quick-Create tag is quieter and sits at the bottom; reset the top inset, otherwise
+   top + bottom stretch it over the whole thumbnail. */
+.sb-workspace .storyboard-takes .ver > em.ver-legacy {
+  top: auto;
+  bottom: 30px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.sb-workspace .storyboard-takes .ver > .take-review-badges {
+  padding: 0 5px 5px;
 }
 .sb-workspace .storyboard-takes .ver.viewing {
   border-color: var(--ink);
@@ -293,7 +317,7 @@
   top: 6px;
   right: 6px;
   opacity: 0;
-  background: #17211bd9;
+  background: var(--media-scrim);
   color: white;
 }
 .sb-workspace .dock-screen:hover .screen-expand,
@@ -347,7 +371,7 @@
   position: absolute;
   right: 14px;
   top: 14px;
-  background: #17211bdd;
+  background: var(--media-scrim);
   color: white;
   z-index: 2;
 }
@@ -395,7 +419,7 @@
   padding: 4px;
   opacity: 0;
   border-radius: 50%;
-  background: #17211bdd;
+  background: var(--media-scrim);
   color: var(--white);
 }
 .sb-workspace .card:hover .workbench-select,
@@ -475,7 +499,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 8px;
-  background: #17211bee;
+  background: var(--media-scrim-strong);
   color: var(--ink);
   border: 1px solid var(--line-2);
   border-radius: 8px;
@@ -510,7 +534,7 @@
   font-size: 11px;
   color: var(--white);
   text-shadow: 0 1px 2px var(--black);
-  background: linear-gradient(transparent, #000b);
+  background: linear-gradient(transparent, var(--media-scrim-strong));
   bottom: 0;
   padding: 8px 4px 3px;
   left: 0;
@@ -1300,14 +1324,19 @@ body.sb-resizing-y video {
   justify-content: flex-start;
   width: 100%;
 }
-.ed-more > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
+.editor .ed-footer .ed-gen-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
 }
-.ed-more[open] {
-  display: grid;
-  gap: 8px;
+.editor .ed-footer .ed-gen-options .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-2);
 }
 /* #232 (#24): the expanded shot panel scrolls its two columns independently. */
 .drawer.wide {
@@ -1415,39 +1444,16 @@ body.sb-resizing-y video {
 }
 .help-tip {
   position: relative;
-  display: inline-grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
+  display: inline-flex;
+  align-items: center;
   margin-left: 4px;
-  border-radius: 50%;
-  border: 1px solid var(--line-2, var(--line));
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
   cursor: help;
   vertical-align: middle;
 }
-.help-tip:hover::after,
-.help-tip:focus-visible::after {
-  content: attr(data-tip);
-  position: absolute;
-  z-index: 60;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 260px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line-2, var(--line));
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
-  text-align: left;
-  white-space: normal;
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--ink-2);
 }
 .picker-head[data-drag-handle] {
   cursor: grab;
@@ -1524,9 +1530,10 @@ body.sb-resizing-y video {
   font-weight: 600;
   line-height: 1;
 }
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab.alert > small {
+/* Unsorted items: a readable count on the warn pill, open or collapsed. */
+.sb-workspace .library .lib-tabs .sb-library-tab.alert > small {
   background: var(--warn);
-  color: #1a1205;
+  color: var(--accent-ink);
 }
 /* Shot panel header (owner, 2026-10-26): the actions centre on the title block, and the
    title field hugs its text so the pencil sits right after it. */
@@ -1561,4 +1568,111 @@ body.sb-resizing-y video {
 }
 .take-info .take-warn::before {
   content: '⚠ ';
+}
+
+/* Long-shot windows (h3-studio#597). */
+.script-windows {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+}
+.script-windows > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.script-windows > summary .badge {
+  margin-left: auto;
+  font-weight: 500;
+}
+.script-windows > p {
+  margin: 8px 0;
+  font-size: 12px;
+}
+.script-windows-controls {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.script-windows-controls select {
+  width: auto;
+}
+.script-windows-list {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.script-windows-list li {
+  display: grid;
+  gap: 2px;
+}
+.script-windows-list q {
+  color: var(--ink-2);
+}
+/* A playhead you can see and grab on any picture (owner, 2026-10-26): a light line with a
+   dark edge, a round grip on top, and a wider invisible hit area. */
+.timeline .track.video .playhead {
+  top: -8px;
+  bottom: -2px;
+  width: 3px;
+  margin-left: -1px;
+  background: var(--white);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 6px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  z-index: 4;
+}
+.timeline .track.video .playhead::before {
+  content: '';
+  position: absolute;
+  inset: 0 -7px;
+}
+.timeline .track.video .playhead::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--white);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.timeline .track.video .playhead:active {
+  cursor: grabbing;
+}
+/* Take review badges in the take list (h3-studio#631): verdict and mark count. */
+.take-review-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.take-review-badges > span {
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  line-height: 18px;
+}
+.take-verdict.keep {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.take-verdict.redo {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.take-marks {
+  background: var(--surface-3);
+  color: var(--ink-2);
 }

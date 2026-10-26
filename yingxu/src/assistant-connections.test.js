@@ -301,17 +301,23 @@ test('inactive visibility never changes authoritative records and preserves paus
     ].map((status, index) => ({ id: String(index), status, paused: index === 1 })),
     before = structuredClone(rows);
   const closed = assistantConnectionsView(rows);
-  assert.equal(closed.inactiveCount, 3);
+  assert.equal(closed.inactiveCount, 2);
   assert.equal(closed.activeCount, 4);
   assert.deepEqual(
     closed.items.filter((item) => item.hidden).map((item) => item.row.id),
     ['4', '5', '6'],
   );
+  // A deleted (revoked) connection stays out of the list even with inactive shown.
   const open = assistantConnectionsView(rows, { showInactive: true });
-  assert.ok(open.items.every((item) => !item.hidden));
+  assert.deepEqual(
+    open.items.filter((item) => item.hidden).map((item) => item.row.id),
+    ['5'],
+  );
   const pending = assistantConnectionsView(rows, { pendingId: '6' });
-  assert.equal(pending.inactiveCount, 2);
+  assert.equal(pending.inactiveCount, 1);
   assert.equal(pending.items[6].hidden, false);
+  const deleting = assistantConnectionsView(rows, { pendingId: '5' });
+  assert.equal(deleting.items[5].hidden, false);
   for (let index = 0; index < rows.length; index++) {
     assert.equal(closed.items[index].row, rows[index]);
     assert.equal(open.items[index].row, rows[index]);
@@ -378,10 +384,10 @@ test('real connection list keeps filtered rows mounted, exposes their toggle and
         'filter retains the same row components and drafts',
       );
       assert.equal((hidden.match(/<article hidden=""/g) || []).length, 3);
-      assert.equal((shown.match(/<article hidden=""/g) || []).length, 0);
+      assert.equal((shown.match(/<article hidden=""/g) || []).length, 1);
       assert.match(hidden, /aria-expanded="false"/);
       assert.match(shown, /aria-expanded="true"/);
-      assert.match(hidden, language === 'en' ? /Show 3 inactive/ : /显示 3 个失效连接/);
+      assert.match(hidden, language === 'en' ? /Show 2 inactive/ : /显示 2 个失效连接/);
       assert.match(shown, language === 'en' ? /Hide inactive/ : /收起失效连接/);
       assert.match(hidden, language === 'en' ? /Created / : /创建于 /);
       assert.match(hidden, /00000001/);
@@ -390,7 +396,7 @@ test('real connection list keeps filtered rows mounted, exposes their toggle and
       const pending = render({ pendingId: rows[6].id });
       assert.equal((pending.match(/<article hidden=""/g) || []).length, 2);
       const partial = render({ hasMore: true });
-      assert.match(partial, language === 'en' ? /Show 3 inactive/ : /显示已加载的 3 个失效连接/);
+      assert.match(partial, language === 'en' ? /Show 2 inactive/ : /显示已加载的 2 个失效连接/);
       const noActive = render({ rows: rows.slice(4) });
       assert.match(noActive, language === 'en' ? /No active connections/ : /暂时没有可用的连接/);
     }

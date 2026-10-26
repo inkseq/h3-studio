@@ -138,10 +138,10 @@ Object.assign(trashCatalogs.zh, {
 trashCatalogs.en['trash.cloudOnly'] = 'Open a saved story to use the trash.';
 trashCatalogs.zh['trash.cloudOnly'] = '请先打开已保存的故事，才能用回收站。';
 Object.assign(trashCatalogs.en, {
-  'trash.manage': 'Manage items',
+  'trash.manage': 'Manage story items',
   'trash.search': 'Find',
 });
-Object.assign(trashCatalogs.zh, { 'trash.manage': '管理内容', 'trash.search': '查找' });
+Object.assign(trashCatalogs.zh, { 'trash.manage': '管理故事内容', 'trash.search': '查找' });
 
 Object.assign(trashCatalogs.en, {
   'trash.selectAll': 'Select all',

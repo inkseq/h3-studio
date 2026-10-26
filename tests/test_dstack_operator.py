@@ -353,6 +353,57 @@ class DstackOperatorTests(LedgerCase):
         with self.assertRaisesRegex(OperatorError, "operator_forbidden"):
             self.service.catalog(Principal("superdan", "api", machine=True))
 
+    def test_stopped_unknown_create_is_review_only_without_settlement_or_remote_io(
+        self,
+    ):
+        node_id = self.start()["node_id"]
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(desired_state="stopped", runtime_state="creation_unknown")
+            )
+
+        def snapshot():
+            with self.repo.engine.connect() as connection:
+                return [
+                    [dict(row) for row in connection.execute(select(table)).mappings()]
+                    for table in (operator_nodes, instance_intents, budget_reservations)
+                ]
+
+        before = snapshot()
+        with (
+            patch.object(self.client, "get", side_effect=AssertionError("remote read")),
+            patch.object(
+                self.client, "stop", side_effect=AssertionError("remote stop")
+            ),
+        ):
+            state = self.service.state(self.owner)
+            self.assertEqual(self.service.state(self.other_owner)["nodes"], [])
+        node = state["nodes"][0]
+        self.assertEqual(node["record_group"], "pending_review")
+        self.assertTrue(node["review_required"])
+        self.assertEqual(node["state"], "creation_unknown")
+        self.assertEqual(node["billing_state"], "unsettled")
+        self.assertEqual(node["hourly_cost_basis"], "approved_ceiling")
+        self.assertGreater(node["hourly_cost_microusd"], 0)
+        self.assertFalse(node["ready"])
+        self.assertEqual(state["summary"]["unknown"], 1)
+        self.assertEqual(snapshot(), before)
+
+    def test_running_unknown_create_remains_current(self):
+        node_id = self.start()["node_id"]
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(runtime_state="creation_unknown")
+            )
+        node = self.service.state(self.owner)["nodes"][0]
+        self.assertEqual(node["record_group"], "current")
+        self.assertFalse(node["review_required"])
+        self.assertEqual(node["state"], "creation_unknown")
+
     def test_29gib_profile_admission_binds_each_mode_and_preserves_legacy_floor(self):
         from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
 

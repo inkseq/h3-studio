@@ -8,16 +8,6 @@
   border-radius: var(--r);
   background: var(--surface);
 }
-.shot-segments.start {
-  margin-top: var(--sp-2);
-  padding: 0;
-  border: 0;
-  background: none;
-}
-.shot-segments > header {
-  display: grid;
-  gap: 2px;
-}
 .shot-segments-add,
 .shot-segments > footer {
   display: flex;
@@ -161,11 +151,6 @@
   background: var(--ink);
   pointer-events: none;
 }
-.shot-segments > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 .parts-bar {
   position: relative;
   display: grid;
@@ -193,16 +178,6 @@
 }
 .parts-bar-hint {
   font-size: 11px;
-}
-/* Whole take or cut parts: one switch (owner, 2026-10-26). */
-.shot-segments.start {
-  display: flex;
-}
-.shot-segments > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--sp-2);
 }
 .segments-mode > button {
   min-height: var(--h-sm);
@@ -244,4 +219,25 @@
 .parts-bar-x {
   top: auto;
   bottom: 2px;
+}
+/* Fixed switch row (owner, 2026-10-26): same place and size in both modes; the play button
+   keeps its space when hidden so nothing shifts. */
+.shot-segments-wrap {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.shot-segments-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: var(--h-sm);
+}
+.shot-segments-head > [hidden] {
+  display: inline-flex;
+  visibility: hidden;
+}
+.shot-segments-wrap > .shot-segments {
+  margin-top: 0;
 }

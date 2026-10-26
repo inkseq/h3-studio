@@ -3,6 +3,7 @@
 from fractions import Fraction
 import math
 
+from .render_limits import MAX_AUDIO_TRACKS
 from .shot_segments import has_segments, segment_frames
 
 RATES = (0.5, 0.75, 1, 1.25, 1.5, 2)
@@ -127,7 +128,7 @@ def expanded_audio_count(project, chapter_id, shots):
     if project.get("journey", {}).get("sound", {}).get("mode") == "silent":
         return 0
     tracks = chapter_tracks(project, chapter_id)
-    if not isinstance(tracks, list) or len(tracks) > 32:
+    if not isinstance(tracks, list) or len(tracks) > MAX_AUDIO_TRACKS:
         raise ValueError("film_audio_track_count_limit")
     lookup, count = {shot["id"]: shot for shot in shots}, 0
     for track in tracks:

@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { FloatingMessage } from './floating-notice.js';
 import { Columns2, MoreHorizontal, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-react';
 import { profileLabel } from './model-visibility.js';
@@ -45,6 +46,25 @@ export function WorkbenchCopies({ value, onChange, max }) {
 const hasSubtitles = (row) =>
   Array.isArray(row?.quality_flags) && row.quality_flags.includes('burned_subtitles');
 
+// Usable/redo verdict and mark count from the batch review summary (#630); shown on both the
+// narrow and the wide take cards.
+function ReviewBadges({ review }) {
+  const { t } = useI18n();
+  if (!review || (!review.verdict && !review.mark_count)) return null;
+  return (
+    <small className="take-review-badges">
+      {review.verdict && (
+        <span className={'take-verdict ' + review.verdict}>
+          {t('review.badge.' + review.verdict)}
+        </span>
+      )}
+      {review.mark_count > 0 && (
+        <span className="take-marks">{t('review.badge.marks', { count: review.mark_count })}</span>
+      )}
+    </small>
+  );
+}
+
 export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
   const { t, locale } = useI18n(),
     { state, adapter, dispatch } = useStoryboardUI();
@@ -57,6 +77,13 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
     [error, setError] = useState('');
   const generation = useRef(0);
   const scope = state.contextId + ':' + shot.id;
+  // Whole-take verdicts and mark counts for every take in one read (h3-studio#631).
+  const reviews = useQuery({
+    queryKey: ['take-review-summaries', state.contextId, shot.id],
+    queryFn: () => adapter.readTakeReviewSummaries(shot.id),
+    enabled: !!adapter.readTakeReviewSummaries,
+  });
+  const reviewOf = (id) => reviews.data?.find((row) => row.artifact_id === id);
   async function load(more = false) {
     const n = ++generation.current;
     setLoading(true);
@@ -279,6 +306,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                       (Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t))}
                     {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
                   </span>
+                  <ReviewBadges review={reviewOf(row.id)} />
                   {row.selected && <em>{t('takes.selected')}</em>}
                   {hasSubtitles(row) && (
                     <em className="ver-warn" title={t('takes.subtitlesHelp')}>
@@ -371,6 +399,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     {t('takes.subtitles')}
                   </small>
                 )}
+                <ReviewBadges review={reviewOf(row.id)} />
                 <small className="take-diff">
                   {row.recipe_status === 'known'
                     ? changes === null

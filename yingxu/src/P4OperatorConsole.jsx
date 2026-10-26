@@ -1819,7 +1819,7 @@ export default function P4OperatorConsole() {
       <StudioHeader
         account={c.account}
         active="operator"
-        menuItems={admin && <MenuItem onClick={showAdmin}>{t('operator.copy130')}</MenuItem>}
+        menuItems={admin && <MenuItem onSelect={showAdmin}>{t('operator.copy130')}</MenuItem>}
       />
       <main className="home-main ops-gpu-page">
         <div className="home-head p4-page-heading">

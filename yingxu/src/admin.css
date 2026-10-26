@@ -31,7 +31,7 @@
   color: var(--ink-2);
   font-weight: 600;
 }
-.cap-fold > summary h4 {
+.cap-fold > summary h3 {
   display: inline;
   margin: 0;
   font-size: inherit;
@@ -198,7 +198,7 @@
   font-size: 11px;
 }
 .margin-table > div.bad {
-  color: var(--bad, #f07a6a);
+  color: var(--bad);
 }
 @media (max-width: 760px) {
   .margin-table > div {

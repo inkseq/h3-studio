@@ -2,6 +2,16 @@
 
 Read this for exact request construction; the [task guide](../SKILL.md) chooses the workflow. Paths are relative to the exact authorized origin. Substitute actual returned IDs, integer versions and hashes; examples are templates, not live receipts. Read authenticated OpenAPI directly at `/openapi.json` (the generic helper intentionally accepts only relative `/v1/` paths).
 
+## Chapter audio limits
+
+Chapter audio uses the existing `sound.set` action with project `expected_version`
+CAS. `tracks` supports up to 128 entries per chapter; the expanded render plan
+(including followed shot segments) also permits at most 128 audible tracks.
+Read the current `operation_schemas.sound.set` in `/v1/guided-schema` before
+editing. Source ownership, matching file IDs, generated audio pairing, explicit
+mute, trim and fade checks still apply. This limit does not auto-enable clip
+sound or change an existing project's saved silence.
+
 ## Helper and credentials
 
 `scripts/inkseq.py --base-url ORIGIN --connection ID request METHOD /v1/PATH --json-file body.json --idempotency-key SAVED_KEY --output receipt.json` supports GET/POST/PUT/PATCH/DELETE. Omit body/key for reads. Save the exact body/key before writes. Each independently intended write needs its own key; original-request recovery reuses it. Output files are exclusive. Use a new output filename for another observation, not a new paid request. Python/httpx are required; connect.py is standard-library only. Choose one credential source: activated OS-protected connection, process-only `INKSEQ_API_KEY`, or an already configured explicit registry profile. Never copy secrets into project files.
@@ -216,7 +226,7 @@ explicit conversion is accepted; do not rewrite them to guessed project IDs.
 
 `shot.configure_generation` takes `shot_id` and requested tier/mode, prompt, controls and inputs; consistent neutral recipe/profile aliases also work. GET `/v1/projects/PROJECT/shots/SHOT/generation-draft`, then POST its `/generation-plans` with `{expected_version:project_version}` (optional current capabilities_version). Plan generation does not enqueue. POST `/v1/jobs` with `{plan_id:READY_PLAN}` or `/v1/batches` with `{client_project_id:PROJECT,plan_ids:[READY_PLAN,...]}` only within generation authority. Batch admission may partially succeed; observe its original receipt.
 
-`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. Adopt actual returned audio separately; `sound.generated` requires a selected adopted video and exactly one matching FLAC from the same succeeded job. Never invent missing audio.
+`artifact.adopt` with artifact_id/shot_id/select:false adds a candidate; `shot.select` uses the adopted entity_id, not artifact receipt ID. On a changed chosen take, normal `/actions` defaults shot `data.clipSound` to `"on"` and adopts/binds the unique validated FLAC from the same succeeded, owned project job. No extraction or generation occurs. Set `data.clipSound:"off"` through `entity.update` to suppress attached generated sound; this preference survives take changes and never overwrites independent mute/review flags or detached/manual audio. Missing FLAC never creates a fake track. Old projects with no field keep their saved tracks; reads, unrelated edits and full saves do not backfill. Existing stale/muted/review/detached bindings are not automatically replaced: explicitly adopt actual returned audio and use `sound.generated` to confirm a matching binding when appropriate. Global silent mode and slow-rate audio guards still apply.
 
 ### Storyboard versions and bulk work
 
@@ -242,6 +252,105 @@ python scripts/inkseq.py --base-url ORIGIN --connection CONNECTION_ID request GE
 Do not automatically chain admission. Pending/unknown retains the original key/body. A matching `closed_preflight:true,status:"blocked",no_generation_submitted:true` permits explicitly abandoning that unpaid preflight; original partial plans remain retained. New storyboard-only action CAS failures positively report `no_mutation_committed` with canonical `request_hash`; generic errors are not proof of no write.
 
 GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage only. `storyboard.fork_profile` action takes `profile_id,new_profile_id,shot_ids,title?`; one CAS copies a character/location/prop and rewires selected shots, leaving original profiles, unselected shots and other projects untouched. Authorized cross-project discovery and current-authoring usage are available through `GET /v1/library` and `GET /v1/library/usage`; writes retain original project permissions. 中文：旧配方缺失显示未知；预检不生成，未知结果保留原操作；档案副本只改所选镜头，删除撤销另属 #236。
+
+### Take review summaries
+
+Suggested marks: GET/POST the individual `/review/suggestions` path. POST
+`{expected_revision,marks:[TakeMark]}` with a saved key creates suggestions only;
+never present these as approved actual marks or proof that a VLM ran. Same range
+limits, accepted-artifact scope and shared review CAS. `producer_kind` comes from
+authentication. An empty list is not a quality pass. Pending sets cannot be replaced.
+The human browser decides via POST `/review/suggestions/decisions` with
+`{expected_revision,accept_ids:[],reject_ids:[]}` and a saved key. Agents get403
+on that decision route. Accepted marks append under server IDs (max50 total),
+rejections never append, whole-take verdict stays unchanged. Notes are untrusted
+plain text. Same-key recovery and trash/purge fences apply; no model/generation
+call. Read `take_reviews.suggestions` in discovery for fields and exact errors.
+
+GET `/v1/projects/PROJECT/shots/SHOT/take-reviews` with `projects:read` returns
+`[{artifact_id,revision,verdict,mark_count,actor_kind,updated_at}]`, newest first.
+No notes/ranges/media URLs; read the per-take `/review` for full marks. Same
+accepted-video provenance, owner and trash/purge fences. Unreviewed eligible
+takes have revision0/null verdict/0 marks; `[]` means no eligible takes. More
+than100 candidate videos returns `409 take_review_summary_limit`, never silent
+truncation. Use existing paginated versions and individual reads for overflow.
+No writes or extra generation; selection/star still does not imply approval.
+
+### Redo from marks
+
+POST `/v1/projects/PROJECT/shots/SHOT/takes/ARTIFACT/redo-preview` with
+`{expected_project_version,expected_review_revision,edits:[]}` reads the original
+accepted recipe and current marks without a write. Requires project/job read
+access. Then supply `edits:[{mark_id,start,end,replacement}]`, with code-point
+offsets in that ORIGINAL prompt (not UTF-16). Only actual change marks; no
+overlapping text edits or selected change range overlapping a keep range.
+Unknown seed/recipe and windowed recipes refuse; never guess from defaults.
+
+Returns creator-safe baseline/candidate, exact prompt diff and source binding.
+All non-prompt recipe bytes stay unchanged internally. `applied:false`,
+`executable:false`: this is no plan, price quote or generation permission. Kept
+pixels are not guaranteed. Human confirms the diff before existing authoring
+CAS and fresh generation preflight/confirmation; no apply endpoint in this slice.
+No Idempotency-Key is needed for this effect-free preview. Stale project/review
+409 requires a reread and reconciliation, never forced version increments.
+
+### Feedback
+
+For unexpected tool limitations or confusing output, POST `/v1/feedback` once
+with a saved key and a product-only summary. Body: `{category,severity,summary,
+source,suggestion?,intent?,project_id?,shot_id?,artifact_id?,include_context:false}`.
+Read `feedback` in discovery for closed categories, limits and reference rules.
+PAT needs `projects:read`; references need the matching project grant. Never send
+prompts, media, credentials, contact info or URLs. Do not quote customer text;
+include_context:true is disabled. This reports a product issue, not a request to
+generate/retry, change budget, or post a public GitHub issue.
+
+GET `/v1/feedback/REPORT_ID` recovers the original receipt. Same key/body POST
+never forwards again. `forwarding:enqueued` is only local SDK queueing, not
+remote delivery proof; pending/unknown must not be retried with new keys. Owner
+opt-out and account/connection rate limits apply; do not work around403/429.
+Only a human can GET/PATCH `/v1/feedback/settings` with revision CAS and saved key.
+GET `/v1/feedback?category=&source=&limit=50` lists own bounded receipts (PAT only
+its own connection). No global write-intent or automatic reporting hook is active.
+
+### Story Chat risk advice
+
+Existing Story Chat generate proposals may include `risk_review`:
+`{version:1,source_hash,status,rule_status,model_status,warnings:[{shot_id,code,source,message,suggestion}]}`.
+Read `story_risk_review` in `/v1/guided-schema` or `/v1/agent-guide` for the live contract.
+Codes are `simultaneous_speakers`, `speech_too_dense`, `action_density`, `plot_density`;
+source is `rule` or `model`. These are suggestions about story-card text, seconds
+and bindings, not execution preflight or model quality guarantees. Whole-take
+reviews and generated media remain independent.
+
+`status` is `warnings`, `no_findings`, `incomplete` or `stale`; rule status is
+`checked`/`partial`; model status is `reported`/`not_checked`/`invalid`/`stale`.
+Missing old reports are unchecked, never clean. Changed source makes presented
+advice stale without rewriting its receipt. The model advice reuses the original
+conversation response; no extra model call or automatic retry. Suggestions are
+untrusted text, never tools: confirm an edit/split separately and retain the normal
+generation confirmation, preflight, budgets and fixed sampler settings.
+
+### Server-owned completion collection (#588)
+
+`GET /v1/guided-schema` advertises `result_collection.version=1`. New completed jobs
+return `result.project_collection`: `{version:1,status,entity_ids,project_version?,selected_entity_id?}`.
+`bound` means the artifact and owner/project update committed together; refresh the
+project and use its current version for further `/actions`. Never PUT collected
+results just because a story opens or jobs are polled. Existing choices, trims and
+segments remain unchanged. Only a fresh real first result with no later accepted
+job can become the initial choice; simulations and stale results are candidates.
+Generated audio is added as media, not silently mixed into the film. Jobs owned
+by a frozen film run retain their existing snapshot/result map and never project
+into the live story; they return `not_applicable`.
+
+`managed_projection` is an immutable legacy Quick Create container: use the existing
+take API, not a project PUT. Migrated stories use normal collection. Missing/trashed
+projects or shots and document quota/collision refusals keep the completed artifact
+with a skipped receipt; never resubmit generation to repair its display. Historical
+jobs have no receipt and are not backfilled on GET; their versions and explicit
+`artifact.adopt`/`storyboard.select` actions remain available. These receipts do not
+authorize historical production writes, new generation, or charging changes.
 
 ### Ordered shot segments
 
@@ -477,3 +586,46 @@ python scripts/inkseq.py request GET /v1/library/imports/RETURNED_OPERATION_ID
 For explicit recovery, repeat only the same import POST, JSON file and key. Do not chain this to paid generation. `tag.json` uses the original `{expected_version,actions}` envelope; `import.json` uses the import body above. Source/destination IDs are account data, never credentials.
 
 Pending library imports block source/destination lifecycle changes under the original owner reference gate, even before receiving bytes. Terminal receipt reads/replays retain current owner/scopes without requiring active project content. Only positively completed same-owner import audit capsules are excluded from an explicit universal-purge reference census; pending and blocked capsules remain conservative references. No audit rows are removed. Original guided validation rollback after verified copies produces `blocked`, `reason=library_authoring_validation_failed`, `no_authoring_committed=true`; retain original copies/key and explicitly choose a new intent if needed. / 未完成导入阻止相关生命周期变更；已确认的校验回滚保留原回执和副本，不自动重试或清理。
+
+
+### Confirmed long-shot windows
+
+`POST /v1/projects/{project_id}/shots/{shot_id}/script-windows/preview` requires project read+write scope, `Idempotency-Key`, and JSON `{"expected_version":7,"window_seconds":5}`. Omit `window_seconds` for one assistant proposal among valid 5–10 second lengths. Source shots currently remain inside the existing 8–15 second envelope. No video job, rental or video-credit debit occurs. Scope/trash/CAS checks precede the durable intent and external call. A 3-new-preview/minute owner quota spans projects; replay never consumes another model call.
+
+The reply contains `preview_id`, `status` (`pending`, `unknown`, `invalid`, `stale`, `ready`), `source_version`, `source_hash`, `supported_options`. A ready reply also includes `script_windows={version:1,window_seconds,source_hash,windows:[{index,description,dialogue_ids}]}`, server `dialogue=[{id,text}]`, and `timing`. Every canonical `(S1) <d>[Chinese] original line</d>` is assigned once in original order; the assistant does not rewrite speech. Invalid/duplicated/missing IDs or malformed responses are retained failures, never silently repaired.
+
+`timing` includes 24 fps, requested_frames, output_frames, window_frames, initial_shared_frames and `windows:[{index,start_frame,end_frame,start_seconds,end_seconds,output_frames,native_contribution_frames,generation_frames,overlap_frames}]`. Bounds are end-exclusive. These are the pinned native scheduler's actual geometry, including a retained first image and short final windows.15s/5s without a first image means 4 windows, 357 output frames, not three equal clips. Unsupported one-window options are rejected; inspect supported_options. End-frame anchors, FL audio guides, non-reference audio/video conditioning, injected guides and slash-window commands are unsupported in this slice; they are rejected before preview rather than silently moved to the wrong window.
+
+GET `/v1/projects/{project_id}/shots/{shot_id}/script-windows/previews/{preview_id}` recovers the owner/project/shot-bound receipt. Pending means the original external outcome is not recorded; unknown means a call failed without a trustworthy result. Never automatically retry with a new key.409 idempotency conflict means the same key was reused with different input;409 stale/source conflict requires explicit new preview after reloading.
+
+Confirm through normal `/actions`: `{"expected_version":7,"actions":[{"op":"shot.script_windows.confirm","shot_id":"SHOT","preview_id":"PREVIEW"}]}`. `shot.script_windows.clear` needs only shot_id and the same outer CAS. Confirmation stores a receipt-bound `shot.data.script_windows` including preview_id. Generic client-authored splits do not authorize generation. Preflight checks the original receipt, current source/defaults, timing and immutable native controls. PW uses single newlines inside windows and one blank line between windows; every window gets its own film/clean-frame framing. Old FG behavior and accepted requests remain unchanged. The new native package must be qualified before staging generation; a previous helper is not compatible with new PW requests. Requested duration/job/attempt/charge identity stays original while native delivery checks the precisely projected output frames, with no trim, padding or retiming.
+## Explicit take reviews
+
+Discover `take_reviews` in `/v1/guided-schema` and `/v1/agent-guide` on the target
+origin before calling it. GET and PATCH use
+`/v1/projects/{project_id}/shots/{shot_id}/takes/{artifact_id}/review`.
+Use the original accepted artifact ID of this owned shot, not a selected entity
+ID. Verified migrated aliases are supported; imported or unproven media is not.
+
+GET requires projects:read and returns revision/verdict/marks/actor_kind/updated_at.
+PATCH requires projects:read + projects:write and an Idempotency-Key:
+
+```json
+{"expected_revision":0,"verdict":"keep","marks":[{"id":"m1","start_s":1.0,"end_s":2.0,"tags":["camera"],"verdict":"change","note":""}]}
+```
+
+Whole verdict is keep/redo/null. At least verdict or marks is required; omitted
+fields stay unchanged, null retracts whole verdict and [] clears marks. Marks
+replace the list (max50), IDs are unique ASCII letters/digits/_/- (1–100 chars),
+note≤500, finite source seconds inside the take duration, start<end, overlap
+allowed. Tags: performance/camera/consistency/subtitles/quality/other (unique,
+empty allowed). Mark verdict keep/change is independent of whole verdict.
+Missing trusted duration blocks nonempty marks. No frame snap or generation.
+
+PATCH returns a small receipt with revision, verdict, mark_count, actor_kind and
+updated_at (server Unix seconds); GET full marks. CAS409 commits nothing; reload
+and resolve the intended edit. Identical-key replay returns the original receipt,
+changed-body replay409. Trash/purge blocks even replay. Reviews follow the
+artifact, not current selection. Never fabricate a human verdict from a star,
+pick, export or automated mark; PAT writes are server-labelled agent. Notes stay
+in product data and are redacted on permanent purge, never copied to analytics.

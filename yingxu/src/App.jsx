@@ -5,7 +5,9 @@ import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import StudioHeader from './StudioHeader.jsx';
-import AccountMenu, { MenuItem } from './AccountMenu.jsx';
+import AccountMenu from './AccountMenu.jsx';
+import { Menu, MenuItem } from './ui/Menu.jsx';
+import { Popover } from './ui/Popover.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Landing from './Landing.jsx';
@@ -14,7 +16,7 @@ import Library from './Library.jsx';
 import UniversalTrash, {
   TrashProvider,
   useTrash,
-  TrashMenu,
+  TrashButton,
   StoryItemManager,
 } from './UniversalTrash.jsx';
 import { deletionImpact } from './entity-references.js';
@@ -343,36 +345,10 @@ function SeriesApp({ sidebarView, onSidebarView }) {
       state.workspace.account === c.account &&
       state.project.id === linkTarget.projectId;
   const chapterList = p.entities.filter((e) => e.type === 'chapter').sort(byOrder);
-  const accountMenu = (
-    <AccountMenu
-      account={c.account}
-      onSignIn={() => open({ type: 'cloud' })}
-      items={
-        <>
-          <MenuItem icon={Download} disabled={busy} onClick={backup}>
-            {t('story.copy53')}
-          </MenuItem>
-          <MenuItem icon={Upload} onClick={() => open({ type: 'projects' })}>
-            {t('story.copy54')}
-          </MenuItem>
-          <MenuItem icon={Bot} onClick={() => open({ type: 'agent' })}>
-            {t('story.copy31')}
-          </MenuItem>
-          {state.workspace.mode === 'cloud' && (
-            <>
-              <MenuItem onClick={() => open({ type: 'manage-items' })}>
-                {t('trash.manage')}
-              </MenuItem>
-              <TrashMenu
-                target={{ kind: 'project', project_id: p.id, id: p.id }}
-                onRename={() => open({ type: 'project-settings' })}
-              />
-            </>
-          )}
-        </>
-      }
-    />
-  );
+  // Account menu holds account things only (owner, 2026-10-26). Backup lives under Export,
+  // Connect AI has its own button, local projects sit on the works page and the story list,
+  // and rename / manage items / delete belong to Story settings.
+  const accountMenu = <AccountMenu account={c.account} onSignIn={() => open({ type: 'cloud' })} />;
   return (
     <>
       <div className="home" hidden={sidebarView !== 'library'}>
@@ -408,68 +384,70 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           />
           {/* Chapters are sections on the one storyboard; no chapter switcher (owner, 2026-10-21). */}
           {state.workspace.mode === 'cloud' ? (
-            <details className="v2-cloud-status">
-              <summary className="v2-autosave">
-                <CloudSaveStatus plain />
-              </summary>
-              <div className="card-box">
-                <button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
-                  {t('account.copy64')}
+            <Popover
+              className="v2-cloud-status-panel"
+              trigger={
+                <button type="button" className="v2-autosave">
+                  <CloudSaveStatus plain />
                 </button>
-                <button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
-                  {t('account.copy65')}
+              }
+            >
+              <button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
+                {t('account.copy64')}
+              </button>
+              <button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
+                {t('account.copy65')}
+              </button>
+              <button
+                disabled={c.busy}
+                onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
+              >
+                {t('account.copy66')}
+              </button>
+              <button
+                disabled={c.busy}
+                onClick={() => void cloud.reloadCapabilities().catch(() => {})}
+              >
+                {t('account.copy72')}
+              </button>
+              {c.remoteUpdate && (
+                <button disabled={c.busy} onClick={() => void cloud.open(p.id).catch(() => {})}>
+                  {t('account.copy68')}
                 </button>
-                <button
-                  disabled={c.busy}
-                  onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
-                >
-                  {t('account.copy66')}
-                </button>
-                <button
-                  disabled={c.busy}
-                  onClick={() => void cloud.reloadCapabilities().catch(() => {})}
-                >
-                  {t('account.copy72')}
-                </button>
-                {c.remoteUpdate && (
-                  <button disabled={c.busy} onClick={() => void cloud.open(p.id).catch(() => {})}>
-                    {t('account.copy68')}
+              )}
+              {c.conflict && (
+                <>
+                  <p role="alert">{t('account.copy69')}</p>
+                  <button disabled={c.busy} onClick={() => void cloud.saveCopy().catch(() => {})}>
+                    {t('account.copy70')}
                   </button>
-                )}
-                {c.conflict && (
-                  <>
-                    <p role="alert">{t('account.copy69')}</p>
-                    <button disabled={c.busy} onClick={() => void cloud.saveCopy().catch(() => {})}>
-                      {t('account.copy70')}
-                    </button>
-                    <button
-                      onClick={() =>
-                        download(
-                          new Blob([JSON.stringify(store.exportProject(), null, 2)], {
-                            type: 'application/json',
-                          }),
-                          p.title + '.draft.json',
-                        )
-                      }
-                    >
-                      {t('account.copy71')}
-                    </button>
-                  </>
-                )}
-                {c.error && <p role="alert">{c.error}</p>}
-                {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
-                <PreservedStoryDrafts account={c.account} projectId={p.id} />
-                <button
-                  disabled={c.busy}
-                  onClick={() => {
-                    cloud.leave();
-                    onSidebarView('story', { selected: true });
-                  }}
-                >
-                  {t('account.copy67')}
-                </button>
-              </div>
-            </details>
+                  <button
+                    onClick={() =>
+                      download(
+                        new Blob([JSON.stringify(store.exportProject(), null, 2)], {
+                          type: 'application/json',
+                        }),
+                        p.title + '.draft.json',
+                      )
+                    }
+                  >
+                    {t('account.copy71')}
+                  </button>
+                </>
+              )}
+              {c.error && <p role="alert">{c.error}</p>}
+              {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
+              <PreservedStoryDrafts account={c.account} projectId={p.id} />
+              <button
+                disabled={c.busy}
+                onClick={() => {
+                  cloud.leave();
+                  onSidebarView('story', { selected: true });
+                }}
+              >
+                {t('account.copy67')}
+              </button>
+            </Popover>
           ) : (
             <Badge tone="local">{t('story.copy9')}</Badge>
           )}
@@ -492,41 +470,40 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           >
             <Redo2 size={15} />
           </button>
-          <details className="v2-export-menu">
-            <summary>
-              {t('v2.export')} <ChevronRight size={12} />
-            </summary>
-            <div className="card-box">
-              <button onClick={() => open({ type: 'roughcut' })}>
-                <Clapperboard size={15} />
-                <span>
-                  {t('v2.roughCut')}
-                  <small className="muted export-hint">{t('v2.roughCutHint')}</small>
-                </span>
+          <Menu
+            className="v2-export-panel"
+            trigger={
+              <button type="button" className="v2-export-trigger">
+                {t('v2.export')} <ChevronRight size={12} />
               </button>
-              {(() => {
-                // Subtitles are offered only when this chapter has some (owner, 2026-10-21).
-                let srt = '';
-                try {
-                  srt = exportSrt(p, chapter?.id || chapterList[0]?.id);
-                } catch {
-                  srt = '';
-                }
-                return srt ? (
-                  <button
-                    onClick={() =>
-                      download(new Blob([srt], { type: 'application/x-subrip' }), p.title + '.srt')
-                    }
-                  >
-                    {t('v2.subtitles')}
-                  </button>
-                ) : null;
-              })()}
-              <button disabled={busy} onClick={backup}>
-                {t('story.copy53')}
-              </button>
-            </div>
-          </details>
+            }
+          >
+            <MenuItem icon={Clapperboard} onSelect={() => open({ type: 'roughcut' })}>
+              {t('v2.roughCut')}
+              <small>{t('v2.roughCutHint')}</small>
+            </MenuItem>
+            {(() => {
+              // Subtitles are offered only when this chapter has some (owner, 2026-10-21).
+              let srt = '';
+              try {
+                srt = exportSrt(p, chapter?.id || chapterList[0]?.id);
+              } catch {
+                srt = '';
+              }
+              return srt ? (
+                <MenuItem
+                  onSelect={() =>
+                    download(new Blob([srt], { type: 'application/x-subrip' }), p.title + '.srt')
+                  }
+                >
+                  {t('v2.subtitles')}
+                </MenuItem>
+              ) : null;
+            })()}
+            <MenuItem disabled={busy} onSelect={backup}>
+              {t('story.copy53')}
+            </MenuItem>
+          </Menu>
           <ThemeToggle />
           <LanguageSwitcher />
           <button
@@ -540,12 +517,12 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           </button>
           <button
             className="ghost"
-            title={t('settings.title')}
-            aria-label={t('settings.title')}
+            title={t('story.settings')}
+            aria-label={t('story.settings')}
             onClick={() => open({ type: 'project-settings' })}
           >
             <Settings2 size={15} />
-            <span className="bar-label">{t('settings.title')}</span>
+            <span className="bar-label">{t('story.settings')}</span>
           </button>
           {accountMenu}
         </header>
@@ -785,6 +762,18 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               <Field label={t('story.copy95')}>
                 <textarea name="logline" rows={4} maxLength={2000} defaultValue={p.logline} />
               </Field>
+              {state.workspace.mode === 'cloud' && (
+                <div className="story-settings-actions">
+                  <button type="button" onClick={() => open({ type: 'manage-items' })}>
+                    {t('trash.manage')}
+                  </button>
+                  <TrashButton
+                    target={{ kind: 'project', project_id: p.id, id: p.id }}
+                    label={t('story.deleteStory')}
+                    onTrashSettled={close}
+                  />
+                </div>
+              )}
               {error && (
                 <p role="alert" className="inline-error">
                   {error}

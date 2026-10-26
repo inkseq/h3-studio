@@ -409,7 +409,13 @@ def capabilities(settings):
     }
 
 
-def compile_request(body: dict, resolve_asset, *, backend="comfy-worker"):
+def compile_request(
+    body: dict,
+    resolve_asset,
+    *,
+    backend="comfy-worker",
+    script_windows_authorized=False,
+):
     """Validate immutable inputs without loading weights or accessing providers."""
     permitted = {
         "client_ref",
@@ -473,6 +479,12 @@ def compile_request(body: dict, resolve_asset, *, backend="comfy-worker"):
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > 12000:
         raise ValueError("请输入1至12000字符的单镜提示词")
     controls = copy.deepcopy(body.get("controls", {}))
+    if (
+        isinstance(controls, dict)
+        and "script_window_prompts" in controls
+        and not script_windows_authorized
+    ):
+        raise ValueError("script_windows_unconfirmed")
     if profile is not None:
         from .inference.wangp_profile_dispatch import control_schema as profile_schema
 

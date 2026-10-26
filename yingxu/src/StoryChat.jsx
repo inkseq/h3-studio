@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import ItemMenu from './ItemMenu.jsx';
+import { MenuItem } from './ui/Menu.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
 import { EmptyState } from './ui/Note.jsx';
 import { StoryboardSplitter, useStoryboardPanelSize } from './StoryboardPanels.jsx';
@@ -737,29 +738,17 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                     <small>{whenText(item.updated_at, locale)}</small>
                   </button>
                   <ItemMenu label={t('storyChat.chatMenu')}>
-                    {(close) => (
-                      <>
-                        <button
-                          role="menuitem"
-                          onClick={() => {
-                            close();
-                            setRenaming(item);
-                          }}
-                        >
-                          {t('storyChat.renameChat')}
-                        </button>
-                        <button
-                          role="menuitem"
-                          title={t('storyChat.removeChatHelp')}
-                          onClick={() => {
-                            close();
-                            void updateChat(item.project_id, { hidden: true }).catch(() => {});
-                          }}
-                        >
-                          {t('storyChat.removeChat')}
-                        </button>
-                      </>
-                    )}
+                    <MenuItem onSelect={() => setRenaming(item)}>
+                      {t('storyChat.renameChat')}
+                    </MenuItem>
+                    <MenuItem
+                      title={t('storyChat.removeChatHelp')}
+                      onSelect={() =>
+                        void updateChat(item.project_id, { hidden: true }).catch(() => {})
+                      }
+                    >
+                      {t('storyChat.removeChat')}
+                    </MenuItem>
                   </ItemMenu>
                 </li>
               ))}

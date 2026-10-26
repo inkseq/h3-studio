@@ -1,0 +1,219 @@
+/* Profile editor and file chooser (StoryboardComponents.jsx) on ui/Dialog. Controls keep their
+   shared look from ui/controls.css; this file only lays them out. Tokens only. */
+
+.pe-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+.pe-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(0, 2fr);
+  gap: var(--sp-3) var(--sp-4);
+  align-items: start;
+}
+.pe-looks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pe-looks .seg .badge {
+  margin-left: var(--sp-1);
+}
+.pe-looks .seg small {
+  margin-left: var(--sp-1);
+}
+.pe-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+.pe-section.drop-hot {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  border-radius: var(--r-sm);
+}
+.pe-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+}
+.pe-section-head h3,
+.pe-used h3 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+.pe-section-head > button {
+  margin-left: auto;
+  align-self: center;
+}
+.pe-variant {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(0, 2fr) auto;
+  gap: var(--sp-3);
+  align-items: end;
+}
+.pe-variant-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: 2px;
+}
+.pe-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.pe-grow {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Photos: square tiles; the first is the main photo. */
+.pe-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: var(--sp-3);
+  border-radius: var(--r);
+}
+.pe-photos.drop-hot {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+}
+.pe-photo {
+  position: relative;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.pe-photo img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  box-shadow: 0 0 0 1px var(--line) inset;
+}
+.pe-photo figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-1);
+  min-height: var(--h-sm);
+}
+.pe-photo-remove,
+.pe-photo-ai {
+  position: absolute;
+  top: 6px;
+}
+.pe-photo-remove {
+  right: 6px;
+  background: var(--media-scrim);
+  color: var(--white);
+}
+.pe-photo-ai {
+  left: 6px;
+  background: var(--media-scrim);
+  color: var(--white);
+}
+.pe-photo-add {
+  aspect-ratio: 1;
+  height: auto;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  white-space: normal;
+  text-align: center;
+  color: var(--muted);
+  border-style: dashed;
+  background: transparent;
+}
+.pe-photo-add:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.pe-photo-add small {
+  font-size: var(--fs-xs);
+}
+.pe-voice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.pe-voice.main {
+  border-color: var(--line-3);
+}
+.pe-drop {
+  margin: 0;
+  padding: var(--sp-4);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  text-align: center;
+  font-size: var(--fs-sm);
+}
+.pe-used {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.pe-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* File chooser */
+.pe-choose-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.pe-choose-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: var(--sp-2);
+  max-height: 50vh;
+  overflow: auto;
+}
+.pe-choose-tile {
+  height: auto;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-1);
+  padding: var(--sp-1);
+  white-space: normal;
+}
+.pe-choose-tile img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+}
+.pe-choose-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 50vh;
+  overflow: auto;
+}
+
+@media (max-width: 760px) {
+  .pe-grid,
+  .pe-variant {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .pe-variant-actions {
+    padding-bottom: 0;
+  }
+}

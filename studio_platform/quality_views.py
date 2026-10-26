@@ -457,7 +457,9 @@ def _support(value):
         if isinstance(value.get(field), dict):
             result[field] = _envelope(value[field])
     result["controls"] = {
-        key: _schema(item) for key, item in value.get("controls", {}).items()
+        key: _schema(item)
+        for key, item in value.get("controls", {}).items()
+        if key != "script_window_prompts"
     }
     result["reason_code"] = (
         "preflight_required" if value.get("enabled") else "quality_tier_unavailable"

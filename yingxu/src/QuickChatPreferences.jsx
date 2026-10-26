@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { preferenceBody, takeError } from './quick-chat-takes.js';
+import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 export default function QuickChatPreferences({ controller, value, onSaved, busy }) {
   const { t } = useI18n(),
     [copies, setCopies] = useState(String(value.copies_max)),
@@ -16,41 +17,36 @@ export default function QuickChatPreferences({ controller, value, onSaved, busy 
       setError(takeError(e, t));
     }
   }
+  const number = (value, onChange) => (
+    <input
+      type="number"
+      min="1"
+      step="1"
+      max="2147483647"
+      value={value}
+      disabled={busy}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
   return (
     <form onSubmit={save}>
-      <p>{t('takes.preferencesHelp')}</p>
-      <label className="qc-field">
-        {t('takes.copiesMax')}
-        <input
-          type="number"
-          min="1"
-          step="1"
-          max="2147483647"
-          value={copies}
-          disabled={busy}
-          onChange={(e) => setCopies(e.target.value)}
-        />
-      </label>
-      <label className="qc-field">
-        {t('takes.foldCount')}
-        <input
-          type="number"
-          min="1"
-          step="1"
-          max="2147483647"
-          value={fold}
-          disabled={busy}
-          onChange={(e) => setFold(e.target.value)}
-        />
-      </label>
-      {error && (
-        <p role="alert" className="qc-error">
-          {error}
-        </p>
-      )}
-      <button type="submit" disabled={busy} className="qc-primary">
-        {t('takes.save')}
-      </button>
+      <SettingsSection
+        title={t('takes.preferences')}
+        help={t('takes.preferencesHelp')}
+        actions={
+          <button type="submit" disabled={busy} className="primary">
+            {t('takes.save')}
+          </button>
+        }
+      >
+        <SettingRow label={t('takes.copiesMax')}>{number(copies, setCopies)}</SettingRow>
+        <SettingRow label={t('takes.foldCount')}>{number(fold, setFold)}</SettingRow>
+        {error && (
+          <p role="alert" className="qc-error ui-settings-error">
+            {error}
+          </p>
+        )}
+      </SettingsSection>
     </form>
   );
 }
