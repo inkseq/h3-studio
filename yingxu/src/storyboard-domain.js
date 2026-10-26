@@ -213,6 +213,9 @@ export function storyboardView(
       previousFrame: b.previousFrame?.frameAssetId,
       quality: b.quality ?? s.data.qualityIntent ?? 'draft',
       seedLock: !!s.data.h3?.controls?.seed,
+      // Creator generation choices (owner spec 2026-10-26); the tier fixes everything else.
+      aspect: s.data.h3?.controls?.aspect_ratio || '16:9',
+      keepAudio: s.data.h3?.controls?.generate_audio !== false,
       versions,
       chosen: s.data.selectedAssetId || '',
       // Kept parts of the chosen take, in playback order (#512); empty = the whole take.
@@ -643,6 +646,21 @@ export function storyboardSnapshot(project, shotId) {
     previous: shot?.data.storyboard?.continuePrevious ? shots[at - 1]?.data.selectedAssetId : null,
   };
 }
+// Aspect, "keep sound" and a fresh seed for "another version" (owner spec 2026-10-26).
+// generate_audio defaults to on, so only "off" is stored.
+const CREATOR_KEYS = ['aspect', 'keepAudio', 'newSeed'];
+function patchCreatorControls(shot, patch) {
+  if (!CREATOR_KEYS.some((key) => Object.hasOwn(patch, key))) return;
+  const controls = { ...shot.data.h3?.controls };
+  if (Object.hasOwn(patch, 'aspect')) controls.aspect_ratio = patch.aspect;
+  if (Object.hasOwn(patch, 'keepAudio')) {
+    if (patch.keepAudio) delete controls.generate_audio;
+    else controls.generate_audio = false;
+  }
+  if (patch.newSeed && controls.seed)
+    controls.seed = String(1 + Math.floor(Math.random() * 2147483646));
+  shot.data.h3 = { ...shot.data.h3, controls };
+}
 export function patchStoryboardShot(project, id, patch) {
   const shot = find(project, id);
   if (!shot) throw Error('镜头不存在。');
@@ -704,6 +722,7 @@ export function patchStoryboardShot(project, id, patch) {
             role: find(project, source)?.type === 'audio' ? 'audio' : 'reference',
           });
     }
+    patchCreatorControls(shot, patch);
     shot.version++;
     if (shot.data.selectedAssetId) shot.status = 'review';
     return;
@@ -767,6 +786,7 @@ export function patchStoryboardShot(project, id, patch) {
       inputMode: b.mode,
       recipeId: b.mode === 'ref' ? 'h3-base-ref2va-v1' : 'h3-base-fl2va-v1',
     };
+  patchCreatorControls(shot, patch);
   shot.data.storyboard = b;
   shot.version++;
   if (shot.data.selectedAssetId) shot.status = 'review';
