@@ -1,6 +1,6 @@
 // Shared modal dialog (h3-studio#514). One behaviour for every dialog: native modal, Escape
 // closes, focus moves in and returns to the opener, and a cached page that is hidden closes
-// its dialog. The look is dialogs.css (.qc-dialog); admin consoles reuse useModal only.
+// its dialog. The look is ui/dialog.css (.qc-dialog); admin consoles reuse useModal only.
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';

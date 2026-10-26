@@ -32,10 +32,8 @@
   display: grid;
   gap: 6px;
 }
-.cloud-project-list > button {
+.cloud-project-list > div > button {
   justify-content: space-between;
-  text-align: left;
-  padding: 14px;
 }
 .cloud-project-list span {
   display: grid;
@@ -115,12 +113,6 @@
   gap: 7px;
   font-size: 12px;
 }
-.shot-prompt-options input {
-  width: 16px;
-  height: 16px;
-  flex-shrink: 0;
-  margin: 0;
-}
 .shot-prompt-preview {
   padding: 12px;
   margin-top: 12px;
@@ -135,9 +127,8 @@
   overflow: auto;
 }
 .cloud-warning > button {
-  margin: 8px 0 0;
   display: block;
-  font-size: 12px;
+  margin: 8px 0 0;
 }
 
 .service-status {

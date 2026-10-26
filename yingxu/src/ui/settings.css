@@ -133,14 +133,8 @@
   color: var(--muted);
   font-size: 12px;
 }
-.ui-setting-value .linkish {
-  padding: 0;
-  border: 0;
-  background: none;
-  box-shadow: none;
-  color: var(--accent);
+.ui-setting-value button.link {
   font-size: 12px;
-  cursor: pointer;
 }
 .ui-setting-error {
   color: var(--bad);

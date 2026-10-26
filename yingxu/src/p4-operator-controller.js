@@ -392,10 +392,14 @@ export function createP4OperatorController({
           ? state.billingFilter
           : { owner_id: operation.billing.owner_id },
       );
-    } catch {}
+    } catch {
+      // A failed refresh already shows in the controller state; the next poll retries.
+    }
     try {
       await readBudgetAdmin();
-    } catch {}
+    } catch {
+      // A failed refresh already shows in the controller state; the next poll retries.
+    }
     return value;
   }
   async function sendBilling(operation) {
@@ -643,7 +647,9 @@ export function createP4OperatorController({
     await readBudgetAdmin();
     try {
       await refresh();
-    } catch {}
+    } catch {
+      // A failed refresh already shows in the controller state; the next poll retries.
+    }
     return { state: 'reconciled', desired_values_confirmed: true };
   }
   async function act(fn) {
@@ -699,18 +705,24 @@ export function createP4OperatorController({
       pending(null);
       try {
         await refresh(!!state.adminSnapshot);
-      } catch {}
+      } catch {
+        // A failed refresh already shows in the controller state; the next poll retries.
+      }
       if (operation.method === 'cancelJobs')
         try {
           await readJobAdmin();
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
       if (operation.method === 'updateHostPolicy')
         try {
           await readHosts({ admin: true });
           await readHostAudit();
           if (String(state.hostTarget?.machine_id) === operation.body.machine_id)
             await readHostTarget(operation.body.machine_id);
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
       return value;
     } catch (error) {
       guard(account, version);
@@ -745,7 +757,9 @@ export function createP4OperatorController({
       ) {
         try {
           await refresh(!!state.adminSnapshot);
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
         guard(account, version);
         error.message =
           '机器状态刚刚更新，本次操作未接受。请重试（operator_node_version_conflict）。';
@@ -810,7 +824,7 @@ export function createP4OperatorController({
       billingReading++;
       for (const key of Object.keys(hostReading)) hostReading[key]++;
       client.setAccount(account);
-      let saved = null;
+      let saved;
       try {
         saved = account ? JSON.parse(storage?.getItem(pendingKey(account)) || 'null') : null;
       } catch {
@@ -840,7 +854,9 @@ export function createP4OperatorController({
       if (account)
         try {
           await refresh();
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
     },
     refresh,
     readAdmin,

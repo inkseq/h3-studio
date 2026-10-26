@@ -7,7 +7,6 @@ import { artifactMedia } from './artifact-media.js';
 import { useThumbnailSource } from './use-thumbnail-source.js';
 
 export function StoryboardDownloads({ version, title }) {
-  const { t } = useI18n();
   const video = version.asset?.entity,
     audio = version.audio,
     items = [
@@ -427,7 +426,9 @@ export function StoryboardPlayButton({ asset, start = 0, len = null, label }) {
   };
   return (
     <Button
-      className={'play' + (playing ? ' on' : '')}
+      size="sm"
+      variant={playing ? 'primary' : undefined}
+      className="play"
       disabled={!url}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={toggle}

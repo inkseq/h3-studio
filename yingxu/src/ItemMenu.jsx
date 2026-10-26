@@ -4,7 +4,8 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { Menu } from './ui/Menu.jsx';
 import { IconButton } from './ui/Button.jsx';
 // The "…" row menu. Rows are ui/Menu MenuItem elements; business operations stay with callers.
-export default function ItemMenu({ children, label, disabled = false }) {
+// onMedia: the trigger sits on a cover picture, so it uses the round on-media button.
+export default function ItemMenu({ children, label, disabled = false, onMedia = false }) {
   const { t } = useI18n();
   return (
     <span className="item-menu" onPointerDown={(e) => e.stopPropagation()}>
@@ -13,7 +14,8 @@ export default function ItemMenu({ children, label, disabled = false }) {
         disabled={disabled}
         trigger={
           <IconButton
-            size="sm"
+            size={onMedia ? undefined : 'sm'}
+            variant={onMedia ? 'on-media' : undefined}
             label={label || t('trash.menu')}
             onClick={(e) => e.stopPropagation()}
           >

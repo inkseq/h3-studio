@@ -14,12 +14,7 @@ import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Landing from './Landing.jsx';
 import { CloudSaveStatus, useCloudAutosave } from './CloudAutosave.jsx';
 import Library from './Library.jsx';
-import UniversalTrash, {
-  TrashProvider,
-  useTrash,
-  TrashButton,
-  StoryItemManager,
-} from './UniversalTrash.jsx';
+import UniversalTrash, { TrashProvider, TrashButton, StoryItemManager } from './UniversalTrash.jsx';
 import React, { useState, useEffect, useEffectEvent, useRef, useSyncExternalStore } from 'react';
 import {
   Plus,
@@ -112,12 +107,10 @@ const getChapter = (p, e) => {
 };
 const readLocalLibrary = readLocalStoryLibrary;
 function Icon({ type, size = 18 }) {
-  const { t, locale } = useI18n();
   const I = icons[type] || BookOpen;
   return <I size={size} />;
 }
 function Field({ label, hint, children }) {
-  const { t, locale } = useI18n();
   return (
     <label className="field">
       <span>{label}</span>
@@ -151,10 +144,8 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
     [search, setSearch] = useState(''),
-    [legacyGuide, setLegacyGuide] = useState(false);
-  const c = useCloud(),
-    trash = useTrash();
-  const storyboardActive = true;
+    [, setLegacyGuide] = useState(false);
+  const c = useCloud();
   const importRef = useRef(),
     selected = find(p, state.selectedId),
     chapter = find(p, state.scopeId);
@@ -241,12 +232,6 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     store.updateProject({ journey: { ...live.journey, stage: 5, reviewShotId: id } });
     store.setSection('journey');
   };
-  const remove = (id) => {
-    const e = find(p, id);
-    if (e && state.workspace.mode === 'cloud')
-      void trash?.request('trash', [{ kind: 'entity', project_id: p.id, id }]);
-    else store.notify(t('trash.cloudOnly'));
-  };
   useEffect(() => {
     if (!state.notice) return;
     const t = setTimeout(() => store.notify(''), 5500);
@@ -305,11 +290,6 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     store.setMode('guide');
     if (c.storyboardEnabled) store.setSection('journey');
     store.select(null);
-  }
-  function focusChapter(id) {
-    store.setScope(id);
-    store.select(null);
-    store.setSection(c.storyboardEnabled && !legacyGuide ? 'journey' : 'story');
   }
   const linkTarget = readAgentLink(window.location.search),
     linkHere =
@@ -940,7 +920,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               </div>
               <p>{t('story.helpCapabilities')}</p>
               <p>{t('story.copy123')}</p>
-              <Button className="text-link" onClick={() => open({ type: 'cloud' })}>
+              <Button variant="link" onClick={() => open({ type: 'cloud' })}>
                 {t('story.copy124')}
               </Button>
             </>
@@ -1314,7 +1294,7 @@ function AppContent() {
         <OperatorConsole active={active} />
       </React.Suspense>
     ),
-    '/quick-chat': ({ active, location: page }) => (
+    '/quick-chat': ({ location: page }) => (
       <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
         {/* ?story=preview: sample replies; otherwise the chat story builder (#422). The
             original Quick Create was removed (owner, 2026-10-24): its old links open the

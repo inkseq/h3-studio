@@ -205,7 +205,7 @@ export function createTrashController({
           guard();
           same(op);
           storage.removeItem(name);
-          throw Error(trashErrorKey(error));
+          throw Error(trashErrorKey(error), { cause: error });
         }
         throw error;
       }

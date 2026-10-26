@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import React from 'react';
 import './generation-availability.css';
@@ -36,10 +37,9 @@ export default function GenerationAvailability({
           );
         })}
       </div>
-      <details>
-        <summary>{t('quickView.inputDetails')}</summary>
+      <Disclosure summary={t('quickView.inputDetails')}>
         <p>{current.message}</p>
-      </details>
+      </Disclosure>
       <div className="qc-availability-actions">
         {onRefresh && (
           <Button size="sm" disabled={checking} onClick={onRefresh}>

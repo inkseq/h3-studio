@@ -20,4 +20,23 @@ export default [
       'valid-typeof': 'error',
     },
   },
+  {
+    // Cleared to zero in the app source (design#293); kept at zero from here on.
+    files: ['src/**/*.{js,jsx}'],
+    rules: {
+      'no-unused-vars': [
+        'error',
+        {
+          caughtErrors: 'none',
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^(_|React$)',
+          ignoreRestSiblings: true,
+        },
+      ],
+      'no-empty': 'error',
+      'preserve-caught-error': 'error',
+      'no-useless-assignment': 'error',
+      'no-loss-of-precision': 'error',
+    },
+  },
 ];

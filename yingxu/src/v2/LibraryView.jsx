@@ -1,7 +1,7 @@
 // View ported from design/inkseq-v2-prototype/src/library.jsx.
 // All ownership, uploads, commands and receipts are supplied by Library.jsx.
 import React, { useRef, useState } from 'react';
-import { Button } from '../ui/Button.jsx';
+import { Button, IconButton } from '../ui/Button.jsx';
 import { SideNav, SideNavItem } from '../ui/SideNav.jsx';
 import {
   Box,
@@ -59,7 +59,9 @@ function useSideWidth() {
     setWidth(value);
     try {
       localStorage.setItem(SIDE_KEY, String(value));
-    } catch {}
+    } catch {
+      // Browser storage is optional (private mode, blocked site data).
+    }
   };
   const start = (event) => {
     event.preventDefault();
@@ -283,26 +285,26 @@ export default function LibraryView({
                 {filters.unused
                   ? t('library.view.unused')
                   : projects.find((p) => p.id === filters.project_id)?.title}
-                <Button
-                  className="x"
-                  aria-label={t('library.clear')}
+                <IconButton
+                  size="xs"
+                  label={t('library.clear')}
                   onClick={() => change({ project_id: '', work: '', unused: '' })}
                 >
                   <X size={11} />
-                </Button>
+                </IconButton>
               </span>
             )}
             {filters.tag && (
               <span className="pill">
                 <Tag size={11} />
                 {filters.tag}
-                <Button
-                  className="x"
-                  aria-label={t('library.clear')}
+                <IconButton
+                  size="xs"
+                  label={t('library.clear')}
                   onClick={() => change({ tag: '' })}
                 >
                   <X size={11} />
-                </Button>
+                </IconButton>
               </span>
             )}
             <input
@@ -336,7 +338,7 @@ export default function LibraryView({
             <div className="libp-bulk">
               <b>{t('library.selected', { count: picked.length })}</b>
               <PopMenu
-                summaryClass="small"
+                look="small"
                 disabled={locked || pickedManaged}
                 title={pickedManaged ? t('library.managedHint') : undefined}
                 label={

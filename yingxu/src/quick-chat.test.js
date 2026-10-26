@@ -95,9 +95,7 @@ test('uint64 seeds stay decimal strings; overflow and lossy numbers fail', () =>
   assert.ok(
     settingsProblems({ copies: 1, controls: { seed: '18446744073709551616' } }, recipe).length,
   );
-  assert.ok(
-    settingsProblems({ copies: 1, controls: { seed: 18446744073709551615 } }, recipe).length,
-  );
+  assert.ok(settingsProblems({ copies: 1, controls: { seed: 2 ** 64 } }, recipe).length);
 });
 test('material catalog preserves disabled and incompatible selections, effective inputs are explicit', () => {
   const bindings = [
@@ -199,9 +197,8 @@ test('client uses same-origin account fence, original idempotency and exact crea
   assert.deepEqual(JSON.parse(calls[1].options.body).item_ids, ['i']);
 });
 function fakeClient(overrides = {}) {
-  let account;
   return {
-    setAccount: (value) => (account = value),
+    setAccount: () => {},
     reset() {},
     schema: async () => ({ models: [] }),
     capabilities: async () => capability,

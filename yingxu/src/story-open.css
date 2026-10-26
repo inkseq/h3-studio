@@ -40,10 +40,6 @@
   gap: 8px;
   margin-top: 14px;
 }
-.story-open-notice button,
-.story-open-notice a {
-  min-height: 36px;
-}
 .story-open-destination {
   padding: 22px;
   overflow: auto;

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore, useEffectEvent } from 'react';
+import { Disclosure } from './ui/Disclosure.jsx';
 import {
   Activity,
   BarChart3,
@@ -378,8 +379,10 @@ function Overview({ data, api }) {
         </header>
         {machinesState || <Machines rows={machines} />}
         {review.length > 0 && (
-          <details className="ah-review">
-            <summary>{t('adminHome.reviewRecords', { count: review.length })}</summary>
+          <Disclosure
+            className="ah-review"
+            summary={t('adminHome.reviewRecords', { count: review.length })}
+          >
             <p className="muted">{t('adminHome.reviewHelp')}</p>
             <ul>
               {review.map((row) => (
@@ -390,7 +393,7 @@ function Overview({ data, api }) {
                 </li>
               ))}
             </ul>
-          </details>
+          </Disclosure>
         )}
       </section>
       <section className="ah-card">
@@ -599,10 +602,9 @@ function Limits({ api, active, account }) {
       ) : (
         <Note tone="warn">{t('adminHome.noPolicy')}</Note>
       )}
-      <details className="admin-fold">
-        <summary>{t('admin.legacyBudgets')}</summary>
+      <Disclosure className="admin-fold" summary={t('admin.legacyBudgets')}>
         <BudgetAdministration account={account} />
-      </details>
+      </Disclosure>
     </>
   );
 }

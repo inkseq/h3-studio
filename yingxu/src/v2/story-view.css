@@ -83,11 +83,6 @@
 .sb-workspace .storyboard-takes .takes-head .spacer {
   flex: 1;
 }
-.sb-workspace .storyboard-takes .takes-head button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
 .sb-workspace .storyboard-takes .versions {
   display: flex;
   gap: 8px;
@@ -176,7 +171,6 @@
 }
 .sb-workspace .storyboard-takes .take-top > button {
   pointer-events: auto;
-  min-height: 28px;
 }
 .sb-workspace .storyboard-takes .take-info > b {
   overflow-wrap: anywhere;
@@ -225,9 +219,6 @@
   }
   .sb-workspace .storyboard-takes .takes-head {
     gap: 6px;
-  }
-  .sb-workspace .storyboard-takes .takes-head button {
-    min-height: 36px;
   }
   .sb-workspace .storyboard-takes .take-grid {
     max-height: none;
@@ -459,7 +450,6 @@
     .who.small .chip,
     .ruler,
     .ver em,
-    .ver i.x,
     .slot-empty small,
     .sent-prompt em,
     .sent-item small,
@@ -467,7 +457,6 @@
     .tile-name,
     .tile-badge,
     .tile-used,
-    .tile-play .play,
     .take-top em
   ),
 .sb-portal :is(.tile-name, .tile-badge, .tile-audio small, .tile-used) {
@@ -515,18 +504,6 @@
   align-items: center;
   flex-wrap: wrap;
 }
-.sb-workspace .storyboard-download {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
-  min-height: 32px;
-  padding: 5px 9px;
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 12px;
-}
 .sb-workspace details.sent {
   display: block;
   font-size: 12px;
@@ -548,12 +525,12 @@
   background: var(--muted);
   opacity: 0.65;
 }
-.sb-workspace .splitter.x > i {
+.sb-workspace .splitter.axis-x > i {
   width: 2px;
   height: 28px;
   margin: auto;
 }
-.sb-workspace .splitter.y > i {
+.sb-workspace .splitter.axis-y > i {
   height: 2px;
   width: 32px;
   margin: auto;
@@ -624,8 +601,8 @@
   max-height: calc(100dvh - 16px);
 }
 /* StoryboardPanels sets these body classes while a splitter is dragged. */
-body.sb-resizing .splitter.x i,
-body.sb-resizing-y .splitter.y i {
+body.sb-resizing .splitter.axis-x i,
+body.sb-resizing-y .splitter.axis-y i {
   background: var(--accent);
 }
 body.sb-resizing,
@@ -771,18 +748,6 @@ body.sb-resizing-y video {
 .sb-topbar .chapter-actions {
   align-items: center;
 }
-.sb-topbar .chapter-actions > button,
-.sb-topbar .sb-film-primary .story-film-control > button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.sb-topbar .sb-film-primary .story-film-control > button {
-  background: var(--accent);
-  color: var(--accent-ink, var(--accent-ink));
-  border-color: transparent;
-  font-weight: 600;
-}
 .sb-topbar.compact {
   padding-top: 8px;
   padding-bottom: 6px;
@@ -793,18 +758,6 @@ body.sb-resizing-y video {
 .sb-topbar.compact .chapter-summary small,
 .sb-topbar.compact .chapter-actions .label {
   display: none;
-}
-.sb-topbar.compact .chapter-actions > button,
-.sb-topbar.compact .sb-film-primary .story-film-control > button {
-  font-size: 0;
-  gap: 0;
-  padding: 0 8px;
-  min-height: 30px;
-}
-.sb-topbar.compact .chapter-actions > button svg,
-.sb-topbar.compact .sb-film-primary .story-film-control > button svg {
-  width: 15px;
-  height: 15px;
 }
 .sb-head-toggle {
   padding: 0 6px;
@@ -1275,17 +1228,6 @@ body.sb-resizing-y video {
   gap: 6px;
 }
 /* One size for every take tool, links and buttons alike. */
-.take-tools-inline button,
-.take-tools-inline a.btn {
-  min-height: var(--h-sm);
-  height: var(--h-sm);
-  padding: 0 10px;
-  font-size: var(--fs-sm);
-  background: var(--surface-3);
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
-  box-shadow: none;
-}
 /* #232 (#47, #48): segmented choices size to their words in both languages; small numbers
    get small inputs. */
 .sb-workspace .quality-row .seg > button,

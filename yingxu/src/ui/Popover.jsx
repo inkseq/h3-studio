@@ -5,18 +5,25 @@ import React, { useRef, useState } from 'react';
 import * as Primitive from '@radix-ui/react-popover';
 import './menu.css';
 
-export function Popover({ trigger, align = 'end', className = '', children }) {
+// Content can close its popover after work that is not a button click (a file was chosen) by
+// dispatching this bubbling event from any node inside it.
+export const POPOVER_CLOSE = 'ui-popover-close';
+export const closePopover = (node) =>
+  node?.dispatchEvent(new CustomEvent(POPOVER_CLOSE, { bubbles: true }));
+
+export function Popover({ trigger, align = 'end', className = '', onOpenChange, children }) {
   const triggerRef = useRef(null),
     [container, setContainer] = useState(undefined),
     [open, setOpen] = useState(false);
+  const change = (next) => {
+    if (next) setContainer(triggerRef.current?.closest('dialog') || undefined);
+    setOpen(next);
+    onOpenChange?.(next);
+  };
+  const latest = useRef(change);
+  latest.current = change;
   return (
-    <Primitive.Root
-      open={open}
-      onOpenChange={(next) => {
-        if (next) setContainer(triggerRef.current?.closest('dialog') || undefined);
-        setOpen(next);
-      }}
-    >
+    <Primitive.Root open={open} onOpenChange={change}>
       <Primitive.Trigger ref={triggerRef} asChild>
         {trigger}
       </Primitive.Trigger>
@@ -26,9 +33,16 @@ export function Popover({ trigger, align = 'end', className = '', children }) {
           align={align}
           sideOffset={6}
           collisionPadding={8}
-          // Any button inside closes the panel after its action, like a menu.
+          // Any button inside closes the panel after its action, like a menu, unless it only
+          // changes what the panel shows (data-keep-open).
           onClick={(event) => {
-            if (event.target.closest('button:not(:disabled), a[href]')) setOpen(false);
+            const hit = event.target.closest('button:not(:disabled), a[href]');
+            if (hit && !hit.closest('[data-keep-open]')) change(false);
+          }}
+          ref={(node) => {
+            if (!node || node.dataset.closeListener) return;
+            node.dataset.closeListener = '1';
+            node.addEventListener(POPOVER_CLOSE, () => latest.current(false));
           }}
         >
           {children}

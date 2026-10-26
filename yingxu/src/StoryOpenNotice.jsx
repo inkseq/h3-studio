@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useState } from 'react';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { Dialog } from './ui/Dialog.jsx';
 import { Spinner } from './ui/Field.jsx';
@@ -125,10 +126,9 @@ export default function StoryOpenNotice({
               {t('storyOpen.downloadOriginal')}
             </Button>
           </div>
-          <details>
-            <summary>{t('storyOpen.original')}</summary>
+          <Disclosure summary={t('storyOpen.original')}>
             <pre>{JSON.stringify(legacy.project, null, 2)}</pre>
-          </details>
+          </Disclosure>
         </>
       ) : offer ? (
         <>

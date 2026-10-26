@@ -1,3 +1,4 @@
+import { Disclosure } from './ui/Disclosure.jsx';
 import {
   UserRound,
   MapPin,
@@ -110,8 +111,6 @@ function displayLabels(tr) {
 /* ---------- thumbs & draggable tiles ---------- */
 
 export function AssetThumb({ asset, size = 36 }) {
-  const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   if (!asset) return <span className="athumb empty" style={{ width: size, height: size }} />;
   if (asset.kind === 'audio')
     return (
@@ -128,7 +127,6 @@ function Tile({ asset, used, onClick, onZoom, dragId, children }) {
   const { state, dispatch } = useStore();
   const [renaming, setRenaming] = useState(false);
   const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: dragId || 'asset:' + asset.id,
   });
@@ -205,7 +203,6 @@ function Tile({ asset, used, onClick, onZoom, dragId, children }) {
 
 function ProfileCard({ p, used, onOpen, onAdd }) {
   const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { db, state } = useStore();
   const drag = useDraggable({ id: 'profile:' + p.id });
   const drop = useDroppable({ id: 'pdrop:' + p.id });
@@ -713,6 +710,7 @@ function InboxRow({ a }) {
           <small className="muted">{tr('storyboard.copy47')}</small>
         )}
         <select
+          className="field-sm"
           aria-label={a.name + tr('storyboard.detail21')}
           value={target}
           onChange={(e) => setTarget(e.target.value)}
@@ -768,8 +766,6 @@ function InboxRow({ a }) {
 /* ---------- profile editor ---------- */
 
 function VariantDrop({ pid, vid, children, onFiles }) {
-  const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { setNodeRef, isOver, active } = useDroppable({ id: `vdrop:${pid}:${vid}` });
   return (
     <div
@@ -1469,8 +1465,6 @@ export function ModeChip({ info }) {
 }
 const Pill = ({ status }) => <span className={'pill ' + status.tone}>{status.label}</span>;
 function Progress({ v }) {
-  const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   if (!v || !Number.isFinite(v.progress) || !['generating', 'running', 'queued'].includes(v.status))
     return null;
   return (
@@ -1481,7 +1475,6 @@ function Progress({ v }) {
 }
 export function ShotThumb({ shot }) {
   const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const v = chosenVersion(shot);
   return v ? (
     <StoryboardAssetImage asset={v.asset || v} className="sthumb" retryable />
@@ -1505,7 +1498,6 @@ export function ShotThumb({ shot }) {
 
 export function WhoChips({ shot, small }) {
   const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { db } = useStore();
   return (
     <div className={'who' + (small ? ' small' : '')}>
@@ -1684,7 +1676,6 @@ export function HelpTip({ text }) {
 
 function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, className = '' }) {
   const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { setNodeRef, isOver, active } = useDroppable({ id });
   const hot = isOver && /^(asset|profile):/.test(String(active?.id));
   const open = (e) => {
@@ -2065,6 +2056,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                           {p.name}
                         </Button>
                         <select
+                          className="field-sm"
                           aria-label={p.name + tr('storyboard.detail57')}
                           value={variantOf(p, c.variant)?.id || ''}
                           onChange={(e) =>
@@ -2113,6 +2105,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                             {p.name}
                           </Button>
                           <select
+                            className="field-sm"
                             aria-label={p.name + tr('storyboard.detail59')}
                             value={variantOf(p, shot.place.variant)?.id || ''}
                             onChange={(e) =>
@@ -2348,8 +2341,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           )}
         </div>
 
-        <details className="sent">
-          <summary>{tr('storyboard.details')}</summary>
+        <Disclosure className="sent" summary={tr('storyboard.details')}>
           <div className="sent-head">
             <b>{tr('storyboard.copy90')}</b>
             <ModeChip info={info} />
@@ -2393,7 +2385,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               · {w}
             </div>
           ))}
-        </details>
+        </Disclosure>
 
         {/* No model parameters in the shot editor, for anyone (owner, 2026-10-27): quality,
             shape, sound, seed and copies below are the creator's; raw values belong in admin. */}
@@ -2524,7 +2516,6 @@ export function usePlayer(shots) {
 
 export function Screen({ player, big, style }) {
   const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { seg, t, playing } = player,
     ref = useRef(),
     playback = useRef(null),
@@ -2609,7 +2600,6 @@ export function Screen({ player, big, style }) {
 
 export function Transport({ player }) {
   const { t: tr } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { playing, setPlaying, t, total, setT } = player;
   return (
     <div className="transport">
@@ -2651,7 +2641,6 @@ function Segment({
   tiles = 1,
 }) {
   const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state } = useStore();
   const status = shotStatus(seg.shot, queuePositions(state.shots)[seg.shot.id], locale);
   // Drag a segment onto another to reorder the story; a plain click still opens the shot.

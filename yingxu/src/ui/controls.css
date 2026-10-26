@@ -72,6 +72,12 @@ button.ghost:hover {
   background: var(--surface-3);
   color: var(--ink);
 }
+/* A ghost toggle that is on (compare mode, the open page). */
+button.ghost.on,
+button.ghost[aria-pressed='true'] {
+  background: var(--surface-3);
+  color: var(--ink);
+}
 button.danger {
   background: var(--danger);
   border-color: var(--danger);
@@ -101,6 +107,28 @@ button.option {
 button.option:hover {
   background: var(--surface);
   border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+button.link {
+  min-height: 0;
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+button.link:hover {
+  background: none;
+  filter: brightness(1.1);
+}
+button.on-color {
+  color: inherit;
+  background: rgb(0 0 0 / 0.15);
+  border-color: transparent;
+}
+button.on-color:hover {
+  background: rgb(0 0 0 / 0.25);
+  border-color: transparent;
 }
 button.on-media {
   color: var(--white);
@@ -175,9 +203,9 @@ textarea {
   line-height: 1.55;
 }
 /* A field that sits inside its own frame (the chat composer): no box of its own. */
-:is(input, textarea).field-bare,
-:is(input, textarea).field-bare:focus,
-:is(input, textarea).field-bare:focus-visible {
+:is(input, textarea, select).field-bare,
+:is(input, textarea, select).field-bare:focus,
+:is(input, textarea, select).field-bare:focus-visible {
   padding-inline: 4px;
   background: none;
   border: 0;
@@ -202,6 +230,11 @@ select {
   background-repeat: no-repeat;
   background-position: right 10px center;
 }
+select option,
+select optgroup {
+  background-color: var(--surface-2);
+  color: var(--ink);
+}
 input[type='range'] {
   accent-color: var(--accent);
   padding: 0;
@@ -212,7 +245,73 @@ input[type='range'] {
 input[type='checkbox'],
 input[type='radio'] {
   accent-color: var(--accent);
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+/* Compact field inside a dense row (a policy select in a machine row, a small number). */
+:is(input, select).field-sm {
   width: auto;
+  min-height: 26px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+select.field-sm {
+  padding-right: 22px;
+  background-position: right 7px center;
+}
+
+/* A narrow toolbar shows icons only: mark the container with data-icon-only. */
+[data-icon-only] button:has(> svg) {
+  gap: 0;
+  padding-inline: 8px;
+  font-size: 0;
+}
+[data-icon-only] button:has(> svg) > svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* Phones: 16px fields stop iOS from zooming in on focus; buttons with an icon show only the
+ * icon (labels return in dialogs, menus and navigation, or under [data-keep-labels]). */
+@media (max-width: 760px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+  /* Touch targets: buttons are at least 36px square (the 22px chip remove and inline links
+   * excepted). */
+  button:not(.xsmall, .link) {
+    min-height: 36px;
+    min-width: 36px;
+  }
+  .seg button {
+    min-height: 36px;
+  }
+  .app
+    button:has(> svg):not(.primary):not(.keep-label):not([role='menuitem']):not(
+      :where(dialog, [role='menu'], .app-nav, .side-nav, [data-keep-labels]) *
+    ) {
+    font-size: 0;
+    gap: 0;
+    padding: 7px;
+    min-width: 36px;
+    min-height: 36px;
+    justify-content: center;
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+  .app button:has(> svg):not(.primary) > svg {
+    flex: none;
+  }
 }
 
 /* Segmented control / tabs (use <Segmented> from ui/Segmented.jsx). */
@@ -246,14 +345,15 @@ input[type='radio'] {
   color: var(--ink);
   border-color: transparent;
 }
-.seg button.on {
+.seg button.on,
+.seg button[aria-pressed='true'] {
   background: var(--surface-4);
   color: var(--ink);
   box-shadow:
     0 1px 2px rgba(0, 0, 0, 0.35),
     0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
 }
-.seg button.on small {
+.seg button:is(.on, [aria-pressed='true']) small {
   color: var(--ink-2);
 }
 

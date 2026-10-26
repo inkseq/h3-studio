@@ -656,6 +656,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
             workspaceState={s}
             onSave={cloud.save}
             otherBusy={busy || !!adapter.state.workbenchPending}
+            primary
           />
         }
         onNewScene={onNewScene}
