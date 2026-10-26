@@ -294,7 +294,9 @@ export default function ProductionQueue({ project, onInspect }) {
                     {row.path} · {row.label}
                   </small>
                 </span>
-                <Button onClick={() => onInspect(row.id)}>{lt('legacy.route81')}</Button>
+                <Button size="sm" onClick={() => onInspect(row.id)}>
+                  {lt('legacy.route81')}
+                </Button>
               </li>
             ))}
           </ol>

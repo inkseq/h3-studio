@@ -244,6 +244,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                       )}
                     </div>
                     <Button
+                      size="sm"
                       onClick={() =>
                         onFix({
                           id: 'roughcut-' + shot.shot_id,

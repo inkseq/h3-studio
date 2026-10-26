@@ -213,3 +213,39 @@ promoter. Do not clear #193 hold until the fresh copy is reconciled.
    unverified files. Any later cleanup needs its own verified plan. Claude's
    normal promotion of this source fix makes subsequent daily captures bounded
    without using this one-operation helper again.
+
+## Workflow sidecar memory follow-up after the one-shot attempt
+
+Recovery `719e7d8c-5135-4452-87d9-f98a0cfc5b3a` failed during capture on
+2026-10-26 at 21:50 UTC. Kernel read-back `66d6083c` confirms a second cgroup OOM;
+application health and restart count were unaffected. The original failed partial,
+new 116,178,944-byte SQLite file, and both exclusive operation fences are retained.
+There is no workflow sidecar, manifest, handoff, or new S3 completion. The installed
+one-off helper and its historical runtime digest remain immutable and exhausted;
+this source change neither rearms it nor authorizes a repeat invocation.
+
+Aggregate-only inspection found 130,937 workflow output rows (55.7 MB serialized)
+and 8,682 notifications (4.0 MB). The business batch fix did not bound the next
+stage: workflow export retained decoded dictionaries and sort keys for every row,
+then encoded the entire document. It also called the generic manifest writer's
+16 MiB limit despite the sidecar's existing 64 MiB contract.
+
+The follow-up streams rows into a private disposable SQLite sorting spool and
+writes the same v1 JSON structure in canonical row order. It keeps the original
+read-only repeatable-read source transaction, exact catalog, row/byte/time limits,
+NULL/text values, duplicate rows and workflow execution hold. Verification and
+manifest inspection now validate one row at a time and hash every original byte.
+Legacy whitespace/key order/UTF-8 remain readable. Explicit isolated restoration's
+materializing `read` API is unchanged. No data retention or schema change occurs.
+The spool alone is removed on normal exit; incomplete backups and receipts stay
+intact. A kill/OOM can leave a private `.workflow-sort-*` directory inside the
+failed capture. It is temporary sorting state, not snapshot content or a completed
+backup; preserve it with the failed capture for reconciliation. Do not include it
+in a verified manifest or remove it during an automatic retry.
+
+Validation includes a 131,000-row sidecar larger than 16 MiB inside a 256 MiB,
+no-swap, network-none container, plus malformed/tampered/legacy format coverage
+and real PostgreSQL same-snapshot/restore-hold tests. A new production recovery
+requires an explicit reviewed path that preserves both failed attempts. Do not
+change their dates, remove their fences, reuse the exhausted helper, or substitute
+an old snapshot for a fresh backup. Claude owns the normal source-fix promotion.

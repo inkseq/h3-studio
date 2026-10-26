@@ -33,7 +33,6 @@
 .roughcut-options select {
   width: 100%;
   min-width: 0;
-  padding: 8px;
 }
 .roughcut .cloud-actions {
   flex-wrap: wrap;
@@ -60,7 +59,6 @@
 }
 .roughcut-timeline button {
   margin-top: 8px;
-  font-size: 11px;
 }
 .roughcut details {
   margin: 14px 0;

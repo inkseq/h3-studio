@@ -8,6 +8,7 @@ import videoCacheWorkerURL from './video-cache-worker.js?worker&url';
 import { installVideoCache } from './video-cache-client.js';
 import './ui/tokens.css';
 import './ui/controls.css';
+import './ui/density.css';
 import './ui/feedback.css';
 import './demo-v2.css';
 import './v2/page-bridge.css';

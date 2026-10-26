@@ -26,15 +26,6 @@
   color: var(--muted);
   font-size: 11px;
 }
-.operator-budget button {
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  padding: 7px 10px;
-  font: inherit;
-  cursor: pointer;
-}
 .operator-budget button:disabled {
   opacity: 0.5;
   cursor: wait;
@@ -191,9 +182,6 @@
   }
 }
 
-.operator-budget button:hover {
-  background: var(--surface-3);
-}
 .budget-account .budget-pending {
   background: var(--warn-soft);
   color: var(--warn);

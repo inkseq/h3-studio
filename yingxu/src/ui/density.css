@@ -1,0 +1,23 @@
+/* Control densities (h3-studio#514). A page container opts in with a class; the shared
+ * controls read these variables, so pages never restyle buttons themselves. */
+
+/* Dense editors (storyboard): smaller type and padding, roomier primary action. */
+.density-compact {
+  --control-fs: 12px;
+  --control-lh: 1.3;
+  --control-r: 7px;
+  --control-py: 5px;
+  --control-px: 9px;
+  --control-gap: 4px;
+  --control-justify: center;
+  --control-sm-h: 28px;
+  --control-sm-py: 3px;
+  --control-sm-px: 7px;
+  --seg-h: 32px;
+  --seg-py: 5px;
+  --seg-px: 9px;
+}
+/* The main action stays easy to hit in a dense editor. */
+.density-compact button.primary {
+  min-height: 36px;
+}

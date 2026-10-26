@@ -1,0 +1,29 @@
+/* Pill chips (<Chip>). */
+.chip {
+  gap: 6px;
+  min-height: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+}
+.chip:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border-color: var(--line-2);
+}
+.chip.with-media {
+  padding: 3px 10px 3px 3px;
+}
+.chip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.chip.accent {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 33%, transparent);
+}
+.chip.accent:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}

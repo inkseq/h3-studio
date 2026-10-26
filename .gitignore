@@ -870,3 +870,6 @@ inventory.json
 !docs/BACKUP-RECOVERY-655.md
 !deploy/platform/business_backup_recovery.py
 !tests/test_business_backup_recovery.py
+
+!studio_platform/workflow_backup_stream.py
+!tests/test_workflow_backup_stream.py

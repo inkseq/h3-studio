@@ -91,6 +91,7 @@ export const assistantCatalogs = {
     'assistants.revoke': 'Delete',
     'assistants.revokeConfirm':
       "Delete this assistant's connection? It stops working right away; its work and records are kept.",
+    'assistants.cancel': 'Cancel',
     'assistants.saveCap': 'Save cap',
     'assistants.activity': 'Recent activity',
     'assistants.more': 'Load more',
@@ -210,6 +211,7 @@ export const assistantCatalogs = {
     'assistants.resume': '恢复',
     'assistants.revoke': '删除',
     'assistants.revokeConfirm': '删除这个助手的连接？它会马上失效，做好的作品和记录都会保留。',
+    'assistants.cancel': '取消',
     'assistants.saveCap': '保存上限',
     'assistants.activity': '最近操作',
     'assistants.more': '加载更多',

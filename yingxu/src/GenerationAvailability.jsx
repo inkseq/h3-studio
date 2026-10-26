@@ -42,7 +42,7 @@ export default function GenerationAvailability({
       </details>
       <div className="qc-availability-actions">
         {onRefresh && (
-          <Button disabled={checking} onClick={onRefresh}>
+          <Button size="sm" disabled={checking} onClick={onRefresh}>
             {checking ? t('availability.checking') : t('availability.refresh')}
           </Button>
         )}
