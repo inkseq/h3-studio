@@ -1,9 +1,8 @@
 import { Note } from './ui/Note.jsx';
 import { operatorOfferReadiness as rawOfferReadiness } from './operator-model.js';
-import { FloatingMessage } from './floating-notice.js';
 import { operatorNodeStatus as rawOperatorNodeStatus } from './operator-presentation.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
-import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
+import { useI18n } from './i18n/I18nProvider.jsx';
 import React from 'react';
 import {
   ChevronRight,
@@ -16,27 +15,8 @@ import {
   ShieldCheck,
   Square,
 } from 'lucide-react';
-import {
-  age,
-  deadlineLabel,
-  nodeDeadline,
-  nodeRemovalConfirmation,
-  dollars,
-  reasonText,
-  stateLabel,
-  stateTone,
-  providerLabel,
-  operatorOfferReadiness,
-  operatorSlotsLabel,
-  roundedSpec,
-  operatorRankReason,
-} from './operator-model.js';
-import {
-  uniqueOperatorReasons,
-  historicalNode,
-  operatorNodeStatus,
-  operatorBootstrap,
-} from './operator-presentation.js';
+import { reasonText, stateTone } from './operator-model.js';
+import { uniqueOperatorReasons, historicalNode } from './operator-presentation.js';
 
 const known = (value) => (Number.isFinite(value) ? value : '—');
 const date = (value) =>
@@ -45,7 +25,7 @@ const date = (value) =>
     : '尚未记录';
 const short = (value) => String(value || '尚未确认').slice(0, 12);
 export function Reasons({ items = [] }) {
-  const { t: lo, locale } = useI18n();
+  const { locale } = useI18n();
   const { reasonText } = operatorFormatters(locale);
   const reasons = uniqueOperatorReasons(items);
   return reasons.length ? (
@@ -73,7 +53,7 @@ export function Badge({ state, stale = false }) {
   );
 }
 function Status({ node, now }) {
-  const { t: lo, locale } = useI18n();
+  const { locale } = useI18n();
   const { operatorNodeStatus } = operatorFormatters(locale);
   const status = operatorNodeStatus(node, now);
   return (
@@ -507,15 +487,8 @@ export function NodeCard({ node, profiles = [], disabled, onAction, now = Date.n
 
 export function CandidateCard({ row, index, current, busy, onStart }) {
   const { t: lo, locale } = useI18n();
-  const {
-    date,
-    providerLabel,
-    dollars,
-    operatorOfferReadiness,
-    operatorSlotsLabel,
-    roundedSpec,
-    operatorRankReason,
-  } = operatorFormatters(locale);
+  const { date, providerLabel, dollars, operatorSlotsLabel, roundedSpec, operatorRankReason } =
+    operatorFormatters(locale);
   const stock = Number.isFinite(row.available_count) && row.available_count > 0,
     readiness = !stock
       ? Number.isFinite(row.available_count)

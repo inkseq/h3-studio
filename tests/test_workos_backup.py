@@ -164,7 +164,9 @@ class WorkOSBackupTests(unittest.TestCase):
         manifest = operation / "snapshot" / "manifest.json"
         manifest.write_text("{}")
         with patch.object(
-            host, "read", return_value={"hosted_users": {"status": "unavailable"}}
+            host,
+            "retention_json",
+            return_value={"value": {"hosted_users": {"status": "unavailable"}}},
         ):
             with patch.object(
                 host, "retention_after_success", return_value={"state": "retained"}
@@ -175,7 +177,7 @@ class WorkOSBackupTests(unittest.TestCase):
                     )
                 retain.assert_called_once_with({}, "image")
         for status in ({}, {"hosted_users": {"status": "complete"}}):
-            with patch.object(host, "read", return_value=status):
+            with patch.object(host, "retention_json", return_value={"value": status}):
                 host.require_hosted_coverage(operation)
 
 

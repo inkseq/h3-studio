@@ -1,6 +1,5 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { FloatingMessage } from './floating-notice.js';
 import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { store } from './store.js';

@@ -26,7 +26,9 @@ No inference provider calls, workers or app servers start in that container.
 The timer runs daily at 16:30 UTC, with up to five minutes jitter and a persistent
 catch-up after downtime. One UTC-day directory in `/var/lib/inkseq-business-backup`
 records intent before work. A completed same-day run does not recapture or upload
-again; it performs only the verified local-retention pass. Any unfinished
+again. The recovery-window service invokes `--daily-preserve`, which also skips
+local retention on both new and already-completed copies. The normal `daily`
+invocation retains its verified local-retention pass. Any unfinished
 prior intent blocks future prefixes until the original remote reconciliation
 workflow resolves it. Do not delete intents or rerun a copy with a new prefix to
 hide an unknown write. This file tracks backup operation outcomes, not tasks,
@@ -43,12 +45,13 @@ and gives only the transport UID (10001) read access: files 0400 and directories
 cannot traverse or replace this host copy even though it shares that UID. The
 transport receives only a read-only bind mount of the exact snapshot. The configured snapshot is limited to 2 GiB media plus
 the existing 256 MiB DB limit; less than 5 GiB available disk refuses a new run.
-After remote verification, local retention keeps the newest daily run's
+When explicitly enabled (not `--daily-preserve`), local retention keeps the newest daily run's
 application-side payload and removes older verified payloads plus their redundant
 private transport snapshots. All operation intents, outputs, completion/transfer
 receipts and S3 versions remain. Unknown, unmatched, manual or active copies are
 never treated as disposable because of age or directory name. The service may run
-up to 65 minutes; individual SDK
+up to 95 minutes (40-minute capture, 15-minute handoff, 30-minute transfer,
+10-minute validation headroom); individual SDK
 calls and child processes are bounded. An uncertain process/write preserves its
 container and intent, with a fixed nonzero service result. No automatic restart.
 

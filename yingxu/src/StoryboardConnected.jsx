@@ -1,6 +1,5 @@
 import { clickedOutside } from './ui/Dialog.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
-import { FloatingMessage } from './floating-notice.js';
 import StoryFilmControl from './StoryFilmControl.jsx';
 import { formatMoneyMicros } from './money.js';
 import { createQuickChatClient } from './quick-chat-client.js';
@@ -193,7 +192,7 @@ function planRecipe(plan, capabilities) {
   };
 }
 function WorkbenchConfirmation({ receipt, onClose }) {
-  const { t, locale } = useI18n(),
+  const { t } = useI18n(),
     c = useCloud(),
     ref = useRef(),
     [busy, setBusy] = useState(false),
@@ -301,7 +300,7 @@ function WorkbenchConfirmation({ receipt, onClose }) {
 }
 
 export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScene }) {
-  const { t: at, locale } = useI18n();
+  const { t: at } = useI18n();
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     c = useCloud(),
     [queue, setQueue] = useState(null),

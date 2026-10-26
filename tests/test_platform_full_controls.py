@@ -278,7 +278,7 @@ class FullControlsIntegrationTests(unittest.TestCase):
             engine_manifest(LEGACY, 'ref').document_json, before.document_json
         )
 
-    def test_browser_and_agent_http_save_same_v2_controls_and_ref_anchors_without_job(
+    def test_internal_and_public_http_controls_preserve_ref_anchors_without_job(
         self,
     ):
         app = create_app(self.settings, repository=self.repo)
@@ -320,8 +320,14 @@ class FullControlsIntegrationTests(unittest.TestCase):
                 'video_excerpts': [],
                 'audio_excerpts': [],
             }
-            revisions = []
             for channel, client in (('browser', browser), ('agent', agent)):
+                # Explicit internal profile controls remain available to the admin;
+                # public quality aliases accept only creator-facing controls.
+                expected_controls = (
+                    controls
+                    if channel == 'browser'
+                    else {'duration': 5, 'resolution': '480P', 'seed': '7'}
+                )
                 session = client.post(
                     '/v1/quick-chat/sessions',
                     json={'title': 'Synthetic ' + channel},
@@ -410,14 +416,13 @@ class FullControlsIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(response.status_code, 201, response.text)
                 revision = response.json()['revision']
-                revisions.append(revision)
                 self.assertEqual(
                     revision['deployment_profile_id'], body['deployment_profile_id']
                 )
                 self.assertEqual(revision['recipe_id'], body['recipe_id'])
                 if channel == 'agent':
                     self.assertEqual(revision['tier'], 'standard')
-                self.assertEqual(revision['controls'], controls)
+                self.assertEqual(revision['controls'], expected_controls)
                 for slot in ('first_frame', 'last_frame'):
                     self.assertEqual(revision['inputs'][slot], {'asset_id': identity})
                 self.assertEqual(revision['inputs']['guides'][0]['media_id'], identity)
@@ -451,7 +456,7 @@ class FullControlsIntegrationTests(unittest.TestCase):
                     ).scalar_one()
                 self.assertEqual(stored['deployment_profile_id'], PROFILE)
                 self.assertEqual(stored['recipe_id'], 'h3-base-ref2va-v1')
-                self.assertEqual(stored['controls'], controls)
+                self.assertEqual(stored['controls'], expected_controls)
                 self.assertEqual(stored['input_hash'], revision['input_hash'])
                 self.assertEqual(stored['requested_input_hash'], revision['input_hash'])
                 item = stored['items'][0]
@@ -465,7 +470,6 @@ class FullControlsIntegrationTests(unittest.TestCase):
                 )
                 # Authoring did not create a render or paid generation task.
                 self.assertEqual(client.get('/v1/jobs').json()['jobs'], [])
-            self.assertEqual(revisions[0]['controls'], revisions[1]['controls'])
 
 
 if __name__ == '__main__':

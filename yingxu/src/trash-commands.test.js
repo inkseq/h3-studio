@@ -5,7 +5,6 @@ import {
   createTrashController,
   actionFromPreview,
   checkedTrashPreview,
-  checkedTrashReceipt,
 } from './trash-commands.js';
 import { digest } from './cloud-model.js';
 const target = { kind: 'entity', project_id: 'story', id: 'shot' };

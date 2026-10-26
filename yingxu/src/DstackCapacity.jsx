@@ -2,22 +2,17 @@ import { Note } from './ui/Note.jsx';
 import { dstackNodeStatus as rawDstackNodeStatus } from './dstack-presentation.js';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
-import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
-import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { Clock, Info, Play, Plus, RefreshCw, Server, X } from 'lucide-react';
+import { operatorFormatters } from './i18n/legacyOperatorPresentation.js';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { Clock, Info, Play, Plus, RefreshCw, Server } from 'lucide-react';
 import { createOperatorController } from './operator-controller.js';
 import { createDstackClient } from './dstack-client.js';
-import { age, dollars, duration } from './operator-model.js';
 import {
   dstackGroups,
   dstackKeepOnSelection,
   dstackLifecycle,
-  dstackLifetime,
-  dstackMode,
-  dstackNodeStatus,
   dstackPreviewCurrent,
-  dstackProvider,
 } from './dstack-presentation.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import './v2/ops-adapter.css';

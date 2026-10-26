@@ -1,7 +1,6 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import TelegramLink, { telegramUserLabel, validTelegramNonce } from './TelegramLink.jsx';
 import { Segmented } from './ui/Segmented.jsx';
-import { FloatingMessage } from './floating-notice.js';
 
 // Daily credit cap suggested for a new Telegram link; USD caps (admins) start uncapped.
 const TELEGRAM_DEFAULT_CAP = '200';

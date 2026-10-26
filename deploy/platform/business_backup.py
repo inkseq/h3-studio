@@ -5,6 +5,7 @@ Install in its own protected directory. Host role is available only to the
 short-lived transport container; the application retains its existing identity.
 """
 from datetime import datetime, timezone
+from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
@@ -24,6 +25,41 @@ CONFIG = Path('/etc/inkseq/business-backup.json')
 HELPERS = Path('/opt/inkseq-release-staging-v1')
 HOSTS = {'staging': 'i-07805df7bd6984bd9', 'production': 'i-03d81d2d153b5e2fd'}
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
+PHASES = frozenset({'snapshot', 'handoff', 'transfer'})
+SNAPSHOT_TIMEOUT = 2400  # 1010s observed capture + >2x headroom, still bounded.
+DIAGNOSTIC_CODES = frozenset({'backup_prior_outcome_requires_reconciliation',
+    'backup_prior_receipt_invalid', 'backup_disk_reserve_required', 'backup_release_not_ready',
+    'backup_docker_failed_or_unknown', 'backup_hosted_users_unavailable_business_confirmed',
+    'backup_coverage_config_mismatch', 'backup_completion_mismatch'})
+
+
+def diagnostic_code(error):
+    # Never expose exception text, subprocess output, arguments or configuration.
+    if isinstance(error, subprocess.TimeoutExpired):
+        return 'backup_phase_timeout_outcome_unknown'
+    if type(error) is ValueError and error.args and type(error.args[0]) is str and error.args[0] in DIAGNOSTIC_CODES:
+        return error.args[0]
+    return 'backup_failed_or_unknown'
+
+
+@contextmanager
+def phase(operation, name):
+    """Append-only diagnostics; never recovery authority or a completed-copy receipt."""
+    require(name in PHASES, 'backup_phase_invalid')
+    record(operation/('phase-'+name+'-started.json'), {'version':1, 'phase':name,
+        'observed_at':datetime.now(timezone.utc).isoformat(), 'automatic_retry':False})
+    try:
+        yield
+    except Exception as error:
+        try:
+            record(operation/('phase-'+name+'-unknown.json'), {'version':1, 'phase':name,
+                'observed_at':datetime.now(timezone.utc).isoformat(),
+                'code':diagnostic_code(error), 'automatic_retry':False})
+        except Exception:
+            pass  # Preserve the original error and original intent even on disk failure.
+        raise
+    record(operation/('phase-'+name+'-returned.json'), {'version':1, 'phase':name,
+        'observed_at':datetime.now(timezone.utc).isoformat(), 'automatic_retry':False})
 
 def require(condition, code):
     if not condition:
@@ -190,13 +226,16 @@ def require_hosted_coverage(operation):
     """Warn only after the original business transfer is durably recorded."""
     manifest = operation/'snapshot'/'manifest.json'
     if manifest.exists():
-        hosted = read(manifest).get('hosted_users')
+        # Transport freeze intentionally owns payload files as uid10001. The
+        # root-only 64KiB operation-metadata reader cannot read this manifest.
+        hosted = retention_json(manifest)['value'].get('hosted_users')
         require(hosted is None or isinstance(hosted, dict) and hosted.get('status') == 'complete',
             'backup_hosted_users_unavailable_business_confirmed')
 
 
-def finish_daily(operation, summary, cfg, image):
-    result = {**summary, 'retention':retention_after_success(cfg,image)}
+def finish_daily(operation, summary, cfg, image, *, preserve=False):
+    result = {**summary, 'retention':({'state':'preserved_by_operator'} if preserve
+        else retention_after_success(cfg,image))}
     require_hosted_coverage(operation)
     return result
 
@@ -519,7 +558,7 @@ def retention_after_success(cfg, image):
 
 
 def run(mode="daily"):
-    require(os.geteuid() == 0 and mode in ('daily','retention-plan','retention-apply'), 'backup_root_or_mode_required')
+    require(os.geteuid() == 0 and mode in ('daily','daily-preserve','retention-plan','retention-apply'), 'backup_root_or_mode_required')
     cfg = validate_config(read(CONFIG), Path('/var/lib/cloud/data/instance-id').read_text().strip())
     protected(STATE, True); protected(HELPERS, True)
     # Load only already installed root-controlled release validation helpers.
@@ -545,12 +584,13 @@ def run(mode="daily"):
         require(app['image'] == image and app['running'] is True, 'backup_app_image_mismatch')
         require(any(m['Destination'] == '/data' and m['Source'] == str(ROOT/'platform-data')
             and m['Type'] == 'bind' for m in app['mounts']), 'backup_data_mount_mismatch')
-        if mode != 'daily':
+        if mode not in ('daily', 'daily-preserve'):
             return retain_backups(cfg,image,apply=mode == 'retention-apply')
         # A previous unknown transfer blocks new prefixes: reconciliation first.
         operation = STATE/day
         if check_history(STATE, day):
-            return finish_daily(operation,completed_summary(operation,day),cfg,image)
+            return finish_daily(operation,completed_summary(operation,day),cfg,image,
+                preserve=mode == 'daily-preserve')
         require(shutil.disk_usage(ROOT).free >= 5*1024**3, 'backup_disk_reserve_required')
         nonce = str(uuid.uuid4())
         new_directory(operation)
@@ -561,14 +601,16 @@ def run(mode="daily"):
         # Parent is created by the existing app user; snapshot itself is exclusive.
         docker(['exec', ids[0], 'python', '-B', '-c',
             "from pathlib import Path;p=Path('/data/business-backups');p.mkdir(mode=0o700,exist_ok=True);assert p.is_dir() and not p.is_symlink()"])
-        docker(['exec', ids[0], 'python', '-B', '-m', 'studio_platform.backup_cli', 'configured',
-            '--destination', snapshot_container] + (['--allow-missing-media'] if cfg['version'] >= 2 else []) + (['--classify-expected-deletions'] if cfg['version'] == 3 else []), timeout=900)
+        with phase(operation, 'snapshot'):
+            docker(['exec', ids[0], 'python', '-B', '-m', 'studio_platform.backup_cli', 'configured',
+                '--destination', snapshot_container] + (['--allow-missing-media'] if cfg['version'] >= 2 else []) + (['--classify-expected-deletions'] if cfg['version'] == 3 else []), timeout=SNAPSHOT_TIMEOUT)
         # Private handoff: cp without -L retains symlinks, which are rejected.
         # The app cannot replace this root-controlled transport mount source.
         snapshot_host = operation/'snapshot'
-        new_directory(snapshot_host)
-        docker(['cp', ids[0]+':'+snapshot_container+'/.', str(snapshot_host)], timeout=900)
-        freeze_transport_snapshot(snapshot_host)
+        with phase(operation, 'handoff'):
+            new_directory(snapshot_host)
+            docker(['cp', ids[0]+':'+snapshot_container+'/.', str(snapshot_host)], timeout=900)
+            freeze_transport_snapshot(snapshot_host)
         target = {**cfg['target'], 'prefix': 'business-backups/'+nonce}
         record(operation/'target.json', target)
         (operation/'target.json').chmod(0o644)  # Explicit public identifiers only.
@@ -577,9 +619,10 @@ def run(mode="daily"):
         transfer = operation/'output'; new_directory(transfer)
         os.chown(transfer, 10001, 10001)
         name = 'inkseq-backup-transfer-'+nonce
-        docker(transport(image, name, [(snapshot_host, '/snapshot', True),
-            (operation/'target.json', '/target.json', True), (transfer, '/output', False)],
-            ['copy', '--execute', '--target', '/target.json', '--backup', '/snapshot', '--receipts', '/output/transfer'] + (['--allow-incomplete'] if cfg['version'] >= 2 else [])), timeout=1800)
+        with phase(operation, 'transfer'):
+            docker(transport(image, name, [(snapshot_host, '/snapshot', True),
+                (operation/'target.json', '/target.json', True), (transfer, '/output', False)],
+                ['copy', '--execute', '--target', '/target.json', '--backup', '/snapshot', '--receipts', '/output/transfer'] + (['--allow-incomplete'] if cfg['version'] >= 2 else [])), timeout=1800)
         receipt = copy_receipt(transfer/'transfer'/'completion.json', target)
         require(receipt['format'] == 'sixnine-private-backup-copy-v'+str(cfg['version']), 'backup_coverage_config_mismatch')
         record(operation/'receipt.json', receipt)
@@ -588,7 +631,8 @@ def run(mode="daily"):
             'completion_sha256': receipt['completion_sha256'], 'completion_version_id': receipt['completion_version_id'],
             'receipt_sha256': hashlib.sha256((operation/'receipt.json').read_bytes()).hexdigest(),
             'restore_verified': False, **coverage(receipt)})
-        return finish_daily(operation,{'state':'copied_not_restored','day':day,**coverage(receipt)},cfg,image)
+        return finish_daily(operation,{'state':'copied_not_restored','day':day,**coverage(receipt)},cfg,image,
+            preserve=mode == 'daily-preserve')
     finally:
         os.close(lockfd)
 
@@ -635,12 +679,13 @@ def restore(day, *, allow_incomplete=False):
 
 if __name__ == '__main__':
     try:
-        retention = {'--retention-plan':'retention-plan','--retention-apply':'retention-apply'}
+        retention = {'--retention-plan':'retention-plan','--retention-apply':'retention-apply',
+            '--daily-preserve':'daily-preserve'}
         require(len(sys.argv) == 1 or len(sys.argv) == 2 and sys.argv[1] in retention
             or len(sys.argv) in (3,4) and sys.argv[1] == '--restore-day' and (len(sys.argv) == 3 or sys.argv[3] == '--allow-incomplete'), 'backup_fixed_invocation_required')
         print(json.dumps(run() if len(sys.argv) == 1 else run(retention[sys.argv[1]]) if len(sys.argv) == 2
             else restore(sys.argv[2],allow_incomplete=len(sys.argv) == 4)))
     except Exception as error:
         state = 'backup_hosted_users_unavailable_business_confirmed' if str(error) == 'backup_hosted_users_unavailable_business_confirmed' else 'backup_failed_or_unknown'
-        print(json.dumps({'state':state,'automatic_retry':False}), file=sys.stderr)
+        print(json.dumps({'state':state,'code':diagnostic_code(error),'automatic_retry':False}), file=sys.stderr)
         raise SystemExit(1) from None

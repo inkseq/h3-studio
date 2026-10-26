@@ -854,6 +854,11 @@ inventory.json
 !docs/TAKE-REDO-PREVIEW.md
 !studio_platform/creator_controls.py
 !tests/test_creator_controls.py
+!tests/test_creator_controls_v6.py
 !tools/audit_creator_controls.py
 !docs/CREATOR-CONTROLS.md
 !studio_platform/review_routes.py
+!tests/test_backup_observation.py
+!docs/BACKUP-RECOVERY-655.md
+!deploy/platform/business_backup_recovery.py
+!tests/test_business_backup_recovery.py

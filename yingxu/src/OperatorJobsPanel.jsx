@@ -137,7 +137,7 @@ function CancelReview({ jobs, reason, busy, current, onClose, onConfirm }) {
   );
 }
 export default function OperatorJobsPanel({ controller, state, busy = false }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [selected, setSelected] = useState([]),
     [reason, setReason] = useState(''),
     [review, setReview] = useState(null),
