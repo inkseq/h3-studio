@@ -1,10 +1,10 @@
 .story-open-notice {
   margin: 12px 0 20px;
   padding: 18px;
-  border: 1px solid var(--line-2, #cdd7d2);
+  border: 1px solid var(--line-2);
   border-radius: 12px;
   background: var(--surface-2, var(--ink));
-  color: var(--ink, #243e35);
+  color: var(--ink);
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
@@ -94,9 +94,9 @@
   }
 }
 .cloud-projects .service-status {
-  background: var(--surface-2, #243b32);
+  background: var(--surface-2);
   color: var(--ink, var(--ink));
-  border-color: var(--line-2, #52695d);
+  border-color: var(--line-2);
 }
 .cloud-project-list > div {
   display: flex;
@@ -125,7 +125,7 @@
 }
 
 .cloud-projects .cloud-error {
-  color: var(--bad, #a33a30) !important;
+  color: var(--bad) !important;
 }
 
 /* Opening a story from My stories. */
@@ -165,7 +165,7 @@
   align-items: center;
   gap: 10px;
   padding: 9px 16px;
-  border: 1px solid var(--line-2, #333);
+  border: 1px solid var(--line-2);
   border-radius: 999px;
   background: var(--surface, var(--surface));
   color: var(--ink, var(--ink));

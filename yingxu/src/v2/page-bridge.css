@@ -108,7 +108,7 @@ dialog {
   padding: 20px;
 }
 dialog::backdrop {
-  background: #0009;
+  background: var(--media-scrim);
   backdrop-filter: blur(3px);
 }
 dialog.modal {
@@ -335,7 +335,7 @@ dialog.modal.wide {
   padding: 0;
   border-radius: 50%;
   justify-content: center;
-  background: #1118;
+  background: var(--media-scrim);
 }
 .workbench-expand {
   position: absolute;
@@ -494,7 +494,7 @@ dialog.modal.wide {
   width: 32px;
   height: 28px;
   justify-content: center;
-  background: #0008;
+  background: var(--media-scrim);
   padding: 3px;
 }
 .home-foot {
@@ -593,7 +593,7 @@ dialog.modal.wide {
     position: fixed;
     inset: 0;
     z-index: 11;
-    background: #0009;
+    background: var(--media-scrim);
     border: 0;
   }
   .sb-workspace .layout > .library {

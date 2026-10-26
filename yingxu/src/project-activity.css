@@ -18,12 +18,12 @@
   font-size: 20px;
 }
 .project-activity p {
-  color: #647469;
+  color: var(--muted);
   line-height: 1.65;
 }
 .project-activity h2 span {
   font-size: 13px;
-  color: #637367;
+  color: var(--muted);
 }
 .activity-intro,
 .agent-link-banner {
@@ -31,7 +31,7 @@
   align-items: center;
   gap: 16px;
   padding: 18px;
-  border: 1px solid #d3dfd4;
+  border: 1px solid var(--line-2);
   border-radius: 12px;
   background: var(--ink);
 }
@@ -45,7 +45,7 @@
 }
 .activity-events li {
   padding: 18px 0;
-  border-bottom: 1px solid #dce4da;
+  border-bottom: 1px solid var(--line);
 }
 .activity-event-head {
   display: flex;
@@ -55,7 +55,7 @@
 }
 .activity-event-head span,
 .activity-events small {
-  color: #657568;
+  color: var(--muted);
   font-size: 12px;
 }
 .activity-targets {
@@ -66,7 +66,7 @@
 }
 .activity-targets span {
   font-size: 12px;
-  color: #7b857b;
+  color: var(--muted);
 }
 .agent-link-banner {
   margin: 16px 24px;
