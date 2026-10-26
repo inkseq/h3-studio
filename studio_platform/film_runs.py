@@ -237,10 +237,10 @@ def selected_recipe_current(project, shot_id, original, defaults, capabilities):
     if not isinstance(recipe, dict):
         return None
     from .generation_draft import plan_body, read_draft
-    from .storyboard_versions import effective_project
+    from .creator_controls import effective_creator_project as effective_project
 
     try:
-        rendered, _ = effective_project(project, shot_id, defaults)
+        rendered, _ = effective_project(project, shot_id, defaults, original)
         draft, issues = read_draft(
             rendered,
             shot_id,
