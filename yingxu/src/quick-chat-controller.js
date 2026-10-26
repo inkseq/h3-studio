@@ -173,7 +173,9 @@ export function createQuickChatController({
           (me.username || me.account) === state.account &&
           asPreviewed(me).operator_capacity?.view === true,
       });
-    } catch {}
+    } catch {
+      // The account or session changed meanwhile; this result is stale.
+    }
   }
   const pendingName = (account) => `yingxu:quick-chat:operation:${account}`;
   function readPending(account) {
@@ -837,7 +839,9 @@ export function createQuickChatController({
       try {
         guard(ctx);
         emit({ error: '云端状态暂未更新，保留原任务；稍后自动核对。' });
-      } catch {}
+      } catch {
+        // The account or session changed meanwhile; this result is stale.
+      }
       throw error;
     } finally {
       refreshing = false;
@@ -1046,7 +1050,9 @@ export function createQuickChatController({
         try {
           guard(ctx, { session: false });
           emit({ error: error.message });
-        } catch {}
+        } catch {
+          // The account or session changed meanwhile; this result is stale.
+        }
       }
     },
     list: (options) => act(() => list(options)),

@@ -1,4 +1,5 @@
 import React from 'react';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { Download, RefreshCw, Square, Play, Check } from 'lucide-react';
 import { formatMoneyMicros } from './money.js';
@@ -167,15 +168,14 @@ export function FilmRunView({
       </div>
       {!terminal && !preflight && <p className="muted">{t('film.cancelNote')}</p>}
       {run.phase === 'blocked' && <p className="muted">{t('film.resumeNote')}</p>}
-      <details>
-        <summary>{t('film.details')}</summary>
+      <Disclosure summary={t('film.details')}>
         <p>{t('film.runId', { id: run.id })}</p>
         <p>{t('film.sourceHash', { hash: run.snapshot_hash })}</p>
         {run.error_code && <code>{run.error_code}</code>}
         {run.warnings?.map((code) => (
           <p key={code}>{code}</p>
         ))}
-      </details>
+      </Disclosure>
     </section>
   );
 }

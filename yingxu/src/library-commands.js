@@ -164,7 +164,7 @@ export function createLibraryController({
         ) {
           same(op);
           storage.removeItem(name);
-          throw Error('library.managed');
+          throw Error('library.managed', { cause: error });
         }
         if (
           ((op.kind === 'actions' &&
@@ -182,7 +182,7 @@ export function createLibraryController({
           guard();
           same(op);
           storage.removeItem(name);
-          throw Error('library.changed');
+          throw Error('library.changed', { cause: error });
         }
         throw error;
       }

@@ -42,18 +42,6 @@
   }
 }
 
-@media (max-width: 760px) {
-  .qc-dialog button {
-    min-height: 44px;
-  }
-}
-@media (max-width: 760px) {
-  .qc-dialog input,
-  .qc-dialog select {
-    font-size: 16px;
-  }
-}
-
 .qc-availability-mode,
 .qc-availability-actions {
   flex-wrap: wrap;
@@ -62,21 +50,4 @@
 .qc-deployment-field {
   min-width: 0;
   overflow-wrap: anywhere;
-}
-@media (max-width: 760px) {
-  .qc-availability-actions button,
-  .qc-availability-actions a {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-  }
-  .qc-deployment-field select {
-    max-width: 100%;
-    min-height: 44px;
-  }
-}
-@media (max-width: 760px) {
-}
-
-@media (max-width: 760px) {
 }

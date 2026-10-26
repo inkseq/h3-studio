@@ -54,23 +54,6 @@ small {
 .spacer {
   flex: 1;
 }
-.x {
-  border: 0;
-  background: none;
-  color: var(--muted);
-  padding: 2px 6px;
-  font-size: 15px;
-  cursor: pointer;
-  font-style: normal;
-  border-radius: 6px;
-}
-.x:hover {
-  color: var(--ink);
-  background: var(--surface-3);
-}
-.x.big {
-  font-size: 22px;
-}
 .row {
   display: flex;
   gap: 10px;
@@ -114,14 +97,6 @@ small {
 }
 .okmsg {
   color: var(--good);
-}
-.link {
-  cursor: pointer;
-  text-decoration: underline dotted rgba(255, 255, 255, 0.35);
-  text-underline-offset: 3px;
-}
-.link:hover {
-  color: var(--accent);
 }
 
 /* chips & pills */
@@ -346,19 +321,6 @@ small {
   height: 1px;
   background: var(--line);
   order: 2;
-}
-.scene-head input {
-  order: 0;
-  font-weight: 650;
-  font-size: 14px;
-  border-color: transparent;
-  background: transparent;
-  padding: 3px 6px;
-  width: auto;
-  max-width: 280px;
-}
-.scene-head input:hover {
-  border-color: var(--line-2);
 }
 .scene-head small {
   order: 1;
@@ -820,12 +782,6 @@ small {
   padding: 0 5px;
   font-size: 10px;
 }
-.ver i.x {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  font-size: 10px;
-}
 .slots {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -937,11 +893,6 @@ small {
   flex-direction: column;
   font-size: 12px;
   gap: 2px;
-}
-.castitem select {
-  font-size: 11px;
-  padding: 1px 4px;
-  background: var(--surface-2);
 }
 .castitem small {
   color: var(--muted);
@@ -1306,10 +1257,6 @@ small {
   top: 4px;
   left: 4px;
 }
-.tile-play .play {
-  padding: 0 6px;
-  font-size: 10px;
-}
 .tile.prof {
   border-width: 2px;
 }
@@ -1380,10 +1327,6 @@ small {
   gap: 5px;
   min-width: 0;
 }
-.inrow-body select {
-  font-size: 12px;
-  padding: 4px;
-}
 .sug {
   color: var(--good);
 }
@@ -1409,17 +1352,6 @@ small {
 }
 
 /* ---------- overlays: picker, dialogs ---------- */
-.play {
-  padding: 2px 9px;
-  font-size: 11px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
-.play.on {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: transparent;
-}
 .picker {
   position: fixed;
   z-index: 70;
@@ -1480,11 +1412,11 @@ small {
   background: transparent;
   touch-action: none;
 }
-.splitter.x {
+.splitter.axis-x {
   width: 8px;
   cursor: col-resize;
 }
-.splitter.y {
+.splitter.axis-y {
   height: 8px;
   cursor: row-resize;
 }
@@ -1494,13 +1426,13 @@ small {
   border-radius: 2px;
   transition: background var(--ease);
 }
-.splitter.x i {
+.splitter.axis-x i {
   top: 0;
   bottom: 0;
   left: 3px;
   width: 2px;
 }
-.splitter.y i {
+.splitter.axis-y i {
   left: 0;
   right: 0;
   top: 3px;
@@ -1864,11 +1796,6 @@ small {
   gap: 6px;
   align-items: center;
 }
-.mrow-actions select {
-  width: auto;
-  font-size: 12px;
-  padding: 4px 6px;
-}
 .steps {
   display: flex;
   gap: 4px;
@@ -1962,23 +1889,6 @@ pre {
   grid-template-columns: 1fr 1.4fr;
   gap: 16px;
   margin-bottom: 36px;
-}
-
-.quick-input {
-  display: flex;
-  gap: 8px;
-  width: 100%;
-  margin-top: auto;
-  padding-top: 8px;
-  align-items: center;
-}
-.quick-input input {
-  flex: 1;
-  background: var(--bg);
-  padding: 10px 12px;
-}
-.quick-input .seg button {
-  padding: 6px 10px;
 }
 
 .story-grid {
@@ -2157,11 +2067,6 @@ pre {
   width: 100%;
   flex-wrap: wrap;
 }
-.queue .auto input[type='number'] {
-  width: 48px;
-  padding: 2px 4px;
-  font-size: 12px;
-}
 .mode.both {
   background: linear-gradient(90deg, var(--fl-soft), rgba(199, 155, 255, 0.16));
   color: var(--ink);
@@ -2183,11 +2088,6 @@ pre {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.mrow-actions select {
-  width: auto;
-  font-size: 12px;
-  padding: 3px 6px;
-}
 .keep {
   display: inline-flex;
   align-items: center;
@@ -2195,27 +2095,12 @@ pre {
   font-size: 12px;
   color: var(--muted);
 }
-.keep select {
-  width: auto;
-  font-size: 12px;
-  padding: 3px 6px;
-}
-.keep input {
-  width: 64px;
-  padding: 2px 4px;
-  font-size: 12px;
-}
 
 .mgroup {
   margin-bottom: 14px;
 }
 .mgroup header {
   margin-bottom: 6px;
-}
-.mgroup header select {
-  width: auto;
-  font-size: 12px;
-  padding: 3px 6px;
 }
 
 .hosts {
@@ -2298,13 +2183,6 @@ pre {
   background: color-mix(in srgb, var(--surface) 85%, transparent);
   cursor: pointer;
   opacity: 0;
-}
-.story-pick input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--accent);
-  cursor: pointer;
 }
 .story-wrap:hover .story-pick,
 .story-pick:focus-within,
@@ -2415,13 +2293,6 @@ pre {
   flex-wrap: wrap;
   margin-top: 12px;
 }
-.trash-filter button {
-  font-size: 12px;
-  padding: 4px 10px;
-}
-.trash-filter button.on {
-  background: var(--surface-3);
-}
 .trash-bar {
   display: flex;
   gap: 8px;
@@ -2487,11 +2358,6 @@ pre {
 .tagchip small {
   color: var(--muted);
 }
-.tagchip .x {
-  background: transparent;
-  border: 0;
-  padding: 0;
-}
 
 .libp-main {
   overflow: auto;
@@ -2519,11 +2385,6 @@ pre {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-}
-.libp-head .pill .x {
-  background: transparent;
-  border: 0;
-  padding: 0 0 0 2px;
 }
 .libp-bulk {
   position: sticky;
@@ -2673,13 +2534,6 @@ pre {
 .use-shot small {
   color: var(--muted);
 }
-.linkish {
-  background: transparent;
-  border: 0;
-  padding: 0;
-  text-decoration: underline;
-  font-size: 12px;
-}
 .libp-actions {
   display: flex;
   gap: 6px;
@@ -2739,9 +2593,6 @@ pre {
 }
 .takes-head .spacer {
   flex: 1;
-}
-.takes-head button.on {
-  background: var(--surface-3);
 }
 .take-grid {
   display: grid;
@@ -2839,10 +2690,6 @@ pre {
   gap: 4px;
   flex-wrap: wrap;
   margin-top: 4px;
-}
-.take-acts button {
-  font-size: 11px;
-  padding: 3px 7px;
 }
 .takes-compare {
   display: grid;
@@ -3089,12 +2936,6 @@ h4,
     -webkit-text-size-adjust: 100%;
   }
 
-  input,
-  select,
-  textarea {
-    font-size: 16px;
-  } /* no iOS zoom on focus */
-
   /* top bar: logo + trash + avatar; the five pages become a bottom tab bar */
   .hbar {
     padding: 8px 14px;
@@ -3324,28 +3165,6 @@ h4,
 }
 
 @media (max-width: 760px) {
-  .app
-    button:has(> svg):not(.primary):not(.keep-label):not([role='menuitem']):not(
-      :where(dialog, [role='menu'], .story-recent-menu, .app-nav, .side-nav, .chapter-menu) *
-    ) {
-    font-size: 0;
-    gap: 0;
-    padding: 7px;
-    min-width: 36px;
-    min-height: 36px;
-    justify-content: center;
-    -webkit-touch-callout: none;
-    user-select: none;
-  }
-  .app button:has(> svg):not(.primary) > svg {
-    flex: none;
-  }
-  .chapter-menu > button {
-    max-width: 42vw;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
 }
 
 .agent-ok {
@@ -3382,9 +3201,6 @@ h4,
 }
 
 /* ================= polish pass ================= */
-.x {
-  min-height: 0;
-}
 .page-title {
   display: inline-flex;
   align-items: center;
@@ -3589,9 +3405,6 @@ h4,
 .trash-filter {
   margin-top: 14px;
 }
-.trash-filter button {
-  font-size: 12px;
-}
 
 .seg.trash-filter {
   display: inline-flex;
@@ -3634,21 +3447,8 @@ h4,
 .editor textarea {
   resize: none;
   overflow-y: auto;
-  min-height: 56px;
 }
 /* Shot panel footer: a plain checkbox on the text's first line, and a one-line copies field. */
-.check input[type='checkbox'] {
-  flex: none;
-  width: 16px;
-  height: 16px;
-  min-height: 0;
-  margin: 1px 0 0;
-  padding: 0;
-  border: 0;
-  background: none;
-  box-shadow: none;
-  accent-color: var(--accent);
-}
 .check {
   line-height: 18px;
 }
@@ -3658,9 +3458,6 @@ h4,
   gap: 8px;
   font-size: 13px;
   color: var(--ink-2);
-}
-.copies-field input {
-  height: 32px;
 }
 /* A take adopted from an old Quick Create conversation (#481): quieter than "selected". */
 .ver em.ver-legacy {

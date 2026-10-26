@@ -92,6 +92,8 @@ export default function StoryFilmControl({
   workspaceState,
   onSave,
   otherBusy = false,
+  // In the story top bar the film is the main action.
+  primary = false,
 }) {
   const { t } = useI18n(),
     active = usePageActive(),
@@ -248,6 +250,7 @@ export default function StoryFilmControl({
   return (
     <span className="story-film-control">
       <Button
+        variant={primary ? 'primary' : undefined}
         disabled={!scoped || (!ready && !state.saved && !run && !pending)}
         title={mode !== 'cloud' ? t('film.local') : !ready ? t('film.unavailable') : undefined}
         onClick={() => setOpen(true)}

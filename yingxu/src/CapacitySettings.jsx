@@ -1,4 +1,5 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Clock, RotateCcw, ShieldCheck } from 'lucide-react';
@@ -89,11 +90,15 @@ function DailyStatus({ daily }) {
         })}
       </small>
       {daily.unresolved_count > 0 && (
-        <details className="cap-unresolved">
-          <summary>
-            <AlertTriangle size={14} aria-hidden="true" />
-            {t('capacity.unresolved', { count: daily.unresolved_count })}
-          </summary>
+        <Disclosure
+          className="cap-unresolved"
+          summary={
+            <>
+              <AlertTriangle size={14} aria-hidden="true" />
+              {t('capacity.unresolved', { count: daily.unresolved_count })}
+            </>
+          }
+        >
           <p className="muted">{t('capacity.unresolvedHelp')}</p>
           <ul>
             {(daily.details || []).map((item, index) => (
@@ -102,7 +107,7 @@ function DailyStatus({ daily }) {
               </li>
             ))}
           </ul>
-        </details>
+        </Disclosure>
       )}
     </section>
   );
@@ -312,7 +317,7 @@ export default function CapacitySettings({ settings, api, onSaved }) {
         extra={
           <>
             {suggested && (
-              <Button className="linkish" onClick={() => recommend([id])}>
+              <Button variant="link" onClick={() => recommend([id])}>
                 {t('capacity.recommended', { value: toText(id, leaf(defaults, id)) })}
               </Button>
             )}
@@ -391,13 +396,19 @@ export default function CapacitySettings({ settings, api, onSaved }) {
         );
         // Queue rules are recorded but not enforced yet (#456 B/C/D), so they start folded.
         return group.id === 'queue' ? (
-          <details key={group.id} className="ui-settings cap-fold">
-            <summary className="ui-settings-head">
-              <h3 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h3>
-            </summary>
+          <Disclosure
+            key={group.id}
+            className="ui-settings cap-fold"
+            summary={
+              <>
+                <h3 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h3>
+              </>
+            }
+            summaryClassName="ui-settings-head"
+          >
             <p className="muted small ui-settings-note">{t('capacity.group.queueHelp')}</p>
             {fields}
-          </details>
+          </Disclosure>
         ) : (
           <SettingsSection key={group.id} title={t('capacity.group.' + group.id)}>
             {fields}

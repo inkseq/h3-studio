@@ -15,7 +15,9 @@ export function setPreviewAsUser(on) {
   try {
     if (on) sessionStorage.setItem(KEY, '1');
     else sessionStorage.removeItem(KEY);
-  } catch {}
+  } catch {
+    // Browser storage is optional (private mode, blocked site data).
+  }
   window.location.reload();
 }
 

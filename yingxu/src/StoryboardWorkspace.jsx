@@ -582,7 +582,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                 })}
               </small>
             </div>
-            <div className="row tight chapter-actions">
+            <div className="row tight chapter-actions" data-icon-only={headCompact || undefined}>
               <QueueSummary />
               {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && (
@@ -944,7 +944,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     </div>
   );
 }
-function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
+function StoryboardShell({ onNewScene, filmControl }) {
   const { t } = useI18n();
   const { state, dispatch, db, clearError } = useStoryboardUI(),
     [selected, setSelected] = useState(null),
@@ -1138,7 +1138,6 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
   );
 }
 export function StoryboardWorkspace({ adapter, onLegacyGuide, onCanvas, onNewScene, filmControl }) {
-  const { t, locale } = useI18n();
   return (
     <StoryboardUIProvider adapter={adapter}>
       <StoryboardShell

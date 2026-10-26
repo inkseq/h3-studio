@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import './i18n/workspace-language.css';
@@ -316,10 +317,9 @@ export default function ApiKeys({
                   used: date(k.last_used_at, locale),
                 })}
               </small>
-              <details>
-                <summary>{t('account.copy48')}</summary>
+              <Disclosure summary={t('account.copy48')}>
                 <p>{k.scopes?.join('、')}</p>
-              </details>
+              </Disclosure>
             </div>
             {!k.revoked_at &&
               (confirmRevoke === k.id ? (

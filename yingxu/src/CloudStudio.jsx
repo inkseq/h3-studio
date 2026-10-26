@@ -1,11 +1,10 @@
 import { TrashMenu } from './UniversalTrash.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import HostedSignIn from './HostedSignIn.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import './i18n/workspace-language.css';
-import { deferredPanel } from './deferred-panel.js';
-const ProductionQueue = deferredPanel(() => import('./ProductionQueue.jsx'), '制作队列');
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { LogOut, RefreshCw, ChevronRight } from 'lucide-react';
 import { store } from './store.js';
@@ -132,8 +131,11 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
           {t('account.copy81')}
         </Button>
       </div>
-      <details open={!!initialGrant} className="cloud-compatibility-access">
-        <summary>{t('quickView.accessDetails')}</summary>
+      <Disclosure
+        open={!!initialGrant}
+        className="cloud-compatibility-access"
+        summary={t('quickView.accessDetails')}
+      >
         <Button aria-expanded={showKeys} onClick={() => setShowKeys(!showKeys)}>
           {showKeys ? t('account.interface1') : t('account.interface2')}
         </Button>
@@ -160,12 +162,14 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
         <Button disabled={c.busy} onClick={() => run(cloud.reloadCapabilities())}>
           {t('account.copy72')}
         </Button>
-      </details>
+      </Disclosure>
       <a className="account-settings-link" href="/">
         {t('quickView.backToWorks')}
       </a>
-      <details className="cloud-compatibility-stories">
-        <summary>{t('quickView.compatibilityStories')}</summary>
+      <Disclosure
+        className="cloud-compatibility-stories"
+        summary={t('quickView.compatibilityStories')}
+      >
         <p>{t('account.copy82')}</p>
         <form
           onSubmit={(e) => {
@@ -244,7 +248,7 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
         <div className="cloud-project-list">
           {visibleProjects.map((p) => (
             <div key={p.id}>
-              <Button disabled={c.busy} onClick={() => open(p.id)}>
+              <Button variant="option" disabled={c.busy} onClick={() => open(p.id)}>
                 <span>
                   <b>{p.title?.trim() || t('legacy.visible24')}</b>
                   <small>
@@ -270,7 +274,7 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
             {t('account.copy92')}
           </Button>
         )}
-      </details>
+      </Disclosure>
       {c.draftOffer && (
         <section className="cloud-warning">
           <h4>{t('account.copy93')}</h4>
@@ -317,7 +321,6 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
   );
 }
 
-const basics = new Set(['duration', 'resolution', 'aspect_ratio', 'generate_audio', 'seed']);
 export function JobList({ jobs, project, onInspect, onReview }) {
   const { t, locale } = useI18n();
   const c = useCloud();

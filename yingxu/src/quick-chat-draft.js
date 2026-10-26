@@ -7,7 +7,9 @@ export function readDraftRecord(storage, account, id) {
   let raw = '';
   try {
     raw = storage?.getItem(draftKey(account, id)) || '';
-  } catch {}
+  } catch {
+    // Browser storage is optional (private mode, blocked site data).
+  }
   try {
     const value = JSON.parse(raw);
     if (
@@ -17,7 +19,9 @@ export function readDraftRecord(storage, account, id) {
       Array.isArray(value.origins)
     )
       return value;
-  } catch {}
+  } catch {
+    // A damaged saved draft is ignored; the editor starts empty.
+  }
   return { schema: 1, text: raw, edit_id: null, origins: [] };
 }
 export const readDraft = (account, id, storage = globalThis.localStorage) =>

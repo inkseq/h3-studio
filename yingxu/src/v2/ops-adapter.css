@@ -17,7 +17,6 @@
 .ops-adapter .ops-page-tabs > button {
   flex: none;
   white-space: nowrap;
-  font-size: 12px;
 }
 .ops-adapter .ops-gpu-page,
 .ops-adapter .spanel,
@@ -764,10 +763,6 @@
     flex-direction: row;
     overflow-x: auto;
   }
-  .ops-adapter :is(.trash-filter button, .ops-page-tabs button) {
-    height: 36px;
-    min-height: 36px;
-  }
   .ops-adapter .trash-row {
     grid-template-columns: 20px 32px minmax(0, 1fr) auto;
     gap: 8px;
@@ -911,16 +906,8 @@
 .ops-adapter .billing-admin :is(input:not([type='checkbox']), select, textarea) {
   width: 100%;
   min-width: 0;
-  box-sizing: border-box;
-  background: var(--surface);
-  color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  font: inherit;
-  padding: 8px;
 }
 .ops-adapter .billing-admin textarea {
-  min-height: 72px;
   resize: vertical;
 }
 .ops-adapter .billing-row {
@@ -950,11 +937,6 @@
 .ops-adapter .billing-row-title span {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-}
-.ops-adapter .billing-admin input[type='checkbox'] {
-  width: 16px;
-  height: 16px;
-  flex: none;
 }
 .ops-adapter .billing-admin dl {
   display: grid;
@@ -1010,7 +992,6 @@
     max-width: 100%;
     white-space: normal;
     text-align: start;
-    height: 36px;
   }
 }
 @media (max-width: 760px) {
@@ -1104,32 +1085,6 @@
   font-size: 12px;
   color: var(--ink-2);
 }
-.ops-adapter .p4-seg {
-  display: inline-flex;
-  width: fit-content;
-  max-width: 100%;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.ops-adapter .p4-seg button {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 7px 14px;
-  white-space: nowrap;
-}
-.ops-adapter .p4-seg button + button {
-  border-left: 1px solid var(--line-2);
-}
-.ops-adapter .p4-seg button[aria-pressed='true'] {
-  background: var(--accent-soft);
-  color: var(--accent);
-  font-weight: 600;
-}
-.ops-adapter .p4-seg button:disabled {
-  opacity: 0.45;
-}
 .ops-adapter .p4-engine {
   margin-top: 12px;
 }
@@ -1143,16 +1098,6 @@
   flex-wrap: wrap;
   gap: 6px;
   margin: 8px 0 6px;
-}
-.ops-adapter .p4-engine-list button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-}
-.ops-adapter .p4-engine-list button[aria-pressed='true'] {
-  border-color: var(--accent);
-  color: var(--accent);
 }
 .ops-adapter .p4-engine-tag {
   color: var(--accent);
@@ -1315,10 +1260,6 @@
 }
 .assistant-row-details > form > button,
 .assistant-row-details > button {
-  min-height: var(--h-sm);
-  height: var(--h-sm);
-  padding: 0 10px;
-  font-size: var(--fs-sm);
   justify-self: start;
 }
 

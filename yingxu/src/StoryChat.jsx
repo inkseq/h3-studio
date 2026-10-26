@@ -435,7 +435,9 @@ function useRemembered(key, initial) {
   useEffect(() => {
     try {
       localStorage.setItem(key, value ? '1' : '0');
-    } catch {}
+    } catch {
+      // Browser storage is optional (private mode, blocked site data).
+    }
   }, [key, value]);
   return [value, setValue];
 }
@@ -845,7 +847,8 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                     state.undoTurnId &&
                     message.turnId === state.undoTurnId && (
                       <Button
-                        className="sc-undo linkish"
+                        variant="link"
+                        className="sc-undo"
                         onClick={() =>
                           void chat.current.undo(state.undoTurnId, emit).then((ok) => {
                             setNotice(t(ok ? 'storyChat.undone' : 'storyChat.undoStale'));

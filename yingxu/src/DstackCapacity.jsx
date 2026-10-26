@@ -1,4 +1,5 @@
 import { Note } from './ui/Note.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { dstackNodeStatus as rawDstackNodeStatus } from './dstack-presentation.js';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
@@ -19,10 +20,6 @@ import { usePageActive } from './AppRouteCache.jsx';
 import './v2/ops-adapter.css';
 
 const quietly = (promise) => promise.catch(() => {});
-const date = (value) =>
-  typeof value === 'number' && Number.isFinite(value)
-    ? new Date(value * 1000).toLocaleString('zh-CN')
-    : '尚未确认';
 // The console's dialogs use the shared Dialog (h3-studio#514); op-dialog keeps their content layout.
 function Dialog({ title, onClose, children }) {
   return (
@@ -326,10 +323,9 @@ function NodeDialog({ node, controller, busy, now, onClose }) {
           : lo('legacyOp.copy284')}
       </Note>
       {node.reason_code && (
-        <details className="op-details">
-          <summary>{lo('legacyOp.copy285')}</summary>
+        <Disclosure className="op-details" summary={lo('legacyOp.copy285')}>
           <code>{node.reason_code}</code>
-        </details>
+        </Disclosure>
       )}
       {canHold && (
         <div className="op-dstack-hold">
@@ -465,7 +461,9 @@ export default function DstackCapacity({ account }) {
       if (document.visibilityState !== 'hidden')
         try {
           await controller.poll();
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
       if (!stopped) timer = setTimeout(tick, 5000);
     };
     timer = setTimeout(tick, 5000);

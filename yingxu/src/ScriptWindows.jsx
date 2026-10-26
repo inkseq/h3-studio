@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Scissors } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
@@ -73,20 +74,22 @@ export default function ScriptWindows({ shot }) {
     : [5, 6, 7, 8, 9, 10];
   return (
     // The person opens and closes it; confirming or clearing keeps it open.
-    <details
+    <Disclosure
       className="script-windows"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
+      summary={
+        <>
+          <Scissors size={14} aria-hidden="true" />
+          {t('windows.title')}
+          {confirmed && (
+            <span className="badge">
+              {t('windows.confirmed', { count: confirmed.windows?.length || 0 })}
+            </span>
+          )}
+        </>
+      }
     >
-      <summary>
-        <Scissors size={14} aria-hidden="true" />
-        {t('windows.title')}
-        {confirmed && (
-          <span className="badge">
-            {t('windows.confirmed', { count: confirmed.windows?.length || 0 })}
-          </span>
-        )}
-      </summary>
       <p className="muted">{t('windows.help')}</p>
       <div className="row tight script-windows-controls">
         <label className="field inline-num">
@@ -151,6 +154,6 @@ export default function ScriptWindows({ shot }) {
           {error}
         </p>
       )}
-    </details>
+    </Disclosure>
   );
 }

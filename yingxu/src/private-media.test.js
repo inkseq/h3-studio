@@ -132,16 +132,6 @@ function mediaLifecycle(Component, initialProps) {
   };
 }
 
-// A thumbnail starts only after its placeholder is mounted, visibility is
-// observed and its bounded queue admits it. SSR intentionally has no image.
-async function mountedThumbnail(h) {
-  h.render(undefined, { mountRefs: true });
-  await Promise.resolve();
-  h.render(undefined, { mountRefs: true });
-  await Promise.resolve();
-  return h.render(undefined, { mountRefs: true });
-}
-
 test('a transient Story player error retains its native video and only explicit retry reloads the same source', async () => {
   const kit = await component;
   let reads = 0,

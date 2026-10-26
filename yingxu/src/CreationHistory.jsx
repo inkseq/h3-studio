@@ -13,12 +13,6 @@ const safely = (promise) => promise.catch(() => {});
 const date = (value) => (Number.isFinite(value) ? new Date(value * 1000).toLocaleString() : '');
 function Totals({ title, value, content = false }) {
   const { t, locale } = useI18n();
-  const HISTORY_ACTIONS = {
-    trash: t('history.copy55'),
-    restore: t('history.copy56'),
-    purge: t('history.copy57'),
-    empty_trash: t('history.copy58'),
-  };
   return (
     <section className="qc-history-totals">
       <h3>{title}</h3>
@@ -254,7 +248,9 @@ export default function CreationHistory({ state, controller, busy, embeddedTrash
       controller.selectHistory(
         selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id],
       );
-    } catch {}
+    } catch {
+      // The controller refuses a selection it cannot act on; nothing changes.
+    }
   }
   function selectAll() {
     try {
@@ -264,7 +260,9 @@ export default function CreationHistory({ state, controller, busy, embeddedTrash
           .slice(0, 100)
           .map((row) => row.id),
       );
-    } catch {}
+    } catch {
+      // The controller refuses a selection it cannot act on; nothing changes.
+    }
   }
   async function softAction(action) {
     const value = await controller.previewHistory(action);

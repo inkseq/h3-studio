@@ -43,7 +43,9 @@ export function LibraryMedia({ row, api, detail = false }) {
   let url = '';
   try {
     if (path) url = api.nativeContentURL(path);
-  } catch {}
+  } catch {
+    // No native URL for this path; the preview falls back to its placeholder.
+  }
   const thumbnail = useThumbnailSource(api, url, { enabled: !detail && imageRead }),
     src = detail ? url : thumbnail.src;
   const retries = retry.url === url ? retry.count : 0;
@@ -167,7 +169,7 @@ export default function Library({ account, active = true }) {
       dialogEpochRef.current++;
     };
   }, [account]);
-  let pending = null;
+  let pending;
   try {
     pending = controller.pending();
   } catch {

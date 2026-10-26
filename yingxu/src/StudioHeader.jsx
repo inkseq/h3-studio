@@ -101,7 +101,7 @@ export default function StudioHeader({
             name: supportView.display_name || supportView.owner,
             minutes: Math.max(1, Math.round((supportView.expires_at - Date.now() / 1000) / 60)),
           })}
-          <Button size="sm" onClick={() => void endSupportView()}>
+          <Button size="sm" variant="on-color" onClick={() => void endSupportView()}>
             {t('menu.supportViewEnd')}
           </Button>
         </div>
@@ -109,7 +109,7 @@ export default function StudioHeader({
       {access?.previewing && (
         <div className="preview-as-user-bar" role="status">
           {t('menu.previewing')}
-          <Button size="sm" onClick={() => setPreviewAsUser(false)}>
+          <Button size="sm" variant="on-color" onClick={() => setPreviewAsUser(false)}>
             {t('menu.previewExit')}
           </Button>
         </div>
