@@ -21,7 +21,7 @@ from sqlalchemy import select, text
 
 from .repository import Conflict, Scope, identifier, jobs
 from .workflow_schema import (
-    INKSEQ_WORKFLOW_SCHEMA as SCHEMA,
+    INKSEQ_WORKFLOW_SCHEMA as SCHEMA,  # noqa: F401 -- public workflow-schema compatibility export
     WORKFLOW_APPLICATION_NAME as APPLICATION,
     WORKFLOW_APPLICATION_VERSION as VERSION,
 )

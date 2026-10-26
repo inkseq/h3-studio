@@ -7,7 +7,6 @@ decoded. No original video is staged or decoded in full on the CPU R2 path.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re

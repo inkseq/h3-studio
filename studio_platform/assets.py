@@ -42,7 +42,7 @@ from .storage import (
 from .storage_asset_journal import (
     AssetUploadJournal,
     AssetConflict,
-    AssetQuotaExceeded,
+    AssetQuotaExceeded,  # noqa: F401 - public exception re-export used by asset callers.
     artifact_accounting,
     artifact_identity,
     receipts,

@@ -25,8 +25,8 @@ try:
     from .wangp_receipts import (
         ReceiptJournal,
         checked_directory,
-        VERIFICATION_RECEIPT,
-        read_verification_receipt,
+        VERIFICATION_RECEIPT,  # noqa: F401 - public receipt filename used by launcher callers.
+        read_verification_receipt,  # noqa: F401 - public launcher receipt reader.
         write_verification_receipt,
     )
 except Exception as error:

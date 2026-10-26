@@ -17,7 +17,6 @@ from .repository import (
 )
 from .spending_limits import (
     ADMIN_OWNER,
-    ADMIN_DEFAULTS,
     SpendingConfirmationRequired,
     lock_owner,
     read_settings,

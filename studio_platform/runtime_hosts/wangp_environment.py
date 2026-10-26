@@ -11,7 +11,6 @@ from pathlib import Path, PurePosixPath
 import platform
 import re
 import subprocess
-import sys
 
 FORMAT = "sixnine-wangp-environment-v1"
 PYTHON = "3.11.14"
