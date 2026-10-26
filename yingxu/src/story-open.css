@@ -9,24 +9,6 @@
   max-width: 100%;
   overflow-wrap: anywhere;
 }
-.story-open-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: rgba(5, 6, 5, 0.65);
-  backdrop-filter: blur(4px);
-}
-.story-open-notice.story-open-dialog {
-  margin: 0;
-  width: min(520px, 100%);
-  max-height: 86vh;
-  overflow: auto;
-  background: var(--surface, var(--surface));
-  box-shadow: var(--shadow-lg, 0 20px 60px rgba(0, 0, 0, 0.45));
-}
 .story-open-heading {
   display: flex;
   align-items: start;
@@ -37,18 +19,18 @@
   margin: 0;
   font-size: 18px;
 }
-.story-open-notice p {
+:is(.story-open-notice, .story-open-dialog) p {
   line-height: 1.6;
   margin: 10px 0;
 }
-.story-open-notice pre {
+:is(.story-open-notice, .story-open-dialog) pre {
   max-height: 45vh;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 12px;
 }
-.story-open-notice summary {
+:is(.story-open-notice, .story-open-dialog) summary {
   cursor: pointer;
   margin-top: 14px;
 }

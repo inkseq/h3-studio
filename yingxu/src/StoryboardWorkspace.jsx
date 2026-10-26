@@ -525,7 +525,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     >
       {!railed && (
         <Button
-          className="sb-library-backdrop"
+          className="sb-library-scrim"
           aria-label={t('storyboard.detail15')}
           onClick={() => setLibraryCollapsed(true)}
         />
@@ -1085,7 +1085,11 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
       onDragEnd={onDragEnd}
       onDragCancel={() => setDragging(null)}
     >
-      <section ref={container} className="sb-workspace" aria-label={t('storyboard.copy30')}>
+      <section
+        ref={container}
+        className="sb-workspace density-compact"
+        aria-label={t('storyboard.copy30')}
+      >
         <FloatingMessage
           tone="error"
           // The pending warning below already says this, with its recover action.
@@ -1118,7 +1122,7 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
         />
         <DragOverlay dropAnimation={null}>
           {dragged ? (
-            <div className="sb-portal achip overlay">
+            <div className="sb-portal achip drag-ghost">
               <AssetThumb asset={thumb} />
               <b>{dragged.name}</b>
             </div>

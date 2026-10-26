@@ -40,6 +40,12 @@
 .ui-menu-item.danger svg {
   color: var(--bad);
 }
+.ui-menu-check input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  pointer-events: none;
+}
 .ui-menu-group {
   display: grid;
   gap: 1px;

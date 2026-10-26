@@ -20,6 +20,9 @@ import StudioHeader from './StudioHeader.jsx';
 import ItemMenu from './ItemMenu.jsx';
 import { MenuItem } from './ui/Menu.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
+import { Chip } from './ui/Chip.jsx';
+import { Tabs } from './ui/Tabs.jsx';
+import { ListButton } from './ui/ListButton.jsx';
 import { EmptyState } from './ui/Note.jsx';
 import { StoryboardSplitter, useStoryboardPanelSize } from './StoryboardPanels.jsx';
 import { RenameDialog } from './UniversalTrash.jsx';
@@ -239,18 +242,18 @@ function CardDetail({
             {profiles.map((profile) => {
               const on = refs.includes(profile.id);
               return (
-                <Button
+                <Chip
                   key={profile.id}
-                  aria-pressed={on}
+                  pressed={on}
+                  media={<Thumb card={profile} />}
                   onClick={() =>
                     onEdit(card.id, {
                       refs: on ? refs.filter((id) => id !== profile.id) : [...refs, profile.id],
                     })
                   }
                 >
-                  <Thumb card={profile} />
                   {profile.name}
-                </Button>
+                </Chip>
               );
             })}
           </div>
@@ -678,19 +681,17 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
           {unavailable}
         </p>
       )}
-      <div className="sc-tabs" role="tablist">
-        {stories && (
-          <Button role="tab" aria-selected={tab === 'stories'} onClick={() => setTab('stories')}>
-            {t('storyChat.tabStories')}
-          </Button>
-        )}
-        <Button role="tab" aria-selected={tab === 'chat'} onClick={() => setTab('chat')}>
-          {t('storyChat.tabChat')}
-        </Button>
-        <Button role="tab" aria-selected={tab === 'cards'} onClick={() => setTab('cards')}>
-          {t('storyChat.tabCards', { count: state.cards.length })}
-        </Button>
-      </div>
+      <Tabs
+        className="sc-tabs"
+        fill
+        value={tab}
+        onChange={setTab}
+        options={[
+          ...(stories ? [{ value: 'stories', label: t('storyChat.tabStories') }] : []),
+          { value: 'chat', label: t('storyChat.tabChat') },
+          { value: 'cards', label: t('storyChat.tabCards', { count: state.cards.length }) },
+        ]}
+      />
       <main
         className={
           'sc tab-' +
@@ -730,14 +731,13 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
             <ul>
               {(stories || []).map((item) => (
                 <li key={item.project_id}>
-                  <Button
+                  <ListButton
+                    label={item.title}
                     title={item.title}
-                    aria-current={item.project_id === story.current ? 'page' : undefined}
+                    meta={whenText(item.updated_at, locale)}
+                    current={item.project_id === story.current}
                     onClick={() => item.project_id !== story.current && openStory(item.project_id)}
-                  >
-                    <span>{item.title}</span>
-                    <small>{whenText(item.updated_at, locale)}</small>
-                  </Button>
+                  />
                   <ItemMenu label={t('storyChat.chatMenu')}>
                     <MenuItem onSelect={() => setRenaming(item)}>
                       {t('storyChat.renameChat')}
@@ -795,7 +795,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                 <p>{t('storyChat.welcomeHelp')}</p>
                 <div className="sc-starters">
                   {starters.map((key) => (
-                    <Button key={key} onClick={() => send(t(key))}>
+                    <Button key={key} variant="option" onClick={() => send(t(key))}>
                       {t(key)}
                     </Button>
                   ))}
@@ -863,9 +863,9 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                     message.chips.length > 0 && (
                       <div className="sc-chips">
                         {message.chips.map((chip) => (
-                          <Button key={chip} onClick={() => send(chip)}>
+                          <Chip key={chip} tone="accent" onClick={() => send(chip)}>
                             {chip}
-                          </Button>
+                          </Chip>
                         ))}
                       </div>
                     )}
@@ -910,12 +910,14 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                 {files.map((file) => (
                   <span key={file.url}>
                     <img src={file.url} alt={file.name} />
-                    <Button
-                      aria-label={t('storyChat.close')}
+                    <IconButton
+                      variant="on-media"
+                      size="xs"
+                      label={t('storyChat.close')}
                       onClick={() => setFiles((current) => current.filter((item) => item !== file))}
                     >
                       <X size={12} />
-                    </Button>
+                    </IconButton>
                   </span>
                 ))}
               </div>
@@ -941,6 +943,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               />
               <textarea
                 ref={input}
+                className="field-bare"
                 rows={1}
                 value={text}
                 placeholder={t('storyChat.placeholder')}

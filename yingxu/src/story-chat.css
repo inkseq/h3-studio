@@ -26,10 +26,6 @@
   box-sizing: border-box;
 }
 /* Zero specificity: the chat's own unstyled buttons inherit, shared variants (ui/controls.css) win. */
-:where(.sc-shell > :not(.hbar, .preview-as-user-bar)) button {
-  font: inherit;
-  color: inherit;
-}
 .sc-shell > :where(:not(.hbar, .preview-as-user-bar)) :focus-visible {
   outline: 2px solid var(--sc-green);
   outline-offset: 2px;
@@ -42,7 +38,7 @@
   font-size: 12px;
   text-align: center;
 }
-.sc-tabs {
+div.sc-tabs {
   display: none;
 }
 .sc {
@@ -93,7 +89,6 @@
 }
 .sc-panel-toggles > button {
   pointer-events: auto;
-  color: var(--sc-muted);
 }
 .sc-panel-toggles > button:only-child {
   margin-left: auto;
@@ -134,16 +129,6 @@
   flex-direction: column;
   gap: 8px;
 }
-.sc-starters button {
-  text-align: left;
-  padding: 12px 14px;
-  border: 1px solid var(--sc-line);
-  border-radius: 12px;
-  background: var(--sc-panel);
-}
-.sc-starters button:hover {
-  border-color: color-mix(in srgb, var(--sc-green) 40%, transparent);
-}
 .sc-msg {
   max-width: 88%;
 }
@@ -177,17 +162,6 @@
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 10px;
-}
-.sc-chips button {
-  padding: 6px 12px;
-  border: 1px solid color-mix(in srgb, var(--sc-green) 33%, transparent);
-  border-radius: 999px;
-  background: none;
-  color: var(--sc-green);
-  font-size: 13px;
-}
-.sc-chips button:hover {
-  background: color-mix(in srgb, var(--sc-green) 8%, transparent);
 }
 .sc-change {
   align-self: flex-start;
@@ -328,14 +302,6 @@
   position: absolute;
   top: -6px;
   right: -6px;
-  display: grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--media-scrim-strong);
 }
 .sc-compose-row {
   display: flex;
@@ -344,18 +310,9 @@
 }
 .sc-compose-row textarea {
   flex: 1;
-  min-height: 36px;
   max-height: 160px;
-  padding: 8px 4px;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
   resize: none;
   field-sizing: content;
-}
-.sc-compose-row textarea:focus {
-  outline: none;
 }
 .sc-send {
   display: grid;
@@ -651,35 +608,13 @@
   margin-bottom: 4px;
   padding: 0;
 }
-.sc-detail input,
 .sc-detail textarea {
-  padding: 8px 10px;
-  border: 1px solid var(--sc-line);
-  border-radius: 8px;
-  background: var(--sc-paper);
-  color: var(--sc-ink);
-  font: inherit;
-  font-size: 14px;
   resize: vertical;
 }
 .sc-refs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-.sc-refs button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px 3px 3px;
-  border: 1px solid var(--sc-line);
-  border-radius: 999px;
-  background: none;
-  font-size: 13px;
-}
-.sc-refs button[aria-pressed='true'] {
-  border-color: var(--sc-green);
-  background: color-mix(in srgb, var(--sc-green) 8%, transparent);
 }
 .sc-refs .sc-thumb {
   width: 22px;
@@ -695,22 +630,8 @@
 
 /* Phones: one column with Chat | Cards tabs */
 @media (max-width: 760px) {
-  .sc-tabs {
+  div.sc-tabs {
     display: flex;
-    border-bottom: 1px solid var(--sc-line);
-  }
-  .sc-tabs button {
-    flex: 1;
-    padding: 10px;
-    border: 0;
-    border-radius: 0;
-    border-bottom: 2px solid transparent;
-    background: none;
-    color: var(--sc-muted);
-  }
-  .sc-tabs button[aria-selected='true'] {
-    border-bottom-color: var(--sc-green);
-    color: var(--sc-ink);
   }
   .sc {
     grid-template-columns: 1fr;
@@ -793,37 +714,6 @@
   margin: 0;
   padding: 0;
   list-style: none;
-}
-.sc-stories li > button {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  width: 100%;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
-  text-align: left;
-}
-.sc-stories li > button:hover {
-  background: color-mix(in srgb, var(--sc-ink) 5%, transparent);
-}
-.sc-stories li > button[aria-current='page'] {
-  background: color-mix(in srgb, var(--sc-green) 10%, transparent);
-}
-.sc-stories li > button span,
-.sc-stories li > button small {
-  max-width: 100%;
-}
-.sc-stories li > button span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-}
-.sc-stories li > button small {
-  color: var(--sc-muted);
-  font-size: 11px;
 }
 .sc-stories li {
   position: relative;

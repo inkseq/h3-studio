@@ -1,15 +1,18 @@
 /* Shared controls (h3-studio#514): the one definition of how buttons look.
- * Use the Button / IconButton components (ui/Button.jsx); pages only lay buttons out. */
+ * Use the Button / IconButton components (ui/Button.jsx); pages only lay buttons out.
+ * Sizes read --control-* variables, so a page picks a density (ui/density.css) instead of
+ * restyling buttons. */
 button {
   font: inherit;
+  font-size: var(--control-fs, 1em);
   font-weight: 500;
-  line-height: 1.2;
+  line-height: var(--control-lh, 1.2);
   color: var(--ink);
   background: var(--surface-3);
   border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  min-height: var(--h-md);
-  padding: 6px 12px;
+  border-radius: var(--control-r, var(--r-sm));
+  min-height: var(--control-h, var(--h-md));
+  padding: var(--control-py, 6px) var(--control-px, 12px);
   cursor: pointer;
   transition:
     background var(--ease),
@@ -18,7 +21,8 @@ button {
     transform var(--ease);
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  justify-content: var(--control-justify, normal);
+  gap: var(--control-gap, 6px);
 }
 button:hover {
   background: var(--surface-4);
@@ -85,10 +89,34 @@ button.ghost.danger:hover {
   background: var(--bad-soft);
 }
 
+button.option {
+  justify-content: flex-start;
+  padding: 12px 14px;
+  text-align: left;
+  white-space: normal;
+  background: var(--surface);
+  border-color: var(--line-2);
+  border-radius: 12px;
+}
+button.option:hover {
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+button.on-media {
+  color: var(--white);
+  background: var(--media-scrim-strong);
+  border: 0;
+  border-radius: 50%;
+}
+button.on-media:hover {
+  background: var(--media-scrim-strong);
+  filter: brightness(1.2);
+}
+
 /* Sizes */
 button.small {
-  min-height: var(--h-sm);
-  padding: 4px 10px;
+  min-height: var(--control-sm-h, var(--h-sm));
+  padding: var(--control-sm-py, 4px) var(--control-sm-px, 10px);
   font-size: var(--fs-sm);
   border-radius: 7px;
   white-space: nowrap;
@@ -146,6 +174,16 @@ textarea {
   resize: vertical;
   line-height: 1.55;
 }
+/* A field that sits inside its own frame (the chat composer): no box of its own. */
+:is(input, textarea).field-bare,
+:is(input, textarea).field-bare:focus,
+:is(input, textarea).field-bare:focus-visible {
+  padding-inline: 4px;
+  background: none;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
 input:focus,
 textarea:focus,
 select:focus {
@@ -187,8 +225,8 @@ input[type='radio'] {
   gap: 0;
 }
 .seg button {
-  min-height: 26px;
-  padding: 4px 11px;
+  min-height: var(--seg-h, 26px);
+  padding: var(--seg-py, 4px) var(--seg-px, 11px);
   border: 0;
   border-radius: 7px;
   background: transparent;

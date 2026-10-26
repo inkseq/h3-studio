@@ -243,14 +243,6 @@
   gap: 4px 16px;
   font-size: 12px;
 }
-.film-audio-whole {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  border-bottom: 1px solid var(--line);
-}
 .spin {
   animation: spin 1s linear infinite;
 }
@@ -370,43 +362,11 @@ button.autosave-status {
   margin-top: 8px;
   font-size: 12px;
 }
-.film-audio-add {
-  position: relative;
-}
 .film-audio-add > button,
 .film-audio-controls button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-}
-.film-audio-menu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 5;
-  min-width: 200px;
-  max-height: 260px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
-  border: 1px solid var(--line-2, var(--line));
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-}
-.film-audio-menu button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: flex-start;
-  border: 0;
-  background: none;
-  text-align: left;
-  padding: 7px 10px;
-}
-.film-audio-menu button:hover {
-  background: var(--surface-3, var(--surface-2));
 }
 .film-audio-controls {
   display: flex;

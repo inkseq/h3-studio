@@ -702,28 +702,9 @@
 
 /* #277: active real-service page controls use the same three sizes as the demo.
    Machine rows are navigable content surfaces, not toolbar-sized buttons. */
-.ops-adapter button:not([data-ui-surface]):not(.hbar *),
-.ops-dialog button {
-  height: 32px;
-  min-height: 32px;
-  box-sizing: border-box;
-  padding-block: 0;
-  border-radius: var(--r-sm);
-}
-.ops-adapter button.small,
-.ops-adapter .mrow-actions button {
-  height: 28px;
-  min-height: 28px;
-}
-.ops-adapter :is(.p4-page-launch, .assistant-connect, .snav button) {
+.ops-adapter :is(.p4-page-launch, .assistant-connect) {
   height: 36px;
   min-height: 36px;
-}
-.ops-adapter :is(input:not([type='checkbox']):not([type='radio']), select) {
-  height: 36px;
-  min-height: 36px;
-  box-sizing: border-box;
-  padding-block: 0;
 }
 .ops-adapter .mrow-main[data-ui-surface] {
   height: auto;
@@ -782,10 +763,6 @@
     position: static;
     flex-direction: row;
     overflow-x: auto;
-  }
-  .ops-adapter .snav button {
-    flex: none;
-    white-space: nowrap;
   }
   .ops-adapter :is(.trash-filter button, .ops-page-tabs button) {
     height: 36px;

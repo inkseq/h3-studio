@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { Button } from './ui/Button.jsx';
+import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from './ui/Menu.jsx';
 import { Music, Plus, Trash2, Upload, Volume2, VolumeX } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
@@ -125,8 +126,7 @@ export default function FilmAudioLane({
   onFade,
 }) {
   const { t } = useI18n();
-  const [menu, setMenu] = useState(false),
-    [wholeFilm, setWholeFilm] = useState(false),
+  const [wholeFilm, setWholeFilm] = useState(false),
     file = useRef(null);
   const current = blocks.find((b) => b.track.id === selected);
   if (part === 'lane') {
@@ -167,45 +167,28 @@ export default function FilmAudioLane({
   return (
     <div className="film-audio-bar">
       <div className="film-audio-add">
-        <Button size="sm" disabled={busy} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
-          <Plus size={13} />
-          {t('editor.addAudio')}
-        </Button>
-        {menu && (
-          <div className="film-audio-menu" role="menu">
-            <label className="film-audio-whole">
-              <input
-                type="checkbox"
-                checked={wholeFilm}
-                onChange={(e) => setWholeFilm(e.target.checked)}
-              />
-              {t('editor.wholeFilm')}
-            </label>
-            <Button
-              role="menuitem"
-              onClick={() => {
-                setMenu(false);
-                file.current?.click();
-              }}
-            >
-              <Upload size={13} />
-              {t('editor.uploadAudio')}
+        <Menu
+          trigger={
+            <Button size="sm" disabled={busy}>
+              <Plus size={13} />
+              {t('editor.addAudio')}
             </Button>
-            {audioAssets.map((asset) => (
-              <Button
-                key={asset.id}
-                role="menuitem"
-                onClick={() => {
-                  setMenu(false);
-                  onAdd(asset, { wholeFilm });
-                }}
-              >
-                <Music size={13} />
-                {asset.title}
-              </Button>
-            ))}
-          </div>
-        )}
+          }
+          align="start"
+        >
+          <MenuCheckboxItem checked={wholeFilm} onCheckedChange={setWholeFilm}>
+            {t('editor.wholeFilm')}
+          </MenuCheckboxItem>
+          <MenuSeparator />
+          <MenuItem icon={Upload} onSelect={() => file.current?.click()}>
+            {t('editor.uploadAudio')}
+          </MenuItem>
+          {audioAssets.map((asset) => (
+            <MenuItem key={asset.id} icon={Music} onSelect={() => onAdd(asset, { wholeFilm })}>
+              {asset.title}
+            </MenuItem>
+          ))}
+        </Menu>
         <input
           ref={file}
           type="file"
