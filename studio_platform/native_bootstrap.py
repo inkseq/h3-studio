@@ -6,7 +6,6 @@ No provider clients, rental coordinator, model boot controller or import-time I/
 from __future__ import annotations
 
 import json
-import math
 import re
 import select as io_select
 import shlex

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import httpx
 
-from .google_chat import ChatError, GoogleChatClient, ORIGIN, PROFILE
+from .google_chat import ChatError, GoogleChatClient, ORIGIN, PROFILE  # noqa: F401 -- public title-client compatibility re-export
 from .google_title_config import (
-    GoogleTitleConfig,
+    GoogleTitleConfig,  # noqa: F401 -- public title-client compatibility re-export
     GoogleTitleConfigError,
-    validate_config,
+    validate_config,  # noqa: F401 -- public title-client compatibility re-export
     runtime_config,
 )
 

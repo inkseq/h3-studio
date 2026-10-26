@@ -1,8 +1,6 @@
-import { usePageActive } from './AppRouteCache.jsx';
-import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
+import { useI18n } from './i18n/I18nProvider.jsx';
 import './i18n/workspace-language.css';
-import React, { useEffect, useRef, useState } from 'react';
-import { X, Settings2 } from 'lucide-react';
+import React, { useState } from 'react';
 import { DeploymentProfileSelect } from './DeploymentProfile.jsx';
 import GenerationAvailability from './GenerationAvailability.jsx';
 import { modeAvailability, requireModeAvailable } from './generation-availability.js';
@@ -18,12 +16,8 @@ import {
 } from './quick-chat-model.js';
 import Control from './GenerationControl.jsx';
 import { Dialog } from './ui/Dialog.jsx';
-// Kept as a name for existing callers; the behaviour and look live in ui/Dialog.jsx.
-export function ChatDialog(props) {
-  return <Dialog {...props} />;
-}
 function ProfileInputBoundary({ support }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const roles = {
     first_frame: t('chatControls.copy1'),
     last_frame: t('chatControls.copy2'),
@@ -213,7 +207,7 @@ export default function QuickChatControls({
     运行与导出: t('chatControls.copy16'),
   };
   return (
-    <ChatDialog
+    <Dialog
       title={scope === 'next' ? t('chatControls.copy17') : t('chatControls.copy18')}
       onClose={onClose}
       className="qc-controls-dialog"
@@ -477,6 +471,6 @@ export default function QuickChatControls({
           </button>
         </div>
       </form>
-    </ChatDialog>
+    </Dialog>
   );
 }

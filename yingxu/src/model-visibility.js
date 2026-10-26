@@ -24,10 +24,3 @@ export function profileLabel(profile, locale = 'en', showModels = modelsVisible(
     ? profile.label || profile.model_id || profile.id
     : translate(locale, 'credits.tier.' + profileTier(profile));
 }
-
-// Assistant (chat) model names follow the same rule.
-export function assistantLabel(models, id, locale = 'en', showModels = modelsVisible()) {
-  return showModels
-    ? models.find((item) => item.id === id)?.label || id
-    : translate(locale, 'assistant.name');
-}

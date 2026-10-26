@@ -1,0 +1,2 @@
+# Isolated advisory CI tooling; never installed into application images.
+pip-audit==2.9.0

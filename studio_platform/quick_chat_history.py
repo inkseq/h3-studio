@@ -9,7 +9,6 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-import uuid
 
 from sqlalchemy import delete, inspect, select, update
 
@@ -22,7 +21,6 @@ from .content_lifecycle import (
 from .content_references import cleanup_plan, history_blocker
 from .repository import (
     Conflict,
-    NotFound,
     artifacts,
     documents,
     jobs,

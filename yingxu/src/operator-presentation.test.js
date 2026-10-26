@@ -169,13 +169,13 @@ test('normal model download is visible with observed timestamp and active contro
   assert.match(html, /model_download/);
   assert.match(html, /2 秒前/);
   assert.doesNotMatch(html, /百分之|预计.*分钟|自动重试/);
-  assert.doesNotMatch(html, /<button disabled=/);
+  assert.doesNotMatch(html, /<button[^>]* disabled=/);
   assert.match(html, /延长运行/);
   const blocked = render({
     ...active,
     actions: { ...active.actions, stop: { allowed: false, blockers: ['active_jobs'] } },
   });
-  assert.match(blocked, /<button disabled=""[^>]*>/);
+  assert.match(blocked, /<button[^>]* disabled=""[^>]*>/);
   assert.match(blocked, /active_jobs/);
 });
 test('stale and absent bootstrap observations remain unknown rather than invented current progress', () => {

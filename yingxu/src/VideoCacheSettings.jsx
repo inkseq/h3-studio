@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { HardDrive, Trash2 } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { videoCacheStatus, clearVideoCache } from './video-cache-client.js';
@@ -37,14 +38,15 @@ export default function VideoCacheSettings({ account }) {
         <HardDrive size={17} />
         <b>{t('settings.videoCache')}</b>
         <div className="spacer" />
-        <button
-          className="small ghost"
+        <Button
+          variant="ghost"
+          size="sm"
           disabled={busy || state === false || state === null}
           onClick={clear}
         >
           <Trash2 size={14} />
           {t('settings.videoCacheClear')}
-        </button>
+        </Button>
       </div>
       <small className="muted" role="status">
         {state === false

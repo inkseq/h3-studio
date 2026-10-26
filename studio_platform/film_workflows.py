@@ -4,14 +4,26 @@ Registration is explicit in the single controller executor. No SDK import,
 database initialization or process is started when the API imports this module.
 """
 
-import asyncio
-
 from .film_runs import VERSION, EXECUTION_BLOCKS
 from .auth import AuthenticationError
 from .repository import identifier, Conflict, BudgetExceeded
+from .domain_turns import DomainTurns
 
 
-def register_film_workflows(DBOS, service, principal_for):
+def setup_controller_film(DBOS, domain_turns, repo, app):
+    repo.generation_transport.client.register_queue(VERSION, polling_interval_sec=10)
+    service = app.state.film_runs
+
+    def principal_for(tenant, owner, project_id, run_id):
+        grant = service.execution_context(tenant, owner, project_id, run_id)
+        return app.state.auth.workflow_principal(owner, grant)
+
+    register_film_workflows(DBOS, service, principal_for, domain_turns=domain_turns)
+
+
+def register_film_workflows(DBOS, service, principal_for, *, domain_turns=None):
+    domain_turns = domain_turns or DomainTurns()
+
     @DBOS.step(name='inkseq_film_turn_v1', retries_allowed=False)
     async def domain_turn(tenant, owner, project_id, run_id):
         for value in (tenant, owner, project_id, run_id):
@@ -37,7 +49,7 @@ def register_film_workflows(DBOS, service, principal_for):
                     principal, project_id, run_id, code
                 )
 
-        return await asyncio.to_thread(invoke)
+        return await domain_turns.call(invoke)
 
     @DBOS.workflow(name=VERSION)
     async def film(tenant, owner, project_id, run_id):

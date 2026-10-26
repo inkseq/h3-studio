@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
 import { cloudController as cloud } from './cloud-controller.js';
@@ -38,9 +39,8 @@ export default function AccountPassword({ busy, inline = false }) {
   return (
     <section className="account-password">
       {inline && <h2>{at('adjunct.accountPassword.copy62')}</h2>}
-      <button
+      <Button
         hidden={inline}
-        type="button"
         disabled={busy}
         aria-expanded={open}
         onClick={() => {
@@ -50,7 +50,7 @@ export default function AccountPassword({ busy, inline = false }) {
         }}
       >
         {open ? at('adjunct.accountPassword.copy61') : at('adjunct.accountPassword.copy62')}
-      </button>
+      </Button>
       {open && (
         <form onSubmit={submit}>
           <p>{at('adjunct.accountPassword.copy63')}</p>
@@ -91,7 +91,9 @@ export default function AccountPassword({ busy, inline = false }) {
               onChange={(e) => setConfirm(e.target.value)}
             />
           </label>
-          <button disabled={busy}>{at('adjunct.accountPassword.copy67')}</button>
+          <Button type="submit" disabled={busy}>
+            {at('adjunct.accountPassword.copy67')}
+          </Button>
           <FloatingMessage tone="error" text={error ? error : null} />
         </form>
       )}

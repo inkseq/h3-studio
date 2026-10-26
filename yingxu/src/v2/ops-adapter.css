@@ -312,12 +312,7 @@
   border-color: transparent;
   color: var(--ink-2);
 }
-.ops-adapter .p4-close {
-  padding: 3px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-}
+
 .ops-adapter .p4-formgrid,
 .ops-adapter .p4-configfields {
   display: grid;
@@ -383,7 +378,6 @@
 }
 .ops-adapter .p4-note,
 .ops-adapter .p4-meta,
-.ops-adapter .p4-footer,
 .ops-adapter :is(.p4-dialog, .op-dialog) small {
   color: var(--muted);
   font-size: 12px;
@@ -572,36 +566,7 @@
   flex-direction: column;
   gap: 6px;
 }
-.ops-account-menu {
-  position: relative;
-}
-.ops-account-menu > summary {
-  cursor: pointer;
-  list-style: none;
-}
-.ops-account-menu > div {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 100;
-  min-width: 180px;
-  padding: 8px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.ops-account-menu a {
-  color: var(--ink);
-  padding: 7px 10px;
-  text-decoration: none;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-}
+
 .trash-notice {
   position: fixed;
   bottom: 76px;
@@ -624,25 +589,7 @@
   position: relative;
   display: inline-flex;
 }
-.item-menu-popover {
-  position: absolute;
-  z-index: 100;
-  right: 0;
-  top: 100%;
-  display: flex;
-  flex-direction: column;
-  min-width: 180px;
-  max-width: min(280px, 90vw);
-  padding: 6px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-.item-menu-popover button {
-  text-align: start;
-  white-space: normal;
-}
+
 @media (min-width: 761px) and (max-width: 1220px) {
   .ops-adapter .mrow {
     grid-template-columns: 22px minmax(0, 1.2fr) minmax(180px, 1fr);
@@ -826,14 +773,7 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.item-menu-popover button {
-  height: 32px;
-  min-height: 32px;
-  padding: 0 10px;
-  align-items: center;
-  gap: 8px;
-  display: flex;
-}
+
 @media (max-width: 760px) {
   .ops-adapter .settings-page {
     grid-template-columns: 1fr;

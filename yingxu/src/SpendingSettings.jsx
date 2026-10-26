@@ -1,14 +1,14 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
+import { Button } from './ui/Button.jsx';
 import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
-import { FloatingMessage } from './floating-notice.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
 import TakePreferencesSettings from './TakePreferencesSettings.jsx';
 import SpendingBreakdown from './SpendingBreakdown.jsx';
 import { admissionExposure } from './spending-breakdown.js';
 import { microsToDollars, dollarsToMicros, formatMoneyMicros } from './money.js';
 import AssistantConnections from './AssistantConnections.jsx';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
@@ -16,18 +16,7 @@ import AccountPassword from './AccountPassword.jsx';
 import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import SkinPicker from './SkinPicker.jsx';
-import {
-  UserRound,
-  SlidersHorizontal,
-  Bot,
-  Wallet,
-  Coins,
-  ShieldCheck,
-  LogOut,
-  RefreshCw,
-  BookOpen,
-  ArrowUpRight,
-} from 'lucide-react';
+import { UserRound, SlidersHorizontal, Bot, Wallet, Coins, LogOut, RefreshCw } from 'lucide-react';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
@@ -115,14 +104,15 @@ export default function SpendingSettings({ account }) {
     }
   });
   const tabs = loaded || !rememberedTabs ? liveTabs : rememberedTabs;
+  const liveTabsJson = JSON.stringify(liveTabs);
   useEffect(() => {
     if (!loaded) return;
     try {
-      localStorage.setItem(tabsKey, JSON.stringify(liveTabs));
+      localStorage.setItem(tabsKey, liveTabsJson);
     } catch {
       /* Tabs simply appear after the data on the next visit. */
     }
-  }, [loaded, liveTabs.credits, liveTabs.budget, tabsKey]);
+  }, [loaded, liveTabsJson, tabsKey]);
   const showBudget = tabs.budget;
   // Hosted (WorkOS) sign-ins have no local password to change.
   const hosted = access?.authentication === 'workos';
@@ -169,15 +159,17 @@ export default function SpendingSettings({ account }) {
       if (current === epoch.current) setBusy(false);
     }
   };
+  const loadEvent = useEffectEvent((...args) => load(...args));
   useEffect(() => {
     epoch.current++;
     setUser(null);
     setAdmin(null);
     setDraft(null);
     setNotice('');
-    void load();
+    void loadEvent();
+    const epochRef = epoch;
     return () => {
-      epoch.current++;
+      epochRef.current++;
       api.reset();
     };
   }, [api]);
@@ -262,7 +254,7 @@ export default function SpendingSettings({ account }) {
               ? [['budget', creditMode ? 'settings.limits' : 'settings.budget', Wallet]]
               : []),
           ].map(([id, label, Icon]) => (
-            <button
+            <Button
               key={id}
               className={section === id ? 'on' : ''}
               aria-current={section === id ? 'page' : undefined}
@@ -270,7 +262,7 @@ export default function SpendingSettings({ account }) {
             >
               <Icon size={16} />
               {t(label)}
-            </button>
+            </Button>
           ))}
         </aside>
         <section className="spanel">
@@ -285,15 +277,16 @@ export default function SpendingSettings({ account }) {
               )}
             </h2>
             <div className="spacer" />
-            <button
-              className="small ghost"
+            <Button
+              variant="ghost"
+              size="sm"
               title={t('settings.reload')}
               aria-label={t('settings.reload')}
               disabled={busy}
               onClick={() => void load()}
             >
               <RefreshCw size={14} />
-            </button>
+            </Button>
           </div>
           {error && <p role="alert">{error}</p>}
           {notice && <p role="status">{t(notice)}</p>}
@@ -330,8 +323,8 @@ export default function SpendingSettings({ account }) {
                 )}
                 <VideoCacheSettings account={account} />
                 <div className="row tight account-signout">
-                  <button
-                    className="ghost danger"
+                  <Button
+                    variant="ghost-danger"
                     disabled={busy}
                     onClick={() =>
                       void cloud.logout().catch((failure) => setError(failure.message))
@@ -339,12 +332,12 @@ export default function SpendingSettings({ account }) {
                   >
                     <LogOut size={15} />
                     {t('operator.status117')}
-                  </button>
+                  </Button>
                   {everywhere ? (
                     <>
                       <small className="muted">{t('account.signOutEverywhereConfirm')}</small>
-                      <button
-                        className="danger"
+                      <Button
+                        variant="danger"
                         disabled={busy}
                         onClick={() =>
                           void cloud
@@ -353,15 +346,15 @@ export default function SpendingSettings({ account }) {
                         }
                       >
                         {t('account.signOutEverywhereYes')}
-                      </button>
-                      <button className="ghost" onClick={() => setEverywhere(false)}>
+                      </Button>
+                      <Button variant="ghost" onClick={() => setEverywhere(false)}>
                         {t('library.cancel')}
-                      </button>
+                      </Button>
                     </>
                   ) : (
-                    <button className="ghost" disabled={busy} onClick={() => setEverywhere(true)}>
+                    <Button variant="ghost" disabled={busy} onClick={() => setEverywhere(true)}>
                       {t('account.signOutEverywhere')}
-                    </button>
+                    </Button>
                   )}
                 </div>
               </>
@@ -434,9 +427,9 @@ export default function SpendingSettings({ account }) {
                 </div>
               </SettingsSection>
               <div className="row tight" style={{ justifyContent: 'flex-end' }}>
-                <button className="primary" disabled={busy}>
+                <Button variant="primary" type="submit" disabled={busy}>
                   {t(busy ? 'settings.saving' : 'settings.save')}
-                </button>
+                </Button>
               </div>
             </form>
           )}

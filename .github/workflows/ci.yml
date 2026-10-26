@@ -91,7 +91,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python tools/ci_changes.py
 
+  # Advisory native coverage: hosted arm64 capacity must not block backend delivery.
   macos-helper:
+    continue-on-error: true
     needs: changes
     if: needs.changes.outputs.macos_helper == 'true'
     strategy:
@@ -125,6 +127,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -148,16 +151,18 @@ jobs:
         timeout-minutes: 10
         run: python tools/ci_media_tools.py install "${{ runner.temp }}/sixnine-ci-apt"
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
-      - name: Check pinned Python formatting and fatal lint
+      - run: python -m pip install --require-hashes -r requirements.dev.lock.txt
+      - name: Check pinned formatting and backend maintainability ratchet
         if: matrix.shard == 0
+        env:
+          RATCHET_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
         run: |
-          python -m pip install --require-hashes -r requirements.dev.lock.txt
           python -m ruff format --check
-          python -m ruff check
+          python tools/check_maintainability.py --base-ref "$RATCHET_BASE"
       - name: Complete offline suite shard (temporary data, no model inference)
         env:
           CI_SLOW_TEST_MODULES: ${{ needs.changes.outputs.slow_modules }}
-        run: python tools/ci_test_shards.py --suite python --shard-index ${{ matrix.shard }} --shard-count 6 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/python-${{ matrix.shard }}.json
+        run: python -m coverage run --data-file coverage-data/.coverage tools/ci_test_shards.py --suite python --shard-index ${{ matrix.shard }} --shard-count 6 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/python-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -165,8 +170,18 @@ jobs:
           path: ci-timings/python-${{ matrix.shard }}.json
           if-no-files-found: ignore
           retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sixnine-coverage-data-python-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: coverage-data/
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7
 
   postgres:
+    env:
+      INKSEQ_CI_DBOS_OBSERVATION_ADVISORY: "1"
     needs: changes
     if: needs.changes.outputs.postgres == 'true'
     runs-on: ubuntu-24.04
@@ -215,6 +230,7 @@ jobs:
         timeout-minutes: 10
         run: python tools/ci_media_tools.py install "${{ runner.temp }}/sixnine-ci-apt"
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
+      - run: python -m pip install --require-hashes -r requirements.dev.lock.txt
       - name: Bind native backup client to the existing PostgreSQL 17 service
         env:
           POSTGRES_TEST_CONTAINER: ${{ job.services.postgres.id }}
@@ -272,13 +288,21 @@ jobs:
         env:
           PLATFORM_TEST_DATABASE_URL: postgresql+psycopg://sixnine_test:sixnine-ci-test-only@127.0.0.1:5432/sixnine_test
           CI_SLOW_TEST_MODULES: ${{ needs.changes.outputs.slow_modules }}
-        run: python tools/ci_test_shards.py --suite postgres --shard-index ${{ matrix.shard }} --shard-count 10 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/postgres-${{ matrix.shard }}.json
+        run: python -m coverage run --data-file coverage-data/.coverage tools/ci_test_shards.py --suite postgres --shard-index ${{ matrix.shard }} --shard-count 10 --slow-modules "$CI_SLOW_TEST_MODULES" --timing-output ci-timings/postgres-${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: sixnine-ci-postgres-${{ matrix.shard }}-${{ github.run_attempt }}
           path: ci-timings/postgres-${{ matrix.shard }}.json
           if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sixnine-coverage-data-postgres-${{ matrix.shard }}-${{ github.run_attempt }}
+          path: coverage-data/
+          include-hidden-files: true
+          if-no-files-found: warn
           retention-days: 7
 
   frontend:
@@ -543,11 +567,83 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  dependency-audit:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated pinned audit tooling
+        run: python -m pip install --require-hashes -r requirements.audit.lock.txt
+      - name: Advisory vulnerability reports (no automatic fixes)
+        continue-on-error: true
+        run: python tools/audit_dependencies.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-audit-${{ github.sha }}-${{ github.run_attempt }}
+          path: dependency-audit/
+          if-no-files-found: warn
+          retention-days: 14
+
+  coverage-report:
+    needs: [changes, python, postgres]
+    if: ${{ always() && (needs.python.result != 'skipped' || needs.postgres.result != 'skipped') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --require-hashes -r requirements.dev.lock.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: sixnine-coverage-data-*-${{ github.run_attempt }}
+          merge-multiple: true
+          path: coverage-data/
+      - name: Combine existing unittest shards (artifact only, no threshold)
+        env:
+          SUITE_RESULTS: ${{ toJSON(needs) }}
+          SLOW_MODULE_SELECTION: ${{ needs.changes.outputs.slow_modules }}
+        run: |
+          mkdir -p coverage-report
+          python - <<'PY'
+          import json, os, pathlib
+          files = list(pathlib.Path('coverage-data').glob('.coverage.*'))
+          results = json.loads(os.environ['SUITE_RESULTS'])
+          slow = json.loads(os.environ['SLOW_MODULE_SELECTION'])
+          expected = (6 if results['python']['result'] != 'skipped' else 0) + (10 if results['postgres']['result'] != 'skipped' else 0)
+          complete = len(files) == expected and all(x['result'] in ('success', 'skipped') for x in results.values())
+          pathlib.Path('coverage-report/completeness.json').write_text(json.dumps({'complete': complete, 'all_declared_tests': complete and slow is None, 'slow_module_selection': slow, 'expected_shards': expected, 'received_files': len(files), 'suites': results}, indent=2))
+          PY
+          python -m coverage combine coverage-data
+          python -m coverage xml -o coverage-report/coverage.xml
+          python -m coverage html -d coverage-report/html
+          python -m coverage report > coverage-report/summary.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report-${{ github.sha }}-${{ github.run_attempt }}
+          path: coverage-report/
+          if-no-files-found: warn
+          retention-days: 14
+
   test:
     # Preserve the existing required-check identity. Only explicitly unselected
     # gates may be skipped; failures, cancellations and accidental skips fail it.
     if: always()
-    needs: [changes, python, postgres, frontend, frontend-tools, containers, macos-helper]
+    needs: [changes, python, postgres, frontend, frontend-tools, containers]
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
@@ -562,8 +658,7 @@ jobs:
               raise SystemExit('CI classification or dispatch validation failed')
           flags = results['changes']['outputs']
           for job, flag in [('python', 'python'), ('postgres', 'postgres'), ('frontend', 'frontend'),
-                            ('frontend-tools', 'frontend_tools'), ('containers', 'containers'),
-                            ('macos-helper', 'macos_helper')]:
+                            ('frontend-tools', 'frontend_tools'), ('containers', 'containers')]:
               selected = flags.get(flag)
               if selected not in ('true', 'false'):
                   raise SystemExit('CI selection output missing: ' + flag)

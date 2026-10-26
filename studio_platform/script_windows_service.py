@@ -4,7 +4,7 @@ import copy
 import json
 
 from fastapi import Header, HTTPException, Request
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import func, insert, select
 
 from .content_lifecycle import assert_project_writable, owner_reference_gate
 from .generation_admission import reject_managed

@@ -111,40 +111,6 @@ dialog::backdrop {
   background: var(--media-scrim);
   backdrop-filter: blur(3px);
 }
-dialog.modal {
-  width: 560px;
-}
-dialog.modal.wide {
-  width: 900px;
-}
-.modal-heading,
-.modal-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.modal-heading h2 {
-  flex: 1;
-  font-size: 16px;
-}
-.modal-actions {
-  justify-content: flex-end;
-  margin-top: 18px;
-}
-.modal form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.modal fieldset {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  min-width: 0;
-}
-.modal pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .inline-error,
 [role='alert'] {
   color: var(--warn);
@@ -153,14 +119,7 @@ dialog.modal.wide {
   background: var(--warn-soft);
   color: var(--warn);
 }
-.story-account-menu {
-  position: relative;
-}
-.story-account-menu > summary {
-  list-style: none;
-  cursor: pointer;
-}
-.story-account-panel,
+
 .story-recent-menu {
   position: absolute;
   right: 0;
@@ -173,20 +132,7 @@ dialog.modal.wide {
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
-.story-account-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.story-account-panel p {
-  color: var(--muted);
-}
-.story-account-panel small {
-  display: block;
-}
-.story-account-panel button {
-  justify-content: flex-start;
-}
+
 .story-recent {
   position: relative;
 }
@@ -248,49 +194,7 @@ dialog.modal.wide {
   min-height: 18px;
   justify-content: center;
 }
-.libp-detail .library-media {
-  width: 100%;
-  max-height: 40vh;
-  object-fit: contain;
-}
-.libp-detail {
-  overflow: auto;
-}
-.libp-detail > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.libp-detail > button,
-.libp-detail > a {
-  margin: 6px;
-}
-.libp-detail p {
-  color: var(--muted);
-}
-.media-library-upload {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-  border: 1px dashed var(--line-2);
-  border-radius: 10px;
-  padding: 18px;
-}
-.media-library-upload > div > div {
-  display: flex;
-  gap: 8px;
-}
-.media-library-upload h3 {
-  font-size: 14px;
-}
-.media-library-upload p {
-  color: var(--muted);
-  font-size: 12px;
-}
-.media-library-upload.is-dragging {
-  border-color: var(--accent);
-}
+
 .sb-workspace {
   flex: 1;
   min-height: 0;
@@ -300,17 +204,7 @@ dialog.modal.wide {
 .sb-workspace > .layout {
   width: 100%;
 }
-.sb-error {
-  background: var(--warn-soft);
-  color: var(--warn);
-  padding: 10px;
-  display: flex;
-  gap: 8px;
-  flex: none;
-}
-.sb-error > span {
-  flex: 1;
-}
+
 .sb-toast {
   position: fixed;
   left: 50%;
@@ -337,12 +231,7 @@ dialog.modal.wide {
   justify-content: center;
   background: var(--media-scrim);
 }
-.workbench-expand {
-  position: absolute;
-  right: 45px;
-  top: 14px;
-  z-index: 2;
-}
+
 .drawer.workbench-expanded {
   left: calc(var(--libw, 260px) + 8px);
   width: auto !important;
@@ -365,47 +254,7 @@ dialog.modal.wide {
 .workbench-bulk > small {
   display: none;
 }
-.workbench-takes {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.workbench-take {
-  position: relative;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px;
-}
-.workbench-take video,
-.workbench-take img {
-  width: 100%;
-  max-height: 160px;
-  object-fit: contain;
-}
-.workbench-compare {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.workbench-defaults {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px;
-}
-.workbench-defaults fieldset {
-  border: 0;
-  padding: 4px 0;
-}
-.workbench-defaults fieldset > div,
-.workbench-defaults label {
-  display: block;
-  margin: 8px 0;
-}
-.workbench-defaults small {
-  display: block;
-  color: var(--muted);
-}
+
 .home > main:has(> .home-main) {
   flex: 1;
   min-height: 0;
@@ -446,10 +295,7 @@ dialog.modal.wide {
 .v2-home-search:focus-within {
   border-color: var(--accent);
 }
-.home-search-row > .story-library-refresh {
-  padding: 7px;
-  justify-content: center;
-}
+
 .v2-home-quick {
   display: inline-flex;
   align-items: center;
@@ -521,8 +367,7 @@ dialog.modal.wide {
   .hbar nav {
     transform: none;
   }
-  .hbar > :is(button, .story-account-menu > summary),
-  .hbar .story-account-menu > summary {
+  .hbar > button {
     min-width: 36px;
     min-height: 36px;
   }
@@ -552,11 +397,7 @@ dialog.modal.wide {
   .home-head > .v2-home-new > span {
     display: none;
   }
-  .home-search-row > .story-library-refresh {
-    width: 36px;
-    min-width: 36px;
-    height: 36px;
-  }
+
   .story-card.new > small {
     white-space: normal;
     overflow: visible;
@@ -568,17 +409,7 @@ dialog.modal.wide {
     border-radius: 999px;
     backdrop-filter: blur(6px);
   }
-  .story-account-panel {
-    position: fixed;
-    top: 54px;
-    right: 12px;
-  }
-  .libp-detail {
-    position: fixed;
-    inset: 0;
-    z-index: 80;
-    background: var(--surface);
-  }
+
   .drawer.workbench-expanded {
     left: 0;
     width: 100% !important;
@@ -616,12 +447,6 @@ dialog.modal.wide {
     width: 24px;
     height: 24px;
   }
-  .workbench-expand {
-    right: 45px;
-  }
-  .workbench-compare {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* Phone targets keep the approved compact geometry without shrinking controls. */
@@ -645,13 +470,6 @@ dialog.modal.wide {
   .ui-empty > a {
     min-height: 36px;
     display: inline-flex;
-    align-items: center;
-  }
-  .story-account-panel :is(button, a) {
-    min-height: 36px;
-  }
-  .story-account-panel a {
-    display: flex;
     align-items: center;
   }
 }
@@ -774,10 +592,7 @@ dialog.modal.wide {
   .sb-workspace .library .lib-tip {
     display: none;
   }
-  .sb-workspace .library .add-profile {
-    white-space: normal;
-    text-align: left;
-  }
+
   .sb-workspace .library .lib-head > small {
     display: none;
   }

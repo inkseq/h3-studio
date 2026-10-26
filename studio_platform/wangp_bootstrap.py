@@ -4,13 +4,11 @@ Only an approved initial boot installs or starts. Reconnect reads the original
 marker, token and runtime incarnation. No cloud credentials cross this boundary.
 """
 
-from dataclasses import asdict
 from contextlib import contextmanager
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import secrets
 import stat

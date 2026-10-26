@@ -1,7 +1,8 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
+import { Dialog } from './ui/Dialog.jsx';
 import React, { useEffect, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
-import { ChatDialog } from './QuickChatControls.jsx';
 import {
   historySelectable,
   historyReason,
@@ -97,15 +98,10 @@ function Preview({ value, state, controller }) {
       )}
       {expired && <p className="qc-warning">{t('history.copy14')}</p>}
       <div className="qc-dialog-footer">
-        <button
-          type="button"
-          disabled={state.busy}
-          onClick={() => controller.dismissHistoryPreview()}
-        >
+        <Button disabled={state.busy} onClick={() => controller.dismissHistoryPreview()}>
           {t('history.copy15')}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
           className={permanent ? 'qc-history-danger' : 'qc-primary'}
           disabled={
             state.busy || !!state.pending || expired || !!blocked.length || !value.items.length
@@ -114,13 +110,13 @@ function Preview({ value, state, controller }) {
         >
           {HISTORY_ACTIONS[value.action]}
           {t('history.copy67', { count: value.items.length })}
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 function Receipt({ state, controller, returnToActive = false, showPending = true }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const HISTORY_ACTIONS = {
     trash: t('history.copy55'),
     restore: t('history.copy56'),
@@ -132,11 +128,12 @@ function Receipt({ state, controller, returnToActive = false, showPending = true
     blocked = receipt?.items.filter((item) => item.state === 'blocked').length || 0;
   const receiptKey = receipt?.action_id + ':' + receipt?.state,
     [dismissed, setDismissed] = useState(null);
+  const receiptCompleted = receipt?.state === 'completed';
   useEffect(() => {
-    if (!returnToActive || !receipt || receipt.state !== 'completed' || blocked) return;
+    if (!returnToActive || !receiptCompleted || blocked) return;
     const timer = setTimeout(() => setDismissed(receiptKey), 12000);
     return () => clearTimeout(timer);
-  }, [returnToActive, receiptKey, blocked]);
+  }, [returnToActive, receiptCompleted, receiptKey, blocked]);
   async function undo() {
     const owner = state.account,
       ids = receipt.items
@@ -189,18 +186,18 @@ function Receipt({ state, controller, returnToActive = false, showPending = true
               : t('history.copy17')}
           {t('history.copy66')}
           {receipt.action === 'trash' && receipt.state === 'completed' && !blocked && (
-            <button disabled={state.busy || !!state.pending} onClick={() => safely(undo())}>
+            <Button disabled={state.busy || !!state.pending} onClick={() => safely(undo())}>
               {t('trash.undo')}
-            </button>
+            </Button>
           )}
         </p>
       )}
       {showPending && pending && (
         <div className="qc-warning">
           <p>{state.pending.actionId ? t('history.copy18') : t('history.copy19')}</p>
-          <button type="button" disabled={state.busy} onClick={() => safely(controller.recover())}>
+          <Button disabled={state.busy} onClick={() => safely(controller.recover())}>
             {state.pending.actionId ? t('history.copy20') : t('history.copy21')}
-          </button>
+          </Button>
         </div>
       )}
     </>
@@ -224,7 +221,7 @@ export function HistoryFeedback({ state, controller, busy }) {
     <>
       <Receipt state={state} controller={controller} returnToActive showPending={false} />
       {preview && (
-        <ChatDialog
+        <Dialog
           title={
             t(
               'history.' +
@@ -241,7 +238,7 @@ export function HistoryFeedback({ state, controller, busy }) {
               {state.error}
             </p>
           )}
-        </ChatDialog>
+        </Dialog>
       )}
     </>
   );
@@ -284,16 +281,12 @@ export default function CreationHistory({ state, controller, busy, embeddedTrash
   );
   const controls = (
     <div className="qc-history-selection">
-      <button type="button" disabled={locked} onClick={selectAll}>
+      <Button disabled={locked} onClick={selectAll}>
         {t('history.copy23')}
-      </button>
-      <button
-        type="button"
-        disabled={locked || !selected.length}
-        onClick={() => controller.selectHistory([])}
-      >
+      </Button>
+      <Button disabled={locked || !selected.length} onClick={() => controller.selectHistory([])}>
         {t('history.copy24')}
-      </button>
+      </Button>
       <span>{t('history.copy63', { count: selected.length })}</span>
     </div>
   );
@@ -347,34 +340,34 @@ export default function CreationHistory({ state, controller, busy, embeddedTrash
               )}
             </div>
             {state.trashCursor && (
-              <button
+              <Button
                 disabled={busy}
                 onClick={() => safely(controller.list({ view: 'trash', more: true }))}
               >
                 {t('history.copy51')}
-              </button>
+              </Button>
             )}
             <div className="qc-history-actions">
-              <button
+              <Button
                 disabled={locked || !selected.length}
                 onClick={() => safely(softAction('restore'))}
               >
                 <RotateCcw size={14} />
                 {t('history.copy52')}
-              </button>
-              <button
+              </Button>
+              <Button
                 disabled={locked || !selected.length}
                 onClick={() => safely(controller.previewHistory('purge'))}
               >
                 {t('history.copy53')}
-              </button>
-              <button
+              </Button>
+              <Button
                 className="qc-history-danger"
                 disabled={locked || !state.trashSessions.length}
                 onClick={() => safely(controller.previewHistory('empty_trash'))}
               >
                 {t('history.copy54')}
-              </button>
+              </Button>
             </div>
           </>
         )}

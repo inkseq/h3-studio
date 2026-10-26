@@ -16,7 +16,6 @@ export const coverOf = (db, profile, id) =>
   db.asset(variantOf(profile, id)?.images[0] || profile.variants.flatMap((v) => v.images)[0]);
 export const chosenVersion = (shot) =>
   shot.versions.find((version) => version.id === shot.chosen) || null;
-export const modeOf = (shot) => shot.mode || 'FL';
 export const prevShot = (shots, shot) => {
   const at = shots.findIndex((s) => s.id === shot.id);
   return at > 0 ? shots[at - 1] : null;
@@ -24,11 +23,6 @@ export const prevShot = (shots, shot) => {
 export const expand = (shot, db, locale = 'zh') =>
   storyboardPresentation(db.expand(shot, locale), locale);
 export const planDrop = (shot, item, slot, db) => db.planDrop(shot, item, slot);
-export const shotProfiles = (shot) => [
-  ...shot.cast.map((c) => ({ id: c.id, variant: c.variant })),
-  ...(shot.place ? [shot.place] : []),
-  ...shot.props.map((id) => ({ id })),
-];
 export function startFrame(shot, db, locale = 'zh') {
   if (shot.continuePrev) {
     const previous = prevShot(db.state.shots, shot),

@@ -1,26 +1,52 @@
-# TaoMate creator controls (#649)
+# Profile-owned creator controls (#649, #659)
 
 New creator requests targeting
-`h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7` retain `duration`, `seed`,
+`h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7` or the current
+`h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6` retain `duration`, `seed`,
 `resolution`, `aspect_ratio` and `generate_audio` inside `controls`. Aspect ratio
 and audio output are creator choices, not internal model tuning; they retain
 native enum/bool validation. Resolution is the existing Standard (480P)
 or HD (768P) wire choice. Quality tier, FL/REF mode, copies and reference inputs
 remain in their existing fields. Hidden controls such as steps, sampler, sigma
 shifts and VAE settings use the immutable profile's defaults. In particular,
-stored `steps=50` must compile with five steps, without changing the source record.
+stored `steps=50` compiles with five steps on TaoMate, or the v6 profile's own
+20-step default on v6, without changing the source record. This projection does
+not switch the deployed default profile or turn v6 into a TaoMate runtime.
 
 The projection happens after account/story/shot defaults are combined and before
 draft validation, and again at new-plan compilation. Confirmed script windows
 are still supplied by the server after this projection. No accepted plan, job,
 attempt, revision or artifact is rewritten. New stored-shot plans record
-`creator_control_policy=taomate-creator-v1`; film freshness uses this policy only
-for those receipts. Historical receipts retain their original comparison.
+`creator_control_policy=taomate-creator-v1` for TaoMate and
+`creator_control_policy=controls-v6-creator-v1` for v6. Film freshness uses the
+matching profile's policy only for those receipts. Historical receipts without
+the marker, unknown policies and mismatched profile/policy pairs retain their
+original comparison. Existing accepted plans and jobs never pass through this
+new-request projection again.
+
+As on TaoMate, explicit new public generation-setting writes also ignore hidden
+controls through the existing normalizer and CAS route. Seed/aspect/audio and
+other creator fields still save. Existing documents are not bulk-cleaned;
+preflight does not modify their stored values, and ordinary unchanged-selector
+round trips retain the existing authoring behavior.
 
 Public quality selections are creator requests even for an administrator.
 Explicit human-admin internal API selections retain the native compiler's
 profile-specific permissions and validation: a permitted sampler override can
-work, while `steps=50` remains invalid for TaoMate. Other profiles are unchanged.
+work, while `steps=50` remains invalid for TaoMate and remains permitted by v6
+on that explicit internal path. All profiles other than these two exact IDs are
+unchanged. Invalid creator output choices still fail native validation.
+
+## #659 staging acceptance boundary
+
+The fd2ae3af acceptance in #193 comment6420872383 exercised v6 output choices,
+not the TaoMate-only stale-control filter. The v6 extension is a separate
+Tier2 candidate and needs independent review and exact-tuple acceptance. On v6,
+preflight a disposable stale-steps shot with portrait/silent output; check the
+effective20 steps, retained output choices, unchanged stored document/version
+and new receipt marker. Confirm existing take freshness separately. No GPU is
+needed for that preflight. Claude's separately gated v7 switch and GPU/visual
+checks in #659 remain required; this mitigation is not their acceptance.
 
 ## Read-only compatibility census, 2026-10-26
 

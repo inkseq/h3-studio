@@ -112,7 +112,7 @@ def deletion_evidence(db, references):
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
         ).fetchone():
             query = (
-                'SELECT '
+                'SELECT '  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                 + ','.join('"' + c + '"' for c in columns)
                 + ' FROM "'
                 + table

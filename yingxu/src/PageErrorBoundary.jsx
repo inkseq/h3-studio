@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from './ui/Button.jsx';
 import { navigateApp } from './app-navigation.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
@@ -9,18 +10,17 @@ function Fallback({ onRetry }) {
       <h2>{t('pageError.title')}</h2>
       <p>{t('pageError.body')}</p>
       <div className="page-error-actions">
-        <button type="button" className="primary" onClick={() => window.location.reload()}>
+        <Button variant="primary" onClick={() => window.location.reload()}>
           {t('pageError.reload')}
-        </button>
-        <button
-          type="button"
+        </Button>
+        <Button
           onClick={() => {
             onRetry();
             navigateApp('/');
           }}
         >
           {t('pageError.works')}
-        </button>
+        </Button>
       </div>
     </div>
   );

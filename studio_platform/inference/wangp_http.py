@@ -13,11 +13,9 @@ import httpx
 
 from .protocol import BackendError, SubmissionUncertain
 from .wangp_contract import (
-    ArtifactDescriptor,
     HostReadiness,
     InputDescriptor,
     OperationReceipt,
-    PreparedRequest,
     canonical_json,
 )
 

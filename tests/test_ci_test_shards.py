@@ -451,12 +451,16 @@ class WorkflowTests(unittest.TestCase):
         self.aggregate()
         self.aggregate(selected=False)
         self.assertIn(
-            "needs: [changes, python, postgres, frontend, frontend-tools, containers, macos-helper]",
+            "needs: [changes, python, postgres, frontend, frontend-tools, containers]",
             self.workflow,
         )
 
+    def test_advisory_macos_does_not_block_required_backend_gate(self):
+        for result in ("failure", "cancelled", "abandoned", "skipped"):
+            self.aggregate(override=("macos-helper", result))
+
     def test_required_aggregate_rejects_failed_cancelled_or_skipped_matrix(self):
-        for job in ("python", "postgres", "macos-helper"):
+        for job in ("python", "postgres", "containers"):
             for result in ("failure", "cancelled", "skipped"):
                 with (
                     self.subTest(job=job, result=result),

@@ -11,7 +11,7 @@ const directory = fileURLToPath(new URL('.', import.meta.url));
 const stubs = {
   './i18n/I18nProvider.jsx': `export const useI18n=()=>({t:key=>key});`,
   './UniversalTrash.jsx': `export const useTrash=()=>null;export const TrashMenu=()=>null;`,
-  './QuickChatControls.jsx': `export const ChatDialog=()=>null;`,
+  './ui/Dialog.jsx': `export const Dialog=()=>null;`,
   './media.js': `export const uploadFile=()=>null;`,
   './media-operations.js': `export const uploadLibraryFiles=()=>[];`,
   './storyboard-actions.js': `export const applyStoryboardAction=()=>false;`,
@@ -95,6 +95,13 @@ function mountedLibrary() {
       }
     },
     useSyncExternalStore: (subscribe, snapshot) => snapshot(),
+    // Effect events always call the latest render's function.
+    useEffectEvent: (fn) => {
+      const index = cursor++;
+      const slot = (hooks[index] ??= { kind: 'event', fn });
+      slot.fn = fn;
+      return (...args) => slot.fn(...args);
+    },
   };
   const filename = directory + 'library-loading-test.cjs',
     mod = new Module(filename),

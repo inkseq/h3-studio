@@ -1,8 +1,9 @@
 import { Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
 import StudioHeader from './StudioHeader.jsx';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
+import { operatorFormatters } from './i18n/legacyOperatorPresentation.js';
 import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
 import React, {
   useEffect,
@@ -16,7 +17,6 @@ import {
   ArrowLeft,
   ArrowUpRight,
   Clock,
-  Cpu,
   Info,
   LogOut,
   Play,
@@ -26,23 +26,14 @@ import {
   Server,
   Settings2,
   ShieldCheck,
-  X,
 } from 'lucide-react';
 import { useCloud } from './CloudStudio.jsx';
 import { cloudController as cloud } from './cloud-controller.js';
 import { createOperatorController } from './operator-controller.js';
 import {
-  age,
   allowed,
-  dollars,
-  duration,
   hasBoundOperatorSelection,
-  runtimeDuration,
-  reasonText,
   staleSnapshot,
-  stateLabel,
-  providerLabel,
-  operatorMarketProvider,
   operatorModels,
   operatorCandidateKey,
   operatorCandidateSelection,
@@ -50,8 +41,6 @@ import {
   operatorCandidatePreviewMatches,
   initialOperatorMarket,
   operatorMarketReducer,
-  operatorMarketSummary,
-  roundedSpec,
 } from './operator-model.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import './v2/ops-adapter.css';
@@ -141,7 +130,7 @@ function RecipeEvidence({ profile }) {
   );
 }
 function Login() {
-  const { t: lo, locale } = useI18n();
+  const { t: lo } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
@@ -187,9 +176,13 @@ function Login() {
           <Note>{lo('legacyOp.copy17')}</Note>
         )}
         <FloatingMessage tone="error" text={error ? error : null} />
-        <button className="op-primary" disabled={c.busy || !c.auth || c.auth.auth_ready === false}>
+        <Button
+          type="submit"
+          className="op-primary"
+          disabled={c.busy || !c.auth || c.auth.auth_ready === false}
+        >
           {lo('legacyOp.copy18')}
-        </button>
+        </Button>
       </form>
     </section>
   );
@@ -221,8 +214,8 @@ function ManualReviewDialog({ node, busy, onClose, onReview }) {
       <Note>{lo('legacyOp.copy28')}</Note>
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
-        <button onClick={onClose}>{lo('legacy.panel36')}</button>
-        <button
+        <Button onClick={onClose}>{lo('legacy.panel36')}</Button>
+        <Button
           className="op-primary"
           disabled={busy || !absent || !noCharge}
           onClick={async () => {
@@ -235,7 +228,7 @@ function ManualReviewDialog({ node, busy, onClose, onReview }) {
           }}
         >
           {lo('legacyOp.copy30')}
-        </button>
+        </Button>
       </footer>
     </Dialog>
   );
@@ -311,10 +304,10 @@ function ExtensionDialog({ node, busy, controller, onClose, now }) {
               <span>{lo('legacyOp.copy36')}</span>
             </div>
           </label>
-          <button disabled={busy || loading || !valid || submitted} onClick={check}>
+          <Button disabled={busy || loading || !valid || submitted} onClick={check}>
             <RefreshCw size={14} />
             {loading ? lo('workspace.agentDetail24') : lo('legacyOp.copy38')}
-          </button>
+          </Button>
           {!preview && <Reasons items={node.actions.extend.blockers || []} />}
           {preview && (
             <div className="op-preview">
@@ -357,21 +350,21 @@ function ExtensionDialog({ node, busy, controller, onClose, now }) {
       )}
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
-        <button onClick={onClose}>
+        <Button onClick={onClose}>
           {submitted ? lo('storyboard.copy58') : lo('legacy.panel36')}
-        </button>
+        </Button>
         {supported && !submitted && (
-          <button className="op-primary" disabled={busy || loading || !current} onClick={confirm}>
+          <Button className="op-primary" disabled={busy || loading || !current} onClick={confirm}>
             <Clock size={14} />
             {lo('legacyOp.copy53')}
-          </button>
+          </Button>
         )}
       </footer>
     </Dialog>
   );
 }
 function PolicyDialog({ policy, busy, onSave, onClose }) {
-  const { t: lo, locale } = useI18n();
+  const { t: lo } = useI18n();
   const [draft, setDraft] = useState({ ...policy }),
     [error, setError] = useState('');
   const fields = [
@@ -448,12 +441,10 @@ function PolicyDialog({ policy, busy, onSave, onClose }) {
         </Note>
         <FloatingMessage tone="error" text={error ? error : null} />
         <footer className="op-dialog-actions">
-          <button type="button" onClick={onClose}>
-            {lo('legacy.panel36')}
-          </button>
-          <button className="op-primary" disabled={busy}>
+          <Button onClick={onClose}>{lo('legacy.panel36')}</Button>
+          <Button type="submit" className="op-primary" disabled={busy}>
             {lo('legacyOp.copy68')}
-          </button>
+          </Button>
         </footer>
       </form>
     </Dialog>
@@ -752,14 +743,14 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
         )}
         <FloatingMessage tone="error" text={error ? error : null} />
         <footer className="op-dialog-actions">
-          <button disabled={busy} onClick={back}>
+          <Button disabled={busy} onClick={back}>
             <ArrowLeft size={14} />
             {lo('legacyOp.copy124')}
-          </button>
-          <button className="op-primary" disabled={busy || !canStart} onClick={start}>
+          </Button>
+          <Button className="op-primary" disabled={busy || !canStart} onClick={start}>
             <Play size={15} />
             {busy ? lo('legacyOp.copy125') : lo('legacyOp.copy126')}
-          </button>
+          </Button>
         </footer>
       </Dialog>
     );
@@ -795,15 +786,14 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
                 ['fl', 'FL2VA', lo('legacy.projection15')],
                 ['ref', 'Ref2VA', lo('cloud.shot4')],
               ].map(([mode, label, note]) => (
-                <button
-                  type="button"
+                <Button
                   key={mode}
                   aria-pressed={query.mode === mode}
                   onClick={() => change({ mode })}
                 >
                   <b>{label}</b>
                   <small>{note}</small>
-                </button>
+                </Button>
               ))}
             </div>
           </div>
@@ -819,9 +809,8 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
           </p>
         )}
         <div className="op-market-query">
-          <button
+          <Button
             className="op-primary"
-            type="button"
             disabled={busy || market.loading === 'candidates' || !model || !!ttl.problem}
             onClick={scan}
           >
@@ -831,7 +820,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
               : result
                 ? lo('legacyOp.copy134')
                 : lo('legacyOp.copy135')}
-          </button>
+          </Button>
           <span>{lo('legacyOp.copy136')}</span>
           <details className="op-details op-start-window">
             <summary>
@@ -940,7 +929,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
       </fieldset>
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer className="op-dialog-actions">
-        <button onClick={onClose}>{lo('storyboard.copy58')}</button>
+        <Button onClick={onClose}>{lo('storyboard.copy58')}</Button>
       </footer>
     </Dialog>
   );
@@ -965,7 +954,7 @@ export default function OperatorConsole() {
   }, [controller]);
   useEffect(() => {
     if (pageActive) document.title = lo('legacyOp.copy153');
-  }, [pageActive, locale]);
+  }, [pageActive, locale, lo]);
   useEffect(() => {
     setDialog(null);
     setActionError('');
@@ -1050,10 +1039,10 @@ export default function OperatorConsole() {
             : lo('legacyOp.copy159')}
       </h2>
       <p>{lo('legacyOp.copy160')}</p>
-      <button onClick={refresh} disabled={state.loading}>
+      <Button onClick={refresh} disabled={state.loading}>
         <RefreshCw size={14} />
         {lo('legacyOp.copy161')}
-      </button>
+      </Button>
     </section>
   ) : (
     <>
@@ -1116,29 +1105,29 @@ export default function OperatorConsole() {
             <h2>{lo('legacyOp.copy179')}</h2>
             <p>{lo('legacyOp.copy180')}</p>
           </div>
-          <button
+          <Button
             className="op-primary"
             disabled={busy || !allowed(snapshot, 'start', now)}
             onClick={() => setDialog({ type: 'start' })}
           >
             <Plus size={16} />
             {lo('legacyOp.copy181')}
-          </button>
+          </Button>
         </div>
         <div className="op-machine-tabs" role="group" aria-label={lo('legacyOp.copy182')}>
-          <button
+          <Button
             aria-pressed={machineView === 'current'}
             onClick={() => setMachineView('current')}
           >
             {lo('legacyOp.copy183')}{' '}
             <span>{groups.current.length + groups.pending_review.length}</span>
-          </button>
-          <button
+          </Button>
+          <Button
             aria-pressed={machineView === 'history'}
             onClick={() => setMachineView('history')}
           >
             {lo('legacyOp.copy184')} <span>{groups.history.length}</span>
-          </button>
+          </Button>
         </div>
         {machineView === 'current' ? (
           <>
@@ -1303,13 +1292,13 @@ export default function OperatorConsole() {
             <small>{lo('legacyOp.copy221')}</small>
           </div>
           {c.account && (
-            <button
+            <Button
               className="op-icon"
               aria-label={lo('legacyOp.copy222')}
               onClick={() => quietly(cloud.logout())}
             >
               <LogOut size={16} />
-            </button>
+            </Button>
           )}
         </div>
       </aside>
@@ -1323,14 +1312,14 @@ export default function OperatorConsole() {
                 ? lo('legacyOp.copy224', { x0: age(snapshot.observed_at, now) })
                 : lo('legacyOp.copy225')}
             </span>
-            <button
+            <Button
               className="op-icon"
               aria-label={lo('legacyOp.copy226')}
               disabled={state.loading || !c.account}
               onClick={refresh}
             >
               <RefreshCw size={17} />
-            </button>
+            </Button>
           </div>
         </header>
         <div className="op-content">
@@ -1340,13 +1329,13 @@ export default function OperatorConsole() {
               <h1>{lo('legacyOp.copy227')}</h1>
               <p>{lo('legacyOp.copy228')}</p>
             </div>
-            <button
+            <Button
               disabled={busy || !allowed(snapshot, 'update_policy', now)}
               onClick={() => setDialog({ type: 'policy' })}
             >
               <Settings2 size={16} />
               {lo('legacyOp.copy229')}
-            </button>
+            </Button>
           </div>
           {state.error && !state.denied && (
             <div className="op-banner warn" role="alert">
@@ -1365,9 +1354,9 @@ export default function OperatorConsole() {
                 <b>{lo('legacyOp.copy231')}</b>
                 <p>{lo('legacyOp.copy232')}</p>
               </div>
-              <button disabled={state.busy} onClick={() => quietly(controller.recover())}>
+              <Button disabled={state.busy} onClick={() => quietly(controller.recover())}>
                 {lo('legacyOp.copy233')}
-              </button>
+              </Button>
             </div>
           )}
           {content}
@@ -1439,8 +1428,8 @@ export default function OperatorConsole() {
           <Note>{lo('legacyOp.copy241')}</Note>
           <FloatingMessage tone="error" text={actionError ? actionError : null} />
           <footer className="op-dialog-actions">
-            <button onClick={() => setDialog(null)}>{lo('legacy.panel36')}</button>
-            <button
+            <Button onClick={() => setDialog(null)}>{lo('legacy.panel36')}</Button>
+            <Button
               className="op-primary"
               disabled={busy || stale}
               onClick={async () => {
@@ -1454,7 +1443,7 @@ export default function OperatorConsole() {
             >
               {lo('legacyOp.copy242')}
               {dialog.kind === 'drain' ? lo('legacyOp.copy207') : lo('legacyOp.copy208')}
-            </button>
+            </Button>
           </footer>
         </Dialog>
       )}

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { ArrowRight } from 'lucide-react';
 import InkMark from './InkMark.jsx';
@@ -88,22 +89,18 @@ export default function Landing() {
           {t('landing.pricing')}
         </a>
         <LanguageSwitcher />
-        <button
-          type="button"
-          className="landing-link"
-          disabled={opening}
-          onClick={() => start('sign-in')}
-        >
+        <Button className="landing-link" disabled={opening} onClick={() => start('sign-in')}>
           {t('landing.signIn')}
-        </button>
-        <button
-          type="button"
-          className="primary small landing-bar-start"
+        </Button>
+        <Button
+          variant="primary"
+          size="sm"
+          className="landing-bar-start"
           disabled={opening}
           onClick={() => start()}
         >
           {t('landing.start')}
-        </button>
+        </Button>
       </header>
       <main>
         {/* Owner 2026-10-26: one page — the ink drop explains the idea, the studio proves it,
@@ -113,15 +110,15 @@ export default function Landing() {
           <p className="landing-lede">{t('landing.v2.lede')}</p>
           <FloatingMessage tone="error" text={signinError ? signinError : null} />
           <div className="landing-ctas">
-            <button
-              type="button"
-              className="primary landing-big"
+            <Button
+              variant="primary"
+              className="landing-big"
               disabled={opening}
               onClick={() => start()}
             >
               {t('landing.start')}
               <ArrowRight size={18} />
-            </button>
+            </Button>
             <a className="landing-secondary" href="#how">
               {t('landing.v2.howLink')}
             </a>
@@ -129,8 +126,7 @@ export default function Landing() {
           {hostedSignInEnabled(c.auth) && (
             <small className="muted">
               {t('landing.noAccount')}{' '}
-              <button
-                type="button"
+              <Button
                 className="linkish"
                 onClick={() => {
                   setPasswordFirst(true);
@@ -138,7 +134,7 @@ export default function Landing() {
                 }}
               >
                 {t('landing.passwordSignIn')}
-              </button>
+              </Button>
             </small>
           )}
         </section>
@@ -169,10 +165,10 @@ export default function Landing() {
         <section className="landing-final">
           <h2>{t('landing.v2.finalTitle')}</h2>
           <div className="landing-ctas">
-            <button type="button" className="primary landing-big" onClick={() => start()}>
+            <Button variant="primary" className="landing-big" onClick={() => start()}>
               {t('landing.start')}
               <ArrowRight size={18} />
-            </button>
+            </Button>
             <a
               className="landing-secondary"
               href="/pricing"

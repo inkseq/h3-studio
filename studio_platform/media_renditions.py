@@ -14,7 +14,7 @@ import re
 from PIL import Image, ImageOps
 
 from .media import MediaError
-from .asset_objects import ASSET_OBJECT_ROLES
+from .asset_objects import ASSET_OBJECT_ROLES  # noqa: F401 - public role re-export used by assets.
 
 RENDITIONS = {"thumb": (320, 64 * 1024), "preview": (1280, 512 * 1024)}
 POSTER_PREFIX_BYTES = 8 * 1024 * 1024
