@@ -34,7 +34,8 @@ import { useDragMove } from './ui/useDragMove.js';
 import { Badge, Chip, Note } from './ui/Note.jsx';
 import './profile-editor.css';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
-import { WorkbenchTakes, WorkbenchCopies } from './StoryboardWorkbench.jsx';
+import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
+import { useCloud } from './CloudStudio.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -1846,6 +1847,22 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db, locale);
   const upd = (patch) => dispatch({ type: 'update', id: shot.id, patch });
+  const operatorAccess = useCloud().operatorAccess === true;
+  // One new take: a fresh seed only matters when the seed is locked; HD switches the tier first.
+  const [regenerating, setRegenerating] = useState(false);
+  const regenerate = async (patch) => {
+    if (patch.newSeed && !shot.seedLock) delete patch.newSeed;
+    setRegenerating(true);
+    try {
+      if (Object.keys(patch).length) {
+        const result = await upd(patch);
+        if (result?.ok === false) return;
+      }
+      await dispatch({ type: 'workbenchGenerate', ids: [shot.id], copies: 1 });
+    } finally {
+      setRegenerating(false);
+    }
+  };
   const openPicker = (slot) => (e) => setPicker({ slot, x: e.clientX, y: e.clientY });
   const sf = startFrame(shot, db, locale),
     endA = shot.end && db.asset(shot.end);
@@ -2383,8 +2400,9 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           ))}
         </details>
 
-        {/* No per-shot model parameters (owner, 2026-10-26): quality, copies and seed below are
-            the creator's controls; the tier fixes steps, sampler and decoding. */}
+        {/* No per-shot model parameters for creators (owner, 2026-10-26): quality, shape, sound,
+            seed and copies below are theirs. Admins keep the raw panel for debugging. */}
+        {operatorAccess && <WorkbenchDefaults shotId={shot.id} />}
         {/* Quality, copies and Generate stay in view at the bottom (owner, 2026-10-24). */}
         <div className="ed-footer">
           <div className="row quality-row">
@@ -2396,6 +2414,27 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             <small className="muted">
               {info.res} · {shortSeconds(info.sec)} {tr('storyboard.secondsUnit')}
             </small>
+          </div>
+          <div className="row ed-gen-options">
+            <Segmented
+              label={tr('storyboard.aspect')}
+              options={[
+                ['16:9', 'storyboard.aspectWide'],
+                ['9:16', 'storyboard.aspectTall'],
+                ['1:1', 'storyboard.aspectSquare'],
+              ].map(([value, key]) => ({ value, label: tr(key) }))}
+              value={shot.aspect}
+              onChange={(aspect) => upd({ aspect })}
+            />
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={shot.keepAudio}
+                onChange={(e) => upd({ keepAudio: e.target.checked })}
+              />
+              {tr('storyboard.keepAudio')}
+              <HelpTip text={tr('storyboard.keepAudioHelp')} />
+            </label>
           </div>
           {/* Seed lock and takes sit on one line right above Generate (owner, 2026-10-26). */}
           <div className="row ed-gen-options">
@@ -2413,6 +2452,17 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
           </div>
           <div className="ed-actions">
+            {/* After a take: another version (new seed, same settings) or the same in HD. */}
+            {shot.versions.length > 0 && (
+              <Button disabled={regenerating} onClick={() => regenerate({ newSeed: true })}>
+                {tr('storyboard.anotherVersion')}
+              </Button>
+            )}
+            {shot.versions.length > 0 && shot.quality !== 'final' && (
+              <Button disabled={regenerating} onClick={() => regenerate({ quality: 'final' })}>
+                {tr('storyboard.regenerateHd')}
+              </Button>
+            )}
             <button
               className="primary"
               disabled={
