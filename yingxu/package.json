@@ -24,6 +24,7 @@
     "@radix-ui/react-tooltip": "1.2.16",
     "@remotion/player": "4.0.531",
     "@sentry/react": "11.6.0",
+    "@tanstack/react-query": "5.104.1",
     "jszip": "^3.10.1",
     "lucide-react": "^0.468.0",
     "posthog-js": "1.438.6",
