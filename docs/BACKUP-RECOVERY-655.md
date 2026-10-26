@@ -141,3 +141,75 @@ still fails visibly after the original business-copy receipt is saved.
    today's upload. Preserve its original receipts and report actual data dates.
 6. Sentry wiring is a separate #655 follow-up through the existing deployment config
    path and acceptance gates. Charging/Checkout remain off.
+
+## Confirmed fresh-capture OOM, 2026-10-26 UTC
+
+The original 10-19 copy completed (SSM `e64cb9bb-020d-4391-83d3-491078b41004`).
+Its S3 completion version is `I8UkNyXtrq._wi_MAdY_kVzbbKf6obrs`, SHA256
+`e71866a66d2a15a7fdf4467197c1fb8aff5c0ef7131258f05de2f5076c158b33`.
+This is an old snapshot copied today, not a fresh capture or restore proof.
+
+The one subsequent daily invocation `3849a3e9-2d95-416c-b78d-f0c527aee51f`
+passed zero-work and release checks but the kernel killed backup Python in the
+application's 512 MiB memory cgroup at 18:25:30 UTC. Read-only evidence
+`1f0b4d16-e0e2-4735-a57a-de6735c1724a` records 408116 KiB anonymous RSS.
+Application health remained healthy, restart count zero, and jobs zero. Original
+operation `9f8335d4-2da3-42ac-81c0-4f4104af2ee8` has only its intent, phase records
+and partial SQLite/journal, no manifest or transfer. S3 version history for that
+exact prefix was empty. The files and hashes are pinned by the new helper; none
+was removed, renamed, reset or represented as a completed snapshot.
+
+The source fix selects a table's export batch from its already measured largest
+row: at most 200 rows and approximately 4 MiB serialized bytes, with a minimum of
+one row. The existing 16 MiB individual-row / 256 MiB total / time limits remain.
+Decoded JSON and serialized values are released before the next fetch. A single
+large row can exceed 4 MiB; this is a batching bound, not an absolute process-RSS
+guarantee. A local PostgreSQL export of 96 synthetic 1 MiB documents plus one small
+document measured 397972 KiB peak RSS before, 112560 KiB after, in separate 512 MiB
+containers with no swap. Nine real PostgreSQL backup regressions passed.
+
+### One reviewed recovery, without promoting or raising memory limits
+
+This changes the reviewed recovery behavior and needs one new Tier2 PR review.
+The source fix goes through ordinary staging; Claude remains the production
+promoter. Do not clear #193 hold until the fresh copy is reconciled.
+
+1. Adopt only two **new** root-owned mode-0644 files, recording hashes and an
+   exclusive install intent under the existing release lock: this PR's
+   `deploy/platform/business_backup_oom_recovery.py` as
+   `/opt/inkseq-business-backup-v1/business_backup_oom_recovery.py`, and the exact
+   `studio_platform/backup.py` as `backup_capture_runtime.py` in that directory.
+   Refuse either existing path or changed installed #657 helper/config/release
+   hashes; retain rollback evidence. Do not alter the app image, app filesystem,
+   credentials, memory limit, existing helpers, unit or timer. The runtime hash
+   is pinned in the recovery script and tested against the tracked source bytes.
+2. Run the helper without arguments to qualify only. It pins production fd2ae3af,
+   its approved archive/image, original source hash, configuration, exact failed
+   intent/partial-file hashes, zero jobs, no writer, failed/inactive unit and no
+   original-nonce transport container. It requires at least 5 GiB free disk and
+   the original UTC capture day; another date requires a reviewed adjustment,
+   never silent redating. Independently recheck that original S3 prefix still has
+   no versions or deletion markers before executing.
+3. Invoke `python3 -B business_backup_oom_recovery.py --execute` **once**, with a
+   5700-second outer bound. Snapshot/handoff/transfer bounds remain 2400/900/1800s.
+   The exclusive fsynced recovery intent precedes all writes. A fresh private
+   `-oom-recapture` directory receives a new read-only database snapshot. The
+   previous partial directory stays untouched and its hashes are rechecked.
+   The known-reviewed module is passed on stdin to a separate Python subprocess
+   in the existing app container; source and runtime hashes must match. This
+   replaces no running application module/file and uses only its existing
+   explicit DB/storage identity. No generic script or destination argument is
+   accepted. Capture failure/timeout preserves the fence and never retries.
+4. Freeze a private host handoff and use the existing verified conditional-copy
+   transport to the **original nonce**. This is the first remote write for that
+   operation, not a replay or new upload prefix. Record the actual S3 receipt,
+   root receipt hash and completion once. Hosted-user unavailability can still
+   fail after a genuine business-copy completion; reconcile that receipt rather
+   than rerunning. A copy is never represented as a verified restore.
+5. Read back S3's exact completion version and local receipt/digests, report both
+   dated copies on #655, then clear #193's hold for Claude. Keep daily-preserve;
+   the old partial and new recapture paths are intentionally retained. Existing
+   retention will refuse the old partial tree's inventory mismatch, not delete
+   unverified files. Any later cleanup needs its own verified plan. Claude's
+   normal promotion of this source fix makes subsequent daily captures bounded
+   without using this one-operation helper again.

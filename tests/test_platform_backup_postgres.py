@@ -244,6 +244,43 @@ class PostgresPortableBackupTests(LedgerCase):
             )
         self.assertFalse((target / "manifest.json").exists())
 
+    def test_large_json_rows_use_bounded_batches_and_round_trip(self):
+        # The old fixed 200-row batch decoded all large payloads at once, sharing
+        # the production app's 512 MiB cgroup. Exercise the real server cursor.
+        payload = "synthetic-backup-memory-" + "x" * (512 * 1024)
+        expected = {}
+        for index in range(16):
+            key = "memory-document-" + str(index)
+            value = {"text": payload, "index": index, "nullable": None}
+            self.repo.put_document(self.scope, "project", key, value)
+            expected[key] = value
+        seen = []
+
+        def observe(connection, cursor, statement, parameters, context, executemany):
+            if context.execution_options.get("stream_results"):
+                seen.append((statement, context.execution_options["max_row_buffer"]))
+
+        event.listen(self.repo.engine, "before_cursor_execute", observe)
+        target = self.root / "large-row-backup"
+        try:
+            backup_postgres_engine(
+                self.repo.engine, self.store.root, target, schema=self.schema
+            )
+        finally:
+            event.remove(self.repo.engine, "before_cursor_execute", observe)
+        verify_local(target)
+        document_batches = [n for sql, n in seen if '"platform_documents"' in sql]
+        self.assertEqual(len(document_batches), 1)
+        self.assertGreaterEqual(document_batches[0], 1)
+        self.assertLessEqual(document_batches[0] * len(payload), 4 * 1024 * 1024)
+        self.assertTrue(any(n == 200 for _, n in seen))  # Small rows stay efficient.
+        with closing(sqlite3.connect(target / "database.sqlite3")) as db:
+            saved = dict(
+                db.execute("SELECT document_id,payload FROM platform_documents")
+            )
+        for key, value in expected.items():
+            self.assertEqual(json.loads(saved[key]), value)
+
     def test_extra_column_still_refuses_before_manifest(self):
         with self.repo.engine.begin() as conn:
             conn.exec_driver_sql(
