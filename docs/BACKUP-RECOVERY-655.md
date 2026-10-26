@@ -237,7 +237,11 @@ NULL/text values, duplicate rows and workflow execution hold. Verification and
 manifest inspection now validate one row at a time and hash every original byte.
 Legacy whitespace/key order/UTF-8 remain readable. Explicit isolated restoration's
 materializing `read` API is unchanged. No data retention or schema change occurs.
-The spool alone is removed on exit; incomplete backups and receipts stay intact.
+The spool alone is removed on normal exit; incomplete backups and receipts stay
+intact. A kill/OOM can leave a private `.workflow-sort-*` directory inside the
+failed capture. It is temporary sorting state, not snapshot content or a completed
+backup; preserve it with the failed capture for reconciliation. Do not include it
+in a verified manifest or remove it during an automatic retry.
 
 Validation includes a 131,000-row sidecar larger than 16 MiB inside a 256 MiB,
 no-swap, network-none container, plus malformed/tampered/legacy format coverage
