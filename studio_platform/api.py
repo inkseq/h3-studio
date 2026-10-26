@@ -1469,6 +1469,9 @@ def create_app(
     from .take_reviews import register_routes as register_take_reviews
 
     register_take_reviews(app)
+    from .take_redo import register_routes as register_take_redo
+
+    register_take_redo(app)
     from .operator_host_routes import register_routes as register_operator_host_routes
 
     register_operator_host_routes(app)

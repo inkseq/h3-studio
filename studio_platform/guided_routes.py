@@ -101,9 +101,11 @@ def create_guided_router(app, service) -> APIRouter:
     @router.get("/v1/guided-schema")
     def schema():
         from .take_reviews import contract as take_reviews_contract
+        from .take_redo import contract as take_redo_contract
 
         return {
             "take_reviews": take_reviews_contract(),
+            "take_redo": take_redo_contract(),
             "version": 1,
             "entity_types": sorted(TYPES),
             "link_roles": sorted(ROLES),
@@ -169,6 +171,7 @@ def create_guided_router(app, service) -> APIRouter:
             "generation_availability": public_guide()["generation_availability"],
             "story_risk_review": public_guide()["story_risk_review"],
             "take_reviews": public_guide()["take_reviews"],
+            "take_redo": public_guide()["take_redo"],
             "steps": [
                 "Browser account creates scoped API key; pass Bearer on API calls only",
                 "Before choosing quality and FL/REF, preflight and a new GPU submission, GET /v1/generation-availability; follow generation_availability for neutral tier/mode aliases, freshness and administrator/wait guidance. Read current capabilities for supported controls; unavailable tiers never fall back. Existing uncertain jobs retain their original receipt/key.",

@@ -264,6 +264,24 @@ than100 candidate videos returns `409 take_review_summary_limit`, never silent
 truncation. Use existing paginated versions and individual reads for overflow.
 No writes or extra generation; selection/star still does not imply approval.
 
+### Redo from marks
+
+POST `/v1/projects/PROJECT/shots/SHOT/takes/ARTIFACT/redo-preview` with
+`{expected_project_version,expected_review_revision,edits:[]}` reads the original
+accepted recipe and current marks without a write. Requires project/job read
+access. Then supply `edits:[{mark_id,start,end,replacement}]`, with code-point
+offsets in that ORIGINAL prompt (not UTF-16). Only actual change marks; no
+overlapping text edits or selected change range overlapping a keep range.
+Unknown seed/recipe and windowed recipes refuse; never guess from defaults.
+
+Returns creator-safe baseline/candidate, exact prompt diff and source binding.
+All non-prompt recipe bytes stay unchanged internally. `applied:false`,
+`executable:false`: this is no plan, price quote or generation permission. Kept
+pixels are not guaranteed. Human confirms the diff before existing authoring
+CAS and fresh generation preflight/confirmation; no apply endpoint in this slice.
+No Idempotency-Key is needed for this effect-free preview. Stale project/review
+409 requires a reread and reconciliation, never forced version increments.
+
 ### Story Chat risk advice
 
 Existing Story Chat generate proposals may include `risk_review`:

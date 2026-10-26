@@ -1,6 +1,6 @@
 ---
 name: inkseq
-description: Use an Inkseq / 映序 link to create video takes, organise an authorized story and references, and return editable drafts and results through the same business API as the website.
+description: Create video takes and organise authorized Inkseq / 映序 stories and references through the website's business API.
 ---
 
 # Inkseq / 映序
@@ -34,7 +34,7 @@ Video uses `tier: standard|refine|fast`, `mode: fl|ref`; Fast is unavailable. Re
 4. For authorized multi-shot work, POST the story's `/storyboard/preflights` with `{expected_version,shot_ids,copies}` and one saved key. Inspect aggregate cost and retained per-copy plans before using the explicit-plan batch API. Copies share the owner's editable limit; only the first uses a fixed seed.
 5. Inspect results; adopt with `select:false` to retain the current choice. Use `shot.select` only when choosing that version is intended. For edits within that take, use [ordered shot segments](reference/api.md#ordered-shot-segments) through `shot.segments`; never change generation duration or regenerate to apply a cut. Return original receipts and story/shot links.
 
-For a person to continue in the website, return `ORIGIN/quick-chat?story=PROJECT` using the actual owned project ID. Attaching an ordinary story to chat uses the signed-in browser's `POST /v1/story-chats/PROJECT/open`; it is human-only. PATs must not call `/open`, impersonate a browser or put a token in that link. Creating/editing entities through `/actions` neither calls the conversation model nor generates media.
+Return `ORIGIN/quick-chat?story=PROJECT` with the owned project ID. Attaching a story uses browser-only `POST /v1/story-chats/PROJECT/open`. PATs must not call `/open`, impersonate a browser or put tokens in links. Entity `/actions` call no conversation model and generate no media.
 
 ```http
 POST /v1/batches
@@ -102,3 +102,4 @@ Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-wi
 ## Take reviews
 
 [Verdicts, marks, CAS and batch summaries](reference/api.md#explicit-take-reviews).
+[Redo diff preview](reference/api.md#redo-from-marks).
