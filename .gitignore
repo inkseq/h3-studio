@@ -683,6 +683,8 @@ inventory.json
 !yingxu/src/v2/**
 !yingxu/src/ui/
 !yingxu/src/ui/**
+!yingxu/src/data/
+!yingxu/src/data/**
 
 # Held staging-only, no-GPU resource spike (#295).
 !tools/workflow_spike295.py
