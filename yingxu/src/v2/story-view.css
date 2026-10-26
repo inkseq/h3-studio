@@ -1641,3 +1641,27 @@ body.sb-resizing-y video {
 .timeline .track.video .playhead:active {
   cursor: grabbing;
 }
+/* Take review badges in the take list (h3-studio#631): verdict and mark count. */
+.take-review-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.take-review-badges > span {
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  line-height: 18px;
+}
+.take-verdict.keep {
+  background: var(--good-soft);
+  color: var(--good);
+}
+.take-verdict.redo {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.take-marks {
+  background: var(--surface-3);
+  color: var(--ink-2);
+}

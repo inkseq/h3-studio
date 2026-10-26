@@ -418,3 +418,84 @@ html[data-skin='aegean'] .credits-chip svg {
 .skin-preview.system .light {
   background: linear-gradient(160deg, #f7f4ef 60%, #3f5a4c 60% 64%, #f7f4ef 64%);
 }
+
+/* Coral (owner, 2026-10-26): the default brand look. White or near-black, black text, one coral
+   accent for the brand and AI, blue (--fl) for the person's own marks. Colour comes from the work. */
+html[data-skin='coral'] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f7f7f8;
+  --surface-3: #efeff2;
+  --surface-4: #e4e4e8;
+  --line: rgba(15, 17, 21, 0.08);
+  --line-2: rgba(15, 17, 21, 0.14);
+  --line-3: rgba(15, 17, 21, 0.22);
+  --ink: #0f1115;
+  --ink-2: #3f4350;
+  --muted: #666b78;
+  --placeholder: #8a8f99;
+  --fill: rgba(15, 17, 21, 0.04);
+  --accent: #ff5a36;
+  --accent-ink: #140805;
+  --accent-soft: rgba(255, 90, 54, 0.12);
+  --accent-glow: 0 4px 14px rgba(255, 90, 54, 0.22);
+  --good: #16a34a;
+  --good-soft: rgba(22, 163, 74, 0.1);
+  --warn: #c2410c;
+  --warn-soft: rgba(194, 65, 12, 0.1);
+  --bad: #dc2626;
+  --bad-soft: rgba(220, 38, 38, 0.08);
+  --fl: #2e6bff;
+  --fl-soft: rgba(46, 107, 255, 0.1);
+  --ref: #6d4aff;
+  --ref-soft: rgba(109, 74, 255, 0.1);
+  --char: #16a34a;
+  --loc: #c2410c;
+  --prp: #6d4aff;
+  --char-soft: rgba(22, 163, 74, 0.08);
+  --loc-soft: rgba(194, 65, 12, 0.08);
+  --prp-soft: rgba(109, 74, 255, 0.08);
+  --shadow: 0 1px 2px rgba(15, 17, 21, 0.06), 0 8px 24px rgba(15, 17, 21, 0.06);
+  --shadow-lg: 0 24px 64px rgba(15, 17, 21, 0.14);
+  --scrim: rgba(15, 17, 21, 0.4);
+  color-scheme: light;
+}
+html[data-skin='coral'] .hbar {
+  background: rgba(255, 255, 255, 0.92);
+}
+html[data-skin='coral-dark'] {
+  --bg: #0b0c0e;
+  --surface: #141518;
+  --surface-2: #1a1b1f;
+  --surface-3: #222429;
+  --surface-4: #2b2d33;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-2: rgba(255, 255, 255, 0.13);
+  --line-3: rgba(255, 255, 255, 0.2);
+  --ink: #f4f4f5;
+  --ink-2: #c7c9d1;
+  --muted: #9a9da8;
+  --placeholder: #747884;
+  --fill: rgba(255, 255, 255, 0.045);
+  --accent: #ff6b47;
+  --accent-ink: #140805;
+  --accent-soft: rgba(255, 107, 71, 0.14);
+  --accent-glow: 0 4px 14px rgba(255, 107, 71, 0.24);
+  --good: #4ade80;
+  --good-soft: rgba(74, 222, 128, 0.12);
+  --warn: #fb923c;
+  --warn-soft: rgba(251, 146, 60, 0.12);
+  --bad: #f87171;
+  --bad-soft: rgba(248, 113, 113, 0.1);
+  --fl: #6e98ff;
+  --fl-soft: rgba(110, 152, 255, 0.14);
+  --ref: #9b85ff;
+  --ref-soft: rgba(155, 133, 255, 0.14);
+  --char: #4ade80;
+  --loc: #fb923c;
+  --prp: #9b85ff;
+  --char-soft: rgba(74, 222, 128, 0.1);
+  --loc-soft: rgba(251, 146, 60, 0.1);
+  --prp-soft: rgba(155, 133, 255, 0.1);
+  color-scheme: dark;
+}

@@ -1799,6 +1799,16 @@ export function createCloudController({
     guard(ctx);
     return value;
   }
+  async function readTakeReviewSummaries(shotId) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(
+      `/v1/projects/${encodeURIComponent(ctx.projectId)}/shots/${encodeURIComponent(shotId)}/take-reviews`,
+    );
+    guard(ctx);
+    if (!Array.isArray(value)) throw Error('review.unavailable');
+    return value;
+  }
   async function saveTakeReview(shotId, artifactId, body, key) {
     requireCloud();
     const ctx = context();
@@ -2008,6 +2018,7 @@ export function createCloudController({
     workbenchRead: (suffix) => workbenchRead(suffix),
     previewScriptWindows: (shotId, options) => previewScriptWindows(shotId, options),
     readTakeReview: (shotId, artifactId) => readTakeReview(shotId, artifactId),
+    readTakeReviewSummaries: (shotId) => readTakeReviewSummaries(shotId),
     saveTakeReview: (shotId, artifactId, body, key) =>
       saveTakeReview(shotId, artifactId, body, key),
     // Story edits share one version, so they run one after another: a quick second click
