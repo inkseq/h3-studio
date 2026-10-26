@@ -5,6 +5,10 @@ Claude owns the two whole-take buttons and range editor. This document is a code
 contract, not evidence of deployment. No generation, spending, selection or
 charging is performed by these routes.
 
+See [suggested marks](TAKE-SUGGESTIONS.md) for separate proposals and explicit
+human accept/reject. They share this review revision and purge transaction;
+ordinary PATCH preserves suggestions and never implicitly decides them.
+
 ## API
 
 `GET` and `PATCH /v1/projects/{project_id}/shots/{shot_id}/takes/{artifact_id}/review`.
