@@ -1,4 +1,5 @@
 import { Note } from './ui/Note.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import StudioHeader from './StudioHeader.jsx';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
@@ -57,8 +58,6 @@ export { NodeCard } from './operator-machine-view.jsx';
 
 const quietly = (promise) => promise.catch(() => {});
 const known = (value) => (Number.isFinite(value) ? value : '—');
-const date = (value) =>
-  typeof value === 'number' ? new Date(value * 1000).toLocaleString('zh-CN') : '尚未记录';
 // The console's dialogs use the shared Dialog (h3-studio#514); op-dialog keeps their content layout.
 function Dialog({ title, subtitle, onClose, children, wide = false }) {
   return (
@@ -78,8 +77,7 @@ function RecipeEvidence({ profile }) {
   const { t: lo, locale } = useI18n();
   const { duration } = operatorFormatters(locale);
   return (
-    <details className="op-details">
-      <summary>{lo('legacyOp.copy2')}</summary>
+    <Disclosure className="op-details" summary={lo('legacyOp.copy2')}>
       <p>{lo('legacyOp.copy3')}</p>
       <div className="op-table-wrap">
         <table>
@@ -126,7 +124,7 @@ function RecipeEvidence({ profile }) {
         {lo('legacyOp.copy12')}
         <code>{profile.id}</code>
       </p>
-    </details>
+    </Disclosure>
   );
 }
 function Login() {
@@ -491,11 +489,15 @@ function MarketFilters({ result, catalog }) {
   const { providerLabel, dollars, roundedSpec } = operatorFormatters(locale);
   if (!result.filters?.length) return null;
   return (
-    <details className="op-details op-market-filters">
-      <summary>
-        {lo('legacyOp.copy77')}
-        {result.excluded_count > 0 && lo('legacyOp.copy78', { x0: result.excluded_count })}
-      </summary>
+    <Disclosure
+      className="op-details op-market-filters"
+      summary={
+        <>
+          {lo('legacyOp.copy77')}
+          {result.excluded_count > 0 && lo('legacyOp.copy78', { x0: result.excluded_count })}
+        </>
+      }
+    >
       <p>{lo('legacyOp.copy79')}</p>
       <p>{lo('legacyOp.copy80')}</p>
       {result.filters.map((profile) => (
@@ -509,10 +511,14 @@ function MarketFilters({ result, catalog }) {
           <Note>{lo('legacyOp.copy82')}</Note>
           <FilterFacts filters={profile.guidance} />
           {profile.deployments?.length ? (
-            <details className="op-details">
-              <summary>
-                {lo('legacyOp.copy83')} {profile.deployments.length} {lo('legacyOp.copy84')}
-              </summary>
+            <Disclosure
+              className="op-details"
+              summary={
+                <>
+                  {lo('legacyOp.copy83')} {profile.deployments.length} {lo('legacyOp.copy84')}
+                </>
+              }
+            >
               {profile.deployments.map((binding) => (
                 <section key={binding.binding_id}>
                   <p>
@@ -529,17 +535,21 @@ function MarketFilters({ result, catalog }) {
                   </p>
                 </section>
               ))}
-            </details>
+            </Disclosure>
           ) : (
             <Note>{lo('legacyOp.copy89')}</Note>
           )}
         </section>
       ))}
       {result.excluded?.length > 0 && (
-        <details className="op-details">
-          <summary>
-            {lo('legacyOp.copy90')} {result.excluded_count} {lo('legacyOp.copy84')}
-          </summary>
+        <Disclosure
+          className="op-details"
+          summary={
+            <>
+              {lo('legacyOp.copy90')} {result.excluded_count} {lo('legacyOp.copy84')}
+            </>
+          }
+        >
           <p>{lo('legacyOp.copy91')}</p>
           <div className="op-table-wrap">
             <table>
@@ -588,9 +598,9 @@ function MarketFilters({ result, catalog }) {
               {result.excluded_count} {lo('legacyOp.copy100')}
             </p>
           )}
-        </details>
+        </Disclosure>
       )}
-    </details>
+    </Disclosure>
   );
 }
 function StartDrawer({ catalog, policy, controller, busy, onClose }) {
@@ -720,8 +730,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
             {preview.policy_version !== policy.version && (
               <p className="op-error">{lo('legacyOp.copy117')}</p>
             )}
-            <details className="op-details">
-              <summary>{lo('legacyOp.copy118')}</summary>
+            <Disclosure className="op-details" summary={lo('legacyOp.copy118')}>
               <p>
                 {lo('legacyOp.copy119')} {dollars(preview.estimated_hourly_cost_microusd)}{' '}
                 {lo('legacyOp.copy120')} {date(preview.expires_at)}。
@@ -737,7 +746,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
                 </p>
               )}
               {profile && <RecipeEvidence profile={profile} />}
-            </details>
+            </Disclosure>
             <Note>{lo('legacyOp.copy123')}</Note>
           </div>
         )}
@@ -822,10 +831,14 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
                 : lo('legacyOp.copy135')}
           </Button>
           <span>{lo('legacyOp.copy136')}</span>
-          <details className="op-details op-start-window">
-            <summary>
-              {lo('legacyOp.copy137')} {duration(query.ttl_seconds)}
-            </summary>
+          <Disclosure
+            className="op-details op-start-window"
+            summary={
+              <>
+                {lo('legacyOp.copy137')} {duration(query.ttl_seconds)}
+              </>
+            }
+          >
             <label>
               {lo('legacyOp.copy138')}
               <div className="op-unit-input">
@@ -844,7 +857,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
               {lo('legacyOp.copy139')} {ttl.maximumMinutes ?? lo('legacyOp.copy140')}{' '}
               {lo('legacyOp.copy141')}
             </p>
-          </details>
+          </Disclosure>
         </div>
         {result ? (
           <section className="op-candidates" aria-label={lo('legacyOp.copy142')}>
@@ -860,19 +873,24 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
               {['lium', 'targon'].map((provider) => {
                 const observation = operatorMarketProvider(result, provider, now);
                 return (
-                  <details className="op-details" key={provider}>
-                    <summary>
-                      <b>{providerLabel(provider)}</b>
-                      <span
-                        className={
-                          'op-badge ' +
-                          (observation.fresh || observation.refreshing ? 'neutral' : 'warn')
-                        }
-                      >
-                        {observation.label}
-                      </span>
-                      <small>{age(observation.observed_at, now)}</small>
-                    </summary>
+                  <Disclosure
+                    className="op-details"
+                    key={provider}
+                    summary={
+                      <>
+                        <b>{providerLabel(provider)}</b>
+                        <span
+                          className={
+                            'op-badge ' +
+                            (observation.fresh || observation.refreshing ? 'neutral' : 'warn')
+                          }
+                        >
+                          {observation.label}
+                        </span>
+                        <small>{age(observation.observed_at, now)}</small>
+                      </>
+                    }
+                  >
                     {Number.isFinite(observation.refresh_requested_at) && (
                       <p>
                         {lo('legacyOp.copy145')} {date(observation.refresh_requested_at)}
@@ -887,7 +905,7 @@ function StartDrawer({ catalog, policy, controller, busy, onClose }) {
                         </>
                       )}
                     </p>
-                  </details>
+                  </Disclosure>
                 );
               })}
             </div>
@@ -972,7 +990,9 @@ export default function OperatorConsole() {
       if (document.visibilityState !== 'hidden')
         try {
           await controller.poll();
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
       if (!stopped) timer = setTimeout(tick, 5000);
     };
     timer = setTimeout(tick, 5000);
@@ -1208,10 +1228,14 @@ export default function OperatorConsole() {
           </>
         )}
       </section>
-      <details className="op-operations op-details">
-        <summary>
-          {lo('legacyOp.copy200')} {snapshot.operations?.length || 0} {lo('legacyOp.copy196')}
-        </summary>
+      <Disclosure
+        className="op-operations op-details"
+        summary={
+          <>
+            {lo('legacyOp.copy200')} {snapshot.operations?.length || 0} {lo('legacyOp.copy196')}
+          </>
+        }
+      >
         <p>{lo('legacyOp.copy201')}</p>
         {snapshot.operations?.length ? (
           <div className="op-table-wrap">
@@ -1258,7 +1282,7 @@ export default function OperatorConsole() {
         ) : (
           <Note>{lo('legacyOp.copy212')}</Note>
         )}
-      </details>
+      </Disclosure>
     </>
   );
   return (

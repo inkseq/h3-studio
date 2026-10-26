@@ -1,4 +1,5 @@
 import React from 'react';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { modelsVisible, profileLabel } from './model-visibility.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { recipeFor, effectiveControlSchema } from './quick-chat-model.js';
@@ -7,10 +8,9 @@ export default function TakeRecipe({ take, state }) {
   const { t, locale } = useI18n();
   if (!take?.recipe)
     return (
-      <details>
-        <summary>{t('quickView.inputDetails')}</summary>
+      <Disclosure summary={t('quickView.inputDetails')}>
         <p role="status">{t('takes.recipeMissing')}</p>
-      </details>
+      </Disclosure>
     );
   const value = take.recipe,
     recipe = recipeFor(state.capabilities, value),
@@ -27,8 +27,7 @@ export default function TakeRecipe({ take, state }) {
     audios: 'workspace.detail30',
   };
   return (
-    <details>
-      <summary>{t('takes.recipe')}</summary>
+    <Disclosure summary={t('takes.recipe')}>
       <p>
         {recipe?.mode === 'fl' ? t('workspace.status13') : t('workspace.status14')} ·{' '}
         {profile
@@ -75,6 +74,6 @@ export default function TakeRecipe({ take, state }) {
           }),
         )}
       </ul>
-    </details>
+    </Disclosure>
   );
 }

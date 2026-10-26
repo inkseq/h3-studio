@@ -107,21 +107,6 @@ export function productionRows(project, cloud, now = Date.now(), locale = 'zh') 
                                       : submitted || latest?.status === 'succeeded'
                                         ? 'submitted'
                                         : 'unplanned';
-              const labels = {
-                waiting_capacity: '等待计算容量',
-                recovery_hold: '恢复后待核对',
-                unknown: '提交结果待核对',
-                active: '排队或运行中',
-                error: '预检未完成',
-                stale: '内容已改，需重检',
-                expired: '计划过期，需重检',
-                blocked: '有阻塞项',
-                ready: '预检通过',
-                failed: '最近任务失败',
-                cancelled: '最近任务已取消',
-                submitted: '已有任务结果',
-                unplanned: '尚未预检',
-              };
               return {
                 id: shot.id,
                 shot,

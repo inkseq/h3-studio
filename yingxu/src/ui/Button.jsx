@@ -10,6 +10,10 @@ const VARIANTS = {
   option: 'option',
   // Round icon button over a picture or video (remove an attachment, open a menu).
   'on-media': 'on-media',
+  // Reads as an inline text link (sign in, show more) but stays a button.
+  link: 'link',
+  // On a coloured strip (preview/support banner): a darker tint of the strip.
+  'on-color': 'on-color',
 };
 
 export function buttonClass({ variant = 'secondary', size = 'md', className = '' } = {}) {

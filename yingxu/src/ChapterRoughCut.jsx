@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import React, { useSyncExternalStore } from 'react';
 import { store } from './store.js';
@@ -282,8 +283,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                 <div className="roughcut-subtitle-plan">
                   <h4>{lt('rough.ui39')}</h4>
                   <p>{lt('rough.burned', { count: plan.timeline.subtitles.cues?.length || 0 })}</p>
-                  <details>
-                    <summary>{lt('rough.ui40')}</summary>
+                  <Disclosure summary={lt('rough.ui40')}>
                     <ol>
                       {plan.timeline.subtitles.cues?.map((cue) => (
                         <li key={cue.id}>
@@ -299,7 +299,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                         </li>
                       ))}
                     </ol>
-                  </details>
+                  </Disclosure>
                 </div>
               ) : (
                 <p>{plan.options?.burn_subtitles ? lt('rough.ui41') : lt('rough.ui42')}</p>
@@ -311,8 +311,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                       <li key={index}>{text}</li>
                     ))}
                   </ul>
-                  <details>
-                    <summary>{lt('rough.ui43')}</summary>
+                  <Disclosure summary={lt('rough.ui43')}>
                     <div className="cloud-actions">
                       {summary.shots.map((shot) => (
                         <Button
@@ -330,18 +329,17 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                         </Button>
                       ))}
                     </div>
-                  </details>
+                  </Disclosure>
                 </div>
               )}
               {plan.warnings?.length > 0 && (
-                <details open>
-                  <summary>{lt('rough.ui44')}</summary>
+                <Disclosure open summary={lt('rough.ui44')}>
                   <ul>
                     {plan.warnings.map((text, index) => (
                       <li key={index}>{text}</li>
                     ))}
                   </ul>
-                </details>
+                </Disclosure>
               )}
               <p>{estimateLabel(plan.estimate, locale)}</p>
               <Button

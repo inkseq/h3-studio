@@ -30,7 +30,9 @@ export function useStoryboardPanelSize(key, initial, min, max) {
       saved === null
         ? localStorage.removeItem(storageKey)
         : localStorage.setItem(storageKey, JSON.stringify({ size: saved }));
-    } catch {}
+    } catch {
+      // Browser storage is optional (private mode, blocked site data).
+    }
   }, [storageKey, saved]);
   useEffect(() => () => cleanup.current(), []);
   return {
@@ -76,7 +78,7 @@ export function StoryboardSplitter({
   const { t } = useI18n();
   return (
     <div
-      className={'splitter ' + axis + ' ' + className}
+      className={'splitter axis-' + axis + ' ' + className}
       tabIndex={0}
       role="separator"
       aria-label={label || t('storyboard.resize')}

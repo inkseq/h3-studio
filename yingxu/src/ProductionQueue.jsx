@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import React, { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
@@ -128,7 +129,7 @@ export default function ProductionQueue({ project, onInspect }) {
             value={status}
             onChange={(e) => setStatus(e.target.value)}
           >
-            {Object.entries(queueFilters).map(([value, label]) => (
+            {Object.entries(queueFilters).map(([value]) => (
               <option key={value} value={value}>
                 {lt('queue.filter.' + value)}
               </option>
@@ -364,8 +365,10 @@ export default function ProductionQueue({ project, onInspect }) {
           </Button>
         </div>
       )}
-      <details className="queue-batches">
-        <summary>{lt('queue.batches', { count: c.batches.length })}</summary>
+      <Disclosure
+        className="queue-batches"
+        summary={lt('queue.batches', { count: c.batches.length })}
+      >
         {c.batches.map((batch) => (
           <article key={batch.id}>
             <b>
@@ -394,10 +397,9 @@ export default function ProductionQueue({ project, onInspect }) {
                     <p className="cloud-error">
                       {lt('queue.notQueued', { title: row?.shot.title || lt('queue.historical') })}
                     </p>
-                    <details>
-                      <summary>{lt('legacy.route84')}</summary>
+                    <Disclosure summary={lt('legacy.route84')}>
                       <code>{item.error_code}</code>
-                    </details>
+                    </Disclosure>
                     {row && (
                       <Button onClick={() => onInspect(row.id)}>{lt('legacy.route85')}</Button>
                     )}
@@ -419,7 +421,7 @@ export default function ProductionQueue({ project, onInspect }) {
             <p>{lt('legacy.explain17')}</p>
           </div>
         )}
-      </details>
+      </Disclosure>
       <h3>{lt('legacy.route88')}</h3>
       <p>{lt('legacy.explain23')}</p>
       <JobList jobs={shownJobs} project={project} onInspect={onInspect} onReview={openReview} />

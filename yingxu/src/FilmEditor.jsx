@@ -643,6 +643,7 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                       <span>{t('editor.speed')}</span>
                       {/* #232 (#29): one compact choice instead of a row of six buttons. */}
                       <select
+                        className="field-sm"
                         aria-label={t('editor.speed')}
                         value={selected.rate}
                         disabled={busy}
@@ -797,7 +798,7 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
               {excluded.map((clip) => (
                 <Button
                   key={clip.id}
-                  className={'small ghost' + (selected?.id === clip.id ? ' on' : '')}
+                  className={'small ghost excluded-clip' + (selected?.id === clip.id ? ' on' : '')}
                   onClick={() => select(clip)}
                 >
                   {clip.index + 1}. {clip.title}

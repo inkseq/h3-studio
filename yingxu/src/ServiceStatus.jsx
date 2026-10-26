@@ -1,4 +1,5 @@
 import './i18n/locale.js';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React from 'react';
 import { executionStatus } from './service-model.js';
@@ -7,11 +8,15 @@ export function ServiceStatus({ capabilities, projectId }) {
   const status = executionStatus(capabilities, locale),
     render = capabilities?.chapter_render;
   return (
-    <details className={'service-status ' + status.kind}>
-      <summary>
-        {status.title}
-        {at('adjunct.serviceStatus.copy106')}
-      </summary>
+    <Disclosure
+      className={'service-status ' + status.kind}
+      summary={
+        <>
+          {status.title}
+          {at('adjunct.serviceStatus.copy106')}
+        </>
+      }
+    >
       <p>{status.detail}</p>
       <ul>
         <li>{at('adjunct.serviceStatus.copy107')}</li>
@@ -25,8 +30,7 @@ export function ServiceStatus({ capabilities, projectId }) {
         </li>
         <li>{at('adjunct.serviceStatus.copy112')}</li>
       </ul>
-      <details className="api-integration">
-        <summary>{at('adjunct.serviceStatus.copy113')}</summary>
+      <Disclosure className="api-integration" summary={at('adjunct.serviceStatus.copy113')}>
         <p>{at('adjunct.serviceStatus.copy114')}</p>
         {projectId && (
           <p>
@@ -60,7 +64,7 @@ export function ServiceStatus({ capabilities, projectId }) {
           <li>{at('adjunct.serviceStatus.copy125')}</li>
         </ol>
         <p>{at('adjunct.serviceStatus.copy126')}</p>
-      </details>
-    </details>
+      </Disclosure>
+    </Disclosure>
   );
 }

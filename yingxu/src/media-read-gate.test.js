@@ -207,7 +207,7 @@ test('active abort without a consumer and stream/fetch failures release their sl
   const gate = createMediaReadGate({
     origin: ORIGIN,
     maxActive: 1,
-    fetcher: async (value, init) => {
+    fetcher: async (value, _init) => {
       calls.push(value);
       if (calls.length === 1)
         return new Response(

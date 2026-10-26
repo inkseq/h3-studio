@@ -33,7 +33,8 @@ export default function HostedSignIn({ auth, passwordFirst = false }) {
         {t('signIn.consentAfter')}
       </small>
       <Button
-        className="linkish hosted-sign-in-legacy"
+        variant="link"
+        className="hosted-sign-in-legacy"
         aria-expanded={legacy}
         onClick={() => setLegacy(!legacy)}
       >

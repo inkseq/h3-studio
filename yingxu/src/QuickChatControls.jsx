@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import './i18n/workspace-language.css';
 import React, { useState } from 'react';
 import { DeploymentProfileSelect } from './DeploymentProfile.jsx';
@@ -223,8 +224,7 @@ export default function QuickChatControls({
               {/* Deployment profiles and sampler/VAE/runtime knobs are operator tools; regular
                   users get the common settings and references only. */}
               {operator && (
-                <details className="quick-model-details">
-                  <summary>{t('quickView.modelDetails')}</summary>
+                <Disclosure className="quick-model-details" summary={t('quickView.modelDetails')}>
                   <DeploymentProfileSelect
                     capabilities={capabilities}
                     value={draft.deployment_profile_id}
@@ -232,7 +232,7 @@ export default function QuickChatControls({
                     disabled={busy}
                     onChange={(value) => setDraft({ ...draft, deployment_profile_id: value })}
                   />
-                </details>
+                </Disclosure>
               )}
               <label className="qc-field">
                 <span>{t('workspace.copy75')}</span>
@@ -413,8 +413,7 @@ export default function QuickChatControls({
               {CONTROL_GROUPS.slice(1)
                 .filter(([name]) => operator || name === '参考与时间')
                 .map(([name, names]) => (
-                  <details key={name}>
-                    <summary>{groupLabels[name] || name}</summary>
+                  <Disclosure key={name} summary={groupLabels[name] || name}>
                     <div className="qc-form-grid">{fields(names)}</div>
                     {name === '参考与时间' && (
                       <>
@@ -435,7 +434,7 @@ export default function QuickChatControls({
                       <p className="qc-muted">{t('workspace.copy137')}</p>
                     )}
                     {name === '运行与导出' && <p className="qc-muted">{t('workspace.copy138')}</p>}
-                  </details>
+                  </Disclosure>
                 ))}
               {operator &&
                 Object.keys(schema).some(
@@ -443,8 +442,7 @@ export default function QuickChatControls({
                     !allGroups.has(name) &&
                     !['guides', 'video_audio', 'width', 'height'].includes(name),
                 ) && (
-                  <details>
-                    <summary>{t('workspace.copy86')}</summary>
+                  <Disclosure summary={t('workspace.copy86')}>
                     <div className="qc-form-grid">
                       {fields(
                         Object.keys(schema).filter(
@@ -454,7 +452,7 @@ export default function QuickChatControls({
                         ),
                       )}
                     </div>
-                  </details>
+                  </Disclosure>
                 )}
             </>
           )}

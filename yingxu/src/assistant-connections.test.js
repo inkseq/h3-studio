@@ -167,7 +167,7 @@ test('settings CAS response validates unchanged frozen value, no body mutation a
     account: 'a',
     storage: memory(),
     client: {
-      saveConnectionSettings: (b, k) => {
+      saveConnectionSettings: (b, _k) => {
         received = structuredClone(b);
         return new Promise(
           (resolve) => (finish = () => resolve({ version: 2, value: received.value })),
