@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import { RenameDialog, useTrash } from './UniversalTrash.jsx';
 import ItemMenu from './ItemMenu.jsx';
+import { MenuItem } from './ui/Menu.jsx';
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
 import { store } from './store.js';
@@ -188,61 +189,49 @@ function ChapterHeader({ chapter, index, count, shots, folded, onFold, onNewScen
       <div className="spacer" />
       <FilmEditorButton chapterId={chapter.id} />
       <ItemMenu label={t('chapter.menu')} disabled={locked}>
-        {(close) => (
-          <>
-            <button role="menuitem" onClick={() => (close(), setRenaming(true))}>
-              {t('chapter.rename')}
-            </button>
-            {onNewScene && (
-              <button
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  store.setScope(chapter.id);
-                  onNewScene();
-                }}
-              >
-                {t('chapter.addScene')}
-              </button>
-            )}
-            <button
-              role="menuitem"
-              disabled={index === 0}
-              onClick={() => (close(), dispatch({ type: 'moveChapter', id: chapter.id, dir: -1 }))}
-            >
-              {t('chapter.moveUp')}
-            </button>
-            <button
-              role="menuitem"
-              disabled={index === count - 1}
-              onClick={() => (close(), dispatch({ type: 'moveChapter', id: chapter.id, dir: 1 }))}
-            >
-              {t('chapter.moveDown')}
-            </button>
-            <button
-              role="menuitem"
-              className="danger-text"
-              disabled={!canDelete}
-              title={
-                count <= 1
-                  ? t('chapter.lastChapter')
-                  : busyShots
-                    ? t('chapter.busy')
-                    : state.workspaceMode !== 'cloud'
-                      ? t('chapter.cloudOnly')
-                      : undefined
-              }
-              onClick={() => {
-                close();
-                trash.request('trash', [
-                  { kind: 'entity', project_id: state.project.id, id: chapter.id },
-                ]);
-              }}
-            >
-              {t('chapter.delete')}
-            </button>
-          </>
+        <MenuItem onSelect={() => setRenaming(true)}>{t('chapter.rename')}</MenuItem>
+        {onNewScene && (
+          <MenuItem
+            onSelect={() => {
+              store.setScope(chapter.id);
+              onNewScene();
+            }}
+          >
+            {t('chapter.addScene')}
+          </MenuItem>
         )}
+        <MenuItem
+          disabled={index === 0}
+          onSelect={() => dispatch({ type: 'moveChapter', id: chapter.id, dir: -1 })}
+        >
+          {t('chapter.moveUp')}
+        </MenuItem>
+        <MenuItem
+          disabled={index === count - 1}
+          onSelect={() => dispatch({ type: 'moveChapter', id: chapter.id, dir: 1 })}
+        >
+          {t('chapter.moveDown')}
+        </MenuItem>
+        <MenuItem
+          danger
+          disabled={!canDelete}
+          title={
+            count <= 1
+              ? t('chapter.lastChapter')
+              : busyShots
+                ? t('chapter.busy')
+                : state.workspaceMode !== 'cloud'
+                  ? t('chapter.cloudOnly')
+                  : undefined
+          }
+          onSelect={() =>
+            trash.request('trash', [
+              { kind: 'entity', project_id: state.project.id, id: chapter.id },
+            ])
+          }
+        >
+          {t('chapter.delete')}
+        </MenuItem>
       </ItemMenu>
       {renaming && (
         <RenameDialog

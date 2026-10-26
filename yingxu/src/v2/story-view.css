@@ -1444,27 +1444,6 @@ body.sb-resizing-y video {
 .help-tip:focus-visible {
   color: var(--ink-2);
 }
-.help-tip:hover::after,
-.help-tip:focus-visible::after {
-  content: attr(data-tip);
-  position: absolute;
-  z-index: 60;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
-  width: 260px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--surface);
-  border: 1px solid var(--line-2, var(--line));
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-  color: var(--ink);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.5;
-  text-align: left;
-  white-space: normal;
-}
 .picker-head[data-drag-handle] {
   cursor: grab;
   user-select: none;
@@ -1543,7 +1522,7 @@ body.sb-resizing-y video {
 /* Unsorted items: a readable count on the warn pill, open or collapsed. */
 .sb-workspace .library .lib-tabs .sb-library-tab.alert > small {
   background: var(--warn);
-  color: #1a1205;
+  color: var(--accent-ink);
 }
 /* Shot panel header (owner, 2026-10-26): the actions centre on the title block, and the
    title field hugs its text so the pencil sits right after it. */
@@ -1632,7 +1611,7 @@ body.sb-resizing-y video {
   bottom: -2px;
   width: 3px;
   margin-left: -1px;
-  background: #fff;
+  background: var(--white);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.55),
     0 0 6px rgba(0, 0, 0, 0.35);
@@ -1656,7 +1635,7 @@ body.sb-resizing-y video {
   transform: translateX(-50%);
   border-radius: 50%;
   background: var(--accent);
-  border: 2px solid #fff;
+  border: 2px solid var(--white);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
 }
 .timeline .track.video .playhead:active {

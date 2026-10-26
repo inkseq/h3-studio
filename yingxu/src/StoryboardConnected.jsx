@@ -404,12 +404,14 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
         capabilities: c.capabilities,
         jobs: c.jobs,
         queue,
-        busy: busy || c.busy,
+        // Only page-switching cloud work locks the storyboard; generate and upload guard
+        // their own second press (serial) instead of greying out everything (owner, 2026-10-26).
+        busy: c.busy,
         error: error || c.error,
       }),
       lastAdded,
     }),
-    [s.project, s.scopeId, c.capabilities, c.jobs, queue, busy, c.busy, error, c.error, lastAdded],
+    [s.project, s.scopeId, c.capabilities, c.jobs, queue, c.busy, error, c.error, lastAdded],
   );
   const view = useMemo(
     () => ({

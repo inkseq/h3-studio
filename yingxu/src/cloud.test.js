@@ -1270,6 +1270,25 @@ test('account change clears prior private summaries even when new list retrieval
   assert.equal(h.controller.getState().capabilities, null);
   h.controller.destroy();
 });
+test('cloud operations queue quietly; only blocking ones mark the page busy and submits never queue', async () => {
+  const h = harness();
+  await h.controller.login('superdan', 'test-only');
+  let resolve;
+  h.api.projects = () => new Promise((r) => (resolve = r));
+  const listing = h.controller.list();
+  // A quiet read does not grey the page out.
+  assert.equal(h.controller.getState().busy, false);
+  // Another quiet operation waits its turn instead of failing.
+  const second = h.controller.loadMoreProjects();
+  // A submit while anything runs is refused, never queued into a second job.
+  await assert.rejects(h.controller.submit('shot'), /上一项云操作还在处理中/);
+  h.api.projects = async () => ({ projects: [] });
+  resolve({ projects: [] });
+  await listing;
+  await second.catch(() => {});
+  assert.equal(h.controller.getState().busy, false);
+  h.controller.destroy();
+});
 test('late project page cannot reappear after context invalidation', async () => {
   const h = harness();
   await h.controller.login('superdan', 'test-only');

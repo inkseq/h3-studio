@@ -45,25 +45,21 @@ a {
   background: transparent;
   font-weight: 600;
 }
-.wbar .v2-export-menu {
-  position: relative;
-}
-.v2-export-menu > summary {
-  display: flex;
+/* Export and cloud-status triggers sit in the story header; their panels are the shared
+   ui/Menu and ui/Popover (#514 phase 2). */
+.v2-export-trigger,
+.wbar .v2-autosave {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
-  list-style: none;
 }
-.v2-export-menu > div {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 80;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow);
+.v2-cloud-status-panel p {
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .visually-hidden,
 .skip {
@@ -627,47 +623,6 @@ dialog.modal.wide {
   }
   .workbench-compare {
     grid-template-columns: 1fr;
-  }
-}
-
-.v2-cloud-status {
-  position: relative;
-}
-.v2-cloud-status > summary {
-  cursor: pointer;
-  list-style: none;
-}
-.v2-cloud-status > div {
-  position: absolute;
-  left: 0;
-  top: 100%;
-  z-index: 80;
-  min-width: 220px;
-  max-width: min(320px, 90vw);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  box-shadow: var(--shadow-lg);
-}
-.v2-cloud-status p {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.v2-cloud-status button {
-  text-align: left;
-  justify-content: flex-start;
-}
-@media (max-width: 760px) {
-  .v2-cloud-status > div {
-    position: fixed;
-    top: 88px;
-    left: 12px;
-    right: 12px;
-    max-width: none;
   }
 }
 

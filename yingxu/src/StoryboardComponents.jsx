@@ -26,6 +26,7 @@ import {
   CircleHelp,
 } from 'lucide-react';
 import { Segmented } from './ui/Segmented.jsx';
+import { Tooltip } from './ui/Tooltip.jsx';
 import { useDragMove } from './ui/useDragMove.js';
 import { Chip, Note } from './ui/Note.jsx';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
@@ -1628,9 +1629,11 @@ export function AddCard({ onAdd, label }) {
 // #232 (#50): a small "?" that explains a field on hover or keyboard focus.
 export function HelpTip({ text }) {
   return (
-    <span className="help-tip" tabIndex={0} role="img" aria-label={text} data-tip={text}>
-      <CircleHelp size={14} strokeWidth={1.75} aria-hidden="true" />
-    </span>
+    <Tooltip content={text}>
+      <span className="help-tip" tabIndex={0} role="img" aria-label={text}>
+        <CircleHelp size={14} strokeWidth={1.75} aria-hidden="true" />
+      </span>
+    </Tooltip>
   );
 }
 

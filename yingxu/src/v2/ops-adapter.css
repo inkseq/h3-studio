@@ -139,19 +139,6 @@
   align-items: center;
   gap: 12px;
 }
-.ops-adapter .limit-row {
-  min-width: 0;
-  gap: 14px;
-}
-.ops-adapter .limit-row > div {
-  min-width: 0;
-}
-.ops-adapter .limit-row b {
-  font-size: 13px;
-}
-.ops-adapter .limit-input {
-  flex-shrink: 0;
-}
 .ops-adapter .trash-row {
   grid-template-columns: 22px 44px minmax(0, 1fr) auto auto;
 }
@@ -811,10 +798,6 @@
   color: var(--ink);
   padding: 16px;
 }
-.ops-adapter .settings-page .limit-row b {
-  color: var(--ink);
-  font-weight: 500;
-}
 .assistant-badge {
   align-items: center;
   gap: 4px;
@@ -892,13 +875,6 @@
   .ops-adapter .trash-row .thumb {
     width: 32px;
     height: 32px;
-  }
-  .ops-adapter .settings-page .limit-row {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-  .ops-adapter .limit-input {
-    max-width: 100%;
   }
 }
 

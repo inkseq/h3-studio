@@ -31,7 +31,7 @@
   color: var(--ink-2);
   font-weight: 600;
 }
-.cap-fold > summary h4 {
+.cap-fold > summary h3 {
   display: inline;
   margin: 0;
   font-size: inherit;

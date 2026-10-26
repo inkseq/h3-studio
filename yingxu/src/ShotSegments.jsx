@@ -287,21 +287,17 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
       ]}
     />
   );
-  if (!cut)
-    return (
-      <div className="shot-segments start">
-        {mode}
-        <FloatingMessage text={error || null} onDismiss={() => setError('')} />
-      </div>
-    );
+  // The switch row looks and sits the same in both modes, outside the parts box, so choosing
+  // a mode never moves it (owner, 2026-10-26); only the box below appears for parts.
   return (
-    <section className="shot-segments" aria-label={t('segments.title')}>
-      <header>
+    <div className="shot-segments-wrap">
+      <header className="shot-segments-head">
         {mode}
         <Button
           size="sm"
           variant="ghost"
           className="keep-label"
+          hidden={!cut}
           disabled={!list.length}
           onClick={() => playParts(getVideo(), list)}
         >
@@ -309,20 +305,24 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
           {t('segments.playAll')}
         </Button>
       </header>
-      <PartsBar
-        duration={duration}
-        parts={list}
-        getVideo={getVideo}
-        busy={busy}
-        onChange={(next) => void save(next)}
-        t={t}
-      />
-      {list.length > 0 && (
-        <small className="muted">
-          {t('segments.total', { count: list.length, len: secs(segmentsTotal(list)) })}
-        </small>
+      {cut && (
+        <section className="shot-segments" aria-label={t('segments.title')}>
+          <PartsBar
+            duration={duration}
+            parts={list}
+            getVideo={getVideo}
+            busy={busy}
+            onChange={(next) => void save(next)}
+            t={t}
+          />
+          {list.length > 0 && (
+            <small className="muted">
+              {t('segments.total', { count: list.length, len: secs(segmentsTotal(list)) })}
+            </small>
+          )}
+        </section>
       )}
       <FloatingMessage text={error || null} onDismiss={() => setError('')} />
-    </section>
+    </div>
   );
 }

@@ -19,16 +19,40 @@ export function SettingsSection({ title, help, actions, children, className = ''
   );
 }
 
-// A read-only value row uses as="div"; editable rows are labels for their control.
-export function SettingRow({ label, help, meta, children, wide = false, as: Tag = 'label' }) {
+// One setting. Editable rows are labels for their control; rows whose inputs carry their own
+// labels (several inputs, admin forms) or show a value only use as="div".
+// - badge: a short state next to the name ("pending"); meta: a line under the help (last change)
+// - unit: text after the control; extra: links or errors stacked under the control
+// - changed: highlights an edited, unsaved row
+export function SettingRow({
+  label,
+  help,
+  meta,
+  badge,
+  unit,
+  extra,
+  changed = false,
+  wide = false,
+  as: Tag = 'label',
+  children,
+}) {
   return (
-    <Tag className={'ui-setting-row' + (wide ? ' wide' : '')}>
+    <Tag className={'ui-setting-row' + (wide ? ' wide' : '') + (changed ? ' changed' : '')}>
       <span className="ui-setting-label">
-        <b>{label}</b>
+        <span className="ui-setting-name">
+          <b>{label}</b>
+          {badge && <span className="ui-setting-badge">{badge}</span>}
+        </span>
         {help && <small className="muted">{help}</small>}
-        {meta}
+        {meta && <small className="ui-setting-meta">{meta}</small>}
       </span>
-      <span className="ui-setting-control">{children}</span>
+      <span className="ui-setting-value">
+        <span className="ui-setting-control">
+          {children}
+          {unit && <span className="ui-setting-unit">{unit}</span>}
+        </span>
+        {extra}
+      </span>
     </Tag>
   );
 }

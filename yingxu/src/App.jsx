@@ -6,6 +6,8 @@ import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import StudioHeader from './StudioHeader.jsx';
 import AccountMenu from './AccountMenu.jsx';
+import { Menu, MenuItem } from './ui/Menu.jsx';
+import { Popover } from './ui/Popover.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Landing from './Landing.jsx';
@@ -382,68 +384,70 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           />
           {/* Chapters are sections on the one storyboard; no chapter switcher (owner, 2026-10-21). */}
           {state.workspace.mode === 'cloud' ? (
-            <details className="v2-cloud-status">
-              <summary className="v2-autosave">
-                <CloudSaveStatus plain />
-              </summary>
-              <div className="card-box">
-                <button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
-                  {t('account.copy64')}
+            <Popover
+              className="v2-cloud-status-panel"
+              trigger={
+                <button type="button" className="v2-autosave">
+                  <CloudSaveStatus plain />
                 </button>
-                <button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
-                  {t('account.copy65')}
+              }
+            >
+              <button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
+                {t('account.copy64')}
+              </button>
+              <button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
+                {t('account.copy65')}
+              </button>
+              <button
+                disabled={c.busy}
+                onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
+              >
+                {t('account.copy66')}
+              </button>
+              <button
+                disabled={c.busy}
+                onClick={() => void cloud.reloadCapabilities().catch(() => {})}
+              >
+                {t('account.copy72')}
+              </button>
+              {c.remoteUpdate && (
+                <button disabled={c.busy} onClick={() => void cloud.open(p.id).catch(() => {})}>
+                  {t('account.copy68')}
                 </button>
-                <button
-                  disabled={c.busy}
-                  onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
-                >
-                  {t('account.copy66')}
-                </button>
-                <button
-                  disabled={c.busy}
-                  onClick={() => void cloud.reloadCapabilities().catch(() => {})}
-                >
-                  {t('account.copy72')}
-                </button>
-                {c.remoteUpdate && (
-                  <button disabled={c.busy} onClick={() => void cloud.open(p.id).catch(() => {})}>
-                    {t('account.copy68')}
+              )}
+              {c.conflict && (
+                <>
+                  <p role="alert">{t('account.copy69')}</p>
+                  <button disabled={c.busy} onClick={() => void cloud.saveCopy().catch(() => {})}>
+                    {t('account.copy70')}
                   </button>
-                )}
-                {c.conflict && (
-                  <>
-                    <p role="alert">{t('account.copy69')}</p>
-                    <button disabled={c.busy} onClick={() => void cloud.saveCopy().catch(() => {})}>
-                      {t('account.copy70')}
-                    </button>
-                    <button
-                      onClick={() =>
-                        download(
-                          new Blob([JSON.stringify(store.exportProject(), null, 2)], {
-                            type: 'application/json',
-                          }),
-                          p.title + '.draft.json',
-                        )
-                      }
-                    >
-                      {t('account.copy71')}
-                    </button>
-                  </>
-                )}
-                {c.error && <p role="alert">{c.error}</p>}
-                {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
-                <PreservedStoryDrafts account={c.account} projectId={p.id} />
-                <button
-                  disabled={c.busy}
-                  onClick={() => {
-                    cloud.leave();
-                    onSidebarView('story', { selected: true });
-                  }}
-                >
-                  {t('account.copy67')}
-                </button>
-              </div>
-            </details>
+                  <button
+                    onClick={() =>
+                      download(
+                        new Blob([JSON.stringify(store.exportProject(), null, 2)], {
+                          type: 'application/json',
+                        }),
+                        p.title + '.draft.json',
+                      )
+                    }
+                  >
+                    {t('account.copy71')}
+                  </button>
+                </>
+              )}
+              {c.error && <p role="alert">{c.error}</p>}
+              {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
+              <PreservedStoryDrafts account={c.account} projectId={p.id} />
+              <button
+                disabled={c.busy}
+                onClick={() => {
+                  cloud.leave();
+                  onSidebarView('story', { selected: true });
+                }}
+              >
+                {t('account.copy67')}
+              </button>
+            </Popover>
           ) : (
             <Badge tone="local">{t('story.copy9')}</Badge>
           )}
@@ -466,41 +470,40 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           >
             <Redo2 size={15} />
           </button>
-          <details className="v2-export-menu">
-            <summary>
-              {t('v2.export')} <ChevronRight size={12} />
-            </summary>
-            <div className="card-box">
-              <button onClick={() => open({ type: 'roughcut' })}>
-                <Clapperboard size={15} />
-                <span>
-                  {t('v2.roughCut')}
-                  <small className="muted export-hint">{t('v2.roughCutHint')}</small>
-                </span>
+          <Menu
+            className="v2-export-panel"
+            trigger={
+              <button type="button" className="v2-export-trigger">
+                {t('v2.export')} <ChevronRight size={12} />
               </button>
-              {(() => {
-                // Subtitles are offered only when this chapter has some (owner, 2026-10-21).
-                let srt = '';
-                try {
-                  srt = exportSrt(p, chapter?.id || chapterList[0]?.id);
-                } catch {
-                  srt = '';
-                }
-                return srt ? (
-                  <button
-                    onClick={() =>
-                      download(new Blob([srt], { type: 'application/x-subrip' }), p.title + '.srt')
-                    }
-                  >
-                    {t('v2.subtitles')}
-                  </button>
-                ) : null;
-              })()}
-              <button disabled={busy} onClick={backup}>
-                {t('story.copy53')}
-              </button>
-            </div>
-          </details>
+            }
+          >
+            <MenuItem icon={Clapperboard} onSelect={() => open({ type: 'roughcut' })}>
+              {t('v2.roughCut')}
+              <small>{t('v2.roughCutHint')}</small>
+            </MenuItem>
+            {(() => {
+              // Subtitles are offered only when this chapter has some (owner, 2026-10-21).
+              let srt = '';
+              try {
+                srt = exportSrt(p, chapter?.id || chapterList[0]?.id);
+              } catch {
+                srt = '';
+              }
+              return srt ? (
+                <MenuItem
+                  onSelect={() =>
+                    download(new Blob([srt], { type: 'application/x-subrip' }), p.title + '.srt')
+                  }
+                >
+                  {t('v2.subtitles')}
+                </MenuItem>
+              ) : null;
+            })()}
+            <MenuItem disabled={busy} onSelect={backup}>
+              {t('story.copy53')}
+            </MenuItem>
+          </Menu>
           <ThemeToggle />
           <LanguageSwitcher />
           <button
