@@ -2,7 +2,6 @@
 import { children, ancestors } from './store.js';
 import { detachDeletedReferences } from './entity-references.js';
 import {
-  chapterShots,
   storyChapters,
   storyShots,
   patchStoryboardShot,

@@ -120,7 +120,7 @@ function Preview({ value, state, controller }) {
   );
 }
 function Receipt({ state, controller, returnToActive = false, showPending = true }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const HISTORY_ACTIONS = {
     trash: t('history.copy55'),
     restore: t('history.copy56'),

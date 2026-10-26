@@ -11,14 +11,12 @@ import {
   Trash2,
   Maximize2,
   Minimize2,
-  X,
   Scissors,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
-  Sparkles,
   AlertTriangle,
   CheckCheck,
 } from 'lucide-react';
@@ -102,7 +100,7 @@ function collision(args) {
   });
 }
 function QueueSummary() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { state } = useStoryboardUI(),
     queues = state.queue;
   const rows = ['FL', 'REF']
@@ -317,7 +315,7 @@ function FilmEditorButton({ chapterId }) {
 }
 
 function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmControl }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { state, dispatch } = useStoryboardUI(),
     trash = useTrash();
   const gone = trash?.hidden || EMPTY_SET,
@@ -941,7 +939,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
   );
 }
 function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { state, dispatch, db, clearError } = useStoryboardUI(),
     [selected, setSelected] = useState(null),
     [dragging, setDragging] = useState(null),

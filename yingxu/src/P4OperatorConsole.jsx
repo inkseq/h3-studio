@@ -4,18 +4,15 @@ import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { MenuItem } from './AccountMenu.jsx';
 import { readBrowserLocale, translate } from './i18n/locale.js';
-import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
+import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  ArrowLeft,
   ChevronRight,
   Clock,
-  LogOut,
   Plus,
   RefreshCw,
   Server,
   ShieldCheck,
-  X,
   Cpu,
   Square,
   Timer,
@@ -119,7 +116,7 @@ function Dialog({ title, subtitle, onClose, wide = false, children }) {
   );
 }
 function KeepFields({ value, onChange }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   return (
     <>
       <div className="p4-policies" role="group" aria-label={t('operator.status108')}>
@@ -187,7 +184,7 @@ function KeepFields({ value, onChange }) {
   );
 }
 function Login() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
@@ -261,7 +258,7 @@ function ProgressObservation({ view, detail = false }) {
   );
 }
 function ProgressAmount({ value, label }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   return (
     <div className="p4-progress-amount">
       <span>
@@ -971,7 +968,7 @@ function StartDialog({
   );
 }
 function KeepDialog({ target, kind, controller, busy, onClose }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const lifecycle = target.lifecycle || target.nodes?.[0]?.lifecycle,
     [value, setValue] = useState({
       keep_on: lifecycle?.keep_on || 'idle',
@@ -1038,7 +1035,7 @@ function KeepDialog({ target, kind, controller, busy, onClose }) {
   );
 }
 function ActionResults({ receipt }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   return (
     <div className="p4-preview" role="status">
       <b>{receipt.state === 'partial' ? t('operator.status33') : t('operator.status34')}</b>
@@ -1052,7 +1049,7 @@ function ActionResults({ receipt }) {
   );
 }
 function StopDialog({ target, kind, controller, busy, onClose }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [impact, setImpact] = useState(null),
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
@@ -1356,7 +1353,7 @@ export function MachineDetail({
   );
 }
 function MoveDialog({ node, groups, controller, busy, onClose }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [target, setTarget] = useState(node.group_id || ''),
     [error, setError] = useState('');
   return (
