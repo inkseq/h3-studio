@@ -51,10 +51,12 @@
   cursor: default;
   opacity: 0.6;
 }
-.take-review-mark {
+.take-review-bar .take-review-mark {
   position: absolute;
   top: 3px;
   bottom: 3px;
+  height: auto;
+  min-height: 0;
   min-width: 4px;
   padding: 0;
   border: 0;
@@ -127,7 +129,12 @@
   align-items: center;
   gap: 6px;
 }
-.take-review-row {
+.take-review-list .take-review-row {
+  min-height: 32px;
+  padding: 4px 8px;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -156,4 +163,7 @@
 }
 .take-review-dot.keep {
   background: var(--good, var(--accent));
+}
+.take-review-list .take-review-row:hover {
+  background: var(--surface-2);
 }

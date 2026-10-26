@@ -788,6 +788,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
   const adapter = {
     previewScriptWindows: (id, options) => cloud.previewScriptWindows(id, options),
     readTakeReview: (shot, artifact) => cloud.readTakeReview(shot, artifact),
+    readTakeReviewSummaries: (shot) => cloud.readTakeReviewSummaries(shot),
     saveTakeReview: (shot, artifact, body, key) => cloud.saveTakeReview(shot, artifact, body, key),
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),
