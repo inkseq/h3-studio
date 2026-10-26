@@ -2,7 +2,7 @@
 
 import copy
 import math
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from typing import Literal
 
 from fastapi import Header, Request
@@ -31,6 +31,8 @@ from .storyboard_versions import migration_source_shots
 
 TAGS = ("performance", "camera", "consistency", "subtitles", "quality", "other")
 PATH = "/v1/projects/{project_id}/shots/{shot_id}/takes/{artifact_id}/review"
+SUMMARY_PATH = "/v1/projects/{project_id}/shots/{shot_id}/take-reviews"
+SUMMARY_LIMIT = 100
 
 
 class TakeMark(BaseModel):
@@ -70,6 +72,21 @@ def contract():
     return {
         "path": PATH,
         "read": "GET; projects:read. Returns revision, verdict, marks, actor_kind, updated_at.",
+        "summaries": {
+            "path": SUMMARY_PATH,
+            "method": "GET",
+            "fields": [
+                "artifact_id",
+                "revision",
+                "verdict",
+                "mark_count",
+                "actor_kind",
+                "updated_at",
+            ],
+            "semantics": "Newest-first list of eligible accepted video takes; unreviewed revision0/verdictnull/mark_count0/actor_kindnull/updated_atnull. Same scope/provenance/trash fences, no locks, no notes. Empty eligible set returns [].",
+            "limit": SUMMARY_LIMIT,
+            "overflow": "409 take_review_summary_limit if more than100 candidate videos; no partial list. Use the existing paginated versions listing and individual review GETs in this exceptional case.",
+        },
         "write": "PATCH; projects:write + projects:read; Idempotency-Key required.",
         "body": {
             "expected_revision": 0,
@@ -111,7 +128,7 @@ class TakeReviews:
             .first()
         )
 
-    def _source(self, conn, principal, project_id, shot_id, artifact_id, *, write):
+    def _source_ids(self, conn, principal, project_id, shot_id, *, write):
         if principal.support_viewer and write:
             raise NotFound("take_not_found")
         if not principal.allows(
@@ -137,7 +154,7 @@ class TakeReviews:
                 conn, self.tenant, principal.owner, project_id, ("active",)
             )
         shot = shot_entity(record["payload"], shot_id)
-        source_ids = migration_source_shots(
+        return migration_source_shots(
             conn,
             self.tenant,
             principal.owner,
@@ -145,52 +162,66 @@ class TakeReviews:
             shot,
             record["version"],
         )
+
+    def _candidates(self, principal, project_id, source_ids):
+        return (
+            select(
+                artifacts.c.id,
+                artifacts.c.metadata,
+                artifacts.c.job_id,
+                jobs.c.request["client_ref"]["shot_id"]
+                .as_string()
+                .label("source_shot"),
+                jobs.c.result["artifact_ids"].label("accepted"),
+            )
+            .select_from(
+                artifacts.join(jobs, artifacts.c.job_id == jobs.c.id).join(
+                    attempts, artifacts.c.attempt_id == attempts.c.id
+                )
+            )
+            .where(
+                jobs.c.tenant_id == self.tenant,
+                jobs.c.owner_id == principal.owner,
+                jobs.c.project_id == project_id,
+                jobs.c.request["client_ref"]["project_id"].as_string() == project_id,
+                jobs.c.request["client_ref"]["shot_id"].as_string().in_(source_ids),
+                jobs.c.status == "succeeded",
+                attempts.c.status == "succeeded",
+                attempts.c.job_id == jobs.c.id,
+                attempts.c.id == jobs.c.current_attempt_id,
+                artifacts.c.metadata["kind"].as_string() == "video",
+            )
+        )
+
+    @staticmethod
+    def _accepted(source):
+        return (
+            source
+            and isinstance(source["accepted"], list)
+            and source["id"] in source["accepted"]
+            and not source["metadata"].get("content_deleted")
+        )
+
+    def _source(self, conn, principal, project_id, shot_id, artifact_id, *, write):
+        source_ids = self._source_ids(conn, principal, project_id, shot_id, write=write)
         source = (
             conn.execute(
-                select(
-                    artifacts.c.metadata,
-                    artifacts.c.job_id,
-                    jobs.c.request["client_ref"]["shot_id"]
-                    .as_string()
-                    .label("source_shot"),
-                    jobs.c.result["artifact_ids"].label("accepted"),
-                )
-                .select_from(
-                    artifacts.join(jobs, artifacts.c.job_id == jobs.c.id).join(
-                        attempts, artifacts.c.attempt_id == attempts.c.id
-                    )
-                )
-                .where(
-                    artifacts.c.id == artifact_id,
-                    jobs.c.tenant_id == self.tenant,
-                    jobs.c.owner_id == principal.owner,
-                    jobs.c.project_id == project_id,
-                    jobs.c.request["client_ref"]["project_id"].as_string()
-                    == project_id,
-                    jobs.c.request["client_ref"]["shot_id"].as_string().in_(source_ids),
-                    jobs.c.status == "succeeded",
-                    attempts.c.status == "succeeded",
-                    attempts.c.job_id == jobs.c.id,
-                    attempts.c.id == jobs.c.current_attempt_id,
-                    artifacts.c.metadata["kind"].as_string() == "video",
+                self._candidates(principal, project_id, source_ids).where(
+                    artifacts.c.id == artifact_id
                 )
             )
             .mappings()
             .first()
         )
-        if (
-            not source
-            or not isinstance(source["accepted"], list)
-            or artifact_id not in (source["accepted"] or [])
-            or source["metadata"].get("content_deleted")
-        ):
+        if not self._accepted(source):
             raise NotFound("take_not_found")
         assert_content_available(
             conn, self.tenant, principal.owner, artifact_ids=(artifact_id,)
         )
         return source
 
-    def get(self, principal, project_id, shot_id, artifact_id):
+    @contextmanager
+    def _read_snapshot(self):
         guard = self.repo._memory_lock if self.repo._is_memory else nullcontext()
         with guard, self.repo.engine.connect() as conn:
             if conn.dialect.name == "postgresql":
@@ -201,6 +232,10 @@ class TakeReviews:
             else:
                 # Deferred read snapshot, never SQLite's writer BEGIN IMMEDIATE.
                 conn.exec_driver_sql("BEGIN")
+            yield conn
+
+    def get(self, principal, project_id, shot_id, artifact_id):
+        with self._read_snapshot() as conn:
             self._source(conn, principal, project_id, shot_id, artifact_id, write=False)
             row = self._row(
                 conn,
@@ -218,6 +253,71 @@ class TakeReviews:
                 "actor_kind": value.get("actor_kind"),
                 "updated_at": row["updated_at"] if row else None,
             }
+
+    def summaries(self, principal, project_id, shot_id):
+        with self._read_snapshot() as conn:
+            source_ids = self._source_ids(
+                conn, principal, project_id, shot_id, write=False
+            )
+            candidates = list(
+                conn.execute(
+                    self._candidates(principal, project_id, source_ids)
+                    .order_by(jobs.c.created_at.desc(), artifacts.c.id)
+                    .limit(SUMMARY_LIMIT + 1)
+                ).mappings()
+            )
+            if len(candidates) > SUMMARY_LIMIT:
+                raise Conflict("take_review_summary_limit")
+            live = []
+            for candidate in candidates:
+                if not self._accepted(candidate):
+                    continue
+                try:
+                    assert_content_available(
+                        conn,
+                        self.tenant,
+                        principal.owner,
+                        artifact_ids=(candidate["id"],),
+                    )
+                except Conflict as error:
+                    if str(error) not in {
+                        "content_in_trash",
+                        "content_purging_or_purged",
+                    }:
+                        raise
+                    continue
+                live.append(candidate["id"])
+            if not live:
+                return []
+            rows = {
+                row["document_id"]: row
+                for row in conn.execute(
+                    select(documents).where(
+                        self.repo._scope(
+                            documents, Scope(self.tenant, principal.owner, project_id)
+                        ),
+                        documents.c.kind == "take_review",
+                        documents.c.document_id.in_(live),
+                    )
+                ).mappings()
+            }
+            result = []
+            for ident in live:
+                row = rows.get(ident)
+                value = row["payload"] if row else {}
+                if value.get("content_deleted"):
+                    continue
+                result.append(
+                    {
+                        "artifact_id": ident,
+                        "revision": row["version"] if row else 0,
+                        "verdict": value.get("verdict"),
+                        "mark_count": len(value.get("marks", [])),
+                        "actor_kind": value.get("actor_kind"),
+                        "updated_at": row["updated_at"] if row else None,
+                    }
+                )
+            return result
 
     def patch(self, principal, project_id, shot_id, artifact_id, body, key):
         from .quick_chat import key_check
@@ -343,6 +443,13 @@ def redact_reviews(conn, tenant, owner, *, artifact_ids=(), project_ids=(), now)
 def register_routes(app):
     service = TakeReviews(app.state.repository, app.state.settings.tenant_id)
     app.state.take_reviews = service
+
+    @app.get(SUMMARY_PATH)
+    def read_summaries(project_id: str, shot_id: str, request: Request):
+        return JSONResponse(
+            service.summaries(request.state.principal, project_id, shot_id),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get(PATH)
     def read_review(project_id: str, shot_id: str, artifact_id: str, request: Request):

@@ -49,6 +49,28 @@ artifact. Reload on CAS failure and confirm intended changes; do not overwrite
 another edit or retry with a random key. Trash/purge fences are checked before
 replay, so an old receipt never resurrects annotations.
 
+## Batch summary read (#630)
+
+`GET /v1/projects/{project_id}/shots/{shot_id}/take-reviews` returns a JSON list:
+`[{artifact_id,revision,verdict,mark_count,actor_kind,updated_at}]`. Same
+`projects:read` scope and stable read-only snapshot as single-review GET; no
+authoring locks or writes. Cache-Control is no-store. No notes, ranges, prompt
+text or media URL is returned.
+
+The census follows the original shot/verified migration aliases, with the stricter
+take-review proof: same owner/project and client_ref, succeeded current attempt,
+accepted video artifact. Newest job first, artifact ID breaks ties. Unreviewed
+eligible takes have revision0, verdictnull, mark_count0 and null actor/time.
+Trashed/purging/deleted, unaccepted or unproven takes are omitted; a trashed
+project is refused. No eligible takes returns `[]`.
+
+Read at most100 candidate videos plus an overflow sentinel. Overflow refuses
+with `409 take_review_summary_limit`, never returns a partial success. An
+exceptionally large shot can use the existing paginated versions listing and
+single-take reads; this does not broaden eligibility. Current review rows are
+read together in one bounded query. Source availability uses existing content
+fence checks inside the same snapshot. Writes and immutable receipts are unchanged.
+
 ## Identity, storage and privacy
 
 An artifact must be an accepted video of the shot's original succeeded job and

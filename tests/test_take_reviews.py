@@ -77,6 +77,12 @@ class TakeReviewTests(LedgerCase):
         )
         return self.service.get(**{**args, **changes})
 
+    def summaries(self, **changes):
+        args = dict(
+            principal=self.principal, project_id=self.scope.project_id, shot_id="shot"
+        )
+        return self.service.summaries(**{**args, **changes})
+
     def write(self, body=None, key="key-1", **changes):
         args = dict(
             principal=self.principal,
@@ -320,8 +326,10 @@ class TakeReviewTests(LedgerCase):
                     # PostgreSQL row/advisory locks and SQLite's writer reservation
                     # remain held until after this completed read.
                     result = pool.submit(self.read).result(timeout=3)
+                    summaries = pool.submit(self.summaries).result(timeout=3)
                 self.assertEqual(result["verdict"], "keep")
                 self.assertEqual(result["revision"], 1)
+                self.assertEqual(summaries[0]["verdict"], "keep")
 
     def test_project_trash_still_blocks_read_snapshot(self):
         from studio_platform.universal_trash import target_key
@@ -346,6 +354,102 @@ class TakeReviewTests(LedgerCase):
         )
         with self.assertRaisesRegex(Conflict, "project_in_trash"):
             self.read()
+        with self.assertRaisesRegex(Conflict, "project_in_trash"):
+            self.summaries()
+
+    def test_summaries_defaults_order_scope_and_private_response(self):
+        self.write({"expected_revision": 0, "verdict": "keep", "marks": [self.mark()]})
+        later = self.take(created=300, delivered=400)
+        self.take(shot="other-shot", created=350, delivered=450)
+        self.take(
+            scope=Scope("tenant-other", self.scope.owner_id, self.scope.project_id)
+        )
+        self.take(
+            scope=Scope(self.scope.tenant_id, "owner-other", self.scope.project_id)
+        )
+        self.take(
+            scope=Scope(self.scope.tenant_id, self.scope.owner_id, "project-other")
+        )
+        result = self.summaries()
+        self.assertEqual(
+            [r["artifact_id"] for r in result],
+            [later["artifact"], self.output["artifact"]],
+        )
+        self.assertEqual(
+            result[0],
+            {
+                "artifact_id": later["artifact"],
+                "revision": 0,
+                "verdict": None,
+                "mark_count": 0,
+                "actor_kind": None,
+                "updated_at": None,
+            },
+        )
+        self.assertEqual(result[1]["mark_count"], 1)
+        self.assertEqual(result[1]["actor_kind"], "human")
+        self.assertNotIn("PRIVATE", json.dumps(result))
+        self.assertNotIn("marks", json.dumps(result))
+        for change in (
+            {"principal": Principal("owner-other", "browser")},
+            {"project_id": "project-other"},
+            {
+                "principal": replace(
+                    self.principal,
+                    machine=True,
+                    scopes=(),
+                    project_ids=(self.scope.project_id,),
+                )
+            },
+        ):
+            with self.subTest(change=change), self.assertRaises(NotFound):
+                self.summaries(**change)
+        pat = replace(
+            self.principal,
+            machine=True,
+            scopes=("projects:read",),
+            project_ids=(self.scope.project_id,),
+        )
+        self.assertEqual(self.summaries(principal=pat), result)
+
+    def test_summaries_omit_unaccepted_lost_and_trashed_takes(self):
+        rejected = self.take(created=300, delivered=400)
+        lost = self.take(created=350, delivered=450)
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(jobs)
+                .where(jobs.c.id == rejected["job"])
+                .values(result={"artifact_ids": []})
+            )
+            conn.execute(
+                update(attempts)
+                .where(attempts.c.id == lost["attempt"])
+                .values(status="attempt_lost")
+            )
+        self.assertEqual(
+            [r["artifact_id"] for r in self.summaries()], [self.output["artifact"]]
+        )
+        self.repo.put_document(
+            Scope(self.scope.tenant_id, self.scope.owner_id, "__trash"),
+            "trash_item",
+            "artifact-trash",
+            {
+                "state": "purging",
+                "target": {
+                    "kind": "artifact",
+                    "project_id": self.scope.project_id,
+                    "id": self.output["artifact"],
+                },
+            },
+        )
+        self.assertEqual(self.summaries(), [])
+        self.assertEqual(self.summaries(shot_id="other-shot"), [])
+
+    def test_summary_overflow_refuses_instead_of_truncating(self):
+        self.take(created=300, delivered=400)
+        with patch("studio_platform.take_reviews.SUMMARY_LIMIT", 1):
+            with self.assertRaisesRegex(Conflict, "take_review_summary_limit"):
+                self.summaries()
 
     def test_trash_fence_blocks_even_original_idempotency_replay(self):
         self.write()
@@ -393,6 +497,12 @@ class TakeReviewTests(LedgerCase):
             )
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.headers["Cache-Control"], "no-store")
+            listed = client.get(
+                f"/v1/projects/{self.scope.project_id}/shots/shot/take-reviews"
+            )
+            self.assertEqual(listed.status_code, 200, listed.text)
+            self.assertEqual(listed.headers["Cache-Control"], "no-store")
+            self.assertEqual(listed.json(), self.summaries())
             self.assertEqual(
                 client.patch(
                     path, json=body, headers={"Idempotency-Key": "different-key"}

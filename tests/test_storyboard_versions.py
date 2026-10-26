@@ -406,12 +406,27 @@ class StoryboardVersionTests(unittest.TestCase):
         )
         self.assertEqual(result.status_code, 200, result.text)
         self.assertEqual(self.client.get(path).json()['verdict'], 'keep')
+        summary_path = '/v1/projects/story-one/shots/shot-one/take-reviews'
+        summaries = self.client.get(summary_path)
+        self.assertEqual(summaries.status_code, 200, summaries.text)
+        self.assertIn(
+            {
+                'artifact_id': artifact,
+                'revision': 1,
+                'verdict': 'keep',
+                'mark_count': 0,
+                'actor_kind': 'human',
+                'updated_at': result.json()['updated_at'],
+            },
+            summaries.json(),
+        )
         self.assertEqual(
             self.client.get('/v1/guided-schema').json()['take_reviews']['path'],
             self.client.get('/v1/agent-guide').json()['take_reviews']['path'],
         )
         self.login('supervan')
         self.assertEqual(self.client.get(path).status_code, 404)
+        self.assertEqual(self.client.get(summary_path).status_code, 404)
 
     def test_migration_alias_versions_select_restore_and_star_preserve_original_jobs(
         self,

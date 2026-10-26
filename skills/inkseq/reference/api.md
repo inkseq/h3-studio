@@ -253,6 +253,17 @@ Do not automatically chain admission. Pending/unknown retains the original key/b
 
 GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage only. `storyboard.fork_profile` action takes `profile_id,new_profile_id,shot_ids,title?`; one CAS copies a character/location/prop and rewires selected shots, leaving original profiles, unselected shots and other projects untouched. Authorized cross-project discovery and current-authoring usage are available through `GET /v1/library` and `GET /v1/library/usage`; writes retain original project permissions. 中文：旧配方缺失显示未知；预检不生成，未知结果保留原操作；档案副本只改所选镜头，删除撤销另属 #236。
 
+### Take review summaries
+
+GET `/v1/projects/PROJECT/shots/SHOT/take-reviews` with `projects:read` returns
+`[{artifact_id,revision,verdict,mark_count,actor_kind,updated_at}]`, newest first.
+No notes/ranges/media URLs; read the per-take `/review` for full marks. Same
+accepted-video provenance, owner and trash/purge fences. Unreviewed eligible
+takes have revision0/null verdict/0 marks; `[]` means no eligible takes. More
+than100 candidate videos returns `409 take_review_summary_limit`, never silent
+truncation. Use existing paginated versions and individual reads for overflow.
+No writes or extra generation; selection/star still does not imply approval.
+
 ### Story Chat risk advice
 
 Existing Story Chat generate proposals may include `risk_review`:
