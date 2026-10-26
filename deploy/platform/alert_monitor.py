@@ -7,7 +7,7 @@ authority. No provider APIs, service restarts or business writes are performed.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
@@ -28,6 +28,10 @@ STATE = Path('/var/lib/inkseq-alert-monitor/state.json')
 SERVICES = ('app', 'db', 'caddy', 'dstack', 'controller')
 MAX_BYTES = 1024 * 1024
 MAX_PENDING = 128
+BACKUP_STATE = Path('/var/lib/inkseq-business-backup')
+# Daily timer: 16:30 UTC + <=5m jitter + <=95m service + 20m grace.
+# About 26h since the previous scheduled start, not a restore/freshness claim.
+BACKUP_DEADLINE_MINUTE = 18 * 60 + 30
 THRESHOLD_FIELDS = frozenset({'gpu_max_seconds', 'stuck_seconds', 'wake_count', 'cpu_percent',
     'memory_percent', 'host_sustain_seconds', 'health_down_seconds', 'http_5xx_min',
     'http_5xx_ratio', 'max_sample_gap_seconds', 'terminal_reservation_seconds'})
@@ -63,11 +67,11 @@ def protected_directory(path):
                 'alert_directory_unprotected')
 
 
-def read_protected(path, *, missing=False):
+def read_protected_bytes(path, *, missing=False, private=True):
     path = Path(path)
     protected_directory(path.parent)
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         if missing:
             return None
@@ -75,10 +79,16 @@ def read_protected(path, *, missing=False):
     with os.fdopen(fd, 'rb') as stream:
         info = os.fstat(stream.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
-                and not info.st_mode & 0o077 and info.st_size <= MAX_BYTES, 'alert_file_unprotected')
+                and not info.st_mode & (0o077 if private else 0o022)
+                and info.st_size <= MAX_BYTES, 'alert_file_unprotected')
         raw = stream.read(MAX_BYTES + 1)
         require(len(raw) <= MAX_BYTES, 'alert_file_too_large')
-    return json.loads(raw)
+    return raw
+
+
+def read_protected(path, *, missing=False):
+    raw = read_protected_bytes(path, missing=missing)
+    return None if raw is None else json.loads(raw)
 
 
 def atomic(path, value):
@@ -200,9 +210,14 @@ def disk_sample(*, path='/srv/sixnine', statvfs=None):
 
 def retention_service_failed(*, runner=subprocess.run):
     """Observe only the fixed oneshot unit's result; never fetch its journal."""
+    return oneshot_failed('inkseq-release-retention.service', runner=runner)
+
+
+def oneshot_failed(unit, *, runner=subprocess.run):
+    require(unit in {'inkseq-release-retention.service', 'inkseq-business-backup.service'}, 'alert_unit_invalid')
     fields = {'LoadState', 'ActiveState', 'SubState', 'Result', 'ExecMainCode', 'ExecMainStatus'}
     try:
-        result = runner(['/usr/bin/systemctl', 'show', 'inkseq-release-retention.service', '--no-pager',
+        result = runner(['/usr/bin/systemctl', 'show', unit, '--no-pager',
             '--property=' + ','.join(sorted(fields))], stdin=subprocess.DEVNULL, capture_output=True,
             timeout=5, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'})
         if result.returncode != 0 or len(result.stdout) > 4096:
@@ -230,6 +245,55 @@ def retention_service_failed(*, runner=subprocess.run):
     return None
 
 
+def backup_copy_missing(*, now, root=BACKUP_STATE):
+    """Check at most two daily receipts, not media or S3. None means unobservable.
+
+    Root-pinned completion plus receipt hash is copy evidence, never restore proof.
+    Before today's deadline, yesterday is still the most recent due copy.
+    Malformed evidence cannot resolve an incident or become a successful sample.
+    """
+    try:
+        current = datetime.fromtimestamp(now, timezone.utc)
+        days = [current.date()]
+        if current.hour * 60 + current.minute < BACKUP_DEADLINE_MINUTE:
+            days.append(current.date() - timedelta(days=1))
+        protected_directory(root)
+        for day in days:
+            operation = root / day.isoformat()
+            try:
+                value = read_protected(operation / 'completed.json', missing=True)
+            except FileNotFoundError:
+                continue  # No operation directory: no confirmed scheduled copy.
+            if value is None:
+                continue
+            require(type(value) is dict and type(value.get('version')) is int
+                and value['version'] in (1, 2, 3) and value.get('day') == day.isoformat()
+                and all(type(value.get(k)) is str and re.fullmatch('[0-9a-f]{64}', value[k])
+                    for k in ('completion_sha256', 'receipt_sha256')),
+                'alert_backup_completion_invalid')
+            raw = read_protected_bytes(operation / 'receipt.json', private=False)
+            require(hashlib.sha256(raw).hexdigest() == value['receipt_sha256'], 'alert_backup_receipt_changed')
+            receipt = json.loads(raw)
+            require(type(receipt) is dict and receipt.get('phase') == 'copied_not_restored'
+                and receipt.get('format') == 'sixnine-private-backup-copy-v' + str(value['version'])
+                and receipt.get('completion_sha256') == value['completion_sha256']
+                and type(value.get('completion_version_id')) is str
+                and 1 <= len(value['completion_version_id']) <= 1024
+                and receipt.get('completion_version_id') == value['completion_version_id'],
+                'alert_backup_receipt_invalid')
+            return False
+        return True
+    except (OSError, ValueError, TypeError, OverflowError):
+        return None
+
+
+def backup_observation(*, now, runner=subprocess.run):
+    failed = oneshot_failed('inkseq-business-backup.service', runner=runner)
+    missing = backup_copy_missing(now=now)
+    return {'business_backup_failed': failed, 'business_backup_missing': missing,
+        'business_backup_unobservable': missing is None}
+
+
 def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
     sample = proc_sample(proc=proc)
     cpu = None
@@ -240,6 +304,7 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
     host = {'cpu_percent': cpu, 'memory_percent': sample['memory_percent'], 'health_ok': None,
             'http_requests': None, 'http_5xx': None, 'processes_ok': None, 'disk_used_percent': None,
             'retention_service_failed': retention_service_failed(runner=runner)}
+    host.update(backup_observation(now=time.time(), runner=runner))
     try:
         host['disk_used_percent'] = disk_sample()
     except (OSError, ValueError, AttributeError):
@@ -272,7 +337,8 @@ def notification(value, environment):
     # The core evaluator owns this finite code list. Keep a second boundary at SNS.
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
             'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained', 'host_disk_80', 'host_disk_90',
-            'host_process_unhealthy', 'retention_service_failed', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
+            'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed',
+            'business_backup_missing', 'business_backup_unobservable', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
             and value['environment'] == environment and value['transition'] in {'firing', 'resolved'}
             and (value['resource_id'] is None or type(value['resource_id']) is str
                 and re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', value['resource_id']))
