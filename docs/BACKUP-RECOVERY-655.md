@@ -31,7 +31,7 @@ unfinished-operation guard still blocks subsequent scheduled copies.
 
 Read-only qualification `a10f4e02-4c95-4130-9e0e-6f0a0f3ea46f` found the old
 production image/release no longer retained. Do not fabricate their approval or
-recapture the data. The currently approved production image
+recapture the data. The then-approved production image
 `sha256:375b439ff88697761abe1318871027d3a3e1976dfd014c7499a8dbc5100de705`
 at `b78510e6991f5acccb0996981e8016be5434693f` retains the v3 verifier/copy protocol.
 Offline command `b0a226cf-e533-4850-84a1-9c7b0bd50513` verified the original data
@@ -40,6 +40,19 @@ using that image, network disabled, read-only payload/root, uid10001, no credent
 `37a5e05898b9288f58b7eaa802b6bcb880d3935054bcbe6ee51b401a363fa965`;
 1935 available objects, two explicitly deleted misses, zero unexpected misses.
 No upload, live DB write, retention or application restart was performed.
+
+Production subsequently promoted `fd2ae3af0922395639f26a4718b1b5f33994b652`
+(#193 comment6421118992). Following review6421689261, recovery now pins this
+release and image
+`sha256:99135c468f9ac92ba02a8daaed5efeceb814183511f423296ba2f735080cec7e`.
+Read-only/offline command `db62dc4e-3ec1-4c98-bb85-d1d06c6a6abe` verified the same
+original v3 payload with identical manifest, file/byte counts and coverage using
+this image. Read-only command `461fac65-89ef-4fa5-9163-7dcc0a800303` also verified
+the image's membership in the approved archive and matching revision label.
+The original snapshot commit/image above remain historical identity;
+only the separately recorded transport pin changes. Further production promotions
+are held by Claude until this recovery; the helper still refuses any release or
+image drift rather than silently choosing another image.
 
 ## Operator alerts
 
