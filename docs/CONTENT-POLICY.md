@@ -63,13 +63,14 @@ browser/legal acceptance and live payments remain separate owner/release gates.
 ## Improvement-report disclosure handoff — DRAFT (#374 / #580 step 6)
 
 This is an implementation fact sheet for Claude's canonical legal-page update
-and owner review, not legal approval or published text. It describes candidate
-[PR #636](https://github.com/inkseq/h3-studio/pull/636), exact source
-`dcdf51adb9c0f47a181a5714175870d9053175ee`; it is **not evidence of deployment**.
-Recheck that candidate's final reviewed contract before publication. No policy
+and owner review, not legal approval or published text. It describes merged
+[PR #636](https://github.com/inkseq/h3-studio/pull/636), originally checked at
+`dcdf51adb9c0f47a181a5714175870d9053175ee` and reconciled against main
+`a47462f08257af8682a4b72e194028efa1597054`; it is **not evidence of deployment**.
+Recheck the deployed contract before publication. No policy
 revision, reviewed status, acceptance record or runtime setting changes here.
 
-### Data paths in that candidate
+### Data paths in the merged backend contract
 
 | Data | Local application storage | Sentry feedback |
 |---|---|---|
@@ -98,7 +99,7 @@ PostHog UI analytics and any future LLM tracing are separate data paths.
 
 - The owner's share-report preference defaults to enabled. Human-only settings
   read/update use revision checks; a PAT cannot change it. The API exists in the
-  candidate, but the Settings toggle must be implemented and verified by Claude
+  merged backend, but the Settings toggle must be implemented and verified by Claude
   before a public statement tells people it is available in the UI.
 - Disabling sharing refuses new reports and suppresses a pending report if the
   setting wins before its one enqueue attempt. It does not recall a report
@@ -106,7 +107,7 @@ PostHog UI analytics and any future LLM tracing are separate data paths.
 - Context inclusion is disabled for everyone in this slice. Do not advertise
   an available optional context-sharing control yet. Automatic Story Chat and
   system reports, per-reply surveys and global agent-intent logging are also
-  follow-ups, not implemented capabilities of this candidate.
+  follow-ups, not implemented capabilities of this backend slice.
 - Proven project/artifact purge redacts matching local reports; completed account
   deletion redacts owned local documents through the existing guarded workflow.
   Neither statement means immediate deletion at the moment a request is made,
