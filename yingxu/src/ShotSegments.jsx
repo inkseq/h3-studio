@@ -221,7 +221,11 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
           <X size={11} />
         </button>
       )}
-      {list.length <= 1 && <small className="parts-bar-hint muted">{t('segments.moreHint')}</small>}
+      {list.length <= 1 && (
+        <small className="parts-bar-hint muted">
+          {t(list.length ? 'segments.moreHint' : 'segments.firstHint')}
+        </small>
+      )}
     </div>
   );
 }
@@ -234,14 +238,23 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
 export default function ShotSegments({ shot, getVideo, duration, trim }) {
   const { t } = useI18n(),
     { state, dispatch, adapter } = useStoryboardUI();
-  const list = shot.segments || [];
-  const [saving, setSaving] = useState(false),
+  // The bar shows the list being saved straight away (owner, 2026-10-26): nothing greys out
+  // or jumps back while the story edit is on its way; edits queue one after another.
+  const [pending, setPending] = useState(null),
+    [picking, setPicking] = useState(false),
     [error, setError] = useState('');
+  const saves = useRef(0);
+  useEffect(() => {
+    setPicking(false);
+    setPending(null);
+  }, [shot.id, shot.chosen]);
   // Parts are saved on the cloud story (POST /actions), like choosing a take.
   if (!shot.chosen || !adapter?.readVersions) return null;
-  const busy = saving || state.busy || !!state.workbenchPending;
+  const list = pending ?? shot.segments ?? [];
+  const busy = !!state.workbenchPending;
   async function save(next) {
-    setSaving(true);
+    const n = ++saves.current;
+    setPending(next);
     setError('');
     try {
       const result = await dispatch({
@@ -252,12 +265,12 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
     } catch {
       setError(t('segments.failed'));
     } finally {
-      setSaving(false);
+      if (n === saves.current) setPending(null);
     }
   }
-  const cut = list.length > 0;
+  const cut = list.length > 0 || picking;
   // One switch between the whole take and cut parts (owner, 2026-10-26); the bar shows only
-  // for parts. Switching to parts starts from the whole take (#232 #39).
+  // for parts. Parts start empty: drag anywhere from 0 to keep the first one.
   const mode = (
     <Segmented
       className="segments-mode"
@@ -265,9 +278,8 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
       value={cut ? 'parts' : 'whole'}
       disabled={busy}
       onChange={(value) => {
-        if (value === 'whole') return void save([]);
-        const first = duration > 0 ? snapRange(0, duration) : trim && snapRange(trim[0], trim[1]);
-        if (first) void save([first]);
+        setPicking(value === 'parts');
+        if (value === 'whole' && list.length) void save([]);
       }}
       options={[
         { value: 'whole', label: t('segments.clear') },
@@ -290,6 +302,7 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
           size="sm"
           variant="ghost"
           className="keep-label"
+          disabled={!list.length}
           onClick={() => playParts(getVideo(), list)}
         >
           <Play size={13} />
@@ -304,11 +317,11 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
         onChange={(next) => void save(next)}
         t={t}
       />
-      <small className="muted">
-        {saving
-          ? t('segments.saving')
-          : t('segments.total', { count: list.length, len: secs(segmentsTotal(list)) })}
-      </small>
+      {list.length > 0 && (
+        <small className="muted">
+          {t('segments.total', { count: list.length, len: secs(segmentsTotal(list)) })}
+        </small>
+      )}
       <FloatingMessage text={error || null} onDismiss={() => setError('')} />
     </section>
   );

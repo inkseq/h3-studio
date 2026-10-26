@@ -1300,14 +1300,19 @@ body.sb-resizing-y video {
   justify-content: flex-start;
   width: 100%;
 }
-.ed-more > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 12px;
+.editor .ed-footer .ed-gen-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
 }
-.ed-more[open] {
-  display: grid;
-  gap: 8px;
+.editor .ed-footer .ed-gen-options .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-2);
 }
 /* #232 (#24): the expanded shot panel scrolls its two columns independently. */
 .drawer.wide {
@@ -1415,18 +1420,16 @@ body.sb-resizing-y video {
 }
 .help-tip {
   position: relative;
-  display: inline-grid;
-  place-items: center;
-  width: 15px;
-  height: 15px;
+  display: inline-flex;
+  align-items: center;
   margin-left: 4px;
-  border-radius: 50%;
-  border: 1px solid var(--line-2, var(--line));
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
   cursor: help;
   vertical-align: middle;
+}
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--ink-2);
 }
 .help-tip:hover::after,
 .help-tip:focus-visible::after {
