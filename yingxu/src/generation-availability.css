@@ -50,9 +50,7 @@
   color: var(--accent);
   text-decoration: underline;
 }
-.qc-card > .qc-availability {
-  margin: 0 18px 12px;
-}
+
 .qc-availability-compact .qc-availability-mode {
   background: transparent;
   padding: 0;

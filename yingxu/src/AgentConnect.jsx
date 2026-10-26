@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from './ui/Button.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import AssistantConnections from './AssistantConnections.jsx';
 export default function AgentConnect({
@@ -27,9 +28,9 @@ export default function AgentConnect({
       {account && !ready && (
         <p>
           {t('assistants.scopeUnavailable')}{' '}
-          <button disabled={busy} onClick={workspace.mode === 'cloud' ? onSaveCloud : onOpenCloud}>
+          <Button disabled={busy} onClick={workspace.mode === 'cloud' ? onSaveCloud : onOpenCloud}>
             {t(workspace.mode === 'cloud' ? 'account.copy64' : 'assistants.login')}
-          </button>
+          </Button>
         </p>
       )}
     </>

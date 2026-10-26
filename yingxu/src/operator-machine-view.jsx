@@ -1,4 +1,5 @@
 import { Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
 import { operatorOfferReadiness as rawOfferReadiness } from './operator-model.js';
 import { operatorNodeStatus as rawOperatorNodeStatus } from './operator-presentation.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
@@ -89,8 +90,7 @@ export function MachineRow({
     deadline = nodeDeadline(node, now);
   return (
     <article className={'op-machine-row' + (history ? ' historical' : '')}>
-      <button
-        type="button"
+      <Button
         className="op-machine-open"
         aria-label={lo('legacyOp.copy321', {
           x0: providerLabel(node.provider),
@@ -134,28 +134,18 @@ export function MachineRow({
           </small>
         </span>
         <ChevronRight size={17} />
-      </button>
+      </Button>
       {!history && node.actions?.extend && (
-        <button
-          type="button"
-          className="op-row-extend"
-          disabled={disabled}
-          onClick={() => onExtend(node)}
-        >
+        <Button className="op-row-extend" disabled={disabled} onClick={() => onExtend(node)}>
           <Clock size={14} />
           {lo('legacyOp.copy330')}
-        </button>
+        </Button>
       )}
       {node.actions?.manual_review?.allowed && (
-        <button
-          type="button"
-          className="op-row-extend"
-          disabled={disabled}
-          onClick={() => onReview(node)}
-        >
+        <Button className="op-row-extend" disabled={disabled} onClick={() => onReview(node)}>
           <ShieldCheck size={14} />
           {lo('legacyOp.copy19')}
-        </button>
+        </Button>
       )}
     </article>
   );
@@ -450,31 +440,31 @@ export function NodeCard({ node, profiles = [], disabled, onAction, now = Date.n
         <p>{lo('legacyOp.copy390')}</p>
       </details>
       <footer>
-        <button
+        <Button
           disabled={disabled || !node.actions?.drain?.allowed}
           onClick={() => onAction('drain', node)}
         >
           <Pause size={14} />
           {lo('legacyOp.copy207')}
-        </button>
-        <button
+        </Button>
+        <Button
           disabled={disabled || !node.actions?.stop?.allowed}
           onClick={() => onAction('stop', node)}
         >
           <Square size={13} />
           {lo('legacyOp.copy208')}
-        </button>
+        </Button>
         {!history && node.actions?.extend && (
-          <button disabled={disabled} onClick={() => onAction('extend', node)}>
+          <Button disabled={disabled} onClick={() => onAction('extend', node)}>
             <Clock size={14} />
             {lo('legacyOp.copy330')}
-          </button>
+          </Button>
         )}
         {node.actions?.manual_review?.allowed && (
-          <button disabled={disabled} onClick={() => onAction('manualReview', node)}>
+          <Button disabled={disabled} onClick={() => onAction('manualReview', node)}>
             <ShieldCheck size={14} />
             {lo('legacyOp.copy19')}
-          </button>
+          </Button>
         )}
       </footer>
       {!history && !node.actions?.manual_review?.allowed && (
@@ -592,15 +582,14 @@ export function CandidateCard({ row, index, current, busy, onStart }) {
                 ? lo('legacyOp.copy409')
                 : lo('legacyOp.copy410')}
         </span>
-        <button
+        <Button
           className="op-primary"
-          type="button"
           disabled={busy || !current || !stock || blocked}
           onClick={() => onStart(row)}
         >
           <Play size={13} />
           {row.offer_kind === 'resource_sku' ? lo('legacyOp.copy411') : lo('legacyOp.copy412')}
-        </button>
+        </Button>
       </footer>
     </article>
   );

@@ -1,5 +1,6 @@
 // Settings → Account → Appearance: pick an interface skin (per browser).
 import React, { useEffect, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { Palette } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { SKINS, applySkin, chosenSkin, followSystem } from './skins.js';
@@ -43,8 +44,7 @@ export default function SkinPicker() {
         <Palette size={15} aria-hidden="true" /> {t('skin.title')}
       </h4>
       <div className="skin-picker" role="radiogroup" aria-label={t('skin.title')}>
-        <button
-          type="button"
+        <Button
           role="radio"
           aria-checked={current === 'system'}
           data-ui-surface="skin"
@@ -60,11 +60,10 @@ export default function SkinPicker() {
           </span>
           <b>{t('skin.system')}</b>
           <small className="muted">{t('skin.systemHelp')}</small>
-        </button>
+        </Button>
         {SKINS.map((skin) => (
-          <button
+          <Button
             key={skin.id}
-            type="button"
             role="radio"
             aria-checked={current === skin.id}
             data-ui-surface="skin"
@@ -77,7 +76,7 @@ export default function SkinPicker() {
               {skin.light && <small className="skin-tag">{t('skin.light')}</small>}
             </b>
             <small className="muted">{t('skin.' + skin.id + 'Help')}</small>
-          </button>
+          </Button>
         ))}
       </div>
     </div>

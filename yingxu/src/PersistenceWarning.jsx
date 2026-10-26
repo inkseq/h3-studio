@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
 import { store } from './store.js';
 import './persistence-warning.css';
@@ -28,14 +29,14 @@ export default function PersistenceWarning() {
         {risk.current ? lt('legacy.draftCurrent') : lt('legacy.draftOther')} {lt('legacy.copy20')}
       </p>
       <div>
-        <button
+        <Button
           onClick={() => {
             if (store.checkpoint()) store.notify(lt('legacy.draftSaved'));
           }}
         >
           {lt('legacy.copy21')}
-        </button>
-        {risk.current && <button onClick={prepare}>{lt('legacy.copy22')}</button>}
+        </Button>
+        {risk.current && <Button onClick={prepare}>{lt('legacy.copy22')}</Button>}
         {url && (
           <a href={url} download="映序-未落盘项目结构.json">
             {lt('legacy.copy23')}

@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import React, { useSyncExternalStore } from 'react';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
@@ -150,9 +151,9 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                         <li key={index}>{issue}</li>
                       ))}
                     </ul>
-                    <button onClick={() => onFix({ id: 'roughcut-subtitles', stage: 6 })}>
+                    <Button onClick={() => onFix({ id: 'roughcut-subtitles', stage: 6 })}>
                       {lt('rough.ui23')}
-                    </button>
+                    </Button>
                   </div>
                 ) : (
                   <p>{lt('rough.confirmed', { count: subtitles.aligned.length })}</p>
@@ -161,7 +162,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
             )}
           </div>
           <div className="cloud-actions">
-            <button
+            <Button
               disabled={
                 subtitleBlocked ||
                 generatedUnsupported ||
@@ -177,10 +178,10 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
               onClick={() => run(cloud.prepareRender(chapterId, options))}
             >
               {lt('rough.ui24')}
-            </button>
-            <button onClick={() => onFix({ id: 'roughcut-sound', stage: 6 })}>
+            </Button>
+            <Button onClick={() => onFix({ id: 'roughcut-sound', stage: 6 })}>
               {lt('rough.ui25')}
-            </button>
+            </Button>
           </div>
           {plan && (
             <div
@@ -242,7 +243,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                         </small>
                       )}
                     </div>
-                    <button
+                    <Button
                       onClick={() =>
                         onFix({
                           id: 'roughcut-' + shot.shot_id,
@@ -253,7 +254,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                       }
                     >
                       {lt('rough.ui35')}
-                    </button>
+                    </Button>
                   </li>
                 ))}
               </ol>
@@ -313,7 +314,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                     <summary>{lt('rough.ui43')}</summary>
                     <div className="cloud-actions">
                       {summary.shots.map((shot) => (
-                        <button
+                        <Button
                           key={shot.id}
                           onClick={() =>
                             onFix({
@@ -325,7 +326,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                           }
                         >
                           {shot.title}
-                        </button>
+                        </Button>
                       ))}
                     </div>
                   </details>
@@ -342,8 +343,8 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                 </details>
               )}
               <p>{estimateLabel(plan.estimate, locale)}</p>
-              <button
-                className="primary"
+              <Button
+                variant="primary"
                 disabled={
                   c.busy ||
                   plan.status !== 'ready' ||
@@ -358,23 +359,23 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                 onClick={() => run(cloud.submitRender(chapterId))}
               >
                 {submitted ? lt('rough.ui45') : lt('rough.ui46')}
-              </button>
+              </Button>
             </div>
           )}
           {held && <p className="cloud-warning">{lt('rough.ui47')}</p>}
           {pending && (
             <div className="cloud-warning" role="alert">
               <p>{c.busy ? lt('rough.ui48') : lt('rough.ui49')}</p>
-              <button disabled={c.busy || held} onClick={() => run(cloud.submitRender(chapterId))}>
+              <Button disabled={c.busy || held} onClick={() => run(cloud.submitRender(chapterId))}>
                 {lt('rough.ui50')}
-              </button>
+              </Button>
             </div>
           )}
           <div className="cloud-section-head">
             <h4>{lt('rough.ui51')}</h4>
-            <button disabled={c.busy} onClick={() => run(cloud.refresh())}>
+            <Button disabled={c.busy} onClick={() => run(cloud.refresh())}>
               {lt('rough.ui52')}
-            </button>
+            </Button>
           </div>
           <p>{lt('rough.ui53')}</p>
           {!jobs.length && <p className="muted">{lt('rough.ui54')}</p>}
@@ -387,9 +388,9 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
                     {jobStatusLabel(job.status, locale)}
                   </b>
                   {activeJobStatuses.has(job.status) && (
-                    <button disabled={c.busy} onClick={() => run(cloud.cancel(job.id))}>
+                    <Button disabled={c.busy} onClick={() => run(cloud.cancel(job.id))}>
                       {lt('rough.ui56')}
-                    </button>
+                    </Button>
                   )}
                 </div>
                 <p role="status">

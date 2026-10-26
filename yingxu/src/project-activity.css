@@ -83,12 +83,7 @@
   font-size: 13px;
   margin: 6px 0;
 }
-.agent-header-entry {
-  white-space: nowrap;
-}
-.agent-public-link {
-  font-size: 12px;
-}
+
 .project-activity .cloud-job-list {
   max-height: none;
 }
@@ -106,10 +101,7 @@
   .agent-link-banner {
     margin: 12px;
   }
-  .agent-header-entry {
-    padding: 8px !important;
-    font-size: 12px;
-  }
+
   .agent-link-banner > div + div {
     flex-wrap: wrap;
   }

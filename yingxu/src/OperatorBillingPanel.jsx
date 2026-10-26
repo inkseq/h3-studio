@@ -1,4 +1,5 @@
 import { Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
 import React, { useEffect, useState } from 'react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { formatMoneyMicros as money } from './money.js';
@@ -198,9 +199,9 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
             }}
           />
         </label>
-        <button type="submit" disabled={locked || !owner.trim() || !bounds}>
+        <Button type="submit" disabled={locked || !owner.trim() || !bounds}>
           {t(reading ? 'billing.loading' : 'billing.load')}
-        </button>
+        </Button>
       </form>
       <details className="billing-date-filter">
         <summary>{t('billing.dateFilter')}</summary>
@@ -255,8 +256,7 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
               {t('billing.loaded', { count: shown.items.length })} ·{' '}
               {t('billing.selected', { count: rows.length })}
             </p>
-            <button
-              type="button"
+            <Button
               disabled={locked || !shown.items.some((row) => row.eligible_actions.includes(action))}
               onClick={() => {
                 setSelected(
@@ -271,9 +271,8 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
               }}
             >
               {t('billing.selectEligible')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               disabled={locked || !rows.length}
               onClick={() => {
                 setSelected({});
@@ -281,7 +280,7 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
               }}
             >
               {t('billing.clearSelection')}
-            </button>
+            </Button>
           </div>
           <div className="billing-rows">
             {shown.items.map((row) => {
@@ -404,9 +403,9 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
             })}
           </div>
           {shown.next_cursor && (
-            <button type="button" disabled={locked} onClick={() => void read(shown.next_cursor)}>
+            <Button disabled={locked} onClick={() => void read(shown.next_cursor)}>
               {t('billing.more')}
-            </button>
+            </Button>
           )}
           <div className="billing-action-form">
             {action === 'settle' && (
@@ -421,13 +420,12 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
                     onChange={(event) => setAllocationInput(event.target.value)}
                   />
                 </label>
-                <button
-                  type="button"
+                <Button
                   disabled={locked || !rows.length || !allocationInput.trim()}
                   onClick={importAllocations}
                 >
                   {t('billing.applyAllocations')}
-                </button>
+                </Button>
               </details>
             )}
             <label>
@@ -466,9 +464,9 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
               />
             </label>
             <Note>{t(action === 'waive' ? 'billing.waiveHelp' : 'billing.settleHelp')}</Note>
-            <button type="button" disabled={locked || !valid} onClick={() => void prepare()}>
+            <Button disabled={locked || !valid} onClick={() => void prepare()}>
               {t('billing.preview', { count: rows.length })}
-            </button>
+            </Button>
           </div>
         </>
       )}
@@ -494,13 +492,12 @@ export default function OperatorBillingPanel({ controller, state, busy }) {
             />
             {t('billing.confirm')}
           </label>
-          <button
-            type="button"
+          <Button
             disabled={locked || !valid || !confirmed || !validBillingPreview(preview, request)}
             onClick={() => void apply()}
           >
             {t('billing.submit')}
-          </button>
+          </Button>
         </section>
       )}
       {error && <p role="alert">{error}</p>}

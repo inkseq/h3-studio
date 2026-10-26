@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react';
+import { Button } from './ui/Button.jsx';
 import qrcode from 'qrcode-generator';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
@@ -60,9 +61,9 @@ export default function TelegramLink({ code, expiresAt, autoOpen = false, onHide
         </div>
       </div>
       {onHide && (
-        <button type="button" className="ghost small" onClick={onHide}>
+        <Button variant="ghost" size="sm" onClick={onHide}>
           {t('assistants.hide')}
-        </button>
+        </Button>
       )}
     </article>
   );

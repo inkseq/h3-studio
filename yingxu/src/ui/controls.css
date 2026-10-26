@@ -263,20 +263,6 @@ input[type='radio'] {
   }
 }
 
-/* Menu rows (ItemMenu popovers): plain rows, not stacked buttons (owner, 2026-10-25). */
-.item-menu-popover > button {
-  justify-content: flex-start;
-  width: 100%;
-  border-color: transparent;
-  background: transparent;
-  color: var(--ink);
-  font-weight: 400;
-}
-.item-menu-popover > button:hover {
-  background: var(--surface-3);
-  border-color: transparent;
-}
-
 /* Link styled as a small button (downloads): same box as button.small so rows line up. */
 a.btn {
   display: inline-flex;

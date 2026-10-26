@@ -16,10 +16,6 @@ import {
 } from './quick-chat-model.js';
 import Control from './GenerationControl.jsx';
 import { Dialog } from './ui/Dialog.jsx';
-// Kept as a name for existing callers; the behaviour and look live in ui/Dialog.jsx.
-export function ChatDialog(props) {
-  return <Dialog {...props} />;
-}
 function ProfileInputBoundary({ support }) {
   const { t } = useI18n();
   const roles = {
@@ -211,7 +207,7 @@ export default function QuickChatControls({
     运行与导出: t('chatControls.copy16'),
   };
   return (
-    <ChatDialog
+    <Dialog
       title={scope === 'next' ? t('chatControls.copy17') : t('chatControls.copy18')}
       onClose={onClose}
       className="qc-controls-dialog"
@@ -475,6 +471,6 @@ export default function QuickChatControls({
           </button>
         </div>
       </form>
-    </ChatDialog>
+    </Dialog>
   );
 }

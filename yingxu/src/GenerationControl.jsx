@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import React from 'react';
 import { CONTROL_LABELS, newExcerptControl } from './quick-chat-model.js';
 
@@ -71,23 +72,21 @@ export default function GenerationControl({
                 />
               </label>
             ))}
-            <button
-              type="button"
+            <Button
               aria-label={at('adjunct.generationControl.copy92', { v0: label, v1: index + 1 })}
               onClick={() => onChange(entries.filter((_, i) => i !== index))}
             >
               {at('adjunct.generationControl.copy93')}
-            </button>
+            </Button>
           </div>
         ))}
-        <button
-          type="button"
+        <Button
           disabled={disabled || (Number.isInteger(maximum) && entries.length >= maximum)}
           onClick={() => onChange([...entries, newExcerptControl(field, schema)])}
         >
           {at('adjunct.generationControl.copy94')}
           {Number.isInteger(maximum) ? `（${entries.length}/${maximum}）` : ''}
-        </button>
+        </Button>
         {schema.reason && <small>{schema.reason}</small>}
       </fieldset>
     );
