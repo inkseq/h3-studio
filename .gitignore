@@ -847,5 +847,6 @@ inventory.json
 !docs/TAKE-REDO-PREVIEW.md
 !studio_platform/creator_controls.py
 !tests/test_creator_controls.py
+!tests/test_creator_controls_v6.py
 !tools/audit_creator_controls.py
 !docs/CREATOR-CONTROLS.md
