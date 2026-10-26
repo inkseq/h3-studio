@@ -222,12 +222,12 @@ class BackupDiagnosticsTests(unittest.TestCase):
             patch.object(
                 host,
                 'retention_json',
-                return_value={'hosted_users': {'status': 'complete'}},
+                return_value={'value': {'hosted_users': {'status': 'complete'}}},
             ) as reader,
         ):
             host.require_hosted_coverage(Path('/synthetic'))
             reader.assert_called_once_with(Path('/synthetic/snapshot/manifest.json'))
-            reader.return_value = {'hosted_users': {'status': 'unavailable'}}
+            reader.return_value = {'value': {'hosted_users': {'status': 'unavailable'}}}
             with self.assertRaisesRegex(ValueError, 'hosted_users_unavailable'):
                 host.require_hosted_coverage(Path('/synthetic'))
 

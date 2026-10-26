@@ -227,7 +227,7 @@ def require_hosted_coverage(operation):
     if manifest.exists():
         # Transport freeze intentionally owns payload files as uid10001. The
         # root-only 64KiB operation-metadata reader cannot read this manifest.
-        hosted = retention_json(manifest).get('hosted_users')
+        hosted = retention_json(manifest)['value'].get('hosted_users')
         require(hosted is None or isinstance(hosted, dict) and hosted.get('status') == 'complete',
             'backup_hosted_users_unavailable_business_confirmed')
 
