@@ -220,14 +220,30 @@ export const storyboardCatalogs = {
     'storyboard.moreActions': 'Download and more',
     'storyboard.moreSettings': 'More settings',
     'storyboard.seedLock': 'Fixed seed',
-    'storyboard.aspect': 'Shape',
+    'storyboard.aspect': 'Aspect ratio',
     'storyboard.aspectWide': 'Landscape',
     'storyboard.aspectTall': 'Portrait',
     'storyboard.aspectSquare': 'Square',
     'storyboard.keepAudio': 'Keep sound',
-    'storyboard.keepAudioHelp': 'Off: the video comes without the sound it generated.',
-    'storyboard.anotherVersion': 'Another version',
-    'storyboard.regenerateHd': 'Again in HD',
+    'storyboard.keepAudioHelp':
+      'Turn off to export picture only, if you plan to add your own music or voice.',
+    'storyboard.anotherVersion': 'Try another version',
+    'storyboard.regenerateHd': 'Remake in Sharp',
+    'storyboard.help.quality':
+      'Standard: fast. Good for previewing and revising your script. Sharp: more detail in faces, hair and textures; takes about three times as long. Use it for your final cut.',
+    'storyboard.help.aspect':
+      'Landscape: YouTube, computers and TVs. Portrait: TikTok, Instagram Reels, YouTube Shorts and other vertical phone viewing. Square: Instagram and Facebook posts, thumbnails.',
+    'storyboard.help.effort':
+      'Standard: right for most shots. Enhanced: slower. Worth a try if the standard version has small flaws, though the difference is usually small; "Try another version" often helps more.',
+    'storyboard.help.sound':
+      'Auto: chosen for each shot, recommended. Standard: fastest. Refined: crisper action sounds, ambience and music; slower; little difference for dialogue. Not available for shots with an uploaded voice track.',
+    'storyboard.help.anotherVersion':
+      'Makes the shot again with the same settings; characters, camera and framing will change. Try this first if you are not happy.',
+    'storyboard.help.remakeSharp':
+      'Makes the shot again in Sharp quality. Characters and framing may differ from this version.',
+    'storyboard.help.download': 'Full quality, for editing and publishing.',
+    'storyboard.help.downloadSmall':
+      'About a quarter of the size, slightly softer when paused; good for sending in messages.',
     'storyboard.seedLockHelp':
       'Change only the prompt or references; keep everything else like this take.',
     'storyboard.copy82': 'In use',
@@ -340,7 +356,7 @@ export const storyboardCatalogs = {
     'storyboard.labels.MODE_LABEL.FL': 'First/last frame',
     'storyboard.labels.MODE_LABEL.REF': 'All-reference',
     'storyboard.labels.QUALITY_LABEL.draft': 'Standard',
-    'storyboard.labels.QUALITY_LABEL.final': 'HD',
+    'storyboard.labels.QUALITY_LABEL.final': 'Sharp',
     'storyboard.mixed1': '{p0}\nDrag onto a shot or profile, or select a shot and click',
     'storyboard.mixed2': 'Drop to add the photo to {p0}',
     'storyboard.mixed3': "Drop to set as {p0}'s voice",
@@ -391,7 +407,8 @@ export const storyboardCatalogs = {
     'storyboard.finish20': 'Use this take (replaces v{number} on the timeline)',
     'storyboard.finish21': 'Continue from “{title}”: start from its last frame',
     'storyboard.finish22': 'Duration {seconds} s',
-    'storyboard.durationLabel': 'Duration',
+    'storyboard.durationLabel': 'Length',
+    'storyboard.secondsRange': 's ({min}–{max})',
     'storyboard.finish23': 'Not sent: {reason}',
     'storyboard.finish24': ' · added to the prompt automatically',
     'storyboard.secondsUnit': 's',
@@ -752,9 +769,22 @@ export const storyboardCatalogs = {
     'storyboard.aspectTall': '竖屏',
     'storyboard.aspectSquare': '方形',
     'storyboard.keepAudio': '保留声音',
-    'storyboard.keepAudioHelp': '关掉后，视频不带生成的声音。',
+    'storyboard.keepAudioHelp': '关掉后只导出画面，适合你打算自己配乐或配音。',
     'storyboard.anotherVersion': '换一版',
     'storyboard.regenerateHd': '用清晰画质再生成',
+    'storyboard.help.quality':
+      '普通：出片快，适合先看效果、改剧本。清晰：画面细节更多（脸、头发、树叶更清楚），大约要多等两倍时间。满意了再用清晰版出成片。',
+    'storyboard.help.aspect':
+      '横屏：YouTube、电脑和电视。竖屏：TikTok、Instagram Reels、YouTube Shorts 等手机竖屏观看。方形：Instagram 和 Facebook 帖子、封面图。',
+    'storyboard.help.effort':
+      '标准：大多数镜头用这个就够了。加强：会慢一些。标准版有小瑕疵时可以试试，但多数时候差别不大，先试「换一版」往往更有用。',
+    'storyboard.help.sound':
+      '自动：按镜头内容自动选择，推荐。普通：最快。精修：动作声、环境声和音乐更清脆，会慢一些；对白差别不大。已上传配音的镜头不能用精修。',
+    'storyboard.help.anotherVersion':
+      '同样的设置再生成一次，人物、机位和构图都会变。不满意时最先试这个。',
+    'storyboard.help.remakeSharp': '用同样的设置以清晰画质重新生成，人物和构图可能会和这一版不同。',
+    'storyboard.help.download': '原画质，适合剪辑和发布。',
+    'storyboard.help.downloadSmall': '文件约小四分之三，暂停细看会稍糊，适合直接发消息。',
     'storyboard.seedLockHelp': '只改提示词或素材，其他尽量和这一条保持一致。',
     'storyboard.copy82': '使用中',
     'storyboard.copy83': '取消',
@@ -915,6 +945,7 @@ export const storyboardCatalogs = {
     'storyboard.finish21': '接上一镜：用「{title}」选定版本的最后一帧作开头',
     'storyboard.finish22': '时长 {seconds} 秒',
     'storyboard.durationLabel': '时长',
+    'storyboard.secondsRange': '秒（{min}–{max}）',
     'storyboard.finish23': '没发出去：{reason}',
     'storyboard.finish24': ' · 会自动加进提示词',
     'storyboard.secondsUnit': '秒',
