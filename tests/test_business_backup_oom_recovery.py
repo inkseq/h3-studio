@@ -20,6 +20,11 @@ with patch.dict(
 
 class OomRecoveryTests(unittest.TestCase):
     def setUp(self):
+        # This exhausted one-off operation must keep its installed historical pin.
+        self.assertEqual(
+            recovery.RUNTIME_SHA,
+            'fed5e0c78078d0c833f983871e5da01960071f756f9453a7552976bda93ba98a',
+        )
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.root = Path(temp.name)
@@ -49,6 +54,8 @@ class OomRecoveryTests(unittest.TestCase):
             patch.object(h, 'ROOT', self.root),
             patch.object(h, 'protected', side_effect=lambda p, *args: Path(p)),
             patch.object(recovery, 'RUNTIME', runtime),
+            # Historical installed runtime remains pinned; mocks exercise changed bytes.
+            patch.object(recovery, 'RUNTIME_SHA', hashlib.sha256(source).hexdigest()),
             patch.object(recovery, 'ORIGINAL', hashes),
             patch.object(recovery, 'partial_unchanged'),
             patch.object(h, 'docker', self.docker),
