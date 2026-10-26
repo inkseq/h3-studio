@@ -236,6 +236,7 @@ def public_guide():
     from .storyboard_versions import contract as storyboard_versions_contract
     from .take_reviews import contract as take_reviews_contract
     from .caption_server import MAX_LINE_CHARACTERS
+    from .story_risk import contract as story_risk_contract
 
     return {
         "name": "Inkseq / 映序",
@@ -244,6 +245,7 @@ def public_guide():
         "description": "Create one video clip or edit a multi-chapter story; save the same prompt, separate references and controls visible on the website, plan generation and adopt results without replacing prior takes.",
         "video_quality": video_quality_contract(),
         "script_windows": script_windows_contract(),
+        "story_risk_review": story_risk_contract(),
         "discovery_is_authorization": False,
         "quick_chat": agent_contract(),
         "storyboard_versions": storyboard_versions_contract(),

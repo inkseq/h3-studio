@@ -447,11 +447,14 @@ class StoryChatTests(unittest.TestCase):
         self.assertEqual([c["name"] for c in value["cards"]["characters"]], ["Mia"])
         self.assertTrue(all(zib not in s["cast"] for s in value["cards"]["shots"]))
         self.assertEqual(
-            value["turn"]["proposal"],
+            {k: v for k, v in value["turn"]["proposal"].items() if k != "risk_review"},
             {
                 "kind": "generate",
                 "shot_ids": [s["id"] for s in value["cards"]["shots"]],
             },
+        )
+        self.assertEqual(
+            value["turn"]["proposal"]["risk_review"]["status"], "incomplete"
         )
         self.assertEqual(self.jobs(), before)
 
