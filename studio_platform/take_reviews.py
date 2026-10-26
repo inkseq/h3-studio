@@ -2,6 +2,7 @@
 
 import copy
 import math
+from contextlib import nullcontext
 from typing import Literal
 
 from fastapi import Header, Request
@@ -10,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_v
 from sqlalchemy import insert, select, update
 
 from .content_lifecycle import (
+    _assert_project_available,
     assert_content_available,
     assert_project_writable,
     owner_reference_gate,
@@ -116,15 +118,24 @@ class TakeReviews:
             project_id, "projects:write" if write else "projects:read"
         ):
             raise NotFound("take_not_found")
-        owner_reference_gate(conn, self.tenant, principal.owner)
         project_scope = Scope(self.tenant, principal.owner, "__projects")
-        record = self.repo._locked(
-            conn,
-            select(documents).where(*self._where(project_scope, "project", project_id)),
+        query = select(documents).where(
+            *self._where(project_scope, "project", project_id)
         )
+        if write:
+            owner_reference_gate(conn, self.tenant, principal.owner)
+            record = self.repo._locked(conn, query)
+        else:
+            record = conn.execute(query).mappings().first()
         if not record or record["payload"].get("content_deleted"):
             raise NotFound("take_not_found")
-        assert_project_writable(conn, self.tenant, principal.owner, project_id)
+        if write:
+            assert_project_writable(conn, self.tenant, principal.owner, project_id)
+        else:
+            # Same content/history fences, without authoring or purge locks.
+            _assert_project_available(
+                conn, self.tenant, principal.owner, project_id, ("active",)
+            )
         shot = shot_entity(record["payload"], shot_id)
         source_ids = migration_source_shots(
             conn,
@@ -180,7 +191,16 @@ class TakeReviews:
         return source
 
     def get(self, principal, project_id, shot_id, artifact_id):
-        with self.repo.transaction() as conn:
+        guard = self.repo._memory_lock if self.repo._is_memory else nullcontext()
+        with guard, self.repo.engine.connect() as conn:
+            if conn.dialect.name == "postgresql":
+                conn = conn.execution_options(
+                    isolation_level="REPEATABLE READ", postgresql_readonly=True
+                )
+                conn.begin()
+            else:
+                # Deferred read snapshot, never SQLite's writer BEGIN IMMEDIATE.
+                conn.exec_driver_sql("BEGIN")
             self._source(conn, principal, project_id, shot_id, artifact_id, write=False)
             row = self._row(
                 conn,

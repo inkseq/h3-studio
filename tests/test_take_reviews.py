@@ -288,6 +288,65 @@ class TakeReviewTests(LedgerCase):
         self.assertEqual(results[0], results[1])
         self.assertEqual(self.read()["revision"], 2)
 
+    def test_get_finishes_while_project_writer_holds_gate_and_row(self):
+        from studio_platform.content_lifecycle import owner_reference_gate
+
+        self.write()
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with self.repo.transaction() as conn:
+                owner_reference_gate(conn, self.scope.tenant_id, self.scope.owner_id)
+                conn.execute(
+                    update(documents)
+                    .where(
+                        *self.service._where(
+                            self.project_scope, "project", self.scope.project_id
+                        )
+                    )
+                    .values(version=documents.c.version + 1)
+                )
+                with (
+                    patch.object(
+                        self.repo, "_locked", side_effect=AssertionError("GET locked")
+                    ),
+                    patch(
+                        "studio_platform.take_reviews.owner_reference_gate",
+                        side_effect=AssertionError("GET gated"),
+                    ),
+                    patch(
+                        "studio_platform.take_reviews.assert_project_writable",
+                        side_effect=AssertionError("GET writable"),
+                    ),
+                ):
+                    # PostgreSQL row/advisory locks and SQLite's writer reservation
+                    # remain held until after this completed read.
+                    result = pool.submit(self.read).result(timeout=3)
+                self.assertEqual(result["verdict"], "keep")
+                self.assertEqual(result["revision"], 1)
+
+    def test_project_trash_still_blocks_read_snapshot(self):
+        from studio_platform.universal_trash import target_key
+
+        target = {
+            "kind": "project",
+            "id": self.scope.project_id,
+            "project_id": self.scope.project_id,
+        }
+        self.repo.put_document(
+            Scope(self.scope.tenant_id, self.scope.owner_id, "__trash"),
+            "trash_item",
+            target_key(target),
+            {
+                "state": "trashed",
+                "target": {
+                    "kind": "project",
+                    "id": self.scope.project_id,
+                    "project_id": self.scope.project_id,
+                },
+            },
+        )
+        with self.assertRaisesRegex(Conflict, "project_in_trash"):
+            self.read()
+
     def test_trash_fence_blocks_even_original_idempotency_replay(self):
         self.write()
         self.repo.put_document(

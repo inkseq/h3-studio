@@ -61,6 +61,9 @@ Reuse `platform_documents`: current `take_review` keyed by artifact; immutable
 `take_review_receipt` keyed by a hash of actor/artifact/idempotency key. CAS and
 first creation share the original owner reference gate and project row lock
 with authoring and purge. There is no schema migration or new service.
+GET uses a stable read-only snapshot and plain selects, without the owner gate,
+project row lock or SQLite writer reservation. Existing project/history and
+artifact trash/purge checks still apply. Only PATCH takes authoring locks.
 
 Only the current review contains notes and ranges. Immutable receipts contain
 scoped source IDs, request hash and small response, plus whether the whole-take
@@ -70,6 +73,13 @@ project purge redacts current marks in the same existing purge transaction;
 redacted receipts are retained. Review rows are non-retaining only for the exact
 owned purge targets; other and foreign content references retain the usual guard.
 Account deletion already redacts the owner's scoped documents.
+
+V1 retains the small immutable receipts; there is no automatic compaction or
+TTL. A later retention change must preserve original idempotency replies and
+explicit verdict history (including retractions and actor identity) needed by
+the metrics. It requires a separate bounded retention proposal and tests before
+deleting receipts. The bounded projection reports incomplete coverage on overflow
+instead of silently dropping history or treating it as zero.
 
 ## Telemetry
 
