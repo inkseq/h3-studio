@@ -385,6 +385,34 @@ class StoryboardVersionTests(unittest.TestCase):
             )
         return made, project, receipt
 
+    def test_take_review_uses_verified_migration_alias_and_original_receipt(self):
+        made, _, _ = self.migration_versions_fixture()
+        repo = self.app.state.repository
+        job, artifact = made[1]
+        with repo.transaction() as conn:
+            attempt = conn.execute(
+                select(artifacts.c.attempt_id).where(artifacts.c.id == artifact)
+            ).scalar_one()
+            conn.execute(
+                update(jobs)
+                .where(jobs.c.id == job)
+                .values(current_attempt_id=attempt, result={"artifact_ids": [artifact]})
+            )
+        path = f'/v1/projects/story-one/shots/shot-one/takes/{artifact}/review'
+        result = self.client.patch(
+            path,
+            json={"expected_revision": 0, "verdict": "keep"},
+            headers={"Idempotency-Key": "alias-review"},
+        )
+        self.assertEqual(result.status_code, 200, result.text)
+        self.assertEqual(self.client.get(path).json()['verdict'], 'keep')
+        self.assertEqual(
+            self.client.get('/v1/guided-schema').json()['take_reviews']['path'],
+            self.client.get('/v1/agent-guide').json()['take_reviews']['path'],
+        )
+        self.login('supervan')
+        self.assertEqual(self.client.get(path).status_code, 404)
+
     def test_migration_alias_versions_select_restore_and_star_preserve_original_jobs(
         self,
     ):

@@ -650,6 +650,9 @@ inventory.json
 !skills/inkseq/reference/api.md
 !skills/inkseq/reference/recovery.md
 !studio_platform/storyboard_versions.py
+!studio_platform/take_reviews.py
+!tests/test_take_reviews.py
+!docs/TAKE-REVIEWS.md
 !tests/test_storyboard_versions.py
 !studio_platform/story_chat.py
 !studio_platform/story_chat_routes.py

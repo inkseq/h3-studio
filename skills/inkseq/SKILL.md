@@ -98,3 +98,12 @@ See [recovery](reference/recovery.md) for refusals.
 ## Long-shot windows
 
 Use [preview/confirm](reference/api.md#confirmed-long-shot-windows) for `shot.data.script_windows`; confirm native timing/dialogue, recover the same key.
+
+## Take reviews
+
+Use [explicit take reviews](reference/api.md#explicit-take-reviews) for a whole-take
+usable/redo verdict and independent source-second marks. Never treat a selection,
+star or range marked change as whole-take approval. Read the review revision,
+PATCH with CAS and a saved Idempotency-Key, and recover that original receipt.
+Agent writes are recorded as agent decisions. Review writes never generate or
+spend; any later redo needs its own existing preflight and confirmation.

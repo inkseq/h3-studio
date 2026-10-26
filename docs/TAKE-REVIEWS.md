@@ -1,0 +1,92 @@
+# Explicit take reviews (#626)
+
+Backend/API slice of [#580](https://github.com/inkseq/h3-studio/issues/580).
+Claude owns the two whole-take buttons and range editor. This document is a code
+contract, not evidence of deployment. No generation, spending, selection or
+charging is performed by these routes.
+
+## API
+
+`GET` and `PATCH /v1/projects/{project_id}/shots/{shot_id}/takes/{artifact_id}/review`.
+Browser access is original-owner scoped. PATs need `projects:read` for GET and
+both `projects:read` and `projects:write` for PATCH, on this project. A human
+admin does not receive cross-owner access here. PATCH requires `Idempotency-Key`.
+
+```json
+{
+  "expected_revision": 0,
+  "verdict": "keep",
+  "marks": [
+    {"id": "mark-1", "start_s": 1.0, "end_s": 2.5,
+     "tags": ["camera"], "verdict": "change", "note": ""}
+  ]
+}
+```
+
+- Whole-take `verdict`: `keep` (usable), `redo`, or null (retract).
+  Never infer it from range marks, selection, stars, export or machine suggestions.
+- At least verdict or marks is required. Omitted fields are preserved. Marks
+  replace the entire list; `[]` clears it. Max50 marks; unique nonempty IDs of
+  up to100 ASCII letters/digits/underscore/hyphen; note≤500 characters.
+- Each range uses finite source seconds, `0 <= start_s < end_s <= duration_s`
+  from the accepted artifact's immutable metadata. Ranges may overlap; no frame
+  snapping because these are annotations, not clip edits. Missing duration
+  blocks nonempty marks, but still allows a whole-take verdict.
+- Mark verdict is `keep` or `change`; tags are a nonduplicated subset of
+  performance, camera, consistency, subtitles, quality, other. Empty tags/note
+  are allowed; all mark fields are required. Unknown fields are rejected.
+- GET returns `{revision, verdict, marks, actor_kind, updated_at}`. Before the
+  first write: revision0, verdictnull, marks[], actor_kind/updated_atnull.
+- PATCH returns only `{revision, verdict, mark_count, actor_kind, updated_at}`.
+  Read GET for full marks. Timestamp is server Unix seconds. `actor_kind` is
+  human/agent derived from authentication; the client cannot supply it.
+
+The revision belongs to the review, not the project. A successful write does not
+increment the project version or edit its selected take. CAS409 commits nothing.
+An identical key/body returns its original small receipt even after later writes;
+same key with a changed body returns409. Keys are scoped by owner/project/actor/
+artifact. Reload on CAS failure and confirm intended changes; do not overwrite
+another edit or retry with a random key. Trash/purge fences are checked before
+replay, so an old receipt never resurrects annotations.
+
+## Identity, storage and privacy
+
+An artifact must be an accepted video of the shot's original succeeded job and
+its current succeeded attempt, in the same tenant/owner/project. Verified
+migration aliases reuse the existing server receipt validator; editable aliases
+alone have no authority. An imported video without this lineage is not eligible.
+Reviews follow the artifact when current selection changes.
+
+Reuse `platform_documents`: current `take_review` keyed by artifact; immutable
+`take_review_receipt` keyed by a hash of actor/artifact/idempotency key. CAS and
+first creation share the original owner reference gate and project row lock
+with authoring and purge. There is no schema migration or new service.
+
+Only the current review contains notes and ranges. Immutable receipts contain
+scoped source IDs, request hash and small response, plus whether the whole-take
+verdict was explicitly written. They contain no note, prompt, media URL or
+range text. Notes are user content, not analytics. Proven permanent artifact or
+project purge redacts current marks in the same existing purge transaction;
+redacted receipts are retained. Review rows are non-retaining only for the exact
+owned purge targets; other and foreign content references retain the usual guard.
+Account deletion already redacts the owner's scoped documents.
+
+## Telemetry
+
+The #290 projection reads only redacted explicit verdict receipts. Latest whole
+verdict revision at `as_of` wins, including null retraction. Range-only writes
+do not change the decision or its actor. Human first-candidate verdicts drive
+`first_usable_rate`; agent first-candidate counts are separate coverage, never
+inferred human approval. A newer agent whole verdict is an agent decision until
+a human explicitly evaluates again. First-take-shipped remains independent.
+
+Coverage includes reviewed first candidates, agent-reviewed first candidates
+and shots with any current human `keep`. Unreviewed first candidates do not enter
+the explicit-rate denominator. Full cost and complete command metrics remain
+null until the other sources are implemented. A bounded8000-receipt overflow or
+unverified lineage makes the affected metric incomplete. No all-users aggregate.
+
+Tier2 review is required for scope and purge integration. Disposable SQLite and
+PostgreSQL tests cover CAS/replay/concurrency, range limits, accepted-attempt
+proof, scopes, trash fences, purge redaction and verdict history. No production
+data was edited as part of this implementation.

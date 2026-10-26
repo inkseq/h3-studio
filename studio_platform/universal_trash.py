@@ -1339,6 +1339,15 @@ def finish_purge(service, record):
                 .values(metadata={**artifact["metadata"], "content_deleted": True})
             )
         final = []
+        from .take_reviews import redact_reviews
+
+        redact_reviews(
+            conn,
+            service.tenant,
+            record["owner"],
+            artifact_ids=plan["artifact_ids"],
+            now=now,
+        )
         for ident in payload["trash_ids"]:
             row = (
                 conn.execute(
@@ -1351,6 +1360,13 @@ def finish_purge(service, record):
             )
             target = row["payload"]["target"]
             if target["kind"] == "project":
+                redact_reviews(
+                    conn,
+                    service.tenant,
+                    record["owner"],
+                    project_ids=(target["project_id"],),
+                    now=now,
+                )
                 # Explicitly purge authoring content, retaining document and edit
                 # receipt identities. Accepted job inputs/financial rows are never edited.
                 project_where = (

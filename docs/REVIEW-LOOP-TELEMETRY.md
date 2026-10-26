@@ -1,7 +1,8 @@
 # Review-loop telemetry proposal (#290)
 
 Status: approved contract; initial read-only projection implemented in PR #625,
-not a production receipt. Explicit-verdict/command writers and full-cost
+not a production receipt. [#626 take reviews](TAKE-REVIEWS.md) add explicit verdict
+receipts and first-usable coverage. Complete command writers and full-cost
 allocation remain subsequent slices; those metrics return null with reasons.
 Source audit: `f7638d710c2b760358d84e9fe823377b6efb1fa4`, 2026-10-26.
 Plan: [#580 review loop](https://github.com/inkseq/h3-studio/issues/580#issuecomment-6408772792).
@@ -121,8 +122,8 @@ Whole-take state is `{verdict: keep | redo | null, revision, actor_kind}` per
 artifact. Writes require expected revision and idempotency; actor kind is derived
 from the authenticated caller. Picking/starring never writes a verdict; a range
 mark `change` only suggests redo. The player/take-menu buttons are explicit
-"这条能用" / "这条要重做". Final routes and scoped CAS writer ship with the next
-take-review slice; do not call a proposed verdict endpoint as if it were live.
+"这条能用" / "这条要重做". Routes and scoped CAS writer are defined in
+[take reviews](TAKE-REVIEWS.md); check the target origin's discovery for availability.
 
 An all-owners aggregate is deferred to v2: same human-admin gate, capped per-owner
 rows and aggregate numbers only. v1 always requires `owner_id`.
@@ -143,7 +144,9 @@ source artifact; preserve original job IDs across automatic attempt recovery.
 Do not repurpose the job-delivery outbox as an analytics queue. Validate existing
 store indexes/retention before adding bounded receipt document kinds; if reuse
 cannot support them, return a concrete storage proposal instead of silently adding
-a table family. The initial implementation adds no schema, writer or background collector.
+a table family. The initial projection adds no schema or background collector;
+the take-review slice adds only scoped document kinds. Its current explicit
+human verdicts feed first-usable rate; agent verdicts are separate coverage.
 
 **Larger:** new event warehouse, queue or vendor. Unnecessary now; outside this claim
 and requires separate authority. Sentry feedback from plan step 6 is a different

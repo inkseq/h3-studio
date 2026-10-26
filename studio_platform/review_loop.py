@@ -21,6 +21,7 @@ MAX_JOBS = 2000
 MAX_ATTEMPTS = 8000
 MAX_ARTIFACTS = 4000
 MAX_FILMS = 200
+MAX_REVIEWS = 8000
 
 
 def _utc(value):
@@ -181,6 +182,45 @@ def review_loop(repo, tenant, owner, *, start, end, now):
             if by_job
             else []
         )
+        review_reasons = set()
+        review_rows = (
+            _bounded(
+                connection,
+                select(
+                    documents.c.project_id,
+                    documents.c.payload["artifact_id"].as_string().label("artifact_id"),
+                    documents.c.payload["source_job_id"].as_string().label("job_id"),
+                    documents.c.payload["source_shot_id"].as_string().label("shot_id"),
+                    documents.c.payload["response"]["revision"]
+                    .as_integer()
+                    .label("revision"),
+                    documents.c.payload["response"]["verdict"]
+                    .as_string()
+                    .label("verdict"),
+                    documents.c.payload["response"]["actor_kind"]
+                    .as_string()
+                    .label("actor_kind"),
+                )
+                .where(
+                    documents.c.tenant_id == tenant,
+                    documents.c.owner_id == owner,
+                    documents.c.project_id.in_(project_ids),
+                    documents.c.kind == "take_review_receipt",
+                    documents.c.payload["contract_version"].as_integer() == 1,
+                    documents.c.payload["verdict_written"].as_boolean().is_(True),
+                    documents.c.payload["artifact_id"]
+                    .as_string()
+                    .in_([r["id"] for r in output_rows]),
+                    documents.c.updated_at <= now,
+                )
+                .order_by(documents.c.updated_at, documents.c.document_id),
+                MAX_REVIEWS,
+                review_reasons,
+                "reviews",
+            )
+            if output_rows
+            else []
+        )
         film_rows = (
             _bounded(
                 connection,
@@ -327,6 +367,56 @@ def review_loop(repo, tenant, owner, *, start, end, now):
         for row in attempt_rows
         if type(row["actual_cost_microusd"]) is int and row["actual_cost_microusd"] >= 0
     ]
+    # The current whole-take decision is the latest explicit revision, including
+    # retraction. A later range-only edit must not attribute an earlier human
+    # decision to an agent. No review text or mutable selection is read here.
+    verdicts = {}
+    for row in review_rows:
+        source = artifact_map.get(row["artifact_id"])
+        if (
+            not source
+            or source[0] != (row["project_id"], row["shot_id"])
+            or source[1]["job_id"] != row["job_id"]
+            or type(row["revision"]) is not int
+            or row["revision"] < 1
+            or row["verdict"] not in ("keep", "redo", None)
+            or row["actor_kind"] not in ("human", "agent")
+        ):
+            review_reasons.add("review_receipt_unverified")
+            continue
+        prior = verdicts.get(row["artifact_id"])
+        if prior is None or prior["revision"] < row["revision"]:
+            verdicts[row["artifact_id"]] = row
+        elif prior["revision"] == row["revision"]:
+            review_reasons.add("review_revision_ambiguous")
+    first_verdicts = [
+        verdicts[values[0]["id"]]
+        for values in delivered.values()
+        if values[0]["id"] in verdicts
+    ]
+    human_first = [
+        r
+        for r in first_verdicts
+        if r["actor_kind"] == "human" and r["verdict"] is not None
+    ]
+    agent_first = [
+        r
+        for r in first_verdicts
+        if r["actor_kind"] == "agent" and r["verdict"] is not None
+    ]
+    usable_shots = {
+        source[0]
+        for ident, source in artifact_map.items()
+        if ident in verdicts
+        and verdicts[ident]["actor_kind"] == "human"
+        and verdicts[ident]["verdict"] == "keep"
+    }
+    explicit_reasons = reasons | review_reasons
+    usable_reasons = reasons | review_reasons
+    if not human_first:
+        explicit_reasons.add("review_verdicts_missing")
+    if not usable_shots:
+        usable_reasons.add("review_verdicts_missing")
     return {
         "schema_version": 1,
         "owner_id": owner,
@@ -341,17 +431,26 @@ def review_loop(repo, tenant, owner, *, start, end, now):
         },
         "metrics": {
             "first_take_shipped_rate": _metric(shipped, len(delivered), reasons),
-            "first_usable_rate": _metric(None, 0, ("review_verdicts_missing",)),
+            "first_usable_rate": _metric(
+                sum(r["verdict"] == "keep" for r in human_first),
+                len(human_first),
+                explicit_reasons,
+            ),
             "full_cost_per_usable_shot_microusd": _metric(
-                None, 0, ("review_verdicts_missing", "shared_cost_allocation_missing")
+                None,
+                len(usable_shots),
+                usable_reasons | {"shared_cost_allocation_missing"},
             ),
             "user_actions_per_usable_shot": _metric(
-                None, 0, ("review_verdicts_missing", "command_lineage_missing")
+                None, len(usable_shots), usable_reasons | {"command_lineage_missing"}
             ),
         },
         "coverage": {
-            "reviewed_first_candidates": 0,
-            "whole_take_verdicts_available": False,
+            "reviewed_first_candidates": len(human_first),
+            "agent_reviewed_first_candidates": len(agent_first),
+            "human_usable_shots": len(usable_shots),
+            "whole_take_verdicts_available": True,
+            "review_reasons": sorted(review_reasons),
             "known_attempt_cost_microusd": sum(costs) if costs else None,
             "attempts_with_known_cost": len(costs),
             "attempts_observed": len(attempt_rows),
