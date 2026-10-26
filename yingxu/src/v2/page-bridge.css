@@ -38,13 +38,7 @@ a {
   height: 100%;
   min-height: 0;
 }
-.v2-chapter {
-  width: auto;
-  max-width: 240px;
-  border: 0;
-  background: transparent;
-  font-weight: 600;
-}
+
 /* Export and cloud-status triggers sit in the story header; their panels are the shared
    ui/Menu and ui/Popover (#514 phase 2). */
 .v2-export-trigger,
@@ -158,23 +152,7 @@ dialog::backdrop {
 .story-recent .badge {
   display: none;
 }
-.v2-library-tools {
-  position: relative;
-}
-.v2-library-tools > summary {
-  list-style: none;
-  cursor: pointer;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  padding: 7px;
-}
-.v2-library-tools > div {
-  position: absolute;
-  right: 0;
-  z-index: 20;
-  min-width: 260px;
-  box-shadow: var(--shadow);
-}
+
 .libp-tile .library-preview-error {
   display: grid;
   place-items: center;
@@ -216,7 +194,7 @@ dialog::backdrop {
   border: 1px solid var(--line-2);
   border-radius: 10px;
 }
-.sb-library-backdrop {
+.sb-library-scrim {
   display: none;
 }
 .workbench-select {
@@ -364,9 +342,6 @@ dialog::backdrop {
   .home {
     padding-bottom: calc(74px + env(safe-area-inset-bottom));
   }
-  .hbar nav {
-    transform: none;
-  }
   .hbar > button {
     min-width: 36px;
     min-height: 36px;
@@ -417,7 +392,7 @@ dialog::backdrop {
   .sb-workspace .layout {
     padding-bottom: 0;
   }
-  .sb-library-backdrop {
+  .sb-library-scrim {
     display: block;
     position: fixed;
     inset: 0;
@@ -457,11 +432,9 @@ dialog::backdrop {
     min-height: 36px;
     min-width: 36px;
   }
-  .ops-adapter .snav button,
   .ops-adapter .ops-page-tabs > button {
     min-height: 36px;
   }
-  .v2-library-tools > summary,
   .ops-adapter details > summary {
     min-height: 36px;
     display: flex;
@@ -475,7 +448,7 @@ dialog::backdrop {
 }
 
 /* The header is shared by all creator pages; captions remain readable on mobile. */
-.hbar :is(.chip, .navdot) {
+.hbar .chip {
   font-size: 11px;
 }
 .hbar > button:not(.avatar) {
@@ -491,18 +464,6 @@ dialog::backdrop {
   min-height: 36px;
 }
 @media (max-width: 760px) {
-  .hbar nav button {
-    font-size: 11px;
-    line-height: 12px;
-    height: 36px;
-    min-height: 36px;
-    padding: 3px 2px;
-    gap: 2px;
-  }
-  .hbar nav .nav-ico {
-    width: 16px;
-    height: 16px;
-  }
   .hbar > button:not(.avatar) {
     height: 36px;
     min-height: 36px;
@@ -631,23 +592,6 @@ dialog::backdrop {
   flex-direction: column;
   gap: 4px;
   margin-top: 8px;
-}
-.sb-workspace .library.collapsed .lib-tabs button {
-  position: relative;
-  justify-content: center;
-  padding: 6px 0;
-  min-height: 32px;
-}
-.sb-workspace .library.collapsed .lib-tabs button span {
-  display: none;
-}
-.sb-workspace .library.collapsed .lib-tabs button small {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  margin: 0;
-  font-size: 9px;
-  line-height: 1;
 }
 .sb-workspace .library .lib-new {
   margin-left: auto;

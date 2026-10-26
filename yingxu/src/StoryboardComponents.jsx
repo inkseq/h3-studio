@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { Segmented } from './ui/Segmented.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
+import { FilterChip } from './ui/FilterChip.jsx';
 import { Field } from './ui/Field.jsx';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Tooltip } from './ui/Tooltip.jsx';
@@ -355,7 +356,13 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
   );
   // Its own modal on top of whatever opened it (e.g. the profile editor), via ui/Dialog.
   return (
-    <Dialog title={title} onClose={onClose} portal wide className="sb-portal pe-choose">
+    <Dialog
+      title={title}
+      onClose={onClose}
+      portal
+      wide
+      className="sb-portal density-compact pe-choose"
+    >
       <div
         className="pe-choose-body"
         {...nativeDrop((files) => {
@@ -569,13 +576,14 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
       />
       <div className="lib-tabs">
         {LIB_TABS.map(([k, l, Icon]) => (
-          <Button
+          <FilterChip
             key={k}
-            className={
-              'sb-library-tab' +
-              (tab === k ? ' on' : '') +
-              (k === 'inbox' && inbox.length ? ' alert' : '')
-            }
+            active={tab === k}
+            alert={k === 'inbox' && !!inbox.length}
+            iconOnly={collapsed}
+            icon={Icon}
+            label={l}
+            count={count(k)}
             onClick={() => {
               setTab(k);
               // On the icon rail a category opens the library at that category.
@@ -583,12 +591,7 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
             }}
             title={l}
             aria-label={l}
-            aria-pressed={tab === k}
-          >
-            <Icon size={13} />
-            <span>{l}</span>
-            <small className={count(k) ? '' : 'zero'}>{count(k)}</small>
-          </Button>
+          />
         ))}
       </div>
 
@@ -1336,7 +1339,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
   return createPortal(
     <div
       ref={box}
-      className="sb-portal picker"
+      className="sb-portal density-compact picker"
       style={{ left: left + moved.x, top: top + moved.y }}
       role="dialog"
       aria-label={SLOT_TITLE[slot]}
@@ -1370,9 +1373,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
       />
       <div className="lib-tabs">
         {tabs.map((k) => (
-          <Button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-            {label(k)}
-          </Button>
+          <FilterChip key={k} active={tab === k} label={label(k)} onClick={() => setTab(k)} />
         ))}
       </div>
       {(slot === 'start' || slot === 'end') && (

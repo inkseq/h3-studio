@@ -1,5 +1,6 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import { Button } from './ui/Button.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import TelegramLink, { telegramUserLabel, validTelegramNonce } from './TelegramLink.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 
@@ -73,6 +74,7 @@ export default function AssistantConnections({
     [name, setName] = useState(telegram ? 'Telegram' : 'Codex'),
     [target, setTarget] = useState(telegram ? 'telegram' : 'agent'),
     [error, setError] = useState(''),
+    [revoking, setRevoking] = useState(null),
     [notice, setNotice] = useState(''),
     [loading, setLoading] = useState(false),
     [activity, setActivity] = useState(null),
@@ -507,12 +509,27 @@ export default function AssistantConnections({
             onPatch={(row, body) =>
               act(() => ops.current.execute('updateConnection', [row.id], body))
             }
-            onRevoke={(row) => {
-              if (window.confirm(t('assistants.revokeConfirm')))
-                void act(() => ops.current.execute('revokeConnection', [row.id]));
-            }}
+            onRevoke={setRevoking}
             onActivity={activityPage}
           />
+          {revoking && (
+            <Dialog title={t('assistants.revoke')} onClose={() => setRevoking(null)}>
+              <p>{t('assistants.revokeConfirm')}</p>
+              <DialogActions>
+                <Button onClick={() => setRevoking(null)}>{t('assistants.cancel')}</Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const row = revoking;
+                    setRevoking(null);
+                    void act(() => ops.current.execute('revokeConnection', [row.id]));
+                  }}
+                >
+                  {t('assistants.revoke')}
+                </Button>
+              </DialogActions>
+            </Dialog>
+          )}
           {connectionsPage !== null && (
             <Button disabled={busy} onClick={moreConnections}>
               {t('assistants.more')}

@@ -42,10 +42,6 @@
 .qc-availability-actions:empty {
   display: none;
 }
-.qc-availability-actions button {
-  font: inherit;
-  padding: 3px 7px;
-}
 .qc-availability-actions a {
   color: var(--accent);
   text-decoration: underline;

@@ -28,7 +28,6 @@
 .api-key-panel select {
   width: 100%;
   min-width: 0;
-  padding: 9px;
 }
 .api-key-panel .api-key-project {
   display: flex;
@@ -108,16 +107,7 @@
   color: var(--muted);
   font-size: 12px;
 }
-.cloud-remote-update {
-  flex-basis: 100%;
-  padding: 10px;
-  background: var(--good-soft);
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-}
-.cloud-remote-update button {
-  margin-left: 8px;
-}
+
 @media (max-width: 600px) {
   .api-key-options {
     grid-template-columns: 1fr;

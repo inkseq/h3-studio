@@ -179,11 +179,6 @@
 .parts-bar-hint {
   font-size: 11px;
 }
-.segments-mode > button {
-  min-height: var(--h-sm);
-  padding: 4px 12px;
-  font-size: var(--fs-sm);
-}
 /* Playhead strip above the parts (owner, 2026-10-26): drag here to move the playhead; the
    delete button sits under the selected part so neither blocks dragging. */
 .parts-bar {

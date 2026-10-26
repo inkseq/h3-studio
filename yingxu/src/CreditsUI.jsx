@@ -2,6 +2,7 @@
 // Port of prototype account.jsx. Hidden until GET /v1/credits answers, so it can merge early.
 import React, { useEffect, useEffectEvent, useMemo, useState } from 'react';
 import { Button } from './ui/Button.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import {
   Check,
   Coins,
@@ -338,48 +339,31 @@ export function LowCreditsDialog() {
     window.addEventListener(INSUFFICIENT_CREDITS, open);
     return () => window.removeEventListener(INSUFFICIENT_CREDITS, open);
   }, []);
-  useEffect(() => {
-    if (!block) return undefined;
-    const onKey = (event) => event.key === 'Escape' && setBlock(null);
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [block]);
   if (!block) return null;
   const close = () => setBlock(null);
   return (
-    <div className="choose-overlay" onClick={close}>
-      <div
-        className="choose low-credits"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="low-credits-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="picker-head">
-          <b id="low-credits-title">{t('credits.lowTitle')}</b>
-        </div>
-        <p>
-          {t('credits.lowBody', {
-            need: formatCredits(block.need, locale),
-            have: formatCredits(block.have, locale),
-          })}
-        </p>
-        <p className="muted">{t('credits.lowHint')}</p>
-        <div className="row tight low-credits-actions">
-          <Button onClick={close}>{t('credits.lowBack')}</Button>
-          <Button
-            variant="primary"
-            className="keep-label"
-            onClick={() => {
-              close();
-              navigateApp('/settings?tab=credits');
-            }}
-          >
-            <Coins size={15} aria-hidden="true" />
-            {t('credits.lowTopUp')}
-          </Button>
-        </div>
-      </div>
-    </div>
+    <Dialog title={t('credits.lowTitle')} onClose={close} portal className="low-credits">
+      <p>
+        {t('credits.lowBody', {
+          need: formatCredits(block.need, locale),
+          have: formatCredits(block.have, locale),
+        })}
+      </p>
+      <p className="muted">{t('credits.lowHint')}</p>
+      <DialogActions>
+        <Button onClick={close}>{t('credits.lowBack')}</Button>
+        <Button
+          variant="primary"
+          className="keep-label"
+          onClick={() => {
+            close();
+            navigateApp('/settings?tab=credits');
+          }}
+        >
+          <Coins size={15} aria-hidden="true" />
+          {t('credits.lowTopUp')}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
