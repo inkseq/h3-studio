@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { FloatingMessage } from './floating-notice.js';
 import { Columns2, MoreHorizontal, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-react';
 import { profileLabel } from './model-visibility.js';
@@ -57,6 +58,13 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
     [error, setError] = useState('');
   const generation = useRef(0);
   const scope = state.contextId + ':' + shot.id;
+  // Whole-take verdicts and mark counts for every take in one read (h3-studio#631).
+  const reviews = useQuery({
+    queryKey: ['take-review-summaries', state.contextId, shot.id],
+    queryFn: () => adapter.readTakeReviewSummaries(shot.id),
+    enabled: !!adapter.readTakeReviewSummaries,
+  });
+  const reviewOf = (id) => reviews.data?.find((row) => row.artifact_id === id);
   async function load(more = false) {
     const n = ++generation.current;
     setLoading(true);
@@ -371,6 +379,24 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     {t('takes.subtitles')}
                   </small>
                 )}
+                {(() => {
+                  const review = reviewOf(row.id);
+                  if (!review || (!review.verdict && !review.mark_count)) return null;
+                  return (
+                    <small className="take-review-badges">
+                      {review.verdict && (
+                        <span className={'take-verdict ' + review.verdict}>
+                          {t('review.badge.' + review.verdict)}
+                        </span>
+                      )}
+                      {review.mark_count > 0 && (
+                        <span className="take-marks">
+                          {t('review.badge.marks', { count: review.mark_count })}
+                        </span>
+                      )}
+                    </small>
+                  );
+                })()}
                 <small className="take-diff">
                   {row.recipe_status === 'known'
                     ? changes === null
