@@ -40,6 +40,9 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # Exact main source pairs for a474 staging and queued backup-fix6b2; host CAS still required.
+    'a47462f08257af8682a4b72e194028efa1597054': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '6b2dae1d1ca7c9298c05e3e32bfb0799af953b85': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     # #524 host readback a8c7478c: exact staging/production current and rollback.
     # ce49754 is the queued main candidate, not a runtime acceptance claim.
     '7beb62ac0799c96b965f52dea941a720be79b6c5': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
