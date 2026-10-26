@@ -321,6 +321,34 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.client.stop_count, 0)
 
+    def test_terminal_runpod_create_unknown_never_reapplies_or_settles(self):
+        original = request(backend="runpod")
+        self.capacity.start(original, PUB)
+        self.client.run = no_capacity_run(self.client.run)
+        submission = self.client.run["latest_job_submission"]
+        submission["termination_reason"] = "terminated_by_server"
+        for suffix in (
+            '{"outcome":"unknown","pod_id":"original_pod"}',
+            'invalid SECRET',
+        ):
+            submission["termination_reason_message"] = (
+                "sixnine_runpod_outcome_v1:" + suffix
+            )
+            value = self.capacity.start(original, PUB)
+            self.assertEqual(
+                (value["state"], value["ready"], value["billing_state"]),
+                ("creation_unknown", False, "unsettled"),
+            )
+            self.assertEqual(
+                value["reason_code"], "dstack_allocation_requires_reconciliation"
+            )
+            self.assertNotIn("no_allocation_proof", value)
+            self.assertNotIn("provider_instance_id", value)
+            self.assertNotIn("SECRET", json.dumps(value))
+            self.assertFalse(terminal_no_allocation(self.client.run, self.store.value))
+        self.native.assert_not_called()
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+
     def test_lost_apply_response_reconciles_same_run(self):
         self.client.apply_lost = True
         observed = self.start()
