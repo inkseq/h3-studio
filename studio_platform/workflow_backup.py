@@ -62,8 +62,6 @@ def descriptor(raw, value):
 
 def export(connection, directory, *, deadline=None):
     """Requires the original caller-owned REPEATABLE READ / READ ONLY tx."""
-    from .backup import _write_json
-
     validate(connection)
     deadline = time.monotonic() + 60 if deadline is None else deadline
     require(connection.in_transaction(), 'workflow_backup_transaction_required')
@@ -74,44 +72,74 @@ def export(connection, directory, *, deadline=None):
         == 'on',
         'workflow_backup_same_snapshot_required',
     )
-    value = dict(format=FORMAT, catalog_sha256=CATALOG_SHA256, tables={})
+    from .workflow_backup_stream import Writer, sorted_rows
+
     total = 0
-    for name, columns in tables().items():
-        require(time.monotonic() < deadline, 'workflow_backup_time_limit')
-        fields = ','.join('"' + c + '"::text AS "' + c + '"' for c in columns)
-        relation = '"inkseq_workflows"."' + name + '"'
-        count, size, largest = connection.exec_driver_sql(
-            'SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
-            'COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM '
-            '(SELECT ' + fields + ' FROM ' + relation + ') t'
-        ).one()
-        total += int(size)
-        require(
-            count <= MAX_ROWS and largest <= 16 * 1024**2 and total <= MAX_BYTES,
-            'workflow_backup_size_limit',
-        )
-        rows = []
-        with connection.exec_driver_sql(
-            'SELECT row_to_json(t)::text FROM (SELECT '  # noqa: S608 -- identifiers from fixed schema metadata, not user input
-            + fields
-            + ' FROM '
-            + relation
-            + ') t',
-            execution_options={'stream_results': True, 'max_row_buffer': 100},
-        ) as source:
-            while batch := source.fetchmany(100):
+    with (directory / FILE).open('xb') as output, sorted_rows(directory) as spool:
+        if os.name != 'nt':
+            os.fchmod(output.fileno(), 0o600)
+        writer = Writer(output, MAX_BYTES)
+        writer.write(b'{"catalog_sha256":')
+        writer.value(CATALOG_SHA256)
+        writer.write(b',"format":')
+        writer.value(FORMAT)
+        writer.write(b',"tables":{')
+        first = True
+        for name, columns in tables().items():
+            require(time.monotonic() < deadline, 'workflow_backup_time_limit')
+            fields = ','.join('"' + c + '"::text AS "' + c + '"' for c in columns)
+            relation = '"inkseq_workflows"."' + name + '"'
+            count, size, largest = connection.exec_driver_sql(
+                'SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),'  # noqa: S608 -- identifiers from fixed schema metadata
+                'COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM '
+                '(SELECT ' + fields + ' FROM ' + relation + ') t'
+            ).one()
+            total += int(size)
+            require(
+                count <= MAX_ROWS and largest <= 16 * 1024**2 and total <= MAX_BYTES,
+                'workflow_backup_size_limit',
+            )
+            batch_rows = min(100, max(1, 1024**2 // max(1, int(largest))))
+            actual = 0
+            spool.execute('DELETE FROM rows')
+            with connection.exec_driver_sql(
+                'SELECT row_to_json(t)::text FROM (SELECT '  # noqa: S608 -- identifiers from fixed schema metadata
+                + fields
+                + ' FROM '
+                + relation
+                + ') t',
+                execution_options={
+                    'stream_results': True,
+                    'max_row_buffer': batch_rows,
+                },
+            ) as source:
+                while batch := source.fetchmany(batch_rows):
+                    require(time.monotonic() < deadline, 'workflow_backup_time_limit')
+                    for row in batch:
+                        spool.execute(
+                            'INSERT INTO rows(value) VALUES (?)',
+                            (canonical(json.loads(row[0])),),
+                        )
+                        actual += 1
+                    del batch
+            require(actual == count, 'workflow_backup_count_changed')
+            if not first:
+                writer.write(b',')
+            first = False
+            writer.value(name)
+            writer.write(b':[')
+            for index, (raw,) in enumerate(
+                spool.execute('SELECT value FROM rows ORDER BY value')
+            ):
                 require(time.monotonic() < deadline, 'workflow_backup_time_limit')
-                rows.extend(json.loads(row[0]) for row in batch)
-        require(len(rows) == count, 'workflow_backup_count_changed')
-        # Canonical order does not depend on incidental heap/physical order.
-        rows.sort(key=canonical)
-        value['tables'][name] = rows
-    raw = canonical(value)
-    require(len(raw) <= MAX_BYTES, 'workflow_backup_size_limit')
-    _write_json(directory / FILE, value)
-    raw = (directory / FILE).read_bytes()
-    require(len(raw) <= MAX_BYTES, 'workflow_backup_size_limit')
-    return descriptor(raw, value)
+                if index:
+                    writer.write(b',')
+                writer.write(raw)
+            writer.write(b']')
+        writer.write(b'}}')
+        output.flush()
+        os.fsync(output.fileno())
+    return inspect_file(directory)
 
 
 def read(directory, expected):
@@ -151,12 +179,32 @@ def read(directory, expected):
 
 def inspect_file(directory):
     from .backup import _regular
+    from .workflow_backup_stream import inspect
 
-    raw = _regular(directory / FILE, max_bytes=MAX_BYTES).read_bytes()
-    value = json.loads(raw)
-    expected = descriptor(raw, value)
-    read(directory, expected)
-    return expected
+    with _regular(directory / FILE, max_bytes=MAX_BYTES).open('rb') as source:
+        size, digest, rows = inspect(
+            source,
+            limit=MAX_BYTES,
+            schemas=tables(),
+            row_limit=MAX_ROWS,
+            format_name=FORMAT,
+            catalog=CATALOG_SHA256,
+        )
+    return dict(
+        format=FORMAT,
+        file=FILE,
+        size_bytes=size,
+        sha256=digest,
+        schema=INKSEQ_WORKFLOW_SCHEMA,
+        sdk_version=WORKFLOW_SDK_VERSION,
+        catalog_sha256=CATALOG_SHA256,
+        rows=rows,
+        execution_restore='hold',
+    )
+
+
+def verify(directory, expected):
+    require(inspect_file(directory) == expected, 'workflow_backup_checksum_mismatch')
 
 
 def restore(connection, directory, expected):

@@ -1274,9 +1274,9 @@ def verify_local(directory, *, allow_incomplete=False):
         if missing and not allow_incomplete:
             raise BackupError("backup_incomplete_requires_explicit_opt_in")
         if 'workflow_state' in manifest:
-            from .workflow_backup import read
+            from .workflow_backup import verify
 
-            read(directory, manifest['workflow_state'])
+            verify(directory, manifest['workflow_state'])
         elif (directory / 'workflow-state.json').exists():
             raise BackupError('backup_workflow_state_unreferenced')
         if 'hosted_users' in manifest:
