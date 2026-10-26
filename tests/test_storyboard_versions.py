@@ -1077,7 +1077,9 @@ class StoryboardVersionTests(unittest.TestCase):
                 version=self.current()['version'],
             ).raise_for_status()
             data = next(
-                e for e in self.current()['project']['entities'] if e['id'] == 'shot-one'
+                e
+                for e in self.current()['project']['entities']
+                if e['id'] == 'shot-one'
             )['data']
             self.assertNotIn('storyboard', data)
             self.assertEqual(data['qualityIntent'], operation)
