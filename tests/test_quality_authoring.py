@@ -297,11 +297,14 @@ class QualityAuthoringTests(LedgerCase):
                     "op": "shot.configure_generation",
                     "shot_id": "new-shot",
                     **PUBLIC,
-                    "controls": {"steps": 7},
+                    "controls": {"steps": 7, "seed": "123"},
                 },
                 {
                     "op": "storyboard.defaults",
-                    "value": {**PUBLIC, "controls": {"steps": 9}},
+                    "value": {
+                        **PUBLIC,
+                        "controls": {"steps": 9, "aspect_ratio": "9:16"},
+                    },
                 },
             ],
             key="public-actions",
@@ -310,13 +313,15 @@ class QualityAuthoringTests(LedgerCase):
         for shot in (item for item in saved["entities"] if item["type"] == "shot"):
             self.assertEqual(shot["data"]["h3"]["deploymentProfileId"], PROFILE)
             self.assertEqual(shot["data"]["h3"]["recipeId"], RECIPE)
-        self.assertEqual(saved["entities"][-1]["data"]["h3"]["controls"]["steps"], 7)
+        self.assertEqual(
+            saved["entities"][-1]["data"]["h3"]["controls"], {"seed": "123"}
+        )
         self.assertEqual(
             saved["journey"]["storyboard"]["defaults"],
             {
                 "deployment_profile_id": PROFILE,
                 "recipe_id": RECIPE,
-                "controls": {"steps": 9},
+                "controls": {"aspect_ratio": "9:16"},
             },
         )
         incoming = self.seed()
