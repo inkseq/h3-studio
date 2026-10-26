@@ -97,4 +97,8 @@ See [recovery](reference/recovery.md) for refusals.
 
 ## Long-shot windows
 
-Use [preview/confirm](reference/api.md#confirmed-long-shot-windows) for `shot.data.script_windows`; confirm native timing/dialogue, recover the same key.
+Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-windows).
+
+## Take reviews
+
+[Whole-take verdicts, independent marks and CAS](reference/api.md#explicit-take-reviews).

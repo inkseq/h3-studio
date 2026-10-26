@@ -521,3 +521,33 @@ The reply contains `preview_id`, `status` (`pending`, `unknown`, `invalid`, `sta
 GET `/v1/projects/{project_id}/shots/{shot_id}/script-windows/previews/{preview_id}` recovers the owner/project/shot-bound receipt. Pending means the original external outcome is not recorded; unknown means a call failed without a trustworthy result. Never automatically retry with a new key.409 idempotency conflict means the same key was reused with different input;409 stale/source conflict requires explicit new preview after reloading.
 
 Confirm through normal `/actions`: `{"expected_version":7,"actions":[{"op":"shot.script_windows.confirm","shot_id":"SHOT","preview_id":"PREVIEW"}]}`. `shot.script_windows.clear` needs only shot_id and the same outer CAS. Confirmation stores a receipt-bound `shot.data.script_windows` including preview_id. Generic client-authored splits do not authorize generation. Preflight checks the original receipt, current source/defaults, timing and immutable native controls. PW uses single newlines inside windows and one blank line between windows; every window gets its own film/clean-frame framing. Old FG behavior and accepted requests remain unchanged. The new native package must be qualified before staging generation; a previous helper is not compatible with new PW requests. Requested duration/job/attempt/charge identity stays original while native delivery checks the precisely projected output frames, with no trim, padding or retiming.
+## Explicit take reviews
+
+Discover `take_reviews` in `/v1/guided-schema` and `/v1/agent-guide` on the target
+origin before calling it. GET and PATCH use
+`/v1/projects/{project_id}/shots/{shot_id}/takes/{artifact_id}/review`.
+Use the original accepted artifact ID of this owned shot, not a selected entity
+ID. Verified migrated aliases are supported; imported or unproven media is not.
+
+GET requires projects:read and returns revision/verdict/marks/actor_kind/updated_at.
+PATCH requires projects:read + projects:write and an Idempotency-Key:
+
+```json
+{"expected_revision":0,"verdict":"keep","marks":[{"id":"m1","start_s":1.0,"end_s":2.0,"tags":["camera"],"verdict":"change","note":""}]}
+```
+
+Whole verdict is keep/redo/null. At least verdict or marks is required; omitted
+fields stay unchanged, null retracts whole verdict and [] clears marks. Marks
+replace the list (max50), IDs are unique ASCII letters/digits/_/- (1–100 chars),
+note≤500, finite source seconds inside the take duration, start<end, overlap
+allowed. Tags: performance/camera/consistency/subtitles/quality/other (unique,
+empty allowed). Mark verdict keep/change is independent of whole verdict.
+Missing trusted duration blocks nonempty marks. No frame snap or generation.
+
+PATCH returns a small receipt with revision, verdict, mark_count, actor_kind and
+updated_at (server Unix seconds); GET full marks. CAS409 commits nothing; reload
+and resolve the intended edit. Identical-key replay returns the original receipt,
+changed-body replay409. Trash/purge blocks even replay. Reviews follow the
+artifact, not current selection. Never fabricate a human verdict from a star,
+pick, export or automated mark; PAT writes are server-labelled agent. Notes stay
+in product data and are redacted on permanent purge, never copied to analytics.
