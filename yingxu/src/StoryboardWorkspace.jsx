@@ -1,4 +1,5 @@
 import { WorkbenchBulk } from './StoryboardWorkbench.jsx';
+import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import './v2/story-view.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
@@ -11,19 +12,18 @@ import {
   Trash2,
   Maximize2,
   Minimize2,
-  X,
   Scissors,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
-  Sparkles,
   AlertTriangle,
   CheckCheck,
 } from 'lucide-react';
 import { RenameDialog, useTrash } from './UniversalTrash.jsx';
 import ItemMenu from './ItemMenu.jsx';
+import { MenuItem } from './ui/Menu.jsx';
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
 import { store } from './store.js';
@@ -101,7 +101,7 @@ function collision(args) {
   });
 }
 function QueueSummary() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { state } = useStoryboardUI(),
     queues = state.queue;
   const rows = ['FL', 'REF']
@@ -169,15 +169,16 @@ function ChapterHeader({ chapter, index, count, shots, folded, onFold, onNewScen
     !trash.pending;
   return (
     <header className="sb-chapter-head">
-      <button
-        type="button"
-        className="ghost small sb-chapter-fold"
+      <Button
+        variant="ghost"
+        size="sm"
+        className="sb-chapter-fold"
         aria-expanded={!folded}
         aria-label={t(folded ? 'chapter.unfold' : 'chapter.fold')}
         onClick={onFold}
       >
         {folded ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
-      </button>
+      </Button>
       <h2>
         <small>{t('chapter.number', { n: index + 1 })}</small>
         {chapter.title}
@@ -188,61 +189,49 @@ function ChapterHeader({ chapter, index, count, shots, folded, onFold, onNewScen
       <div className="spacer" />
       <FilmEditorButton chapterId={chapter.id} />
       <ItemMenu label={t('chapter.menu')} disabled={locked}>
-        {(close) => (
-          <>
-            <button role="menuitem" onClick={() => (close(), setRenaming(true))}>
-              {t('chapter.rename')}
-            </button>
-            {onNewScene && (
-              <button
-                role="menuitem"
-                onClick={() => {
-                  close();
-                  store.setScope(chapter.id);
-                  onNewScene();
-                }}
-              >
-                {t('chapter.addScene')}
-              </button>
-            )}
-            <button
-              role="menuitem"
-              disabled={index === 0}
-              onClick={() => (close(), dispatch({ type: 'moveChapter', id: chapter.id, dir: -1 }))}
-            >
-              {t('chapter.moveUp')}
-            </button>
-            <button
-              role="menuitem"
-              disabled={index === count - 1}
-              onClick={() => (close(), dispatch({ type: 'moveChapter', id: chapter.id, dir: 1 }))}
-            >
-              {t('chapter.moveDown')}
-            </button>
-            <button
-              role="menuitem"
-              className="danger-text"
-              disabled={!canDelete}
-              title={
-                count <= 1
-                  ? t('chapter.lastChapter')
-                  : busyShots
-                    ? t('chapter.busy')
-                    : state.workspaceMode !== 'cloud'
-                      ? t('chapter.cloudOnly')
-                      : undefined
-              }
-              onClick={() => {
-                close();
-                trash.request('trash', [
-                  { kind: 'entity', project_id: state.project.id, id: chapter.id },
-                ]);
-              }}
-            >
-              {t('chapter.delete')}
-            </button>
-          </>
+        <MenuItem onSelect={() => setRenaming(true)}>{t('chapter.rename')}</MenuItem>
+        {onNewScene && (
+          <MenuItem
+            onSelect={() => {
+              store.setScope(chapter.id);
+              onNewScene();
+            }}
+          >
+            {t('chapter.addScene')}
+          </MenuItem>
         )}
+        <MenuItem
+          disabled={index === 0}
+          onSelect={() => dispatch({ type: 'moveChapter', id: chapter.id, dir: -1 })}
+        >
+          {t('chapter.moveUp')}
+        </MenuItem>
+        <MenuItem
+          disabled={index === count - 1}
+          onSelect={() => dispatch({ type: 'moveChapter', id: chapter.id, dir: 1 })}
+        >
+          {t('chapter.moveDown')}
+        </MenuItem>
+        <MenuItem
+          danger
+          disabled={!canDelete}
+          title={
+            count <= 1
+              ? t('chapter.lastChapter')
+              : busyShots
+                ? t('chapter.busy')
+                : state.workspaceMode !== 'cloud'
+                  ? t('chapter.cloudOnly')
+                  : undefined
+          }
+          onSelect={() =>
+            trash.request('trash', [
+              { kind: 'entity', project_id: state.project.id, id: chapter.id },
+            ])
+          }
+        >
+          {t('chapter.delete')}
+        </MenuItem>
       </ItemMenu>
       {renaming && (
         <RenameDialog
@@ -263,9 +252,9 @@ function AddChapter({ count }) {
   const { t } = useI18n();
   const { state, dispatch } = useStoryboardUI();
   return (
-    <button
-      type="button"
-      className="ghost sb-add-chapter"
+    <Button
+      variant="ghost"
+      className="sb-add-chapter"
       disabled={state.busy || !!state.workbenchPending}
       onClick={() =>
         dispatch({
@@ -277,7 +266,7 @@ function AddChapter({ count }) {
     >
       <Plus size={14} />
       {t('chapter.add')}
-    </button>
+    </Button>
   );
 }
 
@@ -310,10 +299,10 @@ function FilmEditorButton({ chapterId }) {
   if (!chapterId) return null;
   return (
     <>
-      <button onClick={() => setOpen(true)}>
+      <Button onClick={() => setOpen(true)}>
         <Scissors size={14} />
         {t('editor.open')}
-      </button>
+      </Button>
       {open && (
         <React.Suspense fallback={<p role="status">{t('settings.loading')}</p>}>
           <FilmEditor
@@ -328,7 +317,7 @@ function FilmEditorButton({ chapterId }) {
 }
 
 function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmControl }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { state, dispatch } = useStoryboardUI(),
     trash = useTrash();
   const gone = trash?.hidden || EMPTY_SET,
@@ -438,16 +427,16 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     };
     window.addEventListener('keydown', close, true);
     return () => window.removeEventListener('keydown', close, true);
-  }, [theater, expanded, selected]);
+  }, [theater, expanded, selected, setSelected]);
   useEffect(() => {
     setSelection(emptySelection());
   }, [state.contextId]);
+  // Keyed on the shot ids, not the array: a re-render with the same shots changes nothing.
+  const liveShotIds = state.shots.map((s) => s.id).join('|');
   useEffect(() => {
-    setSelection((old) => ({
-      ...old,
-      ids: old.ids.filter((id) => state.shots.some((s) => s.id === id)),
-    }));
-  }, [state.shots.map((s) => s.id).join('|')]);
+    const live = new Set(liveShotIds.split('|'));
+    setSelection((old) => ({ ...old, ids: old.ids.filter((id) => live.has(id)) }));
+  }, [liveShotIds]);
   useEffect(() => {
     const clear = (e) => {
       if (
@@ -535,8 +524,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       }}
     >
       {!railed && (
-        <button
-          type="button"
+        <Button
           className="sb-library-backdrop"
           aria-label={t('storyboard.detail15')}
           onClick={() => setLibraryCollapsed(true)}
@@ -570,8 +558,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         >
           <div className={'chapter-head sb-topbar' + (headCompact ? ' compact' : '')}>
             <div className="row tight chapter-summary">
-              <button
-                className="small ghost"
+              <Button
+                variant="ghost"
+                size="sm"
                 title={t(libraryCollapsed ? 'storyboard.detail14' : 'storyboard.detail15')}
                 onClick={() => setLibraryCollapsed((v) => !v)}
               >
@@ -583,7 +572,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                 ) : (
                   <PanelLeftClose size={16} />
                 )}
-              </button>
+              </Button>
               <h1>{multi ? state.project.title : state.project.chapter}</h1>
               <small className="muted">
                 {t('storyboard.summary', {
@@ -597,7 +586,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               <QueueSummary />
               {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && (
-                <button
+                <Button
                   disabled={state.busy || !!state.workbenchPending}
                   onClick={() =>
                     dispatch({
@@ -609,16 +598,16 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                 >
                   <Plus size={14} />
                   {t('storyboard.addShot')}
-                </button>
+                </Button>
               )}
               {onNewScene && (
-                <button onClick={onNewScene} title={t('v2.newScene')}>
+                <Button onClick={onNewScene} title={t('v2.newScene')}>
                   <Plus size={14} />
                   <span className="label">{t('v2.newScene')}</span>
-                </button>
+                </Button>
               )}
               {pending.length > 0 && (
-                <button
+                <Button
                   className="sb-pending-chip"
                   disabled={state.busy || !state.copiesMax}
                   title={t('storyboard.pendingHint')}
@@ -632,10 +621,10 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                 >
                   <AlertTriangle size={14} />
                   <span className="label">{t('storyboard.copy35', { count: pending.length })}</span>
-                </button>
+                </Button>
               )}
               {unpicked.length > 0 && (
-                <button
+                <Button
                   disabled={state.busy || !!state.workbenchPending}
                   title={t('storyboard.useLatestHelp')}
                   onClick={() =>
@@ -646,18 +635,18 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   <span className="label">
                     {t('storyboard.useLatest', { count: unpicked.length })}
                   </span>
-                </button>
+                </Button>
               )}
               <span className="sb-film-primary">{filmControl}</span>
-              <button
-                type="button"
-                className="ghost sb-head-toggle"
+              <Button
+                variant="ghost"
+                className="sb-head-toggle"
                 aria-label={t(headCompact ? 'storyboard.headExpand' : 'storyboard.headCollapse')}
                 title={t(headCompact ? 'storyboard.headExpand' : 'storyboard.headCollapse')}
                 onClick={() => setHeadCompact((v) => !v)}
               >
                 {headCompact ? <ChevronsUpDown size={15} /> : <ChevronsDownUp size={15} />}
-              </button>
+              </Button>
             </div>
             {/* #232 (#54): the actions for selected shots are a second row of the sticky title bar. */}
             <WorkbenchBulk
@@ -712,8 +701,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                           · {fmt(totalDuration(group.shots))}
                         </small>
                         <div className="spacer" />
-                        <button
-                          className="small ghost"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           disabled={locked || !group.id}
                           onClick={() =>
                             dispatch({
@@ -726,9 +716,10 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                         >
                           <Plus size={14} />
                           {t('storyboard.addShot')}
-                        </button>
-                        <button
-                          className="small ghost"
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           aria-label={t('storyboard.deleteScene')}
                           title={t(
                             lastScene
@@ -754,7 +745,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                           }
                         >
                           <Trash2 size={14} />
-                        </button>
+                        </Button>
                       </div>
                       {group.shots.length ? (
                         <div className="wall">
@@ -846,10 +837,10 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             <div className="sb-theater-stage">
               <Screen player={player} />
             </div>
-            <button className="small sb-theater-close" onClick={() => setTheater(false)}>
+            <Button size="sm" className="sb-theater-close" onClick={() => setTheater(false)}>
               <Minimize2 size={14} />
               {t('storyboard.exitTheater')}
-            </button>
+            </Button>
           </section>
         )}
         {!theater && !dockMini && (
@@ -871,39 +862,41 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
           style={{ height: theater ? 130 : dockMini ? 64 : dockLayout.size }}
         >
           {!theater && (
-            <button
-              type="button"
+            <Button
               className="dock-mini-toggle"
               aria-label={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
               title={t(dockMini ? 'storyboard.dockExpand' : 'storyboard.dockCollapse')}
               onClick={() => setDockMini((v) => !v)}
             >
               {dockMini ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
+            </Button>
           )}
           {!theater && !dockMini && (
             <div className="dock-screen">
               <Screen player={player} />
-              <button
-                className="small screen-expand"
+              <Button
+                size="sm"
+                className="screen-expand"
                 aria-label={t('storyboard.theater')}
                 title={t('storyboard.theater')}
                 onClick={() => setTheater(true)}
               >
                 <Maximize2 size={14} />
-              </button>
+              </Button>
             </div>
           )}
           <div className="dock-right">
             <div className="dock-transport">
               <Transport player={player} />
-              <button
-                className="small ghost dock-theater-toggle"
+              <Button
+                variant="ghost"
+                size="sm"
+                className="dock-theater-toggle"
                 aria-label={t(theater ? 'storyboard.exitTheater' : 'storyboard.theater')}
                 onClick={() => setTheater((value) => !value)}
               >
                 {theater ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              </button>
+              </Button>
             </div>
             <Timeline
               player={player}
@@ -952,7 +945,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
   );
 }
 function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { state, dispatch, db, clearError } = useStoryboardUI(),
     [selected, setSelected] = useState(null),
     [dragging, setDragging] = useState(null),
@@ -971,13 +964,14 @@ function StoryboardShell({ onLegacyGuide, onCanvas, onNewScene, filmControl }) {
     else url.searchParams.delete('entity');
     navigateApp(url.pathname + url.search, { restore: false });
   };
+  const shotIdsKey = state.shots.map((s) => s.id).join('|');
   useEffect(() => {
     if (!pageActive || location.path !== '/') return;
     const params = new URLSearchParams(location.search),
       id = params.get('entity');
-    if (id && state.shots.some((s) => s.id === id)) setSelected(id);
+    if (id && shotIdsKey.split('|').includes(id)) setSelected(id);
     else if (!id) setSelected(null);
-  }, [pageActive, location.href, state.project.id, state.shots.map((s) => s.id).join('|')]);
+  }, [pageActive, location.path, location.search, state.project.id, shotIdsKey]);
   const container = useRef(),
     sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),

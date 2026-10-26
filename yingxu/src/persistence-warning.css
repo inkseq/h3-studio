@@ -1,10 +1,10 @@
 .persistence-warning {
   margin: 10px 16px;
   padding: 12px 16px;
-  border: 1px solid #b97732;
+  border: 1px solid var(--warn);
   border-radius: 10px;
-  background: #fff5df;
-  color: #503811;
+  background: var(--warn-soft);
+  color: var(--ink);
   font-size: 13px;
 }
 .persistence-warning p {
@@ -24,7 +24,7 @@
 .cloud-resume {
   margin: 10px 0;
   padding: 12px 16px;
-  border: 1px solid #d8dfd2;
+  border: 1px solid var(--line-2);
   border-radius: 10px;
   background: var(--ink);
   font-size: 13px;

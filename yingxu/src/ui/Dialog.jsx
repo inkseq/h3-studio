@@ -37,11 +37,12 @@ export function useModal({ focusFirst = false } = {}) {
         dialog.querySelector('[autofocus],input,textarea,select') ||
         dialog.querySelector('button:not(.qc-dialog-head button)')
       )?.focus();
+    const openerRef = opener;
     return () => {
       dialog.close();
       queueMicrotask(() => {
-        if (opener.current?.isConnected && !opener.current.closest('[inert]'))
-          opener.current.focus();
+        if (openerRef.current?.isConnected && !openerRef.current.closest('[inert]'))
+          openerRef.current.focus();
       });
     };
   }, [active, focusFirst]);
@@ -82,6 +83,9 @@ export function Dialog({
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();
+        // A dialog opened from inside this one (portal) bubbles its own cancel through React;
+        // Escape closes only the top one.
+        if (event.target !== event.currentTarget) return;
         // Escape closes an open item menu first, not the dialog around it.
         if (!ref.current?.querySelector('.item-menu [aria-expanded="true"]')) close();
       }}

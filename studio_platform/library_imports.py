@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, StrictInt, StrictStr, Field
 from sqlalchemy import select, insert, update
 from .repository import documents, request_hash, Conflict, NotFound
-from .content_lifecycle import owner_reference_gate, assert_project_writable
+from .content_lifecycle import owner_reference_gate
 
 
 class Source(BaseModel):

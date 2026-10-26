@@ -12,7 +12,8 @@ import stat
 import threading
 import time
 
-from .worker import WorkerRunner, _slot_lock
+from .worker import WorkerRunner
+from .slot_lock import slot_lock
 
 
 @contextmanager
@@ -39,7 +40,7 @@ def collection_slot(directory, heartbeat, *, poll_interval_s=1):
         raise ValueError('collection_lock_directory_invalid')
     while True:
         heartbeat()
-        with _slot_lock(directory, 'production-cpu-collection-v1') as acquired:
+        with slot_lock(directory, 'production-cpu-collection-v1') as acquired:
             if acquired:
                 heartbeat()
                 yield

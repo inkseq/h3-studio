@@ -163,12 +163,6 @@ select optgroup {
   margin: 0;
 }
 
-/* Dropdown menus list actions as left-aligned rows with their labels at every width. */
-:root :is(.v2-export-menu, .v2-cloud-status) .card-box > button {
-  justify-content: flex-start;
-  text-align: left;
-}
-
 /* The hosted sign-in button is the one full-width action (it was shrunk by the rule above). */
 :root dialog.qc-dialog .hosted-sign-in > button.hosted-sign-in-main {
   width: 100%;

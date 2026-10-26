@@ -126,6 +126,7 @@ def run_demand_loop(
     *,
     active_seconds,
     safety=None,
+    heartbeat=None,
     clock=time.monotonic,
     report=lambda value: None,
 ):
@@ -144,10 +145,14 @@ def run_demand_loop(
         # a notification buffered on the already-subscribed connection.
         active = has_demand()
         seconds = (
-            active_seconds
+            (active_seconds() if callable(active_seconds) else active_seconds)
             if active
             else max(0, next_safety - clock())
             if safety
             else IDLE_SAFETY_SECONDS
         )
+        if heartbeat is not None:
+            # The loop has finished its scan/work. No timer can mask a stall.
+            heartbeat(active)
+            seconds = min(seconds, 60)
         wakeup.wait(seconds)

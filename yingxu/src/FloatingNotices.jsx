@@ -1,4 +1,5 @@
 import React, { useSyncExternalStore } from 'react';
+import { Button } from './ui/Button.jsx';
 import { X } from 'lucide-react';
 import { currentNotices, dismissNotice, subscribeNotices } from './floating-notice.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -23,22 +24,17 @@ export default function FloatingNotices() {
         >
           <span title={item.text}>{item.text}</span>
           {item.action && (
-            <button
-              type="button"
+            <Button
               className="floating-notice-action"
               disabled={item.action.disabled}
               onClick={item.action.onClick}
             >
               {item.action.label}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            aria-label={t('notice.dismiss')}
-            onClick={() => dismissNotice(item.text)}
-          >
+          <Button aria-label={t('notice.dismiss')} onClick={() => dismissNotice(item.text)}>
             <X size={14} />
-          </button>
+          </Button>
         </div>
       ))}
     </div>

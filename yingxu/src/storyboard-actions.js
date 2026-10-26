@@ -2,7 +2,6 @@
 import { children, ancestors } from './store.js';
 import { detachDeletedReferences } from './entity-references.js';
 import {
-  chapterShots,
   storyChapters,
   storyShots,
   patchStoryboardShot,
@@ -123,9 +122,13 @@ function validShotPatch(project, patch) {
       'continuePrev',
       'quality',
       'seedLock',
+      'aspect',
+      'keepAudio',
+      'newSeed',
     ])
   )
     return false;
+  if (owns(patch, 'aspect') && !['16:9', '9:16', '1:1'].includes(patch.aspect)) return false;
   for (const [key, max] of [
     ['title', 160],
     ['script', 120000],
@@ -139,7 +142,7 @@ function validShotPatch(project, patch) {
     !(Number.isFinite(patch.duration) && patch.duration > 0 && patch.duration <= 3600)
   )
     return false;
-  for (const key of ['continuePrev', 'seedLock'])
+  for (const key of ['continuePrev', 'seedLock', 'keepAudio', 'newSeed'])
     if (owns(patch, key) && typeof patch[key] !== 'boolean') return false;
   for (const key of ['start', 'end'])
     if (

@@ -3,6 +3,7 @@
 import copy
 from dataclasses import replace
 import json
+import os
 import subprocess
 import unittest
 from unittest.mock import patch
@@ -96,6 +97,59 @@ class SubtitleQualityTests(unittest.TestCase):
             with self.subTest(item=item), self.assertRaises(ValueError):
                 validate_quality(item, 2)
         self.assertEqual(public_quality({}), evidence('not_checked'))
+
+    def test_blas_limits_apply_only_to_child_and_preserve_parent_environment(self):
+        with patch.dict(
+            os.environ,
+            {
+                'OPENBLAS_NUM_THREADS': '64',
+                'OMP_NUM_THREADS': '32',
+                'MKL_NUM_THREADS': '8',
+                'INKSEQ_TEST_PRIVATE_TOKEN': 'synthetic-private-value',
+                'PYTHONPATH': '/untrusted/injection',
+                'LD_PRELOAD': '/untrusted/library',
+                'PATH': '/usr/bin',
+                'HOME': '/tmp/test-home',
+                'LANG': 'C.UTF-8',
+            },
+        ):
+            before = dict(os.environ)
+            with patch(
+                'subprocess.run',
+                return_value=subprocess.CompletedProcess(
+                    [], 0, json.dumps(evidence('checked'))
+                ),
+            ) as run:
+                self.assertEqual(
+                    inspect_video('test.mp4', ['hash'], 3), evidence('checked')
+                )
+                env = run.call_args.kwargs['env']
+                for key in (
+                    'OPENBLAS_NUM_THREADS',
+                    'OMP_NUM_THREADS',
+                    'MKL_NUM_THREADS',
+                ):
+                    self.assertEqual(env[key], '1')
+                self.assertEqual(dict(os.environ), before)
+                self.assertEqual(
+                    {
+                        k: v
+                        for k, v in env.items()
+                        if k
+                        not in {
+                            'OPENBLAS_NUM_THREADS',
+                            'OMP_NUM_THREADS',
+                            'MKL_NUM_THREADS',
+                        }
+                    },
+                    {k: v for k, v in before.items() if k in {'PATH', 'HOME', 'LANG'}},
+                )
+                for private in (
+                    'INKSEQ_TEST_PRIVATE_TOKEN',
+                    'PYTHONPATH',
+                    'LD_PRELOAD',
+                ):
+                    self.assertNotIn(private, env)
 
     def test_child_timeout_failure_and_absent_dependencies_are_advisory(self):
         with patch('subprocess.run') as run:

@@ -19,12 +19,16 @@ import signal
 import stat
 import subprocess
 import threading
-import time
+
+from .slot_lock import slot_lock
+
+# Retained import compatibility; the implementation has one owner.
+_slot_lock = slot_lock
 
 from .media import ffmpeg, probe
 from .queue import TaskQueue
 from .repository import Conflict, LeaseLost, Scope, money
-from .storage import ObjectAlreadyExists, ObjectNotFound, StorageWriteUncertain
+from .storage import ObjectAlreadyExists, ObjectNotFound, StorageWriteUncertain  # noqa: F401 -- public worker compatibility export
 from .telemetry import ERROR_CODES as TELEMETRY_ERROR_CODES, NullStage, NullTelemetry
 
 # Compatibility exports retain the same objects for existing worker callers.
@@ -39,7 +43,7 @@ from .inference.protocol import (
     SubmissionRejected,
     SubmissionUncertain,
     TAG,
-    TASK,
+    TASK,  # noqa: F401 -- public worker compatibility export
     safe_failure_code,
 )
 
@@ -509,7 +513,7 @@ class WorkerRunner:
                 "simulation": isinstance(self.backend, MockBackend),
             }
         self.work_dir.mkdir(parents=True, exist_ok=True)
-        with _slot_lock(self.work_dir, self.backend.slot_key) as acquired:
+        with slot_lock(self.work_dir, self.backend.slot_key) as acquired:
             if not acquired:
                 return {
                     "state": "slot_busy",
@@ -1365,43 +1369,6 @@ def _validate_audio(path, duration, *, flac=False, timeout=180):
         timeout=timeout,
     )
     return actual
-
-
-@contextmanager
-def _slot_lock(directory, key):
-    """OS-held local lock; all runners for an endpoint must share this directory."""
-    path = Path(directory) / (hashlib.sha256(key.encode()).hexdigest() + ".slot")
-    with path.open("a+b") as handle:
-        acquired = False
-        try:
-            if os.name == "nt":
-                import msvcrt
-
-                if os.fstat(handle.fileno()).st_size == 0:
-                    handle.write(b"0")
-                    handle.flush()
-                handle.seek(0)
-                try:
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                    acquired = True
-                except OSError:
-                    pass
-            else:
-                import fcntl
-
-                try:
-                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    acquired = True
-                except BlockingIOError:
-                    pass
-            yield acquired
-        finally:
-            if acquired:
-                if os.name == "nt":
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
-                else:
-                    fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def main(argv=None):

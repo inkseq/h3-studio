@@ -1,11 +1,14 @@
 import ThemeToggle from './ThemeToggle.jsx';
-import { ChatDialog } from './QuickChatControls.jsx';
+import { Button } from './ui/Button.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Badge } from './ui/Note.jsx';
 import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import StudioHeader from './StudioHeader.jsx';
-import AccountMenu, { MenuItem } from './AccountMenu.jsx';
+import AccountMenu from './AccountMenu.jsx';
+import { Menu, MenuItem } from './ui/Menu.jsx';
+import { Popover } from './ui/Popover.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Landing from './Landing.jsx';
@@ -14,30 +17,19 @@ import Library from './Library.jsx';
 import UniversalTrash, {
   TrashProvider,
   useTrash,
-  TrashMenu,
+  TrashButton,
   StoryItemManager,
 } from './UniversalTrash.jsx';
-import { deletionImpact } from './entity-references.js';
-import { storyboardUrl } from './storyboard.js';
-import React, { useState, useEffect, useRef, useSyncExternalStore } from 'react';
+import React, { useState, useEffect, useEffectEvent, useRef, useSyncExternalStore } from 'react';
 import {
   Plus,
-  LayoutGrid,
   Workflow,
   ChevronRight,
   ChevronLeft,
-  Search,
   Undo2,
   Redo2,
   Download,
   Upload,
-  X,
-  Check,
-  ArrowUp,
-  ArrowDown,
-  Copy,
-  Trash2,
-  Link2,
   FolderOpen,
   BookOpen,
   Users,
@@ -45,10 +37,7 @@ import {
   Image,
   Clapperboard,
   Settings2,
-  HelpCircle,
-  PanelRightClose,
   Bot,
-  Activity,
 } from 'lucide-react';
 const ChapterRoughCut = React.lazy(() => import('./ChapterRoughCut.jsx'));
 const Freestyle = React.lazy(() => import('./Freestyle.jsx'));
@@ -57,7 +46,6 @@ const QuickCreateEntry = React.lazy(() => import('./QuickCreateEntry.jsx'));
 const LegacyQuickChatLink = React.lazy(() => import('./LegacyQuickChatLink.jsx'));
 import OperatorConsole from './P4OperatorConsole.jsx';
 import AdminHome from './AdminHome.jsx';
-import { navigateWorkspace } from './workspace-navigation.js';
 import { CloudProjects, useCloud } from './CloudStudio.jsx';
 import AgentConnect from './AgentConnect.jsx';
 import AgentLink from './AgentLink.jsx';
@@ -68,17 +56,8 @@ import StoryboardConnected from './StoryboardConnected.jsx';
 import { StoryLibraryHome, RecentStoriesDropdown } from './StoryNavigation.jsx';
 import { readAgentLink } from './agent-navigation.js';
 import { readLocalStoryLibrary, archiveLocalStory } from './story-navigation.js';
+import { store, typeLabels } from './store.js';
 import {
-  store,
-  typeLabels,
-  roleLabels,
-  children,
-  ancestors,
-  readiness,
-  validateLink,
-} from './store.js';
-import {
-  getFile,
   putFile,
   uploadFile,
   exportBundle,
@@ -131,11 +110,6 @@ const getChapter = (p, e) => {
   }
   return null;
 };
-const statuses = {
-  draft: 'story.status.draft',
-  review: 'story.status.review',
-  ready: 'story.status.ready',
-};
 const readLocalLibrary = readLocalStoryLibrary;
 function Icon({ type, size = 18 }) {
   const { t, locale } = useI18n();
@@ -154,9 +128,9 @@ function Field({ label, hint, children }) {
 }
 function Modal({ title, children, onClose, wide = false }) {
   return (
-    <ChatDialog title={title} onClose={onClose} wide={wide} className="story-dialog">
+    <Dialog title={title} onClose={onClose} wide={wide} className="story-dialog">
       {children}
-    </ChatDialog>
+    </Dialog>
   );
 }
 function SeriesApp({ sidebarView, onSidebarView }) {
@@ -188,6 +162,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     .filter((e) => mediaKinds.includes(e.type) && e.data.fileId)
     .map((e) => e.id + ':' + e.data.fileId + ':' + !!e.data.missingFile)
     .join('|');
+  const auditFailed = useEffectEvent(() => store.notify(t('story.copy42')));
   useEffect(() => {
     let alive = true,
       checking = false;
@@ -212,7 +187,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
             );
         }
       } catch {
-        if (alive) store.notify(t('story.copy42'));
+        if (alive) auditFailed();
       } finally {
         checking = false;
       }
@@ -343,36 +318,10 @@ function SeriesApp({ sidebarView, onSidebarView }) {
       state.workspace.account === c.account &&
       state.project.id === linkTarget.projectId;
   const chapterList = p.entities.filter((e) => e.type === 'chapter').sort(byOrder);
-  const accountMenu = (
-    <AccountMenu
-      account={c.account}
-      onSignIn={() => open({ type: 'cloud' })}
-      items={
-        <>
-          <MenuItem icon={Download} disabled={busy} onClick={backup}>
-            {t('story.copy53')}
-          </MenuItem>
-          <MenuItem icon={Upload} onClick={() => open({ type: 'projects' })}>
-            {t('story.copy54')}
-          </MenuItem>
-          <MenuItem icon={Bot} onClick={() => open({ type: 'agent' })}>
-            {t('story.copy31')}
-          </MenuItem>
-          {state.workspace.mode === 'cloud' && (
-            <>
-              <MenuItem onClick={() => open({ type: 'manage-items' })}>
-                {t('trash.manage')}
-              </MenuItem>
-              <TrashMenu
-                target={{ kind: 'project', project_id: p.id, id: p.id }}
-                onRename={() => open({ type: 'project-settings' })}
-              />
-            </>
-          )}
-        </>
-      }
-    />
-  );
+  // Account menu holds account things only (owner, 2026-10-26). Backup lives under Export,
+  // Connect AI has its own button, local projects sit on the works page and the story list,
+  // and rename / manage items / delete belong to Story settings.
+  const accountMenu = <AccountMenu account={c.account} onSignIn={() => open({ type: 'cloud' })} />;
   return (
     <>
       <div className="home" hidden={sidebarView !== 'library'}>
@@ -393,10 +342,14 @@ function SeriesApp({ sidebarView, onSidebarView }) {
       </div>
       <div className="workspace v2-story-view" hidden={sidebarView === 'library'}>
         <header className="wbar">
-          <button className="ghost back story-home-back" onClick={() => onSidebarView('library')}>
+          <Button
+            variant="ghost"
+            className="back story-home-back"
+            onClick={() => onSidebarView('library')}
+          >
             <ChevronLeft size={16} />
             {t('v2.works')}
-          </button>
+          </Button>
           <RecentStoriesDropdown
             state={state}
             onOpenCloud={() => open({ type: 'cloud' })}
@@ -408,151 +361,154 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           />
           {/* Chapters are sections on the one storyboard; no chapter switcher (owner, 2026-10-21). */}
           {state.workspace.mode === 'cloud' ? (
-            <details className="v2-cloud-status">
-              <summary className="v2-autosave">
-                <CloudSaveStatus plain />
-              </summary>
-              <div className="card-box">
-                <button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
-                  {t('account.copy64')}
-                </button>
-                <button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
-                  {t('account.copy65')}
-                </button>
-                <button
-                  disabled={c.busy}
-                  onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
-                >
-                  {t('account.copy66')}
-                </button>
-                <button
-                  disabled={c.busy}
-                  onClick={() => void cloud.reloadCapabilities().catch(() => {})}
-                >
-                  {t('account.copy72')}
-                </button>
-                {c.remoteUpdate && (
-                  <button disabled={c.busy} onClick={() => void cloud.open(p.id).catch(() => {})}>
-                    {t('account.copy68')}
-                  </button>
-                )}
-                {c.conflict && (
-                  <>
-                    <p role="alert">{t('account.copy69')}</p>
-                    <button disabled={c.busy} onClick={() => void cloud.saveCopy().catch(() => {})}>
-                      {t('account.copy70')}
-                    </button>
-                    <button
-                      onClick={() =>
-                        download(
-                          new Blob([JSON.stringify(store.exportProject(), null, 2)], {
-                            type: 'application/json',
-                          }),
-                          p.title + '.draft.json',
-                        )
-                      }
-                    >
-                      {t('account.copy71')}
-                    </button>
-                  </>
-                )}
-                {c.error && <p role="alert">{c.error}</p>}
-                {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
-                <PreservedStoryDrafts account={c.account} projectId={p.id} />
-                <button
-                  disabled={c.busy}
-                  onClick={() => {
-                    cloud.leave();
-                    onSidebarView('story', { selected: true });
-                  }}
-                >
-                  {t('account.copy67')}
-                </button>
-              </div>
-            </details>
+            <Popover
+              className="v2-cloud-status-panel"
+              trigger={
+                <Button className="v2-autosave">
+                  <CloudSaveStatus plain />
+                </Button>
+              }
+            >
+              <Button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
+                {t('account.copy64')}
+              </Button>
+              <Button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
+                {t('account.copy65')}
+              </Button>
+              <Button
+                disabled={c.busy}
+                onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
+              >
+                {t('account.copy66')}
+              </Button>
+              <Button
+                disabled={c.busy}
+                onClick={() => void cloud.reloadCapabilities().catch(() => {})}
+              >
+                {t('account.copy72')}
+              </Button>
+              {c.remoteUpdate && (
+                <Button disabled={c.busy} onClick={() => void cloud.open(p.id).catch(() => {})}>
+                  {t('account.copy68')}
+                </Button>
+              )}
+              {c.conflict && (
+                <>
+                  <p role="alert">{t('account.copy69')}</p>
+                  <Button disabled={c.busy} onClick={() => void cloud.saveCopy().catch(() => {})}>
+                    {t('account.copy70')}
+                  </Button>
+                  <Button
+                    onClick={() =>
+                      download(
+                        new Blob([JSON.stringify(store.exportProject(), null, 2)], {
+                          type: 'application/json',
+                        }),
+                        p.title + '.draft.json',
+                      )
+                    }
+                  >
+                    {t('account.copy71')}
+                  </Button>
+                </>
+              )}
+              {c.error && <p role="alert">{c.error}</p>}
+              {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
+              <PreservedStoryDrafts account={c.account} projectId={p.id} />
+              <Button
+                disabled={c.busy}
+                onClick={() => {
+                  cloud.leave();
+                  onSidebarView('story', { selected: true });
+                }}
+              >
+                {t('account.copy67')}
+              </Button>
+            </Popover>
           ) : (
             <Badge tone="local">{t('story.copy9')}</Badge>
           )}
           <div className="spacer" />
-          <button
-            className="ghost icon-only"
+          <Button
+            variant="ghost"
+            className="icon-only"
             disabled={!state.undoCount}
             onClick={() => store.undo()}
             aria-label={t('story.copy2')}
             title={t('story.copy2')}
           >
             <Undo2 size={15} />
-          </button>
-          <button
-            className="ghost icon-only"
+          </Button>
+          <Button
+            variant="ghost"
+            className="icon-only"
             disabled={!state.redoCount}
             onClick={() => store.redo()}
             aria-label={t('story.copy49')}
             title={t('story.copy49')}
           >
             <Redo2 size={15} />
-          </button>
-          <details className="v2-export-menu">
-            <summary>
-              {t('v2.export')} <ChevronRight size={12} />
-            </summary>
-            <div className="card-box">
-              <button onClick={() => open({ type: 'roughcut' })}>
-                <Clapperboard size={15} />
-                <span>
-                  {t('v2.roughCut')}
-                  <small className="muted export-hint">{t('v2.roughCutHint')}</small>
-                </span>
-              </button>
-              {(() => {
-                // Subtitles are offered only when this chapter has some (owner, 2026-10-21).
-                let srt = '';
-                try {
-                  srt = exportSrt(p, chapter?.id || chapterList[0]?.id);
-                } catch {
-                  srt = '';
-                }
-                return srt ? (
-                  <button
-                    onClick={() =>
-                      download(new Blob([srt], { type: 'application/x-subrip' }), p.title + '.srt')
-                    }
-                  >
-                    {t('v2.subtitles')}
-                  </button>
-                ) : null;
-              })()}
-              <button disabled={busy} onClick={backup}>
-                {t('story.copy53')}
-              </button>
-            </div>
-          </details>
+          </Button>
+          <Menu
+            className="v2-export-panel"
+            trigger={
+              <Button className="v2-export-trigger">
+                {t('v2.export')} <ChevronRight size={12} />
+              </Button>
+            }
+          >
+            <MenuItem icon={Clapperboard} onSelect={() => open({ type: 'roughcut' })}>
+              {t('v2.roughCut')}
+              <small>{t('v2.roughCutHint')}</small>
+            </MenuItem>
+            {(() => {
+              // Subtitles are offered only when this chapter has some (owner, 2026-10-21).
+              let srt = '';
+              try {
+                srt = exportSrt(p, chapter?.id || chapterList[0]?.id);
+              } catch {
+                srt = '';
+              }
+              return srt ? (
+                <MenuItem
+                  onSelect={() =>
+                    download(new Blob([srt], { type: 'application/x-subrip' }), p.title + '.srt')
+                  }
+                >
+                  {t('v2.subtitles')}
+                </MenuItem>
+              ) : null;
+            })()}
+            <MenuItem disabled={busy} onSelect={backup}>
+              {t('story.copy53')}
+            </MenuItem>
+          </Menu>
           <ThemeToggle />
           <LanguageSwitcher />
-          <button
-            className="ghost"
+          <Button
+            variant="ghost"
             title={t('story.copy31')}
             aria-label={t('story.copy31')}
             onClick={() => open({ type: 'agent' })}
           >
             <Bot size={15} />
             <span className="bar-label">{t('story.copy31')}</span>
-          </button>
-          <button
-            className="ghost"
-            title={t('settings.title')}
-            aria-label={t('settings.title')}
+          </Button>
+          <Button
+            variant="ghost"
+            title={t('story.settings')}
+            aria-label={t('story.settings')}
             onClick={() => open({ type: 'project-settings' })}
           >
             <Settings2 size={15} />
-            <span className="bar-label">{t('settings.title')}</span>
-          </button>
+            <span className="bar-label">{t('story.settings')}</span>
+          </Button>
           {accountMenu}
         </header>
         {store.getRecoveryRaw?.() && (
           <div role="alert">
             <span>{t('story.copy65')}</span>
-            <button
+            <Button
               onClick={() =>
                 download(
                   new Blob([store.getRecoveryRaw()], { type: 'text/plain' }),
@@ -561,7 +517,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               }
             >
               {t('story.copy66')}
-            </button>
+            </Button>
           </div>
         )}
         {sidebarView === 'story' &&
@@ -735,7 +691,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                   )
                   .slice(0, 30)
                   .map((e) => (
-                    <button
+                    <Button
                       key={e.id}
                       onClick={() => {
                         inspect(e.id);
@@ -751,7 +707,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                         </small>
                       </span>
                       <ChevronRight size={15} />
-                    </button>
+                    </Button>
                   ))}
                 {!p.entities.some((e) =>
                   (e.title + ' ' + e.description + ' ' + (e.data.script || ''))
@@ -785,17 +741,29 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               <Field label={t('story.copy95')}>
                 <textarea name="logline" rows={4} maxLength={2000} defaultValue={p.logline} />
               </Field>
+              {state.workspace.mode === 'cloud' && (
+                <div className="story-settings-actions">
+                  <Button onClick={() => open({ type: 'manage-items' })}>
+                    {t('trash.manage')}
+                  </Button>
+                  <TrashButton
+                    target={{ kind: 'project', project_id: p.id, id: p.id }}
+                    label={t('story.deleteStory')}
+                    onTrashSettled={close}
+                  />
+                </div>
+              )}
               {error && (
                 <p role="alert" className="inline-error">
                   {error}
                 </p>
               )}
-              <div className="modal-actions">
-                <button type="button" onClick={close}>
-                  {t('story.copy24')}
-                </button>
-                <button className="primary">{t('story.copy96')}</button>
-              </div>
+              <DialogActions>
+                <Button onClick={close}>{t('story.copy24')}</Button>
+                <Button variant="primary" type="submit">
+                  {t('story.copy96')}
+                </Button>
+              </DialogActions>
             </form>
           )}
           {modal.type === 'projects' && (
@@ -828,13 +796,13 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                 <Field label={t('story.copy100')}>
                   <input name="title" maxLength={80} required placeholder={t('story.copy101')} />
                 </Field>
-                <button className="primary">
+                <Button variant="primary" type="submit">
                   <Plus size={16} />
                   {t('story.copy102')}
-                </button>
+                </Button>
               </form>
               <div className="project-tools">
-                <button
+                <Button
                   onClick={() => {
                     try {
                       archive();
@@ -852,17 +820,17 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                   }}
                 >
                   {t('story.copy104')}
-                </button>
-                <button disabled={busy} onClick={() => importRef.current.click()}>
+                </Button>
+                <Button disabled={busy} onClick={() => importRef.current.click()}>
                   <Upload size={16} />
                   {t('story.copy105')}
-                </button>
-                <button disabled={busy} onClick={backup}>
+                </Button>
+                <Button disabled={busy} onClick={backup}>
                   <Download size={16} />
                   {t('story.copy106')}
-                </button>
+                </Button>
               </div>
-              <button
+              <Button
                 className="text-button"
                 onClick={() =>
                   download(
@@ -875,7 +843,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               >
                 <Download size={15} />
                 {t('story.copy107')}
-              </button>
+              </Button>
               <h3>{t('story.copy108')}</h3>
               <ProjectList
                 currentId={p.id}
@@ -920,10 +888,10 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                   {error}
                 </p>
               )}
-              <div className="modal-actions">
-                <button onClick={close}>{t('story.copy24')}</button>
-                <button
-                  className="primary"
+              <DialogActions>
+                <Button onClick={close}>{t('story.copy24')}</Button>
+                <Button
+                  variant="primary"
                   disabled={busy}
                   onClick={async () => {
                     setBusy(true);
@@ -943,8 +911,8 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                   }}
                 >
                   {t('story.copy112')}
-                </button>
-              </div>
+                </Button>
+              </DialogActions>
             </>
           )}
           {modal.type === 'help' && (
@@ -972,9 +940,9 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               </div>
               <p>{t('story.helpCapabilities')}</p>
               <p>{t('story.copy123')}</p>
-              <button className="text-link" onClick={() => open({ type: 'cloud' })}>
+              <Button className="text-link" onClick={() => open({ type: 'cloud' })}>
                 {t('story.copy124')}
-              </button>
+              </Button>
             </>
           )}
         </Modal>
@@ -983,48 +951,34 @@ function SeriesApp({ sidebarView, onSidebarView }) {
   );
 }
 
-function descendants(p, id) {
-  const result = [];
-  const visit = (x) =>
-    p.entities
-      .filter((e) => e.parentId === x)
-      .forEach((e) => {
-        if (!result.includes(e.id)) {
-          result.push(e.id);
-          visit(e.id);
-        }
-      });
-  visit(id);
-  return result;
-}
 function ProjectList({ currentId, onSelect }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { projects, raw, error } = readLocalLibrary();
   return (
     <div className="project-list">
       {error && (
         <div role="alert" className="inline-error">
           <p>{t('story.copy125')}</p>
-          <button
+          <Button
             onClick={() =>
               download(new Blob([raw], { type: 'text/plain' }), '映序-项目列表恢复.txt')
             }
           >
             {t('story.copy126')}
-          </button>
+          </Button>
         </div>
       )}
       {projects
         .filter((x) => x.id !== currentId)
         .map((p) => (
-          <button key={p.id} onClick={() => onSelect(p)}>
+          <Button key={p.id} onClick={() => onSelect(p)}>
             <FolderOpen size={17} />
             <span>
               {p.title}
               <small>{t('story.itemCount', { count: p.entities.length })}</small>
             </span>
             <ChevronRight size={16} />
-          </button>
+          </Button>
         ))}
       {!error && !projects.some((x) => x.id !== currentId) && (
         <p className="muted">{t('story.copy127')}</p>
@@ -1034,7 +988,7 @@ function ProjectList({ currentId, onSelect }) {
 }
 
 function AddForm({ project: p, state, initialKind, onDone }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [kind, setKind] = useState(initialKind || 'chapter'),
     [title, setTitle] = useState(''),
     [parent, setParent] = useState(''),
@@ -1052,7 +1006,9 @@ function AddForm({ project: p, state, initialKind, onDone }) {
     ),
     hasUpload = ['character', 'location', ...mediaKinds].includes(kind),
     expected = ['character', 'location'].includes(kind) ? 'image' : kind;
-  useEffect(() => {
+  // Default parent when the kind or selection changes; reads the latest project without
+  // re-running when other entities change.
+  const defaultParent = useEffectEvent(() => {
     let id = '';
     if (kind === 'scene')
       id = state.scopeId || p.entities.find((e) => e.type === 'chapter')?.id || '';
@@ -1070,7 +1026,10 @@ function AddForm({ project: p, state, initialKind, onDone }) {
     else if (['generation', 'note'].includes(kind))
       id =
         selected && ['scene', 'shot'].includes(selected.type) ? selected.id : state.scopeId || '';
-    setParent(id);
+    return id;
+  });
+  useEffect(() => {
+    setParent(defaultParent());
     setFile(null);
   }, [kind, state.selectedId, state.scopeId]);
   const descriptions = {
@@ -1118,8 +1077,7 @@ function AddForm({ project: p, state, initialKind, onDone }) {
           {Object.keys(typeLabels)
             .map((key) => [key, t('story.type.' + key)])
             .map(([key, label]) => (
-              <button
-                type="button"
+              <Button
                 key={key}
                 disabled={busy}
                 aria-pressed={kind === key}
@@ -1130,7 +1088,7 @@ function AddForm({ project: p, state, initialKind, onDone }) {
               >
                 <Icon type={key} />
                 <span>{label}</span>
-              </button>
+              </Button>
             ))}
         </div>
       )}
@@ -1180,7 +1138,7 @@ function AddForm({ project: p, state, initialKind, onDone }) {
             disabled={busy}
             onChange={(event) => setFile(event.target.files?.[0] || null)}
           />
-          <button type="button" disabled={busy} onClick={() => input.current.click()}>
+          <Button disabled={busy} onClick={() => input.current.click()}>
             <Upload size={18} />
             {file
               ? t('story.copy149')
@@ -1191,7 +1149,7 @@ function AddForm({ project: p, state, initialKind, onDone }) {
                   audio: t('story.type.audio'),
                 }[expected] +
                 t('story.copy151')}
-          </button>
+          </Button>
           <p>
             {file
               ? file.name + ' · ' + (file.size / 1024 / 1024).toFixed(2) + ' MB'
@@ -1200,9 +1158,9 @@ function AddForm({ project: p, state, initialKind, onDone }) {
                 : t('story.copy153')}
           </p>
           {file && (
-            <button type="button" disabled={busy} onClick={() => setFile(null)}>
+            <Button disabled={busy} onClick={() => setFile(null)}>
               {t('story.copy154')}
-            </button>
+            </Button>
           )}
         </section>
       )}
@@ -1211,14 +1169,14 @@ function AddForm({ project: p, state, initialKind, onDone }) {
           {error}
         </p>
       )}
-      <div className="modal-actions">
-        <button className="primary" disabled={busy}>
+      <DialogActions>
+        <Button variant="primary" type="submit" disabled={busy}>
           <Plus size={16} />
           {busy
             ? t('story.copy155')
             : t('story.copy156') + t('story.type.' + kind) + (file ? t('story.copy157') : '')}
-        </button>
-      </div>
+        </Button>
+      </DialogActions>
     </form>
   );
 }
@@ -1228,7 +1186,7 @@ const storyPageFromUrl = (search = window.location.search) =>
     ? 'story'
     : 'library';
 function AppContent() {
-  const { t, locale } = useI18n(),
+  const { t } = useI18n(),
     c = useCloud(),
     account = c.account;
   useEffect(() => installPersistenceGuard(store), []);
@@ -1245,14 +1203,16 @@ function AppContent() {
   const target = readAgentLink(location.search),
     routeLoader = useRef(null);
   if (!routeLoader.current) routeLoader.current = createStoryRouteLoader({ cloud, store });
+  const targetProjectId = target?.projectId;
   useEffect(() => {
     void routeLoader.current.update({
       account,
-      projectId: target?.projectId,
+      projectId: targetProjectId,
       active: path === '/',
       busy: c.busy || !c.sessionReady,
     });
-  }, [account, path, location.search, c.busy, c.sessionReady, workspaceKey]);
+    // workspaceKey: re-check when the open story changes underneath the same link.
+  }, [account, path, targetProjectId, c.busy, c.sessionReady, workspaceKey]);
   useEffect(() => () => routeLoader.current.destroy(), []);
   useEffect(() => installAppNavigation(), []);
   useEffect(() => {
@@ -1314,9 +1274,9 @@ function AppContent() {
         <div className="home story-open-destination">
           <StudioHeader account={account} active="works" />
           <main>
-            <button type="button" className="ghost" onClick={() => changePage('library')}>
+            <Button variant="ghost" onClick={() => changePage('library')}>
               {t('storyOpen.back')}
-            </button>
+            </Button>
             <StoryOpenNotice
               projectId={destination.projectId}
               waiting

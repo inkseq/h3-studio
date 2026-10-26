@@ -139,19 +139,6 @@
   align-items: center;
   gap: 12px;
 }
-.ops-adapter .limit-row {
-  min-width: 0;
-  gap: 14px;
-}
-.ops-adapter .limit-row > div {
-  min-width: 0;
-}
-.ops-adapter .limit-row b {
-  font-size: 13px;
-}
-.ops-adapter .limit-input {
-  flex-shrink: 0;
-}
 .ops-adapter .trash-row {
   grid-template-columns: 22px 44px minmax(0, 1fr) auto auto;
 }
@@ -180,19 +167,19 @@
   width: auto;
   max-width: 100%;
 }
-.ops-adapter .account-password form,
-.ops-adapter .assistant-connections form {
+.account-password form,
+.assistant-connections form {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-.ops-adapter .account-password label,
-.ops-adapter .assistant-connections label {
+.account-password label,
+.assistant-connections label {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
-.ops-adapter .account-password h2 {
+.account-password h2 {
   font-size: 14px;
 }
 .ops-item-row {
@@ -206,11 +193,11 @@
   flex: 1;
   min-width: 0;
 }
-.ops-adapter .account-password h2,
-.ops-adapter .account-password p {
+.account-password h2,
+.account-password p {
   margin-top: 0;
 }
-.ops-adapter .account-password form > button {
+.account-password form > button {
   align-self: flex-end;
 }
 .assistant-connections {
@@ -223,7 +210,7 @@
 .assistant-connections > h3 {
   margin: 0;
 }
-.assistant-connections > form,
+.assistant-connections > form:not(.ui-form),
 .assistant-connections > article,
 .assistant-connections > aside,
 .assistant-connections > details {
@@ -325,12 +312,7 @@
   border-color: transparent;
   color: var(--ink-2);
 }
-.ops-adapter .p4-close {
-  padding: 3px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-}
+
 .ops-adapter .p4-formgrid,
 .ops-adapter .p4-configfields {
   display: grid;
@@ -342,8 +324,8 @@
 }
 .ops-adapter .p4-config,
 .ops-adapter .p4-panel,
-.ops-adapter .budget-account,
-.ops-adapter .budget-admin-row,
+.budget-account,
+.budget-admin-row,
 .ops-adapter .p4-host-record {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -354,7 +336,7 @@
 }
 .ops-adapter .p4-config > header,
 .ops-adapter .p4-between,
-.ops-adapter .operator-budget > header,
+.operator-budget > header,
 .ops-adapter .p4-hosts > header {
   display: flex;
   align-items: center;
@@ -396,7 +378,6 @@
 }
 .ops-adapter .p4-note,
 .ops-adapter .p4-meta,
-.ops-adapter .p4-footer,
 .ops-adapter :is(.p4-dialog, .op-dialog) small {
   color: var(--muted);
   font-size: 12px;
@@ -422,7 +403,7 @@
 .ops-adapter .p4-kv,
 .ops-adapter .p4-metrics,
 .ops-adapter .p4-host-summary,
-.ops-adapter .budget-accounts,
+.budget-accounts,
 .ops-adapter .p4-accountspend {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -543,7 +524,7 @@
 .ops-adapter .p4-jobs-actions,
 .ops-adapter .p4-host-policy,
 .ops-adapter .p4-host-lookup form,
-.ops-adapter .budget-admin-row form {
+.budget-admin-row form {
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
@@ -553,23 +534,23 @@
 .ops-adapter .p4-jobs-actions label,
 .ops-adapter .p4-host-policy label,
 .ops-adapter .p4-host-lookup label,
-.ops-adapter .budget-admin-row label {
+.budget-admin-row label {
   display: flex;
   flex-direction: column;
   gap: 6px;
   flex: 1;
   min-width: 140px;
 }
-.ops-adapter .budget-account dl {
+.budget-account dl {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
-.ops-adapter .budget-account dd {
+.budget-account dd {
   margin: 4px 0;
   font-weight: 600;
 }
-.ops-adapter .budget-account dt {
+.budget-account dt {
   font-size: 11px;
   color: var(--muted);
 }
@@ -585,36 +566,7 @@
   flex-direction: column;
   gap: 6px;
 }
-.ops-account-menu {
-  position: relative;
-}
-.ops-account-menu > summary {
-  cursor: pointer;
-  list-style: none;
-}
-.ops-account-menu > div {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 100;
-  min-width: 180px;
-  padding: 8px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.ops-account-menu a {
-  color: var(--ink);
-  padding: 7px 10px;
-  text-decoration: none;
-  min-height: 32px;
-  display: flex;
-  align-items: center;
-}
+
 .trash-notice {
   position: fixed;
   bottom: 76px;
@@ -637,25 +589,7 @@
   position: relative;
   display: inline-flex;
 }
-.item-menu-popover {
-  position: absolute;
-  z-index: 100;
-  right: 0;
-  top: 100%;
-  display: flex;
-  flex-direction: column;
-  min-width: 180px;
-  max-width: min(280px, 90vw);
-  padding: 6px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
-  background: var(--surface);
-  box-shadow: var(--shadow);
-}
-.item-menu-popover button {
-  text-align: start;
-  white-space: normal;
-}
+
 @media (min-width: 761px) and (max-width: 1220px) {
   .ops-adapter .mrow {
     grid-template-columns: 22px minmax(0, 1.2fr) minmax(180px, 1fr);
@@ -746,7 +680,7 @@
   .ops-adapter .p4-formgrid,
   .ops-adapter .p4-kv,
   .ops-adapter .p4-metrics,
-  .ops-adapter .budget-accounts,
+  .budget-accounts,
   .ops-adapter .p4-accountspend {
     grid-template-columns: 1fr;
   }
@@ -811,34 +745,15 @@
   color: var(--ink);
   padding: 16px;
 }
-.ops-adapter .settings-page .limit-row b {
-  color: var(--ink);
-  font-weight: 500;
-}
-.ops-adapter .settings-story-defaults {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  color: var(--ink);
-  background: var(--surface);
-  text-decoration: none;
-}
-.ops-adapter .settings-story-defaults > span {
-  flex: 1;
-}
-.ops-adapter .assistant-badge {
+.assistant-badge {
   align-items: center;
   gap: 4px;
 }
-.ops-adapter .assistant-usage {
+.assistant-usage {
   color: var(--ink-2);
   font-size: 12px;
 }
-.ops-adapter .budget-cost-details > summary {
+.budget-cost-details > summary {
   cursor: pointer;
   color: var(--muted);
   font-size: 12px;
@@ -858,23 +773,7 @@
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
-.item-menu > button {
-  width: 28px;
-  height: 28px;
-  min-width: 28px;
-  min-height: 28px;
-  padding: 0;
-  justify-content: center;
-  border-radius: var(--r-sm);
-}
-.item-menu-popover button {
-  height: 32px;
-  min-height: 32px;
-  padding: 0 10px;
-  align-items: center;
-  gap: 8px;
-  display: flex;
-}
+
 @media (max-width: 760px) {
   .ops-adapter .settings-page {
     grid-template-columns: 1fr;
@@ -908,49 +807,12 @@
     width: 32px;
     height: 32px;
   }
-  .ops-adapter .settings-page .limit-row {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-  .ops-adapter .limit-input {
-    max-width: 100%;
-  }
 }
 
 /* The desktop timestamp also needs an explicit floor; browser small defaults are 10.833px. */
 .ops-adapter .p4-observed-at {
   font-size: 11px;
   line-height: 1.4;
-}
-
-.ops-adapter .settings-generation-defaults dl {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px 16px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.ops-adapter .settings-generation-defaults dt {
-  color: var(--muted);
-  min-width: 0;
-}
-.ops-adapter .settings-generation-defaults dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  min-width: 0;
-}
-.ops-adapter .settings-generation-defaults summary {
-  font-size: 12px;
-  cursor: pointer;
-  min-height: 32px;
-  align-content: center;
-}
-.ops-adapter .settings-generation-defaults > .settings-story-defaults {
-  height: 36px;
-  min-height: 36px;
-  padding: 0 10px;
-  margin-top: 14px;
-  font-size: 12px;
 }
 
 .spend-breakdown {
@@ -1481,4 +1343,22 @@
   padding: 0 10px;
   font-size: var(--fs-sm);
   justify-self: start;
+}
+
+/* Assistant forms use the shared settings rows (owner, 2026-10-26): compact controls,
+   buttons at their own width. */
+.assistant-connections > form.ui-form,
+.assistant-connections .assistant-defaults > form.ui-form {
+  display: block;
+}
+.assistant-connections > .assistant-refresh,
+.assistant-connections > button {
+  align-self: flex-start;
+}
+.assistant-connections .assistant-defaults > summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.assistant-connections .assistant-defaults[open] > summary {
+  margin-bottom: 12px;
 }

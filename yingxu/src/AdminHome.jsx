@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useState, useSyncExternalStore, useEffectEvent } from 'react';
 import {
   Activity,
   BarChart3,
@@ -34,6 +34,7 @@ import {
   duration,
   jobRows,
   machineRows,
+  reviewRows,
   spendSummary,
   usd,
 } from './admin-overview-model.js';
@@ -56,34 +57,40 @@ const SETTINGS_PATH = '/v1/operator/admin/spending-settings';
 function useAdminData(api, active, section) {
   const [data, setData] = useState({ state: 'loading' });
   const needsMachines = section === 'overview';
+  // Each read shows as soon as it arrives: the live machine read can take far longer than the
+  // job list, and the page should not wait for the slowest one. Older data stays until replaced.
   const load = async () => {
     if (globalThis.document?.visibilityState === 'hidden') return;
-    try {
-      const [workspace, jobs, settings] = await Promise.all([
-        needsMachines ? api.request('/v1/operator/dstack/admin/workspace?live=1') : null,
-        api.request('/v1/operator/admin/jobs?limit=100'),
-        needsMachines ? api.request(SETTINGS_PATH) : null,
-      ]);
-      setData((old) => ({
-        state: 'ready',
-        workspace: workspace || old.workspace,
-        jobs: jobs.jobs || [],
-        settings: settings || old.settings,
-        at: Date.now() / 1000,
-      }));
-    } catch (failure) {
-      setData((old) => ({
-        ...old,
-        state: failure.status === 403 ? 'forbidden' : old.workspace ? 'stale' : 'error',
-        error: failure.message,
-      }));
-    }
+    const merge = (patch) => setData((old) => ({ ...old, ...patch, at: Date.now() / 1000 }));
+    const jobs = api.request('/v1/operator/admin/jobs?limit=100').then(
+      (result) => merge({ state: 'ready', jobs: result.jobs || [] }),
+      (failure) =>
+        setData((old) => ({
+          ...old,
+          state: failure.status === 403 ? 'forbidden' : old.jobs ? 'stale' : 'error',
+          error: failure.message,
+        })),
+    );
+    const extra = needsMachines
+      ? [
+          api.request('/v1/operator/dstack/admin/workspace?live=1').then(
+            (workspace) => merge({ workspace, machinesFailed: false }),
+            () => merge({ machinesFailed: true }),
+          ),
+          api.request(SETTINGS_PATH).then(
+            (settings) => merge({ settings }),
+            () => {},
+          ),
+        ]
+      : [];
+    await Promise.all([jobs, ...extra]);
   };
+  const loadEvent = useEffectEvent((...args) => load(...args));
   useEffect(() => {
     if (!active || !['overview', 'jobs'].includes(section)) return undefined;
-    void load();
-    const timer = setInterval(load, 60000);
-    const visible = () => globalThis.document?.visibilityState === 'visible' && void load();
+    void loadEvent();
+    const timer = setInterval(loadEvent, 60000);
+    const visible = () => globalThis.document?.visibilityState === 'visible' && void loadEvent();
     globalThis.document?.addEventListener('visibilitychange', visible);
     return () => {
       clearInterval(timer);
@@ -295,18 +302,26 @@ const statusTone = (status) =>
 function Overview({ data, api }) {
   const { t, locale } = useI18n();
   const machines = useMemo(() => machineRows(data.workspace, data.at, locale), [data, locale]);
+  const review = useMemo(() => reviewRows(data.workspace), [data]);
   const jobs = useMemo(() => jobRows(data.jobs, data.at), [data]);
   const spend = spendSummary(data.settings);
   const items = findAlerts({ machines, jobs, spend, workspace: data.workspace });
   const waiting = jobs.filter((job) => job.status === 'queued');
   const longest = waiting.reduce((max, job) => Math.max(max, job.ageSeconds || 0), 0);
   const hourly = machines.reduce((sum, row) => sum + (row.hourly || 0), 0);
+  // Machines (and alerts that depend on them) wait for the live read; jobs show meanwhile.
+  const machinesPending = data.workspace === undefined && !data.machinesFailed;
+  const machinesState = machinesPending ? (
+    <Spinner size={16} label={t('adminHome.loading')} />
+  ) : data.workspace === undefined ? (
+    <Note tone="bad">{t('adminHome.loadFailed')}</Note>
+  ) : null;
   return (
     <>
       <div className="ah-kpis">
         <Kpi
           label={t('adminHome.kpi.machines')}
-          value={machines.length}
+          value={data.workspace === undefined ? '—' : machines.length}
           hint={t('adminHome.kpi.hourly', { amount: usd(hourly) })}
         />
         <Kpi
@@ -334,15 +349,23 @@ function Overview({ data, api }) {
         />
         <Kpi
           label={t('adminHome.kpi.alerts')}
-          value={items.length}
-          tone={items.some((item) => item.tone === 'bad') ? 'bad' : items.length ? 'warn' : 'good'}
+          value={machinesState ? '—' : items.length}
+          tone={
+            machinesState
+              ? ''
+              : items.some((item) => item.tone === 'bad')
+                ? 'bad'
+                : items.length
+                  ? 'warn'
+                  : 'good'
+          }
         />
       </div>
       <section className="ah-card">
         <header>
           <h2>{t('adminHome.needsAttention')}</h2>
         </header>
-        <AlertList items={items} />
+        {machinesState || <AlertList items={items} />}
       </section>
       <section className="ah-card">
         <header>
@@ -352,7 +375,22 @@ function Overview({ data, api }) {
             {t('adminHome.openConsole')}
           </Button>
         </header>
-        <Machines rows={machines} />
+        {machinesState || <Machines rows={machines} />}
+        {review.length > 0 && (
+          <details className="ah-review">
+            <summary>{t('adminHome.reviewRecords', { count: review.length })}</summary>
+            <p className="muted">{t('adminHome.reviewHelp')}</p>
+            <ul>
+              {review.map((row) => (
+                <li key={row.id}>
+                  <b>{row.gpu}</b> · {row.owner} · {row.provider}
+                  {row.mode ? ' · ' + row.mode : ''}
+                  {row.code && <small className="muted"> · {row.code}</small>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        )}
       </section>
       <section className="ah-card">
         <header>
@@ -396,9 +434,9 @@ function BudgetAdministration({ account }) {
       {state.pending && current && authorized && (
         <section className="card-box" role="alert">
           <p>{t('operatorPanel.pendingAdmin')}</p>
-          <button disabled={state.busy} onClick={() => void controller.recover().catch(() => {})}>
+          <Button disabled={state.busy} onClick={() => void controller.recover().catch(() => {})}>
             {t('operatorPanel.checkAdmin')}
-          </button>
+          </Button>
         </section>
       )}
     </section>
@@ -441,7 +479,7 @@ function AdminStats({ api, active }) {
     return () => {
       live = false;
     };
-  }, [api, active, days]);
+  }, [api, active, days, t]);
   return (
     <>
       <div className="ah-toolbar">
@@ -547,8 +585,9 @@ function AdminStats({ api, active }) {
 function Limits({ api, active, account }) {
   const [settings, setSettings] = useState(null);
   const load = async () => setSettings(await api.request(SETTINGS_PATH));
+  const loadEvent = useEffectEvent((...args) => load(...args));
   useEffect(() => {
-    if (active) void load().catch(() => setSettings(null));
+    if (active) void loadEvent().catch(() => setSettings(null));
   }, [api, active]);
   const { t } = useI18n();
   if (!settings) return <Spinner />;
@@ -595,16 +634,15 @@ export default function AdminHome({ account }) {
           <nav className="ah-nav" aria-label={t('adminHome.title')}>
             <h1>{t('adminHome.title')}</h1>
             {SECTIONS.map(([id, label, Icon]) => (
-              <button
+              <Button
                 key={id}
-                type="button"
                 className={section === id ? 'on' : ''}
                 aria-current={section === id ? 'page' : undefined}
                 onClick={() => go(id)}
               >
                 <Icon size={16} aria-hidden="true" />
                 {t(label)}
-              </button>
+              </Button>
             ))}
           </nav>
           <main className="ah-main">

@@ -12,6 +12,7 @@ import re
 import uuid
 
 from sqlalchemy import insert, inspect, select, update
+from .render_limits import MAX_AUDIO_TRACKS
 from .generation_services import freeze_generation_policy
 
 from .repository import (
@@ -236,10 +237,10 @@ def selected_recipe_current(project, shot_id, original, defaults, capabilities):
     if not isinstance(recipe, dict):
         return None
     from .generation_draft import plan_body, read_draft
-    from .storyboard_versions import effective_project
+    from .creator_controls import effective_creator_project as effective_project
 
     try:
-        rendered, _ = effective_project(project, shot_id, defaults)
+        rendered, _ = effective_project(project, shot_id, defaults, original)
         draft, issues = read_draft(
             rendered,
             shot_id,
@@ -622,7 +623,8 @@ class FilmRuns:
                 raise ValueError("film_chapter_clip_count_limit")
             if (
                 any(has_segments(shot) for shot in shots)
-                and expanded_audio_count(project, chapter["id"], shots) > 32
+                and expanded_audio_count(project, chapter["id"], shots)
+                > MAX_AUDIO_TRACKS
             ):
                 raise ValueError("film_audio_track_count_limit")
             if options["burn_subtitles"]:
@@ -1106,7 +1108,7 @@ class FilmRuns:
             self.repo, self.tenant, principal.owner, compiled, admission.execution
         )
         digest = request_hash(compiled)
-        plan = self.repo.create_plan(
+        self.repo.create_plan(
             self.access.scope(principal, value["project_id"]),
             compiled,
             admission.execution,
@@ -1287,11 +1289,11 @@ class FilmRuns:
                     target = next(
                         item
                         for item in current["chapters"]
-                        if item["chapter_id"] == chapter["chapter_id"]
+                        if item["chapter_id"] == chapter["chapter_id"]  # noqa: B023 -- called synchronously in this iteration
                     )
-                    if target["artifact_id"] not in {None, result["artifact_id"]}:
+                    if target["artifact_id"] not in {None, result["artifact_id"]}:  # noqa: B023 -- called synchronously in this iteration
                         raise Conflict("film_result_identity_conflict")
-                    target["artifact_id"] = result["artifact_id"]
+                    target["artifact_id"] = result["artifact_id"]  # noqa: B023 -- called synchronously in this iteration
 
                 value = self._mutate(principal, project_id, run_id, record_chapter)
             job = self.access.job(principal, chapter["job_id"])
@@ -1304,7 +1306,7 @@ class FilmRuns:
                 meta = item["metadata"]
                 return {
                     "kind": meta["kind"],
-                    "simulation": job["request"].get("simulation", False),
+                    "simulation": job["request"].get("simulation", False),  # noqa: B023 -- called synchronously in this iteration
                     "object": {
                         "key": meta["object_key"],
                         "size_bytes": meta["size_bytes"],

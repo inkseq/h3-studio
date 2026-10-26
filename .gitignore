@@ -23,6 +23,13 @@ inventory.json
 !requirements.lock.txt
 !requirements.dev.in
 !requirements.dev.lock.txt
+!requirements.audit.in
+!requirements.audit.lock.txt
+!tools/check_maintainability.py
+!tools/maintainability-baseline.json
+!tools/audit_dependencies.py
+!docs/MAINTAINABILITY.md
+!.github/dependabot.yml
 !pyproject.toml
 !comfy_workflow.py
 !comfy-object-info.json
@@ -56,6 +63,9 @@ inventory.json
 !studio_platform/api.py
 !studio_platform/settings.py
 !studio_platform/error_monitoring.py
+!studio_platform/product_feedback.py
+!tests/test_product_feedback.py
+!docs/PRODUCT-FEEDBACK.md
 !studio_platform/subtitle_quality.py
 !studio_platform/runtime_hosts/subtitle_ocr.py
 !tests/test_subtitle_quality.py
@@ -615,6 +625,8 @@ inventory.json
 
 # CR20 private business backup scheduling.
 !deploy/platform/business_backup.py
+!deploy/platform/business_backup_oom_recovery.py
+!tests/test_business_backup_oom_recovery.py
 !deploy/platform/inkseq-business-backup.service
 !deploy/platform/inkseq-business-backup.timer
 !tests/test_business_backup_schedule.py
@@ -650,6 +662,14 @@ inventory.json
 !skills/inkseq/reference/api.md
 !skills/inkseq/reference/recovery.md
 !studio_platform/storyboard_versions.py
+!studio_platform/story_risk.py
+!tests/test_story_risk.py
+!docs/STORY-RISK-LINT.md
+!studio_platform/take_reviews.py
+!tests/test_take_reviews.py
+!tests/test_take_suggestions.py
+!docs/TAKE-REVIEWS.md
+!docs/TAKE-SUGGESTIONS.md
 !tests/test_storyboard_versions.py
 !studio_platform/story_chat.py
 !studio_platform/story_chat_routes.py
@@ -683,6 +703,8 @@ inventory.json
 !yingxu/src/v2/**
 !yingxu/src/ui/
 !yingxu/src/ui/**
+!yingxu/src/data/
+!yingxu/src/data/**
 
 # Held staging-only, no-GPU resource spike (#295).
 !tools/workflow_spike295.py
@@ -799,3 +821,52 @@ inventory.json
 !tests/test_generation_stats.py
 !studio_platform/support_view.py
 !tests/test_support_view.py
+!studio_platform/result_collection.py
+!tests/test_result_collection.py
+
+!studio_platform/capacity_policy.py
+!studio_platform/slot_lock.py
+!studio_platform/lookup_indexes.py
+!studio_platform/migrations/versions/v20261026_0008_lookup_indexes.py
+!tests/test_lookup_indexes.py
+!docs/LOOKUP-INDEXES.md
+!tests/test_capacity_contract.py
+# Shared bounded multi-track audio contract (#600).
+!studio_platform/render_limits.py
+!tests/test_default_profile_maintenance.py
+# #597 confirmed narrative windows
+!studio_platform/script_window_timing.py
+!studio_platform/script_windows.py
+!studio_platform/script_windows_service.py
+!tests/test_script_windows.py
+!tests/script_windows_native_fixture.py
+# Domain HTTP routers (#588 R5).
+!studio_platform/auth_routes.py
+!studio_platform/project_routes.py
+!studio_platform/guided_routes.py
+!studio_platform/controller_liveness.py
+!tests/test_controller_liveness.py
+
+# Explicit shot clip sound preference (#600).
+!studio_platform/clip_sound.py
+!tests/test_clip_sound.py
+!docs/REVIEW-LOOP-TELEMETRY.md
+!studio_platform/review_loop.py
+!tests/test_review_loop.py
+!studio_platform/domain_turns.py
+!tests/test_domain_turns.py
+!studio_platform/controller_idle.py
+!tests/test_controller_idle.py
+!studio_platform/take_redo.py
+!tests/test_take_redo.py
+!docs/TAKE-REDO-PREVIEW.md
+!studio_platform/creator_controls.py
+!tests/test_creator_controls.py
+!tests/test_creator_controls_v6.py
+!tools/audit_creator_controls.py
+!docs/CREATOR-CONTROLS.md
+!studio_platform/review_routes.py
+!tests/test_backup_observation.py
+!docs/BACKUP-RECOVERY-655.md
+!deploy/platform/business_backup_recovery.py
+!tests/test_business_backup_recovery.py

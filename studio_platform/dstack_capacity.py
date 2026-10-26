@@ -449,6 +449,15 @@ class CapacityRequest:
         return value
 
 
+def request_from_document(document):
+    """Decode a retained request without mutating its immutable JSON receipt."""
+    document = copy.deepcopy(document)
+    for key in ("gpu_names", "regions"):
+        if key in document:
+            document[key] = tuple(document[key])
+    return CapacityRequest(**document)
+
+
 class DstackStore(Protocol):
     """Implement against original capacity intents under its transactional lock.
 
@@ -1139,7 +1148,7 @@ class DstackClient:
         )
 
 
-def _owns(run, binding, project):
+def assert_run_owned(run, binding, project):
     """Compare the owned configuration subset, tolerating added server defaults."""
     _require(
         isinstance(run, dict) and run.get("project_name") == project,
@@ -1238,6 +1247,10 @@ def _owns(run, binding, project):
         _require(run["id"] == binding["run_id"], "dstack_run_identity_changed")
 
 
+# Compatibility for retained tests/callers; the public validator is authoritative.
+_owns = assert_run_owned
+
+
 def _range(value):
     # The pinned API serializes parsed scalar/range requirements as min/max.
     if isinstance(value, dict) and set(value) == {"min", "max"}:
@@ -1270,7 +1283,7 @@ def _resources(value):
     }
 
 
-def _terminal_no_allocation_shape(run, binding):
+def terminal_no_allocation_shape(run, binding):
     """Complete failed singleton without runtime identity; not financial proof."""
     if (
         run.get("status") != "failed"
@@ -1319,6 +1332,9 @@ def _terminal_no_allocation_shape(run, binding):
     )
 
 
+_terminal_no_allocation_shape = terminal_no_allocation_shape
+
+
 def terminal_no_allocation(run, binding):
     """Pinned no-capacity failure, not missing-identity or billing evidence.
 
@@ -1327,7 +1343,7 @@ def terminal_no_allocation(run, binding):
     allocation, omitted fields or another submission cannot use this exemption.
     Call only after the exact owned run/spec has been validated.
     """
-    if not _terminal_no_allocation_shape(run, binding):
+    if not terminal_no_allocation_shape(run, binding):
         return False
     latest = run["latest_job_submission"]
     message = latest.get("termination_reason_message")
@@ -1465,7 +1481,7 @@ def live_capacity_usage(
                     if binding.get("run_id")
                     else client.get(run_name=binding["run_name"])
                 )
-                _owns(run, binding, client.project)
+                assert_run_owned(run, binding, client.project)
                 observed_status = run.get("status")
                 _require(
                     isinstance(observed_status, str)
@@ -1490,7 +1506,7 @@ def live_capacity_usage(
                     )
                     continue
                 if (
-                    _terminal_no_allocation_shape(run, binding)
+                    terminal_no_allocation_shape(run, binding)
                     and binding.get("host_observation") is None
                     and binding.get("host_failure") is None
                 ):
@@ -1671,7 +1687,7 @@ class DstackCapacity:
             return self.observe(request.intent_id)
         try:
             run = self.client.apply(binding["run_spec"])
-            _owns(run, binding, self.client.project)
+            assert_run_owned(run, binding, self.client.project)
             self.store.record(
                 request.intent_id,
                 {
@@ -1713,7 +1729,7 @@ class DstackCapacity:
             )
             if run is None:
                 return None
-            _owns(run, binding, self.client.project)
+            assert_run_owned(run, binding, self.client.project)
             if run.get("status") not in TERMINAL:
                 return None
             value = self._observation(run, binding)
@@ -1746,7 +1762,7 @@ class DstackCapacity:
             "dstack_no_allocation_review_unconfirmed",
         )
         run = self.client.get(run_id=binding["run_id"])
-        _owns(run, binding, self.client.project)
+        assert_run_owned(run, binding, self.client.project)
         _require(
             terminal_no_allocation(run, binding),
             "dstack_no_allocation_review_unconfirmed",
@@ -1806,7 +1822,7 @@ class DstackCapacity:
                     "observed_at": self.clock(),
                 }
             else:
-                _owns(run, binding, self.client.project)
+                assert_run_owned(run, binding, self.client.project)
                 value = self._observation(run, binding)
                 self._confirm_provider_removal(run, binding, value)
                 observed_run = run
@@ -2308,7 +2324,7 @@ class DstackCapacity:
         else:
             run = self.client.get(run_id=binding["run_id"])
             _require(run is not None, "dstack_stop_identity_unconfirmed")
-            _owns(run, binding, self.client.project)
+            assert_run_owned(run, binding, self.client.project)
             if run.get("status") in TERMINAL | {"terminating", "stopping"}:
                 value = self._observation(run, binding)
                 self.store.record(intent_id, value)

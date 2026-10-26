@@ -1,4 +1,5 @@
 import { setPreviewAsUser } from './preview-as-user.js';
+import { Button } from './ui/Button.jsx';
 import React, { useEffect, useState } from 'react';
 import {
   Cpu,
@@ -99,17 +100,17 @@ export default function StudioHeader({
             name: supportView.display_name || supportView.owner,
             minutes: Math.max(1, Math.round((supportView.expires_at - Date.now() / 1000) / 60)),
           })}
-          <button type="button" className="small" onClick={() => void endSupportView()}>
+          <Button size="sm" onClick={() => void endSupportView()}>
             {t('menu.supportViewEnd')}
-          </button>
+          </Button>
         </div>
       )}
       {access?.previewing && (
         <div className="preview-as-user-bar" role="status">
           {t('menu.previewing')}
-          <button type="button" className="small" onClick={() => setPreviewAsUser(false)}>
+          <Button size="sm" onClick={() => setPreviewAsUser(false)}>
             {t('menu.previewExit')}
-          </button>
+          </Button>
         </div>
       )}
       <header className="hbar">
@@ -119,31 +120,29 @@ export default function StudioHeader({
         </a>
         <nav aria-label={t('nav.mobile')}>
           {links.map(([id, href, label, Icon]) => (
-            <button
+            <Button
               key={id}
-              type="button"
               className={active === id ? 'on' : ''}
               aria-current={active === id ? 'page' : undefined}
               onClick={() => navigateApp(href)}
             >
               <Icon className="nav-ico" size={20} aria-hidden="true" />
               <span>{t(label)}</span>
-            </button>
+            </Button>
           ))}
         </nav>
         <div className="spacer" />
         <CreditsChip account={account} />
         <ThemeToggle />
         <LanguageSwitcher />
-        <button
-          type="button"
+        <Button
           className={'ghost hbar-trash' + (active === 'trash' ? ' on' : '')}
           onClick={() => navigateApp('/trash')}
           aria-label={t('trash.title')}
           title={t('trash.title')}
         >
           <Trash2 size={15} />
-        </button>
+        </Button>
         {accountMenu || <AccountMenu account={account} items={menuItems} onSignIn={onSignIn} />}
       </header>
     </>

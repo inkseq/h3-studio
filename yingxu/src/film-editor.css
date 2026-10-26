@@ -526,6 +526,6 @@ button.autosave-status {
   padding: 1px 6px;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.6);
-  color: #fff;
+  color: var(--white);
   text-shadow: none;
 }

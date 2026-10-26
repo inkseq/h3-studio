@@ -134,7 +134,7 @@ class ChangeClassificationTests(unittest.TestCase):
         ]
         self.assertIn("if: always()", aggregate)
         self.assertIn(
-            "needs: [changes, python, postgres, frontend, frontend-tools, containers, macos-helper]",
+            "needs: [changes, python, postgres, frontend, frontend-tools, containers]",
             aggregate,
         )
         self.assertIn(

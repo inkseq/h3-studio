@@ -9,15 +9,15 @@ import math
 from .protocol import BackendError
 
 from .native_outputs import (
-    NATIVE_DELIVERY,
-    GPU_R2_DELIVERY,
-    NATIVE_POLICIES,
-    NATIVE_EVIDENCE_FIELDS,
-    validate_delivery_policy,
-    native_delivery_spec,
-    delivery_spec,
-    gpu_delivery,
-    validate_delivery_evidence,
+    NATIVE_DELIVERY,  # noqa: F401 -- public compatibility re-export
+    GPU_R2_DELIVERY,  # noqa: F401 -- public compatibility re-export
+    NATIVE_POLICIES,  # noqa: F401 -- public compatibility re-export
+    NATIVE_EVIDENCE_FIELDS,  # noqa: F401 -- public compatibility re-export
+    validate_delivery_policy,  # noqa: F401 -- public compatibility re-export
+    native_delivery_spec,  # noqa: F401 -- public compatibility re-export
+    delivery_spec,  # noqa: F401 -- public compatibility re-export
+    gpu_delivery,  # noqa: F401 -- public compatibility re-export
+    validate_delivery_evidence,  # noqa: F401 -- public compatibility re-export
 )
 
 

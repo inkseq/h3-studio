@@ -70,7 +70,15 @@ def normalize(settings, repo, principal, value, *, stored=False, partial=False):
             body["recipe_id"] = recipe_alias(mode)
             body.pop("model", None)
             body.pop("model_id", None)
-    return normalize_request(settings, body, allow_internal=internal)
+    resolved, selection = normalize_request(settings, body, allow_internal=internal)
+    if stored or selection is not None or not internal:
+        from .creator_controls import controls
+
+        if "controls" in resolved:
+            resolved["controls"] = controls(
+                resolved.get("deployment_profile_id"), resolved["controls"]
+            )
+    return resolved, selection
 
 
 def public_mode_edit(value):
@@ -249,6 +257,12 @@ def project(settings, repo, principal, value, *, stored=False, baseline=None):
         if not isinstance(h3, dict):
             continue
         if not SELECTOR_NAMES.keys() & h3.keys():
+            if stored and "controls" in h3:
+                from .creator_controls import controls
+
+                h3["controls"] = controls(
+                    settings.default_deployment_profile_id, h3["controls"]
+                )
             continue
         previous_entity = previous_entities.get(entity.get("id"), {})
         previous = (
@@ -261,6 +275,12 @@ def project(settings, repo, principal, value, *, stored=False, baseline=None):
             continue
         selected = _selectors(h3)
         resolved, _ = normalize(settings, repo, principal, selected, stored=stored)
+        if stored and "controls" in h3:
+            from .creator_controls import controls
+
+            h3["controls"] = controls(
+                resolved.get("deployment_profile_id"), h3["controls"]
+            )
         for key in SELECTOR_NAMES:
             h3.pop(key, None)
         for source, target in (

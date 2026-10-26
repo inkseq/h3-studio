@@ -25,8 +25,6 @@ export const secondsLabel = (value, locale = 'zh') =>
   nonnegative(value)
     ? translate(locale, 'operator.display.seconds', { value: Math.round(value) })
     : translate(locale, 'operator.display.notObserved');
-export const policyLabel = (value) =>
-  hostPolicyOptions.find((option) => option.value === value)?.label || '规则待核对';
 export function failureLabel(value, locale = 'zh') {
   if (!value) return translate(locale, 'operatorPanel.noFailure');
   const stages = {

@@ -45,25 +45,21 @@ a {
   background: transparent;
   font-weight: 600;
 }
-.wbar .v2-export-menu {
-  position: relative;
-}
-.v2-export-menu > summary {
-  display: flex;
+/* Export and cloud-status triggers sit in the story header; their panels are the shared
+   ui/Menu and ui/Popover (#514 phase 2). */
+.v2-export-trigger,
+.wbar .v2-autosave {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
-  list-style: none;
 }
-.v2-export-menu > div {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  z-index: 80;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  box-shadow: var(--shadow);
+.v2-cloud-status-panel p {
+  font-size: 12px;
+  overflow-wrap: anywhere;
 }
 .visually-hidden,
 .skip {
@@ -112,42 +108,8 @@ dialog {
   padding: 20px;
 }
 dialog::backdrop {
-  background: #0009;
+  background: var(--media-scrim);
   backdrop-filter: blur(3px);
-}
-dialog.modal {
-  width: 560px;
-}
-dialog.modal.wide {
-  width: 900px;
-}
-.modal-heading,
-.modal-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.modal-heading h2 {
-  flex: 1;
-  font-size: 16px;
-}
-.modal-actions {
-  justify-content: flex-end;
-  margin-top: 18px;
-}
-.modal form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.modal fieldset {
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  min-width: 0;
-}
-.modal pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 .inline-error,
 [role='alert'] {
@@ -157,14 +119,7 @@ dialog.modal.wide {
   background: var(--warn-soft);
   color: var(--warn);
 }
-.story-account-menu {
-  position: relative;
-}
-.story-account-menu > summary {
-  list-style: none;
-  cursor: pointer;
-}
-.story-account-panel,
+
 .story-recent-menu {
   position: absolute;
   right: 0;
@@ -177,20 +132,7 @@ dialog.modal.wide {
   border-radius: 12px;
   box-shadow: var(--shadow);
 }
-.story-account-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.story-account-panel p {
-  color: var(--muted);
-}
-.story-account-panel small {
-  display: block;
-}
-.story-account-panel button {
-  justify-content: flex-start;
-}
+
 .story-recent {
   position: relative;
 }
@@ -252,49 +194,7 @@ dialog.modal.wide {
   min-height: 18px;
   justify-content: center;
 }
-.libp-detail .library-media {
-  width: 100%;
-  max-height: 40vh;
-  object-fit: contain;
-}
-.libp-detail {
-  overflow: auto;
-}
-.libp-detail > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.libp-detail > button,
-.libp-detail > a {
-  margin: 6px;
-}
-.libp-detail p {
-  color: var(--muted);
-}
-.media-library-upload {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
-  border: 1px dashed var(--line-2);
-  border-radius: 10px;
-  padding: 18px;
-}
-.media-library-upload > div > div {
-  display: flex;
-  gap: 8px;
-}
-.media-library-upload h3 {
-  font-size: 14px;
-}
-.media-library-upload p {
-  color: var(--muted);
-  font-size: 12px;
-}
-.media-library-upload.is-dragging {
-  border-color: var(--accent);
-}
+
 .sb-workspace {
   flex: 1;
   min-height: 0;
@@ -304,17 +204,7 @@ dialog.modal.wide {
 .sb-workspace > .layout {
   width: 100%;
 }
-.sb-error {
-  background: var(--warn-soft);
-  color: var(--warn);
-  padding: 10px;
-  display: flex;
-  gap: 8px;
-  flex: none;
-}
-.sb-error > span {
-  flex: 1;
-}
+
 .sb-toast {
   position: fixed;
   left: 50%;
@@ -339,14 +229,9 @@ dialog.modal.wide {
   padding: 0;
   border-radius: 50%;
   justify-content: center;
-  background: #1118;
+  background: var(--media-scrim);
 }
-.workbench-expand {
-  position: absolute;
-  right: 45px;
-  top: 14px;
-  z-index: 2;
-}
+
 .drawer.workbench-expanded {
   left: calc(var(--libw, 260px) + 8px);
   width: auto !important;
@@ -369,47 +254,7 @@ dialog.modal.wide {
 .workbench-bulk > small {
   display: none;
 }
-.workbench-takes {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-.workbench-take {
-  position: relative;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px;
-}
-.workbench-take video,
-.workbench-take img {
-  width: 100%;
-  max-height: 160px;
-  object-fit: contain;
-}
-.workbench-compare {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.workbench-defaults {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 8px;
-}
-.workbench-defaults fieldset {
-  border: 0;
-  padding: 4px 0;
-}
-.workbench-defaults fieldset > div,
-.workbench-defaults label {
-  display: block;
-  margin: 8px 0;
-}
-.workbench-defaults small {
-  display: block;
-  color: var(--muted);
-}
+
 .home > main:has(> .home-main) {
   flex: 1;
   min-height: 0;
@@ -450,10 +295,7 @@ dialog.modal.wide {
 .v2-home-search:focus-within {
   border-color: var(--accent);
 }
-.home-search-row > .story-library-refresh {
-  padding: 7px;
-  justify-content: center;
-}
+
 .v2-home-quick {
   display: inline-flex;
   align-items: center;
@@ -494,12 +336,10 @@ dialog.modal.wide {
   top: 8px;
   z-index: 2;
 }
+/* On the cover image: the shared small icon button on a dark scrim. */
 .story-wrap > .item-menu > button {
-  width: 32px;
-  height: 28px;
-  justify-content: center;
-  background: #0008;
-  padding: 3px;
+  background: var(--media-scrim);
+  color: var(--white);
 }
 .home-foot {
   display: flex;
@@ -527,8 +367,7 @@ dialog.modal.wide {
   .hbar nav {
     transform: none;
   }
-  .hbar > :is(button, .story-account-menu > summary),
-  .hbar .story-account-menu > summary {
+  .hbar > button {
     min-width: 36px;
     min-height: 36px;
   }
@@ -558,11 +397,7 @@ dialog.modal.wide {
   .home-head > .v2-home-new > span {
     display: none;
   }
-  .home-search-row > .story-library-refresh {
-    width: 36px;
-    min-width: 36px;
-    height: 36px;
-  }
+
   .story-card.new > small {
     white-space: normal;
     overflow: visible;
@@ -574,17 +409,7 @@ dialog.modal.wide {
     border-radius: 999px;
     backdrop-filter: blur(6px);
   }
-  .story-account-panel {
-    position: fixed;
-    top: 54px;
-    right: 12px;
-  }
-  .libp-detail {
-    position: fixed;
-    inset: 0;
-    z-index: 80;
-    background: var(--surface);
-  }
+
   .drawer.workbench-expanded {
     left: 0;
     width: 100% !important;
@@ -597,7 +422,7 @@ dialog.modal.wide {
     position: fixed;
     inset: 0;
     z-index: 11;
-    background: #0009;
+    background: var(--media-scrim);
     border: 0;
   }
   .sb-workspace .layout > .library {
@@ -622,53 +447,6 @@ dialog.modal.wide {
     width: 24px;
     height: 24px;
   }
-  .workbench-expand {
-    right: 45px;
-  }
-  .workbench-compare {
-    grid-template-columns: 1fr;
-  }
-}
-
-.v2-cloud-status {
-  position: relative;
-}
-.v2-cloud-status > summary {
-  cursor: pointer;
-  list-style: none;
-}
-.v2-cloud-status > div {
-  position: absolute;
-  left: 0;
-  top: 100%;
-  z-index: 80;
-  min-width: 220px;
-  max-width: min(320px, 90vw);
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  box-shadow: var(--shadow-lg);
-}
-.v2-cloud-status p {
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.v2-cloud-status button {
-  text-align: left;
-  justify-content: flex-start;
-}
-@media (max-width: 760px) {
-  .v2-cloud-status > div {
-    position: fixed;
-    top: 88px;
-    left: 12px;
-    right: 12px;
-    max-width: none;
-  }
 }
 
 /* Phone targets keep the approved compact geometry without shrinking controls. */
@@ -692,13 +470,6 @@ dialog.modal.wide {
   .ui-empty > a {
     min-height: 36px;
     display: inline-flex;
-    align-items: center;
-  }
-  .story-account-panel :is(button, a) {
-    min-height: 36px;
-  }
-  .story-account-panel a {
-    display: flex;
     align-items: center;
   }
 }
@@ -770,7 +541,50 @@ dialog.modal.wide {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Fixed columns, so hiding the picture (narrow sidebar) never shifts the name into the
+   picture's 46 px slot or stretches the add button. */
+.sb-workspace .library .pcard {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.sb-workspace .library .pcard > :is(.athumb, .profile-initial) {
+  grid-column: 1;
+}
+.sb-workspace .library .pcard > .pcard-body {
+  grid-column: 2;
+}
+.sb-workspace .library .pcard > .pcard-open {
+  grid-column: 3;
+}
+/* The card's "…" menu floats over its top-right corner on hover or focus, so the name and
+   details keep the full width at any sidebar size; touch screens always show it. */
+.sb-workspace .library .pcard > .item-menu {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: opacity var(--ease);
+}
+.sb-workspace .library .pcard:is(:hover, :focus-within) > .item-menu,
+.sb-workspace .library .pcard > .item-menu:has([aria-expanded='true']) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .sb-workspace .library .pcard > .item-menu {
+    opacity: 1;
+  }
+  .sb-workspace .library .pcard-body {
+    padding-right: var(--h-sm);
+  }
+}
 @container sb-library (max-width: 240px) {
+  /* Narrow: the name may take two lines instead of cutting to a few letters. */
+  .sb-workspace .library .pcard-body > b {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+  }
   .sb-workspace .library .lib-tabs {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -778,10 +592,7 @@ dialog.modal.wide {
   .sb-workspace .library .lib-tip {
     display: none;
   }
-  .sb-workspace .library .add-profile {
-    white-space: normal;
-    text-align: left;
-  }
+
   .sb-workspace .library .lib-head > small {
     display: none;
   }
@@ -879,4 +690,19 @@ dialog.modal.wide {
   color: var(--muted);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+/* Story settings (owner, 2026-10-26): story actions live here, not in the account menu. */
+.story-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.story-settings-actions .trash-button-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }

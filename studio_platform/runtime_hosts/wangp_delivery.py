@@ -8,7 +8,6 @@ import base64
 from fractions import Fraction
 import hashlib
 import http.client
-import json
 import math
 import os
 from pathlib import Path
@@ -19,12 +18,10 @@ from ..media import ffmpeg, probe
 from ..inference.protocol import BackendError, NotReady
 from ..inference.wangp_delivery import (
     MAX_BYTES,
-    POLICY,
     validate_delivery_request,
     validate_delivery_receipt,
     validate_role_descriptor,
     validate_upload_target,
-    json_copy,
 )
 from .wangp_receipts import checked_directory, checked_reader, sync_directory
 

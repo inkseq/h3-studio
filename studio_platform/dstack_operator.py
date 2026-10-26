@@ -21,11 +21,19 @@ from sqlalchemy import insert, select, update
 
 from .dstack_capacity import (
     CapacityRequest,
+    request_from_document,
     DstackCapacity,
     DstackClient,
     DstackError,
     live_capacity_usage,
 )
+from .capacity_policy import window_open, cold_unadmitted_runtime
+
+# Compatibility names for retained callers; all current call sites use the contract.
+_window_open = window_open
+_cold_unadmitted_runtime = cold_unadmitted_runtime
+_request = request_from_document
+
 from .operator_capacity import (
     OperatorError,
     advance_command_revision,
@@ -121,35 +129,6 @@ def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
-def _window_open(intent, node, now):
-    deadline = intent.get("hard_deadline")
-    if deadline is not None:
-        return _finite(deadline) and now < deadline
-    from .worker_admission import dstack_policy_reason
-
-    return dstack_policy_reason(intent, node, now) is None
-
-
-def _cold_unadmitted_runtime(binding, workers, instance_id, now, fresh_seconds):
-    """No platform execution ever acquired this exact cold preparation.
-
-    Worker rows and the first-ready/incarnation latches are retained history,
-    not just current availability. Unknown previously admitted execution must
-    never use this exception. The caller still checks ownership and stop intent.
-    """
-    observed = binding.get("observed_at")
-    return (
-        not workers
-        and bool(instance_id)
-        and binding.get("provider_instance_id") == instance_id
-        and binding.get("state") in {"starting", "runtime_unconfirmed"}
-        and binding.get("runtime_incarnation") is None
-        and binding.get("first_runtime_ready_at") is None
-        and _finite(observed)
-        and 0 <= now - observed <= fresh_seconds
-    )
-
-
 def plan_offers(plan, request):
     """Project pinned 0.22.5 offers; no backend_data, SSH or user/job payload."""
     require(
@@ -214,14 +193,6 @@ def plan_offers(plan, request):
         result,
         key=lambda row: (not row["inventory_confirmed"], row["hourly_cost_microusd"]),
     )[:100]
-
-
-def _request(document):
-    document = copy.deepcopy(document)
-    for key in ("gpu_names", "regions"):
-        if key in document:
-            document[key] = tuple(document[key])
-    return CapacityRequest(**document)
 
 
 def _protected_read(filename, *, maximum=262144):
@@ -307,7 +278,7 @@ class LedgerDstackStore:
                 return False
             require(
                 intent["state"] == "reserved"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_start_window_expired",
             )
             if stored.get("host_selection") is not None:
@@ -605,7 +576,7 @@ class LedgerDstackStore:
                 value.get("ready") is True
                 and value.get("state") == "ready"
                 and node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock())
+                and window_open(intent, node, self.repo.clock())
             )
             if value.get("runtime_incarnation") and value.get("state") in {
                 "ready",
@@ -924,7 +895,7 @@ class LedgerDstackStore:
             launch_started = binding.get(
                 "bootstrap_launch_started", binding.get("bootstrap_started")
             )
-            cold_unadmitted = _cold_unadmitted_runtime(
+            cold_unadmitted = cold_unadmitted_runtime(
                 binding,
                 workers,
                 intent.get("provider_instance_id"),
@@ -993,7 +964,7 @@ class LedgerDstackStore:
             )
             require(
                 node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired",
             )
             return True
@@ -1013,7 +984,7 @@ class LedgerDstackStore:
             )
             require(
                 node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired",
             )
             if binding.get("bootstrap_launch_started", True):
@@ -1049,7 +1020,7 @@ class LedgerDstackStore:
                 return False
             require(
                 node["desired_state"] == "running"
-                and _window_open(intent, node, self.repo.clock()),
+                and window_open(intent, node, self.repo.clock()),
                 "dstack_bootstrap_window_expired",
             )
             binding.update(
@@ -1745,7 +1716,7 @@ class DstackOperator:
         reason = budget_reason(connection, intent, node, now)
         if reason:
             raise BudgetExceeded(reason)
-        require(_window_open(intent, node, now), "dstack_continuing_policy_unconfirmed")
+        require(window_open(intent, node, now), "dstack_continuing_policy_unconfirmed")
         started = connection.execute(
             select(scaler_actions.c.create_started_at).where(
                 scaler_actions.c.intent_id == intent["id"]
@@ -2698,325 +2669,413 @@ class DstackOperator:
                     "node_id": existing["payload"]["node_id"],
                     "state": existing["state"],
                 }
-            self._enabled()
-            preview = self.repo._locked(
-                connection,
-                select(operator_previews).where(
-                    operator_previews.c.id == body["preview_id"],
-                    operator_previews.c.actor == actor,
-                ),
+            value, demand, profile = self._validate_start_preview(
+                connection, owner, actor, body["preview_id"], demand_job_id
             )
-            require(
-                preview is not None and self.repo.clock() < preview["expires_at"],
-                "dstack_preview_expired",
-            )
-            value = preview["payload"]
-            require(
-                value.get("config_fingerprint") == self.fingerprint
-                and value.get("capacity_backend") == BACKEND_MARKER,
-                "dstack_preview_configuration_changed",
-            )
-            require(
-                value.get("admin_limits_snapshot")
-                == request_hash(self._admin_limits(connection)),
-                "spending_settings_changed",
-            )
-            from .operator_prices import OperatorPrices
-
-            trusted = self.profiles.get(value["profile_id"])
-            require(
-                trusted is not None and trusted["owner_id"] == owner,
-                "dstack_profile_not_found",
-                404,
-            )
-            demand = value.get("demand_start")
-            if demand_job_id is not None:
-                from .dstack_demand import validate_start
-
-                require(
-                    demand
-                    == validate_start(self, connection, demand_job_id, trusted["id"]),
-                    "dstack_demand_changed",
-                )
-            else:
-                require(demand is None, "dstack_demand_start_internal_only")
-            price, _, price_version = OperatorPrices(self.repo, self.settings).read(
-                connection, trusted
-            )
-            require(
-                price["snapshot"] == value["price_policy_snapshot"]
-                if "price_policy_snapshot" in value
-                else price_version == 0
-                and value["profile"]["max_price_microusd"]
-                == price["max_price_microusd"],
-                "dstack_price_policy_changed",
-            )
-            # A preview is single-use even when another idempotency key is supplied.
-            previous = connection.execute(
-                select(operator_commands.c.id).where(
-                    operator_commands.c.actor == actor,
-                    operator_commands.c.kind == "dstack_start",
-                    operator_commands.c.payload["preview_id"].as_string()
-                    == body["preview_id"],
-                )
-            ).first()
-            require(previous is None, "dstack_preview_consumed")
-            profile = value["profile"]
-            if value.get("group_id") is not None:
-                from .dstack_workspace import owned_group
-
-                owned_group(connection, self.settings, owner, value["group_id"])
-            now = self.repo.clock()
-            guard = value.get("lifecycle", {}).get("test_gpu_guard")
-            if guard is not None:
-                from .dstack_test_budget import (
-                    projected_cost,
-                    guard_limit,
-                    limit_reason,
-                    validate_guard,
-                )
-
-                try:
-                    validate_guard(guard)
-                except ValueError:
-                    raise OperatorError("dstack_test_guard_invalid", 422) from None
-                require(
-                    guard["version"] == 2
-                    and value["request"].get("test_task_id") == guard["task_id"],
-                    "dstack_test_task_required",
-                    422,
-                )
-                require(
-                    projected_cost(connection, guard, now)
-                    + value["reservation_microusd"]
-                    < guard_limit(guard),
-                    limit_reason(guard),
-                )
-            from .supplier_spending import admit as admit_supplier_spending
-
-            capacity_snapshot = admit_supplier_spending(
-                connection,
-                self.settings.tenant_id,
-                now,
-                additional_microusd=value["reservation_microusd"],
-                reference_type="instance",
-                test_task=guard is not None,
-                policy=self._admin_limits(connection),
-            )
-            usage = self._limits(
-                connection,
-                profile["max_price_microusd"],
-                profile=profile,
-                request=value["request"],
-                capacity_snapshot=capacity_snapshot,
+            now, capacity_snapshot, usage = self._admit_start_capacity(
+                connection, owner, value, profile
             )
             original = value["request"]
-            host_selection = original.get("host_selection")
-            if profile["backend"] == "vastai":
-                from .host_policy import HostPolicyStore, selection
-
-                require(host_selection is not None, "host_selection_required")
-                host_selection = selection(host_selection, now=now)
-                require(
-                    HostPolicyStore(
-                        self.repo, self.settings.tenant_id
-                    ).admission_snapshot(connection, host_selection["offers"], now=now)
-                    == host_selection["policy_snapshot"],
-                    "host_policy_changed",
-                )
-                # Re-read exact offer identities before any reservation. Stock
-                # presence isn't allocation proof; a missing/changed mapping
-                # refuses this new intent, without changing old paid runs.
-                fresh = self.capacity.client.vast_offer_mapping(
-                    _request(original), clock=self.repo.clock
-                )
-                current = {
-                    r['offer_id']: r['machine_id']
-                    for r in fresh['offers']
-                    if type(r.get('advertised_download_mbps')) in (int, float)
-                    and math.isfinite(r['advertised_download_mbps'])
-                    and r['advertised_download_mbps'] >= 1000
-                }
-                excluded = set()
-                if demand_job_id is not None:
-                    from .dstack_demand_start import excluded_download_machines
-
-                    excluded = excluded_download_machines(
-                        connection, self.settings.tenant_id, demand_job_id
-                    )
-                require(
-                    all(
-                        current.get(r["offer_id"]) == r["machine_id"]
-                        and r['machine_id'] not in excluded
-                        for r in host_selection["offers"]
-                    ),
-                    "host_offer_identity_changed",
-                )
-                self.capacity.client.reusable_hosts_confirmed(
-                    {r["offer_id"]: r["machine_id"] for r in host_selection["offers"]}
-                )
-                selection(host_selection, now=self.repo.clock())
-            continuing = original.get("lifecycle_version", 1) == 2
-            if continuing:
-                # A tenant/global account alone cannot authorize unlimited
-                # keep-on for a person. Require their original scoped cap.
-                accounts = list(
-                    connection.execute(
-                        select(budget_accounts).where(
-                            budget_accounts.c.id.in_(profile["budget_account_ids"])
-                        )
-                    ).mappings()
-                )
-                require(
-                    any(
-                        account["tenant_id"] == self.settings.tenant_id
-                        and account["owner_id"] == owner
-                        and account["project_id"] in (None, profile["project_id"])
-                        for account in accounts
-                    ),
-                    "dstack_owner_spend_limit_required",
-                )
-                require(
-                    self._expected_runtime(profile)
-                    == value["lifecycle"]["expected_runtime_s"],
-                    "dstack_execution_policy_changed",
-                )
-            scope = Scope(
-                self.settings.tenant_id,
-                owner,
-                profile["project_id"],
-                actor_id,
+            host_selection = self._validate_start_hosts(
+                connection, profile, original, now, demand_job_id
             )
-            intent = self.repo.reserve_instance_intent(
-                scope,
-                profile["pool"],
-                "dstack:" + body["preview_id"],
-                physical_gpus=1,
-                slots=1,
-                reserved_cost_microusd=value["reservation_microusd"],
-                hard_deadline=original["hard_deadline"],
-                budget_account_ids=profile["budget_account_ids"],
-                dry_run=False,
-                provider=PROVIDERS[profile["backend"]],
-                connection=connection,
-                continuing=continuing,
-                capacity_usage=usage,
-                active_instance_ids=usage["active_instance_ids"],
-                capacity_policy_snapshot=capacity_snapshot if continuing else None,
-                capacity_provenance={
-                    "capacity_backend": BACKEND_MARKER,
-                    "lifecycle_version": 2,
-                    "tenant_id": scope.tenant_id,
-                    "owner_id": scope.owner_id,
-                    "project_id": scope.project_id,
-                    "pool": profile["pool"],
-                    "provider": PROVIDERS[profile["backend"]],
-                }
-                if continuing and capacity_snapshot is not None
-                else None,
-            )
-            request = self._capacity_request(
-                profile,
-                intent["id"],
-                now,
-                original["hard_deadline"],
-                original["max_duration_s"],
-                lifecycle_version=original.get("lifecycle_version", 1),
-                test_max_duration=original.get("test_max_duration_s"),
-                test_task_id=original.get("test_task_id"),
-            )
-            if host_selection is not None:
-                request = replace(request, host_selection=copy.deepcopy(host_selection))
-            binding = request.binding(self.config["ssh_public_key"])
-            command_id = str(uuid.uuid4())
-            command_payload = {
-                "preview_id": body["preview_id"],
-                "node_id": intent["id"],
-                "capacity_backend": BACKEND_MARKER,
-            }
-            connection.execute(
-                insert(operator_commands).values(
-                    id=command_id,
-                    actor=actor,
-                    idempotency_key=key,
-                    request_hash=digest,
-                    kind="dstack_start",
-                    state="accepted",
-                    payload=command_payload,
-                    created_at=now,
-                    updated_at=now,
-                )
-            )
-            payload = {
-                "capacity_backend": BACKEND_MARKER,
-                "command_revision": 0,
-                "tenant_id": self.settings.tenant_id,
-                "owner_id": owner,
-                "project_id": profile["project_id"],
-                "provider": PROVIDERS[profile["backend"]],
-                "configuration_id": profile["configuration_id"],
-                "hard_deadline": request.hard_deadline,
-                "group_id": value.get("group_id"),
-                "observation_fresh_seconds": self.policy["observation_fresh_seconds"],
-                "hourly_cost_microusd": profile["max_price_microusd"],
-                "hold_until": 0,
-                "selection": {
-                    "runtime_profile_id": profile["runtime_profile_id"],
-                    "mode": profile["mode"],
-                    "gpu_type": profile["gpu_names"][0],
-                    "node_count": 1,
-                    "gpu_count": 1,
-                    "ttl_seconds": original["max_duration_s"],
-                    "provider": PROVIDERS[profile["backend"]],
-                },
-                "request": asdict(request),
-                "dstack": binding,
-            }
-            if demand is not None:
-                payload["demand_start"] = copy.deepcopy(demand)
-            if capacity_snapshot is not None:
-                payload["capacity_policy_snapshot"] = copy.deepcopy(capacity_snapshot)
-            if continuing:
-                payload["lifecycle"] = copy.deepcopy(value["lifecycle"])
-                payload["hold_until"] = payload["lifecycle"]["hold_until"]
-                payload["extra_reservation_microusd"] = profile[
-                    "extra_reservation_microusd"
-                ]
-            connection.execute(
-                insert(operator_nodes).values(
-                    intent_id=intent["id"],
-                    command_id=command_id,
-                    ordinal=0,
-                    binding_id=profile["id"],
-                    binding_hash=request_hash(binding),
-                    payload=payload,
-                    desired_state="running",
-                    runtime_state="reserved",
-                    updated_at=now,
-                )
-            )
-            if value.get("group_id") is not None:
-                from .dstack_workspace import advance_group_version
-
-                advance_group_version(
-                    connection, self.settings, owner, value["group_id"], now
-                )
-            connection.execute(
-                insert(scaler_actions).values(
-                    intent_id=intent["id"],
-                    pool=profile["pool"],
-                    launch_spec={
-                        "capacity_backend": BACKEND_MARKER,
-                        "request": asdict(request),
-                    },
-                )
-            )
-            self.repo._emit(
+            intent, continuing = self._reserve_start_intent(
                 connection,
-                "dstack.start_requested",
-                intent["id"],
-                {"intent_id": intent["id"], "command_id": command_id},
+                owner,
+                actor_id,
+                body["preview_id"],
+                value,
+                profile,
+                original,
+                usage,
+                capacity_snapshot,
             )
+            request, command_id = self._record_start_request(
+                connection,
+                owner,
+                actor,
+                key,
+                digest,
+                body["preview_id"],
+                value,
+                demand,
+                profile,
+                original,
+                now,
+                intent,
+                host_selection,
+                capacity_snapshot,
+                continuing,
+            )
+        return self._apply_reserved_start(intent, request, command_id)
+
+    def _validate_start_preview(
+        self, connection, owner, actor, preview_id, demand_job_id
+    ):
+        """Validate the original preview and single-use fence under the start locks."""
+        self._enabled()
+        preview = self.repo._locked(
+            connection,
+            select(operator_previews).where(
+                operator_previews.c.id == preview_id,
+                operator_previews.c.actor == actor,
+            ),
+        )
+        require(
+            preview is not None and self.repo.clock() < preview["expires_at"],
+            "dstack_preview_expired",
+        )
+        value = preview["payload"]
+        require(
+            value.get("config_fingerprint") == self.fingerprint
+            and value.get("capacity_backend") == BACKEND_MARKER,
+            "dstack_preview_configuration_changed",
+        )
+        require(
+            value.get("admin_limits_snapshot")
+            == request_hash(self._admin_limits(connection)),
+            "spending_settings_changed",
+        )
+        from .operator_prices import OperatorPrices
+
+        trusted = self.profiles.get(value["profile_id"])
+        require(
+            trusted is not None and trusted["owner_id"] == owner,
+            "dstack_profile_not_found",
+            404,
+        )
+        demand = value.get("demand_start")
+        if demand_job_id is not None:
+            from .dstack_demand import validate_start
+
+            require(
+                demand
+                == validate_start(self, connection, demand_job_id, trusted["id"]),
+                "dstack_demand_changed",
+            )
+        else:
+            require(demand is None, "dstack_demand_start_internal_only")
+        price, _, price_version = OperatorPrices(self.repo, self.settings).read(
+            connection, trusted
+        )
+        require(
+            price["snapshot"] == value["price_policy_snapshot"]
+            if "price_policy_snapshot" in value
+            else price_version == 0
+            and value["profile"]["max_price_microusd"] == price["max_price_microusd"],
+            "dstack_price_policy_changed",
+        )
+        # A preview is single-use even when another idempotency key is supplied.
+        previous = connection.execute(
+            select(operator_commands.c.id).where(
+                operator_commands.c.actor == actor,
+                operator_commands.c.kind == "dstack_start",
+                operator_commands.c.payload["preview_id"].as_string() == preview_id,
+            )
+        ).first()
+        require(previous is None, "dstack_preview_consumed")
+        profile = value["profile"]
+        return value, demand, profile
+
+    def _admit_start_capacity(self, connection, owner, value, profile):
+        """Check the original test, supplier and fleet budgets before reservation."""
+        if value.get("group_id") is not None:
+            from .dstack_workspace import owned_group
+
+            owned_group(connection, self.settings, owner, value["group_id"])
+        now = self.repo.clock()
+        guard = value.get("lifecycle", {}).get("test_gpu_guard")
+        if guard is not None:
+            from .dstack_test_budget import (
+                projected_cost,
+                guard_limit,
+                limit_reason,
+                validate_guard,
+            )
+
+            try:
+                validate_guard(guard)
+            except ValueError:
+                raise OperatorError("dstack_test_guard_invalid", 422) from None
+            require(
+                guard["version"] == 2
+                and value["request"].get("test_task_id") == guard["task_id"],
+                "dstack_test_task_required",
+                422,
+            )
+            require(
+                projected_cost(connection, guard, now) + value["reservation_microusd"]
+                < guard_limit(guard),
+                limit_reason(guard),
+            )
+        from .supplier_spending import admit as admit_supplier_spending
+
+        capacity_snapshot = admit_supplier_spending(
+            connection,
+            self.settings.tenant_id,
+            now,
+            additional_microusd=value["reservation_microusd"],
+            reference_type="instance",
+            test_task=guard is not None,
+            policy=self._admin_limits(connection),
+        )
+        usage = self._limits(
+            connection,
+            profile["max_price_microusd"],
+            profile=profile,
+            request=value["request"],
+            capacity_snapshot=capacity_snapshot,
+        )
+        return now, capacity_snapshot, usage
+
+    def _validate_start_hosts(self, connection, profile, original, now, demand_job_id):
+        """Re-read exact Vast offer identities before reserving the original intent."""
+        host_selection = original.get("host_selection")
+        if profile["backend"] == "vastai":
+            from .host_policy import HostPolicyStore, selection
+
+            require(host_selection is not None, "host_selection_required")
+            host_selection = selection(host_selection, now=now)
+            require(
+                HostPolicyStore(self.repo, self.settings.tenant_id).admission_snapshot(
+                    connection, host_selection["offers"], now=now
+                )
+                == host_selection["policy_snapshot"],
+                "host_policy_changed",
+            )
+            # Re-read exact offer identities before any reservation. Stock
+            # presence isn't allocation proof; a missing/changed mapping
+            # refuses this new intent, without changing old paid runs.
+            fresh = self.capacity.client.vast_offer_mapping(
+                request_from_document(original), clock=self.repo.clock
+            )
+            current = {
+                r['offer_id']: r['machine_id']
+                for r in fresh['offers']
+                if type(r.get('advertised_download_mbps')) in (int, float)
+                and math.isfinite(r['advertised_download_mbps'])
+                and r['advertised_download_mbps'] >= 1000
+            }
+            excluded = set()
+            if demand_job_id is not None:
+                from .dstack_demand_start import excluded_download_machines
+
+                excluded = excluded_download_machines(
+                    connection, self.settings.tenant_id, demand_job_id
+                )
+            require(
+                all(
+                    current.get(r["offer_id"]) == r["machine_id"]
+                    and r['machine_id'] not in excluded
+                    for r in host_selection["offers"]
+                ),
+                "host_offer_identity_changed",
+            )
+            self.capacity.client.reusable_hosts_confirmed(
+                {r["offer_id"]: r["machine_id"] for r in host_selection["offers"]}
+            )
+            selection(host_selection, now=self.repo.clock())
+        return host_selection
+
+    def _reserve_start_intent(
+        self,
+        connection,
+        owner,
+        actor_id,
+        preview_id,
+        value,
+        profile,
+        original,
+        usage,
+        capacity_snapshot,
+    ):
+        """Preserve the scoped spend cap and reserve one immutable instance intent."""
+        continuing = original.get("lifecycle_version", 1) == 2
+        if continuing:
+            # A tenant/global account alone cannot authorize unlimited
+            # keep-on for a person. Require their original scoped cap.
+            accounts = list(
+                connection.execute(
+                    select(budget_accounts).where(
+                        budget_accounts.c.id.in_(profile["budget_account_ids"])
+                    )
+                ).mappings()
+            )
+            require(
+                any(
+                    account["tenant_id"] == self.settings.tenant_id
+                    and account["owner_id"] == owner
+                    and account["project_id"] in (None, profile["project_id"])
+                    for account in accounts
+                ),
+                "dstack_owner_spend_limit_required",
+            )
+            require(
+                self._expected_runtime(profile)
+                == value["lifecycle"]["expected_runtime_s"],
+                "dstack_execution_policy_changed",
+            )
+        scope = Scope(
+            self.settings.tenant_id,
+            owner,
+            profile["project_id"],
+            actor_id,
+        )
+        intent = self.repo.reserve_instance_intent(
+            scope,
+            profile["pool"],
+            "dstack:" + preview_id,
+            physical_gpus=1,
+            slots=1,
+            reserved_cost_microusd=value["reservation_microusd"],
+            hard_deadline=original["hard_deadline"],
+            budget_account_ids=profile["budget_account_ids"],
+            dry_run=False,
+            provider=PROVIDERS[profile["backend"]],
+            connection=connection,
+            continuing=continuing,
+            capacity_usage=usage,
+            active_instance_ids=usage["active_instance_ids"],
+            capacity_policy_snapshot=capacity_snapshot if continuing else None,
+            capacity_provenance={
+                "capacity_backend": BACKEND_MARKER,
+                "lifecycle_version": 2,
+                "tenant_id": scope.tenant_id,
+                "owner_id": scope.owner_id,
+                "project_id": scope.project_id,
+                "pool": profile["pool"],
+                "provider": PROVIDERS[profile["backend"]],
+            }
+            if continuing and capacity_snapshot is not None
+            else None,
+        )
+        return intent, continuing
+
+    def _record_start_request(
+        self,
+        connection,
+        owner,
+        actor,
+        key,
+        digest,
+        preview_id,
+        value,
+        demand,
+        profile,
+        original,
+        now,
+        intent,
+        host_selection,
+        capacity_snapshot,
+        continuing,
+    ):
+        """Persist request, command, node and outbox in the original transaction."""
+        request = self._capacity_request(
+            profile,
+            intent["id"],
+            now,
+            original["hard_deadline"],
+            original["max_duration_s"],
+            lifecycle_version=original.get("lifecycle_version", 1),
+            test_max_duration=original.get("test_max_duration_s"),
+            test_task_id=original.get("test_task_id"),
+        )
+        if host_selection is not None:
+            request = replace(request, host_selection=copy.deepcopy(host_selection))
+        binding = request.binding(self.config["ssh_public_key"])
+        command_id = str(uuid.uuid4())
+        command_payload = {
+            "preview_id": preview_id,
+            "node_id": intent["id"],
+            "capacity_backend": BACKEND_MARKER,
+        }
+        connection.execute(
+            insert(operator_commands).values(
+                id=command_id,
+                actor=actor,
+                idempotency_key=key,
+                request_hash=digest,
+                kind="dstack_start",
+                state="accepted",
+                payload=command_payload,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        payload = {
+            "capacity_backend": BACKEND_MARKER,
+            "command_revision": 0,
+            "tenant_id": self.settings.tenant_id,
+            "owner_id": owner,
+            "project_id": profile["project_id"],
+            "provider": PROVIDERS[profile["backend"]],
+            "configuration_id": profile["configuration_id"],
+            "hard_deadline": request.hard_deadline,
+            "group_id": value.get("group_id"),
+            "observation_fresh_seconds": self.policy["observation_fresh_seconds"],
+            "hourly_cost_microusd": profile["max_price_microusd"],
+            "hold_until": 0,
+            "selection": {
+                "runtime_profile_id": profile["runtime_profile_id"],
+                "mode": profile["mode"],
+                "gpu_type": profile["gpu_names"][0],
+                "node_count": 1,
+                "gpu_count": 1,
+                "ttl_seconds": original["max_duration_s"],
+                "provider": PROVIDERS[profile["backend"]],
+            },
+            "request": asdict(request),
+            "dstack": binding,
+        }
+        if demand is not None:
+            payload["demand_start"] = copy.deepcopy(demand)
+        if capacity_snapshot is not None:
+            payload["capacity_policy_snapshot"] = copy.deepcopy(capacity_snapshot)
+        if continuing:
+            payload["lifecycle"] = copy.deepcopy(value["lifecycle"])
+            payload["hold_until"] = payload["lifecycle"]["hold_until"]
+            payload["extra_reservation_microusd"] = profile[
+                "extra_reservation_microusd"
+            ]
+        connection.execute(
+            insert(operator_nodes).values(
+                intent_id=intent["id"],
+                command_id=command_id,
+                ordinal=0,
+                binding_id=profile["id"],
+                binding_hash=request_hash(binding),
+                payload=payload,
+                desired_state="running",
+                runtime_state="reserved",
+                updated_at=now,
+            )
+        )
+        if value.get("group_id") is not None:
+            from .dstack_workspace import advance_group_version
+
+            advance_group_version(
+                connection, self.settings, owner, value["group_id"], now
+            )
+        connection.execute(
+            insert(scaler_actions).values(
+                intent_id=intent["id"],
+                pool=profile["pool"],
+                launch_spec={
+                    "capacity_backend": BACKEND_MARKER,
+                    "request": asdict(request),
+                },
+            )
+        )
+        self.repo._emit(
+            connection,
+            "dstack.start_requested",
+            intent["id"],
+            {"intent_id": intent["id"], "command_id": command_id},
+        )
+        return request, command_id
+
+    def _apply_reserved_start(self, intent, request, command_id):
+        """Apply once after commit and preserve the reviewed-settlement read-back fence."""
         # The reservation, immutable request and command survive any crash before
         # or after HTTP. Controller restart resumes this exact intent only.
         try:
@@ -3114,7 +3173,7 @@ class DstackOperator:
                     fresh
                     and binding.get("ready") is True
                     and node["desired_state"] == "running"
-                    and _window_open(intent, node, now)
+                    and window_open(intent, node, now)
                 )
                 workers = (
                     list(
@@ -3182,6 +3241,12 @@ class DstackOperator:
                         ),
                         "matching_worker_unavailable",
                     )
+                # Presentation only: unresolved stopped creates still retain their
+                # original ledger/fences until allocation evidence is reconciled.
+                review_required = (
+                    node["desired_state"] == "stopped"
+                    and node["runtime_state"] == "creation_unknown"
+                )
                 result.append(
                     {
                         "node_id": node["intent_id"],
@@ -3192,6 +3257,10 @@ class DstackOperator:
                         "mode": payload["selection"]["mode"],
                         "desired_state": node["desired_state"],
                         "state": node["runtime_state"],
+                        "record_group": "pending_review"
+                        if review_required
+                        else "current",
+                        "review_required": review_required,
                         "ready": ready,
                         "native_ready": native_ready,
                         "slots_ready": len(eligible) if native_ready else 0,
@@ -3200,6 +3269,7 @@ class DstackOperator:
                         "hard_deadline": payload["hard_deadline"],
                         "hold_until": payload["hold_until"],
                         "hourly_cost_microusd": payload["hourly_cost_microusd"],
+                        "hourly_cost_basis": "approved_ceiling",
                         **(
                             {"lifecycle": copy.deepcopy(payload["lifecycle"])}
                             if "lifecycle" in payload
@@ -3361,7 +3431,7 @@ class DstackOperator:
                 select(instance_intents).where(instance_intents.c.id == node_id),
             )
             require(
-                node["desired_state"] == "running" and _window_open(intent, node, now),
+                node["desired_state"] == "running" and window_open(intent, node, now),
                 "dstack_hold_window_expired",
             )
             if payload.get("lifecycle", {}).get("version") == 2:

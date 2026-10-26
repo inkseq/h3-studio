@@ -10,9 +10,8 @@ from __future__ import annotations
 from .asset_objects import ASSET_OBJECT_ROLES
 from .schema_version import (
     PAYMENT_REVISION,
-    PAYMENT_REVISIONS,
     LIVE_PAYMENT_REVISION,
-    CREDIT_ADMISSION_REVISION,
+    CREDIT_ADMISSION_REVISIONS,
 )
 
 import csv
@@ -71,7 +70,7 @@ def _schemas(
 ):
     # Register the same additive business tables as the application, without
     # constructing services or creating/migrating a source schema.
-    from . import operator_capacity, capacity_market, dstack_workspace
+    from . import operator_capacity, capacity_market, dstack_workspace  # noqa: F401 -- register additive backup schema tables
     from .repository import metadata
     from .assets import metadata as assets
     from .storage_asset_journal import _schema as quota
@@ -85,7 +84,7 @@ def _schemas(
     from .credit_schema import metadata as credits
     from .payment_schema import frozen_metadata as payment_metadata
 
-    if payment_revision == CREDIT_ADMISSION_REVISION:
+    if payment_revision in CREDIT_ADMISSION_REVISIONS:
         from sqlalchemy import MetaData
         from .migrations.versions.v20261022_0007_credit_admission import extend
 
@@ -396,9 +395,9 @@ def _export_business_db(snapshot, destination):
                 counts[name] = 0
                 continue
             columns = ",".join('"' + c.name + '"' for c in table.columns)
-            select_sql = 'SELECT ' + columns + ' FROM "' + name + '"'
+            select_sql = 'SELECT ' + columns + ' FROM "' + name + '"'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
             insert_sql = (
-                'INSERT INTO "'
+                'INSERT INTO "'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                 + name
                 + '" ('
                 + columns
@@ -941,18 +940,16 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                         continue
                     actual_columns = columns.get(name, [])
                     expected_columns = [column.name for column in table.columns]
-                    # Additive historical migrations can change physical order.
-                    # Both queries below explicitly use canonical column names.
+                    # Explicit columns tolerate historical physical ordering.
                     if len(actual_columns) != len(expected_columns) or set(
                         actual_columns
                     ) != set(expected_columns):
                         raise BackupError("backup_database_version_mismatch")
                     relation = '"' + schema + '"."' + name + '"'
-                    # Bound a row before fetching it into client memory. The
-                    # read-only snapshot is established by the inventory query.
+                    # Inventory fixed the read-only snapshot; bound rows before fetching.
                     count, size, largest = source.execute(
                         text(
-                            "SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM "
+                            "SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM "  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                             + relation
                             + " t"
                         )
@@ -978,8 +975,9 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                         for name, marker in json_nulls.items()
                     )
                     query_fields = fields + (("," + markers) if markers else "")
+                    batch_rows = min(200, max(1, 4 * MIB // max(1, int(largest))))
                     insert_sql = (
-                        'INSERT INTO "'
+                        'INSERT INTO "'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                         + name
                         + '" ('
                         + fields
@@ -990,15 +988,15 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     actual = 0
                     with source.execute(
                         text(
-                            "SELECT " + query_fields + " FROM " + relation
-                        ).execution_options(stream_results=True, max_row_buffer=200)
+                            "SELECT " + query_fields + " FROM " + relation  # noqa: S608 -- identifiers from fixed schema metadata, not user input
+                        ).execution_options(
+                            stream_results=True, max_row_buffer=batch_rows
+                        )
                     ) as rows:
-                        while batch := rows.mappings().fetchmany(200):
+                        while batch := rows.mappings().fetchmany(batch_rows):
                             if time.monotonic() > deadline:
                                 raise BackupError("backup_snapshot_size_or_time_limit")
-                            # JSON null and SQL NULL both arrive as Python None;
-                            # preserve the distinction instead of silently
-                            # changing later IS NULL/query behavior on recovery.
+                            # Markers distinguish JSON null from SQL NULL (both None).
                             values = [
                                 tuple(
                                     json.dumps(
@@ -1015,6 +1013,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                             ]
                             output.exec_driver_sql(insert_sql, values)
                             actual += len(batch)
+                            del values, batch  # Release before the next fetch.
                     if actual != count:
                         raise BackupError("backup_snapshot_count_mismatch")
                     counts[name] = actual
@@ -1315,7 +1314,7 @@ def verify_local(directory, *, allow_incomplete=False):
             # Verify its original table set, then create safe empty additions
             # only inside the NEW restoration target.
             counts = {
-                name: db.execute('SELECT count(*) FROM "' + name + '"').fetchone()[0]
+                name: db.execute('SELECT count(*) FROM "' + name + '"').fetchone()[0]  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                 for name in _tables()
                 if name in existing
             }
@@ -1860,7 +1859,7 @@ def dump_postgres(
             from .payment_schema import validate_connection as payment_valid
 
             revision = read_schema_version(connection, schema=schema)
-            if revision == CREDIT_ADMISSION_REVISION:
+            if revision in CREDIT_ADMISSION_REVISIONS:
                 from .credit_admission import ready as admission_ready
                 from .credits import CreditError
 

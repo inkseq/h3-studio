@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
 import { artifactMedia } from './artifact-media.js';
@@ -17,7 +18,7 @@ export default function ArtifactResult({ artifact, job, title }) {
   return (
     <div className="roughcut-result">
       <div className="cloud-actions">
-        <button
+        <Button
           onClick={() => {
             setPreview(!preview);
             setError('');
@@ -29,7 +30,7 @@ export default function ArtifactResult({ artifact, job, title }) {
                 ? at('adjunct.artifactResult.copy36')
                 : at('adjunct.artifactResult.copy37'))
             : previewLabel}
-        </button>
+        </Button>
         <a
           className="artifact-download"
           href={media.downloadURL}

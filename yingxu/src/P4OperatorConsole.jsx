@@ -1,21 +1,19 @@
 import { EmptyState, Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
 import StudioHeader from './StudioHeader.jsx';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { MenuItem } from './AccountMenu.jsx';
 import { readBrowserLocale, translate } from './i18n/locale.js';
-import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
+import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
-  ArrowLeft,
   ChevronRight,
   Clock,
-  LogOut,
   Plus,
   RefreshCw,
   Server,
   ShieldCheck,
-  X,
   Cpu,
   Square,
   Timer,
@@ -119,7 +117,7 @@ function Dialog({ title, subtitle, onClose, wide = false, children }) {
   );
 }
 function KeepFields({ value, onChange }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   return (
     <>
       <div className="p4-policies" role="group" aria-label={t('operator.status108')}>
@@ -128,8 +126,7 @@ function KeepFields({ value, onChange }) {
           ['until', t('operator.status2')],
           ['until_stopped', t('operator.status3')],
         ].map(([key, text]) => (
-          <button
-            type="button"
+          <Button
             key={key}
             aria-pressed={value.keep_on === key}
             onClick={() =>
@@ -141,7 +138,7 @@ function KeepFields({ value, onChange }) {
             }
           >
             {text}
-          </button>
+          </Button>
         ))}
       </div>
       <div className="p4-policy-extra">
@@ -187,7 +184,7 @@ function KeepFields({ value, onChange }) {
   );
 }
 function Login() {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
@@ -230,9 +227,13 @@ function Login() {
           </label>
         )}
         {error && <p role="alert">{error}</p>}
-        <button className="p4-primary" disabled={c.busy || !c.auth || c.auth.auth_ready === false}>
+        <Button
+          type="submit"
+          className="p4-primary"
+          disabled={c.busy || !c.auth || c.auth.auth_ready === false}
+        >
           {t('operator.copy54')}
-        </button>
+        </Button>
       </form>
     </section>
   );
@@ -261,7 +262,7 @@ function ProgressObservation({ view, detail = false }) {
   );
 }
 function ProgressAmount({ value, label }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   return (
     <div className="p4-progress-amount">
       <span>
@@ -384,9 +385,10 @@ export function MachineRow({
   return (
     <div data-ui-surface="row" className={'mrow' + (stopping(node) ? ' stopping' : '')}>
       <Cpu size={22} className="mrow-icon" />
-      <button
+      <Button
+        variant="ghost"
         data-ui-surface="row"
-        className="mrow-main ghost"
+        className="mrow-main"
         onClick={() => onDetail(node)}
         title={t('operator.more.machineDetails', { id: node.id?.slice(0, 8) })}
       >
@@ -423,7 +425,7 @@ export function MachineRow({
           {t('operator.more.perHour')} · <Timer size={11} />
           <span className="p4-keep">{keepText(node, locale)}</span>
         </small>
-      </button>
+      </Button>
       <div className="mrow-state">
         <span className={'pill ' + (node.current_job ? 'busy' : status.tone)}>
           {status.id === 'stopped' ? t('operator.status18') : status.label}
@@ -432,33 +434,30 @@ export function MachineRow({
       </div>
       <div className="mrow-actions">
         {onKeep && (
-          <button
-            className="small ghost"
+          <Button
+            variant="ghost"
+            size="sm"
             disabled={blocked || stopping(node)}
             onClick={() => onKeep(node)}
           >
             {t('operator.copy63')}
-          </button>
+          </Button>
         )}
         {onMove && (
-          <button className="small ghost" disabled={blocked} onClick={() => onMove(node)}>
+          <Button variant="ghost" size="sm" disabled={blocked} onClick={() => onMove(node)}>
             {t('operator.copy85')}
-          </button>
+          </Button>
         )}
         {onStop && (
-          <button
-            className="small"
-            disabled={blocked || stopping(node)}
-            onClick={() => onStop(node)}
-          >
+          <Button size="sm" disabled={blocked || stopping(node)} onClick={() => onStop(node)}>
             <Square size={12} />
             {t('operator.copy119')}
-          </button>
+          </Button>
         )}
         {!onStop && (
-          <button className="small ghost" onClick={() => onDetail(node)}>
+          <Button variant="ghost" size="sm" onClick={() => onDetail(node)}>
             <ChevronRight size={16} />
-          </button>
+          </Button>
         )}
       </div>
     </div>
@@ -690,15 +689,14 @@ function StartDialog({
             </div>
             <div className="p4-between">
               <h3>{t('operator.copy68')}</h3>
-              <button
-                type="button"
+              <Button
                 className="p4-text"
                 onClick={() =>
                   changed(() => setRows(withDefaultPrices(initialRows(profiles), profiles)))
                 }
               >
                 1 FL ＋ 1 REF
-              </button>
+              </Button>
             </div>
             {rows.map((row, index) => {
               const selected = profiles.find((profile) => profile.id === row.profile_id),
@@ -712,8 +710,7 @@ function StartDialog({
                   <header>
                     <b>{t('operator.more.config', { index: index + 1 })}</b>
                     <div>
-                      <button
-                        type="button"
+                      <Button
                         className="p4-text"
                         onClick={() =>
                           changed(() =>
@@ -722,9 +719,8 @@ function StartDialog({
                         }
                       >
                         {t('operator.copy69')}
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
                         className="p4-text"
                         disabled={rows.length === 1}
                         onClick={() =>
@@ -734,7 +730,7 @@ function StartDialog({
                         }
                       >
                         {t('operator.copy70')}
-                      </button>
+                      </Button>
                     </div>
                   </header>
                   <div className="p4-configfields">
@@ -765,9 +761,8 @@ function StartDialog({
                         {['fl', 'ref'].map((mode) => {
                           const target = sameEngineInMode(choices, row.profile_id, mode);
                           return (
-                            <button
+                            <Button
                               key={mode}
-                              type="button"
                               aria-pressed={selected?.mode === mode}
                               disabled={!target}
                               title={
@@ -778,7 +773,7 @@ function StartDialog({
                               onClick={() => target && edit(row.id, { profile_id: target.id })}
                             >
                               {t('operator.mode.short.' + mode)}
-                            </button>
+                            </Button>
                           );
                         })}
                       </div>
@@ -823,9 +818,8 @@ function StartDialog({
                       </summary>
                       <div className="p4-engine-list">
                         {engines.map((profile, position) => (
-                          <button
+                          <Button
                             key={profile.id}
-                            type="button"
                             aria-pressed={profile.id === row.profile_id}
                             onClick={() => edit(row.id, { profile_id: profile.id })}
                           >
@@ -835,7 +829,7 @@ function StartDialog({
                                 {t('operator.more.engineNewest')}
                               </small>
                             )}
-                          </button>
+                          </Button>
                         ))}
                       </div>
                       <small>{t('operator.more.engineHelp')}</small>
@@ -855,8 +849,7 @@ function StartDialog({
                 </section>
               );
             })}
-            <button
-              type="button"
+            <Button
               onClick={() =>
                 changed(() =>
                   setRows((current) => [
@@ -868,7 +861,7 @@ function StartDialog({
             >
               <Plus size={14} />
               {t('operator.copy75')}
-            </button>
+            </Button>
             <h3 className="p4-fieldheading">{t('operator.copy63')}</h3>
             <KeepFields value={policy} onChange={(value) => changed(() => setPolicy(value))} />
           </fieldset>
@@ -949,11 +942,11 @@ function StartDialog({
       <footer>
         <small>{t('operator.copy78')}</small>
         <div>
-          <button disabled={working} onClick={onClose}>
+          <Button disabled={working} onClick={onClose}>
             {confirmed ? t('operator.status27') : t('operator.status28')}
-          </button>
+          </Button>
           {!confirmed && (
-            <button
+            <Button
               className="p4-primary"
               disabled={working || busy || !expanded || !lifetimeBody(policy) || !task}
               onClick={previews.length ? start : check}
@@ -963,7 +956,7 @@ function StartDialog({
                 : previews.length
                   ? countText(t, 'operator.more.start', { count: previews.length })
                   : countText(t, 'operator.more.checkStart', { count })}
-            </button>
+            </Button>
           )}
         </div>
       </footer>
@@ -971,7 +964,7 @@ function StartDialog({
   );
 }
 function KeepDialog({ target, kind, controller, busy, onClose }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const lifecycle = target.lifecycle || target.nodes?.[0]?.lifecycle,
     [value, setValue] = useState({
       keep_on: lifecycle?.keep_on || 'idle',
@@ -1020,17 +1013,17 @@ function KeepDialog({ target, kind, controller, busy, onClose }) {
       <footer>
         <span />
         <div>
-          <button disabled={working} onClick={onClose}>
+          <Button disabled={working} onClick={onClose}>
             {receipt ? t('operator.status27') : t('operator.status28')}
-          </button>
+          </Button>
           {!receipt && (
-            <button
+            <Button
               className="p4-primary"
               disabled={busy || working || !lifetimeBody(value)}
               onClick={save}
             >
               {t('operator.copy79')}
-            </button>
+            </Button>
           )}
         </div>
       </footer>
@@ -1038,7 +1031,7 @@ function KeepDialog({ target, kind, controller, busy, onClose }) {
   );
 }
 function ActionResults({ receipt }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   return (
     <div className="p4-preview" role="status">
       <b>{receipt.state === 'partial' ? t('operator.status33') : t('operator.status34')}</b>
@@ -1052,7 +1045,7 @@ function ActionResults({ receipt }) {
   );
 }
 function StopDialog({ target, kind, controller, busy, onClose }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [impact, setImpact] = useState(null),
     [error, setError] = useState(''),
     [loading, setLoading] = useState(true),
@@ -1139,17 +1132,17 @@ function StopDialog({ target, kind, controller, busy, onClose }) {
       <footer>
         <span />
         <div>
-          <button disabled={working} onClick={onClose}>
+          <Button disabled={working} onClick={onClose}>
             {receipt ? t('operator.status27') : t('operator.status28')}
-          </button>
+          </Button>
           {!receipt && (
-            <button
+            <Button
               className="p4-primary"
               disabled={busy || working || loading || !impact}
               onClick={stop}
             >
               {impact?.warnings?.length ? t('operator.status37') : t('operator.status38')}
-            </button>
+            </Button>
           )}
         </div>
       </footer>
@@ -1232,9 +1225,9 @@ export function MachineDetail({
           <small>{t('operator.copy85')}</small>
           {groups.find((group) => group.id === node.group_id)?.name || t('operator.status40')}
           {!admin && (
-            <button className="p4-text p4-link" onClick={() => onMove(node)}>
+            <Button className="p4-text p4-link" onClick={() => onMove(node)}>
               {t('operator.copy86')}
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -1335,20 +1328,20 @@ export function MachineDetail({
         </details>
       )}
       <footer>
-        <button disabled={terminal(node) || stopping(node)} onClick={() => onStop(node)}>
+        <Button disabled={terminal(node) || stopping(node)} onClick={() => onStop(node)}>
           {t('operator.copy97')}
-        </button>
+        </Button>
         <div>
           {!admin && !terminal(node) && (
-            <button disabled={stopping(node)} onClick={() => onKeep(node)}>
+            <Button disabled={stopping(node)} onClick={() => onKeep(node)}>
               <Clock size={14} />
               {t('operator.copy63')}
-            </button>
+            </Button>
           )}
           {!admin && (
-            <button className="p4-primary" onClick={() => onAnother(node)}>
+            <Button className="p4-primary" onClick={() => onAnother(node)}>
               {t('operator.copy98')}
-            </button>
+            </Button>
           )}
         </div>
       </footer>
@@ -1356,7 +1349,7 @@ export function MachineDetail({
   );
 }
 function MoveDialog({ node, groups, controller, busy, onClose }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [target, setTarget] = useState(node.group_id || ''),
     [error, setError] = useState('');
   return (
@@ -1380,7 +1373,7 @@ function MoveDialog({ node, groups, controller, busy, onClose }) {
       <FloatingMessage tone="error" text={error ? error : null} />
       <footer>
         <span />
-        <button
+        <Button
           className="p4-primary"
           disabled={busy}
           onClick={async () => {
@@ -1393,7 +1386,7 @@ function MoveDialog({ node, groups, controller, busy, onClose }) {
           }}
         >
           {t('operator.copy79')}
-        </button>
+        </Button>
       </footer>
     </Dialog>
   );
@@ -1514,10 +1507,10 @@ function Inventory({ profiles, controller, onStart, testTaskRequired = false }) 
             </option>
           </select>
         </label>
-        <button className="p4-primary" disabled={pending || !model || !task} onClick={scan}>
+        <Button className="p4-primary" disabled={pending || !model || !task} onClick={scan}>
           <RefreshCw size={15} />
           {pending ? t('operator.status43') : t('operator.status44')}
-        </button>
+        </Button>
       </section>
       <p className="p4-meta">{t('operator.copy104')}</p>
       <div className="p4-offers">
@@ -1601,7 +1594,7 @@ function Inventory({ profiles, controller, onStart, testTaskRequired = false }) 
                 <small>{t('operator.copy112')}</small>
                 <footer>
                   <span>{t('operator.copy113')}</span>
-                  <button
+                  <Button
                     className="p4-primary"
                     disabled={!allowed}
                     onClick={() =>
@@ -1609,7 +1602,7 @@ function Inventory({ profiles, controller, onStart, testTaskRequired = false }) 
                     }
                   >
                     {t('operator.copy114')}
-                  </button>
+                  </Button>
                 </footer>
               </section>
             );
@@ -1668,9 +1661,9 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
           snapshot.nodes.map((node) => (
             <div className="p4-admin-machine" key={node.id}>
               <MachineRow node={node} profiles={profiles} onDetail={onDetail} admin />
-              <button disabled={terminal(node) || stopping(node)} onClick={() => onStop(node)}>
+              <Button disabled={terminal(node) || stopping(node)} onClick={() => onStop(node)}>
                 {t('operator.copy119')}
-              </button>
+              </Button>
             </div>
           ))
         ) : (
@@ -1699,7 +1692,7 @@ export default function P4OperatorConsole() {
   if (pageActive && location.path === '/operator') ownLocation.current = location;
   useEffect(() => {
     if (pageActive) document.title = t('operator.pageTitle');
-  }, [locale, pageActive]);
+  }, [locale, pageActive, t]);
   const c = useCloud(),
     controller = useMemo(() => createP4OperatorController({ locale: readBrowserLocale }), []),
     state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState),
@@ -1737,17 +1730,16 @@ export default function P4OperatorConsole() {
       clearTimeout(timer);
     };
   }, [controller, c.account, view, pageActive, legacyView]);
+  const hasSnapshot = !!state.snapshot,
+    isAdmin = state.snapshot?.operator?.admin === true,
+    adminDialog = !!dialog?.admin;
   useEffect(() => {
-    if (
-      state.denied ||
-      !state.snapshot ||
-      (dialog?.admin && state.snapshot.operator?.admin !== true)
-    ) {
+    if (state.denied || !hasSnapshot || (adminDialog && !isAdmin)) {
       setDialog(null);
-      if (state.denied || state.snapshot?.operator?.admin !== true)
+      if (state.denied || !isAdmin)
         setView((current) => (current === 'admin' ? 'machines' : current));
     }
-  }, [state.denied, state.snapshot?.operator?.admin]);
+  }, [state.denied, hasSnapshot, isAdmin, adminDialog]);
   const snapshot = state.snapshot,
     profiles = state.catalog?.profiles || [],
     groups = snapshot?.groups || [],
@@ -1819,7 +1811,7 @@ export default function P4OperatorConsole() {
       <StudioHeader
         account={c.account}
         active="operator"
-        menuItems={admin && <MenuItem onClick={showAdmin}>{t('operator.copy130')}</MenuItem>}
+        menuItems={admin && <MenuItem onSelect={showAdmin}>{t('operator.copy130')}</MenuItem>}
       />
       <main className="home-main ops-gpu-page">
         <div className="home-head p4-page-heading">
@@ -1830,8 +1822,10 @@ export default function P4OperatorConsole() {
           <small className="muted p4-observed-at">
             {snapshot ? time(snapshot.observed_at, locale) : '—'}
           </small>
-          <button
-            className="small ghost p4-page-refresh"
+          <Button
+            variant="ghost"
+            size="sm"
+            className="p4-page-refresh"
             title={t('operator.status118')}
             aria-label={t('operator.status118')}
             disabled={state.loading || !c.account}
@@ -1839,16 +1833,17 @@ export default function P4OperatorConsole() {
           >
             <RefreshCw size={13} />
             {t('operator.status118')}
-          </button>
+          </Button>
           <div className="spacer" />
-          <button
-            className="primary p4-page-launch"
+          <Button
+            variant="primary"
+            className="p4-page-launch"
             disabled={blocked || !enabled || !profiles.length}
             onClick={() => start()}
           >
             <Plus size={16} />
             {t('operator.copy132')}
-          </button>
+          </Button>
         </div>
         {state.error && !state.denied && <p role="alert">{state.error}</p>}
         {stale && (
@@ -1868,9 +1863,9 @@ export default function P4OperatorConsole() {
                 ? t('operator.status52')
                 : t('operator.status53')}
             </p>
-            <button disabled={state.busy} onClick={() => quiet(controller.recover())}>
+            <Button disabled={state.busy} onClick={() => quiet(controller.recover())}>
               {t('operator.copy135')}
-            </button>
+            </Button>
           </section>
         )}
         {!c.account ? (
@@ -1897,24 +1892,24 @@ export default function P4OperatorConsole() {
                 ['ended', 'operator.status18'],
                 ['budget', 'operator.status64'],
               ].map(([id, key]) => (
-                <button
+                <Button
                   className={view === id ? 'on' : ''}
                   key={id}
                   aria-current={view === id ? 'page' : undefined}
                   onClick={() => setView(id)}
                 >
                   {t(key)}
-                </button>
+                </Button>
               ))}
               {admin && (
-                <button
+                <Button
                   className={view === 'admin' ? 'on' : ''}
                   aria-current={view === 'admin' ? 'page' : undefined}
                   onClick={showAdmin}
                 >
                   <ShieldCheck size={13} />
                   {t('operator.copy139')}
-                </button>
+                </Button>
               )}
             </nav>
             <div className="stats five">
@@ -1953,19 +1948,19 @@ export default function P4OperatorConsole() {
               <div>
                 <small>{t('operator.more.totalCost')}</small>
                 <b>{money(totalCost)}</b>
-                <button
+                <Button
                   className="linkish keep-label"
                   onClick={() => navigateApp('/settings?tab=budget')}
                 >
                   {t('settings.budget')}
-                </button>
+                </Button>
               </div>
             </div>
             {admin && !adminNodes && (
               <p className="p4-fleet-note muted">
-                <button className="linkish" onClick={showAdmin}>
+                <Button className="linkish" onClick={showAdmin}>
                   {t('operator.fleet.load')}
-                </button>
+                </Button>
               </p>
             )}
             {admin && othersLive.length > 0 && (
@@ -1974,9 +1969,9 @@ export default function P4OperatorConsole() {
                   count: othersLive.length,
                   owners: otherOwners.join('、'),
                 })}{' '}
-                <button className="linkish" onClick={showAdmin}>
+                <Button className="linkish" onClick={showAdmin}>
                   {t('operator.fleet.view')}
-                </button>
+                </Button>
               </p>
             )}
             {view === 'machines' && (
@@ -1995,8 +1990,9 @@ export default function P4OperatorConsole() {
                           {item ? queueLabel(item, locale) : t('operator.status65')}
                         </small>
                         {!!item?.waiting && (
-                          <button
-                            className="small primary"
+                          <Button
+                            variant="primary"
+                            size="sm"
                             disabled={
                               blocked ||
                               !enabled ||
@@ -2005,7 +2001,7 @@ export default function P4OperatorConsole() {
                             onClick={() => start({ mode, one: true, groupId: null })}
                           >
                             {t('operator.copy141')}
-                          </button>
+                          </Button>
                         )}
                         <small className="auto">
                           {t('operator.more.queueCounts', {
@@ -2042,27 +2038,28 @@ export default function P4OperatorConsole() {
                           })}
                         </small>
                         <div className="spacer" />
-                        <button
-                          className="small"
+                        <Button
+                          size="sm"
                           disabled={blocked || !enabled}
                           onClick={() => start({ groupId: group.id, one: true })}
                         >
                           <Plus size={13} />
                           {t('operator.copy142')}
-                        </button>
+                        </Button>
                         {group.id && group.nodes.length > 0 && (
                           <>
-                            <button
-                              className="small"
+                            <Button
+                              size="sm"
                               disabled={blocked}
                               onClick={() =>
                                 setDialog({ type: 'keep', kind: 'group', target: group })
                               }
                             >
                               {t('operator.copy143')}
-                            </button>
-                            <button
-                              className="small danger"
+                            </Button>
+                            <Button
+                              variant="danger"
+                              size="sm"
                               disabled={blocked || !group.nodes.some((node) => !stopping(node))}
                               onClick={() =>
                                 setDialog({ type: 'stop', kind: 'group', target: group })
@@ -2070,7 +2067,7 @@ export default function P4OperatorConsole() {
                             >
                               <Square size={12} />
                               {t('operator.copy144')}
-                            </button>
+                            </Button>
                           </>
                         )}
                       </header>
@@ -2129,7 +2126,7 @@ export default function P4OperatorConsole() {
               <div className="card-box">
                 {nodes.filter(terminal).length ? (
                   nodes.filter(terminal).map((node) => (
-                    <button
+                    <Button
                       className="mrow ended-row"
                       data-ui-surface="row"
                       key={node.id}
@@ -2151,7 +2148,7 @@ export default function P4OperatorConsole() {
                           {costLabel(node.usage?.cost_basis, locale)}
                         </small>
                       </div>
-                    </button>
+                    </Button>
                   ))
                 ) : (
                   <p className="muted">{t('operator.copy146')}</p>

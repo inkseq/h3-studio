@@ -1,9 +1,8 @@
 import StudioHeader from './StudioHeader.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { Button } from './ui/Button.jsx';
-import { DialogActions } from './ui/Dialog.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Field } from './ui/Field.jsx';
-import { FloatingMessage } from './floating-notice.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import CreationHistory from './CreationHistory.jsx';
 import { createQuickChatClient } from './quick-chat-client.js';
@@ -16,13 +15,14 @@ import React, {
   useRef,
   useState,
   useSyncExternalStore,
+  useEffectEvent,
 } from 'react';
 import { createCloudClient } from './cloud-client.js';
 import { createTrashController, trashTargetKey, trashErrorKey } from './trash-commands.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { ChatDialog } from './QuickChatControls.jsx';
 import { store } from './store.js';
 import ItemMenu from './ItemMenu.jsx';
+import { MenuItem } from './ui/Menu.jsx';
 import {
   BookOpen,
   Box,
@@ -195,13 +195,13 @@ export function TrashProvider({ account, children }) {
       {error && (
         <div className="trash-notice" role="alert">
           {error}
-          <button onClick={() => setError('')}>{t('trash.close')}</button>
+          <Button onClick={() => setError('')}>{t('trash.close')}</Button>
         </div>
       )}
       {pending && (
         <div className="trash-notice" role="status">
           <span>{t('trash.pending')}</span>
-          <button
+          <Button
             disabled={busy}
             onClick={() =>
               run(async () => {
@@ -211,9 +211,9 @@ export function TrashProvider({ account, children }) {
             }
           >
             {t('trash.check')}
-          </button>
+          </Button>
           {pending.operationId && (
-            <button
+            <Button
               disabled={busy}
               onClick={() =>
                 run(async () => {
@@ -223,7 +223,7 @@ export function TrashProvider({ account, children }) {
               }
             >
               {t('trash.resume')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -239,15 +239,15 @@ export function TrashProvider({ account, children }) {
             )}
           </span>
           {notice.action === 'trash' && (
-            <button disabled={busy} onClick={() => request('restore', notice.targets)}>
+            <Button disabled={busy} onClick={() => request('restore', notice.targets)}>
               {t('trash.undo')}
-            </button>
+            </Button>
           )}
-          <button onClick={() => setNotice(null)}>{t('trash.close')}</button>
+          <Button onClick={() => setNotice(null)}>{t('trash.close')}</Button>
         </div>
       )}
       {preview && (
-        <ChatDialog
+        <Dialog
           className="ops-dialog"
           title={t('trash.confirm')}
           onClose={() => {
@@ -267,11 +267,11 @@ export function TrashProvider({ account, children }) {
               kept: preview.kept?.objects ?? 0,
             })}
           </p>
-          <button disabled={busy} onClick={() => setPreview(null)}>
+          <Button disabled={busy} onClick={() => setPreview(null)}>
             {t('trash.cancel')}
-          </button>
-          <button
-            className="danger"
+          </Button>
+          <Button
+            variant="danger"
             disabled={busy}
             onClick={() =>
               run(async () => {
@@ -282,8 +282,8 @@ export function TrashProvider({ account, children }) {
             }
           >
             {t('trash.purge')}
-          </button>
-        </ChatDialog>
+          </Button>
+        </Dialog>
       )}
     </Context.Provider>
   );
@@ -294,80 +294,48 @@ export function TrashMenu({ target, onRename, onEdit, onChat, onTrashSettled, di
   if (!ctx?.account) return null;
   return (
     <ItemMenu disabled={disabled || ctx.busy || !!ctx.pending}>
-      {(close) => (
-        <>
-          {onRename && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                close();
-                onRename();
-              }}
-            >
-              {t('trash.rename')}
-            </button>
-          )}
-          {onEdit && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                close();
-                onEdit();
-              }}
-            >
-              {t('trash.edit')}
-            </button>
-          )}
-          {onChat && (
-            <button
-              role="menuitem"
-              onClick={() => {
-                close();
-                onChat();
-              }}
-            >
-              {t('trash.editInChat')}
-            </button>
-          )}
-          <button
-            role="menuitem"
-            onClick={async (event) => {
-              const dialog = event.currentTarget.closest('dialog');
-              close();
-              const receipt = await ctx.request('trash', [target]);
-              if (dialog?.isConnected) {
-                if (onTrashSettled) onTrashSettled();
-                else if (receipt?.state === 'completed')
-                  dialog.dispatchEvent(new Event('inkseq-close-after-trash'));
-              }
-            }}
-          >
-            {t('trash.move')}
-          </button>
-        </>
-      )}
+      {onRename && <MenuItem onSelect={onRename}>{t('trash.rename')}</MenuItem>}
+      {onEdit && <MenuItem onSelect={onEdit}>{t('trash.edit')}</MenuItem>}
+      {onChat && <MenuItem onSelect={onChat}>{t('trash.editInChat')}</MenuItem>}
+      <MenuItem
+        danger
+        onSelect={async (event) => {
+          // A menu opened inside a dialog (the story item list) renders inside it, so the
+          // row can close that dialog once the item has really moved to the trash.
+          const dialog = event.target?.closest?.('dialog');
+          const receipt = await ctx.request('trash', [target]);
+          if (dialog?.isConnected) {
+            if (onTrashSettled) onTrashSettled();
+            else if (receipt?.state === 'completed')
+              dialog.dispatchEvent(new Event('inkseq-close-after-trash'));
+          }
+        }}
+      >
+        {t('trash.move')}
+      </MenuItem>
     </ItemMenu>
   );
 }
 // One-click "move to trash" for panels with a single obvious action (no menu).
-export function TrashButton({ target, onTrashSettled, disabled = false }) {
+// With a `label` it is a plain text button, e.g. "Delete this story".
+export function TrashButton({ target, onTrashSettled, label, disabled = false }) {
   const ctx = useTrash(),
     { t } = useI18n();
   if (!ctx?.account) return null;
   return (
-    <button
-      type="button"
-      className="ghost round trash-button"
-      title={t('trash.move')}
-      aria-label={t('trash.move')}
+    <Button
+      className={label ? 'danger trash-button-text' : 'ghost round trash-button'}
+      title={label || t('trash.move')}
+      aria-label={label || t('trash.move')}
       disabled={disabled || ctx.busy || !!ctx.pending}
       onClick={async () => {
-        await ctx.request('trash', [target]);
-        onTrashSettled?.();
+        const receipt = await ctx.request('trash', [target]);
+        if (receipt?.state === 'completed' || !label) onTrashSettled?.();
       }}
     >
       <Trash2 size={15} />
-    </button>
+      {label}
+    </Button>
   );
 }
 export default function UniversalTrash() {
@@ -440,12 +408,14 @@ export default function UniversalTrash() {
       if (n === epoch.current) setLoading(false);
     }
   };
+  const loadEvent = useEffectEvent((...args) => load(...args));
   useEffect(() => {
     setRows([]);
     setSelected([]);
-    if (ctx?.account && kind !== 'conversation') load();
+    if (ctx?.account && kind !== 'conversation') loadEvent();
+    const epochRef = epoch;
     return () => {
-      epoch.current++;
+      epochRef.current++;
     };
   }, [ctx?.account, ctx?.revision, kind]);
   const inGroup = (row, value = group) =>
@@ -513,13 +483,15 @@ export default function UniversalTrash() {
           </h1>
           <div className="spacer" />
           {ctx?.account && kind !== 'conversation' && (
-            <button
-              className="ghost small danger-text"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="danger-text"
               disabled={locked || !rows.length}
               onClick={empty}
             >
               {t(kind || group !== 'all' ? 'trash.emptyFiltered' : 'trash.empty')}
-            </button>
+            </Button>
           )}
         </div>
         <p className="muted">{t('trash.retention')}</p>
@@ -608,11 +580,11 @@ export default function UniversalTrash() {
                         </option>
                       ))}
                     </select>
-                    <button className="small" disabled={locked} onClick={() => load()}>
+                    <Button size="sm" disabled={locked} onClick={() => load()}>
                       {t('trash.refresh')}
-                    </button>
-                    <button
-                      className="small"
+                    </Button>
+                    <Button
+                      size="sm"
                       disabled={locked}
                       onClick={() =>
                         setSelected(
@@ -621,7 +593,7 @@ export default function UniversalTrash() {
                       }
                     >
                       {t('trash.selectAll')}
-                    </button>
+                    </Button>
                   </div>
                 </details>
                 {error && <p role="alert">{error}</p>}
@@ -633,21 +605,22 @@ export default function UniversalTrash() {
                           ? `已选 ${targets.length} 项`
                           : `${targets.length} selected`}
                         <div className="spacer" />
-                        <button
-                          className="small"
+                        <Button
+                          size="sm"
                           disabled={locked}
                           onClick={() => ctx.request('restore', targets)}
                         >
                           <RotateCcw size={13} />
                           {t('trash.restore')}
-                        </button>
-                        <button
-                          className="small danger"
+                        </Button>
+                        <Button
+                          variant="danger"
+                          size="sm"
                           disabled={locked}
                           onClick={() => ctx.request('purge', targets)}
                         >
                           {t('trash.purge')}
-                        </button>
+                        </Button>
                       </div>
                     )}
                     {items.map((row) => {
@@ -687,23 +660,24 @@ export default function UniversalTrash() {
                               : '—'}
                           </span>
                           <div className="acts">
-                            <button
-                              className="small"
+                            <Button
+                              size="sm"
                               disabled={locked || row.state !== 'trashed'}
                               onClick={() => ctx.request('restore', [row.target])}
                             >
                               <RotateCcw size={13} />
                               {t('trash.restore')}
-                            </button>
-                            <button
-                              className="small ghost danger"
+                            </Button>
+                            <Button
+                              variant="ghost-danger"
+                              size="sm"
                               title={t('trash.purge')}
                               aria-label={t('trash.purge')}
                               disabled={locked || row.state !== 'trashed'}
                               onClick={() => ctx.request('purge', [row.target])}
                             >
                               <Trash2 size={13} />
-                            </button>
+                            </Button>
                           </div>
                         </div>
                       );
@@ -728,17 +702,17 @@ export default function UniversalTrash() {
                         group === 'all' &&
                         quickCount?.account === account &&
                         quickCount.count > 0 && (
-                          <button className="small" onClick={() => changeGroup('session')}>
+                          <Button size="sm" onClick={() => changeGroup('session')}>
                             {t('trash.quickElsewhere', { count: quickCount.count })}
-                          </button>
+                          </Button>
                         )}
                     </div>
                   )
                 )}
                 {next !== null && (
-                  <button className="small" disabled={locked} onClick={() => load(true)}>
+                  <Button size="sm" disabled={locked} onClick={() => load(true)}>
                     {t('trash.more')}
-                  </button>
+                  </Button>
                 )}
               </>
             )}
@@ -754,7 +728,7 @@ export function StoryItemManager({ state, onClose, onEdit }) {
     [filter, setFilter] = useState('');
   const p = state.project;
   return (
-    <ChatDialog className="ops-dialog" title={t('trash.manage')} onClose={onClose}>
+    <Dialog className="ops-dialog" title={t('trash.manage')} onClose={onClose}>
       <input
         type="search"
         aria-label={t('trash.search')}
@@ -777,7 +751,7 @@ export function StoryItemManager({ state, onClose, onEdit }) {
             />
           </div>
         ))}
-    </ChatDialog>
+    </Dialog>
   );
 }
 
@@ -804,9 +778,10 @@ function ConversationTrash({ account, busy, onCount }) {
       controller.destroy();
     };
   }, [account, controller]);
+  const onCountEvent = useEffectEvent((...args) => onCount(...args));
   useEffect(() => {
     if (state.account === account && state.historyView === 'trash' && state.trashAsOf !== null)
-      onCount?.(state.trashSessions.length, !!state.trashCursor);
+      onCountEvent?.(state.trashSessions.length, !!state.trashCursor);
   }, [
     state.account,
     state.historyView,
@@ -839,7 +814,7 @@ export function RenameDialog({ title, onSave, onClose }) {
     [],
   );
   return (
-    <ChatDialog
+    <Dialog
       className="ops-dialog"
       title={t('trash.rename')}
       onClose={() => {
@@ -875,6 +850,6 @@ export function RenameDialog({ title, onSave, onClose }) {
           </Button>
         </DialogActions>
       </form>
-    </ChatDialog>
+    </Dialog>
   );
 }

@@ -179,15 +179,26 @@ export function mergeConnectionResult(rows, result) {
 
 // A view filter only: server status stays authoritative, including pending
 // grants and future statuses. Keep the original operation's row available.
+// Deleted (revoked) connections leave the list entirely (owner, 2026-10-26); expired
+// and unavailable ones stay behind the "show inactive" toggle.
 export function assistantConnectionsView(rows, { showInactive = false, pendingId = null } = {}) {
-  const items = rows.map((row) => ({
-    row,
-    inactive: ['expired', 'revoked', 'unavailable'].includes(row.status) && row.id !== pendingId,
-  }));
-  const inactiveCount = items.filter((item) => item.inactive).length;
+  const items = rows.map((row) => {
+    const settled = row.id !== pendingId;
+    return {
+      row,
+      removed: row.status === 'revoked' && settled,
+      inactive: ['expired', 'unavailable'].includes(row.status) && settled,
+    };
+  });
+  const inactiveCount = items.filter((item) => item.inactive).length,
+    removedCount = items.filter((item) => item.removed).length;
   return {
-    items: items.map((item) => ({ ...item, hidden: item.inactive && !showInactive })),
+    items: items.map(({ row, removed, inactive }) => ({
+      row,
+      inactive,
+      hidden: removed || (inactive && !showInactive),
+    })),
     inactiveCount,
-    activeCount: rows.length - inactiveCount,
+    activeCount: rows.length - inactiveCount - removedCount,
   };
 }

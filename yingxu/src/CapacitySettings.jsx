@@ -1,3 +1,5 @@
+import { SettingRow, SettingsSection } from './ui/Settings.jsx';
+import { Button } from './ui/Button.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Clock, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -251,10 +253,7 @@ export default function CapacitySettings({ settings, api, onSaved }) {
     }
   };
 
-  const unit = (id) => {
-    const label = t('capacity.unit.' + FIELD_UNITS[id]);
-    return label ? <span className="cap-unit">{label}</span> : null;
-  };
+  const unit = (id) => t('capacity.unit.' + FIELD_UNITS[id]) || null;
   const input = (id, narrow = false) => (
     <input
       className={narrow ? 'narrow' : ''}
@@ -268,7 +267,7 @@ export default function CapacitySettings({ settings, api, onSaved }) {
   );
   const problem = (id) =>
     errors[id] ? (
-      <small className="cap-error" role="alert">
+      <small className="ui-setting-error" role="alert">
         {t('capacity.error.' + errors[id].code, errors[id])}
       </small>
     ) : null;
@@ -280,13 +279,13 @@ export default function CapacitySettings({ settings, api, onSaved }) {
       timeStyle: 'short',
     }).format(new Date(change.observed_at * 1000));
     return (
-      <small className="cap-last" title={change.reason || undefined}>
+      <span title={change.reason || undefined}>
         {t('capacity.lastChange', {
           actor: String(change.actor_id || '').replace(/^browser:/, ''),
           time,
         })}
         {change.reason ? ` · ${change.reason}` : ''}
-      </small>
+      </span>
     );
   };
   const recommend = (ids) =>
@@ -301,26 +300,28 @@ export default function CapacitySettings({ settings, api, onSaved }) {
     const suggested = recommendedIds.includes(id) && draft[id] !== toText(id, leaf(defaults, id));
     const helpKey = HELP.has(id) ? 'capacity.help.' + id : null;
     return (
-      <div key={id} className={'cap-row' + (changed.includes(id) ? ' changed' : '')}>
-        <div className="cap-label">
-          <b>{t('capacity.field.' + id)}</b>
-          {pending && <span className="cap-badge">{t('capacity.pending')}</span>}
-          {helpKey && <small className="muted">{t(helpKey)}</small>}
-          {lastChange(key)}
-        </div>
-        <div className="cap-value">
-          <span className="cap-input">
-            {input(id)}
-            {unit(id)}
-          </span>
-          {suggested && (
-            <button type="button" className="linkish" onClick={() => recommend([id])}>
-              {t('capacity.recommended', { value: toText(id, leaf(defaults, id)) })}
-            </button>
-          )}
-          {problem(id)}
-        </div>
-      </div>
+      <SettingRow
+        key={id}
+        as="div"
+        label={t('capacity.field.' + id)}
+        badge={pending && t('capacity.pending')}
+        help={helpKey && t(helpKey)}
+        meta={lastChange(key)}
+        unit={unit(id)}
+        changed={changed.includes(id)}
+        extra={
+          <>
+            {suggested && (
+              <Button className="linkish" onClick={() => recommend([id])}>
+                {t('capacity.recommended', { value: toText(id, leaf(defaults, id)) })}
+              </Button>
+            )}
+            {problem(id)}
+          </>
+        }
+      >
+        {input(id)}
+      </SettingRow>
     );
   };
   const shareRow = () => {
@@ -329,32 +330,27 @@ export default function CapacitySettings({ settings, api, onSaved }) {
       'batch_guaranteed_share_slots.denominator',
     ];
     return (
-      <div
+      <SettingRow
         key="share"
-        className={'cap-row' + (ids.some((id) => changed.includes(id)) ? ' changed' : '')}
+        as="div"
+        label={t('capacity.field.batch_guaranteed_share_slots')}
+        badge={pendingControl(settings, ids[0]) && t('capacity.pending')}
+        help={t('capacity.batchShare', {
+          numerator: draft[ids[0]] || '?',
+          denominator: draft[ids[1]] || '?',
+        })}
+        changed={ids.some((id) => changed.includes(id))}
+        extra={
+          <>
+            {problem(ids[0])}
+            {problem(ids[1])}
+          </>
+        }
       >
-        <div className="cap-label">
-          <b>{t('capacity.field.batch_guaranteed_share_slots')}</b>
-          {pendingControl(settings, ids[0]) && (
-            <span className="cap-badge">{t('capacity.pending')}</span>
-          )}
-          <small className="muted">
-            {t('capacity.batchShare', {
-              numerator: draft[ids[0]] || '?',
-              denominator: draft[ids[1]] || '?',
-            })}
-          </small>
-        </div>
-        <div className="cap-value">
-          <span className="cap-input">
-            {input(ids[0], true)}
-            <span className="cap-unit">/</span>
-            {input(ids[1], true)}
-          </span>
-          {problem(ids[0])}
-          {problem(ids[1])}
-        </div>
-      </div>
+        {input(ids[0], true)}
+        <span className="ui-setting-unit narrow">/</span>
+        {input(ids[1], true)}
+      </SettingRow>
     );
   };
 
@@ -379,9 +375,9 @@ export default function CapacitySettings({ settings, api, onSaved }) {
         <div className="cap-banner" role="note">
           <p>{t('capacity.notAdopted')}</p>
           {recommendedIds.length > 0 && (
-            <button type="button" className="ghost small" onClick={() => recommend(recommendedIds)}>
+            <Button variant="ghost" size="sm" onClick={() => recommend(recommendedIds)}>
               {t('capacity.useRecommended')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -395,18 +391,17 @@ export default function CapacitySettings({ settings, api, onSaved }) {
         );
         // Queue rules are recorded but not enforced yet (#456 B/C/D), so they start folded.
         return group.id === 'queue' ? (
-          <details key={group.id} className="cap-group cap-fold">
-            <summary>
-              <h4 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h4>
+          <details key={group.id} className="ui-settings cap-fold">
+            <summary className="ui-settings-head">
+              <h3 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h3>
             </summary>
-            <p className="muted small">{t('capacity.group.queueHelp')}</p>
+            <p className="muted small ui-settings-note">{t('capacity.group.queueHelp')}</p>
             {fields}
           </details>
         ) : (
-          <section key={group.id} className="cap-group" aria-labelledby={'cap-' + group.id}>
-            <h4 id={'cap-' + group.id}>{t('capacity.group.' + group.id)}</h4>
+          <SettingsSection key={group.id} title={t('capacity.group.' + group.id)}>
             {fields}
-          </section>
+          </SettingsSection>
         );
       })}
       {error && (
@@ -445,26 +440,22 @@ export default function CapacitySettings({ settings, api, onSaved }) {
             <small className="muted">{t('capacity.reasonHelp')}</small>
           </label>
           <div className="cap-actions">
-            <button type="button" className="ghost" disabled={busy} onClick={() => setReview(null)}>
+            <Button variant="ghost" disabled={busy} onClick={() => setReview(null)}>
               {t('capacity.back')}
-            </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={busy || !reason.trim()}
-              onClick={confirm}
-            >
+            </Button>
+            <Button variant="primary" disabled={busy || !reason.trim()} onClick={confirm}>
               {t('capacity.confirm')}
-            </button>
+            </Button>
           </div>
         </section>
       ) : (
         <div className="cap-bar">
           <span>{count > 0 ? t('capacity.changes', { count }) : ''}</span>
           {count > 0 && (
-            <button
-              type="button"
-              className="ghost small keep-label"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="keep-label"
               disabled={busy}
               onClick={() => {
                 setDraft(draftFrom(base));
@@ -473,16 +464,11 @@ export default function CapacitySettings({ settings, api, onSaved }) {
             >
               <RotateCcw size={14} aria-hidden="true" />
               {t('capacity.undo')}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || count === 0 || invalid}
-            onClick={check}
-          >
+          <Button variant="primary" disabled={busy || count === 0 || invalid} onClick={check}>
             {t('capacity.review')}
-          </button>
+          </Button>
         </div>
       )}
     </div>

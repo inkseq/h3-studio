@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { Moon, Sun } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { DARK, LIGHT, applySkin, isLightSkin, readSkin } from './skins.js';
@@ -16,14 +17,14 @@ export default function ThemeToggle() {
   const light = isLightSkin(skin);
   const label = t(light ? 'skin.toDark' : 'skin.toLight');
   return (
-    <button
-      type="button"
-      className="ghost theme-toggle"
+    <Button
+      variant="ghost"
+      className="theme-toggle"
       aria-label={label}
       title={label}
       onClick={() => applySkin(light ? DARK : LIGHT)}
     >
       {light ? <Moon size={15} /> : <Sun size={15} />}
-    </button>
+    </Button>
   );
 }

@@ -2,7 +2,7 @@ import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Button } from './ui/Button.jsx';
 import { translate } from './i18n/locale.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 
 // HTML dialogs keep keyboard focus inside the page instead of opening a browser
 // JavaScript prompt. Closing a dialog never commits its draft.

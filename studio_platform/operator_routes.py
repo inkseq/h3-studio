@@ -8,7 +8,7 @@ from .operator_capacity import (
     OperatorError,
     OperatorRegistry,
 )
-from . import capacity_market  # Register additive observation table before startup DDL.
+from . import capacity_market  # Register additive observation table before startup DDL.  # noqa: F401 -- register additive observation table
 
 PREFIX = "/v1/operator/capacity"
 

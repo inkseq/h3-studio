@@ -7,7 +7,6 @@ export const trashCatalogs = {
     'trash.move': 'Delete',
     'trash.selectStory': 'Select story',
     'trash.selectedCount': '{count} selected',
-    'trash.selectAll': 'Select all',
     'trash.moveSelected': 'Delete {count}',
     'trash.editInChat': 'Edit in chat',
     'trash.restore': 'Restore',
@@ -48,7 +47,6 @@ export const trashCatalogs = {
     'trash.move': '删除',
     'trash.selectStory': '选择故事',
     'trash.selectedCount': '已选 {count} 个',
-    'trash.selectAll': '全选',
     'trash.moveSelected': '删除 {count} 个',
     'trash.editInChat': '在聊天里改',
     'trash.restore': '恢复',
@@ -138,10 +136,10 @@ Object.assign(trashCatalogs.zh, {
 trashCatalogs.en['trash.cloudOnly'] = 'Open a saved story to use the trash.';
 trashCatalogs.zh['trash.cloudOnly'] = '请先打开已保存的故事，才能用回收站。';
 Object.assign(trashCatalogs.en, {
-  'trash.manage': 'Manage items',
+  'trash.manage': 'Manage story items',
   'trash.search': 'Find',
 });
-Object.assign(trashCatalogs.zh, { 'trash.manage': '管理内容', 'trash.search': '查找' });
+Object.assign(trashCatalogs.zh, { 'trash.manage': '管理故事内容', 'trash.search': '查找' });
 
 Object.assign(trashCatalogs.en, {
   'trash.selectAll': 'Select all',

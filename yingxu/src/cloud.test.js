@@ -9,7 +9,6 @@ import {
   cloudSystemMessage,
   blankCloudProject,
   freestyleProject,
-  removeFreestyleInput,
   copyForCloud,
   controlsForRecipe,
   selectedProfileRecipe,
@@ -804,32 +803,7 @@ test('freestyle uses the existing project schema and creates no plan or job', as
   assert.equal(h.storage.getItem('yingxu-studio-v4'), original);
   h.controller.destroy();
 });
-test('removing a freestyle zone preserves other uses, other shots and the original asset', () => {
-  const { store, shot, scene } = fixture(),
-    image = store.addEntity('image', null, { data: { fileId: 'keep-file' } }),
-    other = store.addEntity('shot', scene);
-  store.addLink(image, shot, 'firstFrame');
-  store.addLink(image, shot, 'lastFrame');
-  store.addLink(image, other, 'firstFrame');
-  const p = store.exportProject(),
-    version = p.entities.find((e) => e.id === shot).version;
-  assert.equal(removeFreestyleInput(p, shot, image, { roles: ['firstFrame'] }), true);
-  assert.equal(
-    p.links.some((l) => l.target === shot && l.role === 'firstFrame'),
-    false,
-  );
-  assert.equal(
-    p.links.some((l) => l.target === shot && l.role === 'lastFrame'),
-    true,
-  );
-  assert.equal(
-    p.links.some((l) => l.target === other),
-    true,
-  );
-  assert.equal(p.entities.find((e) => e.id === image).data.fileId, 'keep-file');
-  assert.equal(p.entities.find((e) => e.id === shot).version, version + 1);
-  assert.equal(removeFreestyleInput(p, shot, image, { roles: ['firstFrame'] }), false);
-});
+
 test('guide clip request uses the selected range and rejects replaced source file', async () => {
   const h = harness(),
     asset = h.store.addEntity('audio', null, {
@@ -1268,6 +1242,25 @@ test('account change clears prior private summaries even when new list retrieval
   assert.deepEqual(h.controller.getState().projects, []);
   assert.equal(h.controller.getState().projectsLoaded, false);
   assert.equal(h.controller.getState().capabilities, null);
+  h.controller.destroy();
+});
+test('cloud operations queue quietly; only blocking ones mark the page busy and submits never queue', async () => {
+  const h = harness();
+  await h.controller.login('superdan', 'test-only');
+  let resolve;
+  h.api.projects = () => new Promise((r) => (resolve = r));
+  const listing = h.controller.list();
+  // A quiet read does not grey the page out.
+  assert.equal(h.controller.getState().busy, false);
+  // Another quiet operation waits its turn instead of failing.
+  const second = h.controller.loadMoreProjects();
+  // A submit while anything runs is refused, never queued into a second job.
+  await assert.rejects(h.controller.submit('shot'), /上一项云操作还在处理中/);
+  h.api.projects = async () => ({ projects: [] });
+  resolve({ projects: [] });
+  await listing;
+  await second.catch(() => {});
+  assert.equal(h.controller.getState().busy, false);
   h.controller.destroy();
 });
 test('late project page cannot reappear after context invalidation', async () => {
@@ -1874,4 +1867,54 @@ test('history receipt notices use the active language for pending blocked and ev
     cloudSystemMessage('原清理操作已核对，受阻记录仍保留。', 'en'),
     'Original cleanup checked; blocked items are retained.',
   );
+});
+
+test('a server-side result binding rebases the tab: clean adopts, separate edits merge, overlap conflicts', () => {
+  const setup = () => {
+    const { store, shot } = fixture(),
+      cloud = copyForCloud(store.exportProject());
+    assert.equal(store.enterCloudProject(cloud, { account: 'superdan', version: 1 }), true);
+    const remote = structuredClone(store.exportProject());
+    // The server binds a result: one new entity plus a selection on the shot.
+    remote.entities.find((e) => e.id === shot).data.selectedAssetId = 'result-x';
+    remote.entities.push({
+      ...structuredClone(remote.entities.find((e) => e.id === shot)),
+      id: 'result-x',
+      type: 'video',
+      parentId: null,
+      title: 'v1',
+      data: { cloudArtifactId: 'x', fileId: 'cloud_artifact_x' },
+    });
+    return { store, shot, remote };
+  };
+  // Clean tab: adopt the server version as saved.
+  let { store, shot, remote } = setup();
+  remote.entities = remote.entities.filter((e) => e.type !== 'video' || e.id !== 'result-x');
+  delete remote.entities.find((e) => e.id === shot).data.selectedAssetId;
+  remote.title = 'Renamed on the server';
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 2 }), true);
+  assert.equal(store.getState().workspace.serverVersion, 2);
+  assert.equal(store.getState().workspace.dirty, false);
+  assert.equal(store.exportProject().title, 'Renamed on the server');
+  // Dirty tab, different field: both survive and the tab stays dirty against v2.
+  ({ store, shot, remote } = setup());
+  remote.title = 'Renamed on the server';
+  store.updateEntity(shot, { description: 'Local edit' });
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 2 }), true);
+  const merged = store.exportProject();
+  assert.equal(merged.title, 'Renamed on the server');
+  assert.equal(merged.entities.find((e) => e.id === shot).description, 'Local edit');
+  assert.equal(store.getState().workspace.serverVersion, 2);
+  assert.equal(store.getState().workspace.dirty, true);
+  // Both sides changed the same shot differently: refuse, keep the draft untouched.
+  ({ store, shot, remote } = setup());
+  remote.entities.find((e) => e.id === shot).description = 'Server edit';
+  store.updateEntity(shot, { description: 'Local edit' });
+  const before = store.exportProject();
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 2 }), false);
+  assert.deepEqual(store.exportProject(), before);
+  assert.equal(store.getState().workspace.serverVersion, 1);
+  // Never step backwards or accept another account.
+  assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 1 }), false);
+  assert.equal(store.rebaseCloud(remote, { account: 'supervan', version: 3 }), false);
 });

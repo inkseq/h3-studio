@@ -30,11 +30,9 @@ from sqlalchemy import (
 from sqlalchemy.exc import IntegrityError
 
 from .auth import (
-    API_SCOPES,
     Auth,
     AuthenticationError,
     Principal,
-    accounts,
     digest,
     personal_keys,
     sessions,

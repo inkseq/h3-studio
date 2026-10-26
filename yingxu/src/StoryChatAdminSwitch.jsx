@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useEffectEvent } from 'react';
+import { Button } from './ui/Button.jsx';
 import { ImagePlus } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
@@ -22,6 +23,7 @@ export default function StoryChatAdminSwitch({ api, active }) {
         setDraft(String(next.image_credits ?? next.recommended_image_credits ?? ''));
       })
       .catch(() => setPrices(null));
+  const loadPricesEvent = useEffectEvent((...args) => loadPrices(...args));
   useEffect(() => {
     if (!active) return undefined;
     let live = true;
@@ -29,7 +31,7 @@ export default function StoryChatAdminSwitch({ api, active }) {
       .request('/v1/admin/story-chat/settings')
       .then((next) => live && setValue(next))
       .catch(() => live && setValue(null));
-    void loadPrices();
+    void loadPricesEvent();
     return () => {
       live = false;
     };
@@ -100,9 +102,9 @@ export default function StoryChatAdminSwitch({ api, active }) {
           {on ? t('storyChatAdmin.on') : t('storyChatAdmin.off')}
         </span>
         <span className="spacer" />
-        <button type="button" className={on ? 'ghost' : 'primary'} disabled={busy} onClick={save}>
+        <Button className={on ? 'ghost' : 'primary'} disabled={busy} onClick={save}>
           {on ? t('storyChatAdmin.turnOff') : t('storyChatAdmin.turnOn')}
-        </button>
+        </Button>
       </div>
       <p className="muted">{t('storyChatAdmin.help')}</p>
       {prices && (
@@ -117,14 +119,13 @@ export default function StoryChatAdminSwitch({ api, active }) {
             />
             <span className="muted">{t('storyChatAdmin.perPicture')}</span>
           </label>
-          <button
-            type="button"
-            className="ghost"
+          <Button
+            variant="ghost"
             disabled={busy || !validPrice || amount === current}
             onClick={() => void savePrice()}
           >
             {t('storyChatAdmin.savePrice')}
-          </button>
+          </Button>
           <small className="muted">
             {current == null
               ? t('storyChatAdmin.priceUnset')

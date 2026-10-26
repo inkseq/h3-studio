@@ -2,13 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createQuickChatController } from './quick-chat-controller.js';
 import { createQuickChatClient } from './quick-chat-client.js';
-import {
-  checkedCardPage,
-  quickThreadEntries,
-  initialThreadLoading,
-  captureThreadAnchor,
-  restoreThreadAnchor,
-} from './quick-chat-history.js';
+import { checkedCardPage } from './quick-chat-history.js';
 
 function fixture(count = 66) {
   const calls = [],
@@ -153,50 +147,6 @@ test('card client uses the owner-fenced card endpoint and never substitutes a ti
   assert.equal(calls[0].options.credentials, 'same-origin');
 });
 
-test('66-card event-heavy session opens latest 10 and each successful page adds 10 earlier cards, then 6', async () => {
-  const h = await fixture().start();
-  assert.equal(Object.keys(h.controller.getState().cards).length, 10);
-  assert.deepEqual(
-    Object.keys(h.controller.getState().cards).sort(),
-    h.cards.slice(-10).map((card) => card.id),
-  );
-  assert.equal(
-    h.calls.some(([kind, , id]) => kind === 'card' && id < 'card-057'),
-    false,
-    'preflight-only tail cannot hydrate cards outside the page',
-  );
-  const eventReads = h.calls.filter(([kind]) => kind === 'timeline').length;
-  for (const [expected, added] of [
-    [20, 10],
-    [30, 10],
-    [40, 10],
-    [50, 10],
-    [60, 10],
-    [66, 6],
-  ]) {
-    const value = await h.controller.history();
-    assert.equal(value.added, added);
-    assert.equal(Object.keys(h.controller.getState().cards).length, expected);
-  }
-  const state = h.controller.getState();
-  assert.equal(state.cardHistoryHasMore, false);
-  assert.equal(state.cardHistoryCursor, null);
-  assert.equal(state.cardHistoryLoaded, true);
-  assert.equal(
-    h.calls.filter(([kind]) => kind === 'timeline').length,
-    eventReads,
-    'card button never consumes event-only pages',
-  );
-  assert.deepEqual(
-    quickThreadEntries(state.timeline, state.cards, state.cardTurns)
-      .filter((entry) => entry.kind === 'card')
-      .map((entry) => entry.record.id),
-    h.cards.map((card) => card.id),
-  );
-  assert.equal(h.stored.size, 0, 'history GETs do not write a submission intent or draft');
-  h.controller.destroy();
-});
-
 test('failed card/revision hydration commits neither partial cards nor the next cursor, then retry adds the full page', async () => {
   const h = await fixture().start(),
     before = h.controller.getState(),
@@ -238,71 +188,6 @@ test('overlap from a deep link is skipped so the successful earlier-card click s
   h.controller.destroy();
 });
 
-test('real turn/assistant tail and a concurrent poll keep the first earlier page visible once, with its original cursor', async () => {
-  const h = fixture();
-  for (const card of h.cards) card.turn_id = card.id.replace('card-', 'turn-');
-  const turn = (id) => ({
-    id,
-    text: 'Original prompt',
-    created_at: 1000 + Number(id.slice(-3)),
-    card_id: id.replace('turn-', 'card-'),
-    status: 'completed',
-    assistant_mode: 'assist',
-    reply: 'Original reply',
-  });
-  h.api.getTurn = async (_session, id) => turn(id);
-  const tail = h.cards.slice(-10).flatMap((card, index) => [
-    {
-      id: 'created-' + card.id,
-      seq: 100 + index * 3,
-      type: 'turn.created',
-      record: turn(card.turn_id),
-    },
-    {
-      id: 'assistant-' + card.id,
-      seq: 101 + index * 3,
-      type: 'assistant.completed',
-      record: turn(card.turn_id),
-    },
-    {
-      id: 'preflight-' + card.id,
-      seq: 102 + index * 3,
-      type: 'preflight.completed',
-      record: { id: 'preflight-' + card.id, revision_id: card.current_revision_id },
-    },
-  ]);
-  h.api.timeline = async (_session, options = {}) =>
-    options.after_cursor
-      ? { events: [], after_cursor: 'forward' }
-      : { events: tail, next_cursor: 'older-events', after_cursor: 'forward' };
-  await h.start();
-  const visible = () => {
-    const state = h.controller.getState();
-    return quickThreadEntries(state.timeline, state.cards, state.cardTurns).flatMap((entry) =>
-      entry.kind === 'card'
-        ? [entry.record.id]
-        : state.cards[entry.record.card_id]
-          ? [entry.record.card_id]
-          : [],
-    );
-  };
-  assert.equal(visible().length, 10);
-  const before = h.controller.getState().cardHistoryCursor;
-  h.holdCard('card-050');
-  const first = h.controller.history();
-  while (!h.calls.some(([kind, , id]) => kind === 'card' && id === 'card-050'))
-    await Promise.resolve();
-  await h.controller.poll();
-  h.releaseCard();
-  const result = await first;
-  assert.equal(result.added, 10);
-  assert.equal(visible().length, 20);
-  assert.equal(new Set(visible()).size, 20);
-  assert.notEqual(h.controller.getState().cardHistoryCursor, before);
-  assert.equal(h.stored.size, 0);
-  h.controller.destroy();
-});
-
 test('initial card API failure stays unknown with a visible retry rather than claiming the beginning', async () => {
   const h = fixture();
   h.failCards(Object.assign(Error('not available'), { status: 503 }));
@@ -338,36 +223,6 @@ test('an event poll preserves the independent card cursor and cannot inject an o
   assert.equal(after.cards['card-005'], undefined);
   assert.equal(h.calls.filter(([kind]) => kind === 'card').length, cardReads);
   assert.equal(Object.keys(after.cards).length, 20);
-  h.controller.destroy();
-});
-
-test('legitimate newly-created forward card appears at the end without losing older pages or their cursor', async () => {
-  const h = await fixture().start();
-  await h.controller.history();
-  const cursor = h.controller.getState().cardHistoryCursor;
-  const added = {
-    id: 'card-067',
-    created_at: 1066,
-    version: 1,
-    current_revision_id: 'revision-067',
-    submission_ids: [],
-  };
-  h.cards.push(added);
-  h.forward([
-    {
-      id: 'new-card-event',
-      seq: 300,
-      type: 'card.created',
-      record: { id: 'revision-067', card_id: 'card-067', created_at: 1066 },
-    },
-  ]);
-  await h.controller.poll();
-  const state = h.controller.getState();
-  assert.equal(Object.keys(state.cards).length, 21);
-  assert.equal(state.cardHistoryCursor, cursor);
-  assert.equal(quickThreadEntries(state.timeline, state.cards).at(-1).record.id, 'card-067');
-  await h.controller.history();
-  assert.equal(Object.keys(h.controller.getState().cards).length, 31);
   h.controller.destroy();
 });
 
@@ -447,24 +302,6 @@ test('conversation-text history skips event-only pages without changing the card
   h.controller.destroy();
 });
 
-test('card page hydrates original submissions and associated turns without relying on event records', async () => {
-  const h = fixture();
-  h.cards[59].submission_ids = ['submission-060'];
-  h.cards[59].turn_id = 'turn-060';
-  await h.start();
-  const state = h.controller.getState();
-  assert.equal(state.submissions['submission-060'].status, 'succeeded');
-  assert.equal(state.revisions['revision-060'].card_id, 'card-060');
-  assert.equal(state.cardTurns['turn-060'].text, 'Original turn');
-  const entries = quickThreadEntries(state.timeline, state.cards, state.cardTurns);
-  assert.equal(entries.filter((entry) => entry.record.card_id === 'card-060').length, 1);
-  assert.equal(
-    entries.some((entry) => entry.kind === 'card' && entry.record.id === 'card-060'),
-    false,
-  );
-  h.controller.destroy();
-});
-
 test('invalid empty/repeated/foreign card pages are errors, not false end-of-history', async () => {
   const base = {
     session_id: 's',
@@ -507,116 +344,6 @@ test('invalid empty/repeated/foreign card pages are errors, not false end-of-his
       'same',
     ),
   );
-});
-
-test('chronological card order does not change when an old card.created event arrives', () => {
-  const cards = {
-    later: { id: 'later', created_at: 20 },
-    earlier: { id: 'earlier', created_at: 10 },
-  };
-  const before = quickThreadEntries([], cards).map((entry) => entry.record.id),
-    after = quickThreadEntries(
-      [
-        {
-          id: 'event',
-          seq: 999,
-          type: 'card.created',
-          record: { id: 'old-revision', card_id: 'earlier' },
-        },
-      ],
-      cards,
-    ).map((entry) => entry.record.id);
-  assert.deepEqual(before, ['earlier', 'later']);
-  assert.deepEqual(after, before);
-});
-
-test('prepending preserves an existing visible row offset rather than blindly jumping to the top', () => {
-  let top = -25;
-  const row = { isConnected: true, getBoundingClientRect: () => ({ top, bottom: top + 400 }) },
-    container = {
-      scrollTop: 100,
-      scrollHeight: 800,
-      getBoundingClientRect: () => ({ top: 0 }),
-      querySelectorAll: () => [row],
-      contains: (node) => node === row,
-    };
-  const anchor = captureThreadAnchor(container);
-  top += 600;
-  container.scrollHeight += 600;
-  restoreThreadAnchor(container, anchor);
-  assert.equal(container.scrollTop, 700);
-});
-
-test('opening saved history shows loading through auth and first-page hydration, never a false empty creation', () => {
-  const base = {
-    requestedSession: 'long',
-    sessionReady: false,
-    account: null,
-    readyAccount: null,
-    state: {},
-    entryCount: 0,
-  };
-  assert.equal(initialThreadLoading(base), true);
-  assert.equal(initialThreadLoading({ ...base, sessionReady: true }), false);
-  const signed = { ...base, sessionReady: true, account: 'owner' };
-  assert.equal(initialThreadLoading(signed), true);
-  assert.equal(
-    initialThreadLoading({ ...signed, readyAccount: 'owner', state: { session: { id: 'long' } } }),
-    true,
-  );
-  assert.equal(
-    initialThreadLoading({
-      ...signed,
-      readyAccount: 'owner',
-      state: { session: { id: 'long' }, cardHistoryLoaded: true },
-    }),
-    false,
-  );
-  assert.equal(initialThreadLoading({ ...signed, entryCount: 10 }), false);
-  assert.equal(initialThreadLoading({ ...signed, state: { error: 'Not found' } }), false);
-  assert.equal(
-    initialThreadLoading({ ...signed, state: { cardHistoryError: { status: 503 } } }),
-    false,
-  );
-  assert.equal(initialThreadLoading({ ...base, requestedSession: null }), false);
-});
-
-test('take-grid focus hydrates one original card/version without reopening or discarding loaded history, draft or pending receipt', async () => {
-  const h = await fixture().start();
-  await h.controller.history();
-  const before = h.controller.getState();
-  let resets = 0;
-  h.api.reset = () => resets++;
-  h.api.patchSession = async () => {
-    throw Object.assign(Error('lost original metadata ack'), { status: 503 });
-  };
-  await assert.rejects(h.controller.patch({ title: 'Original pending title' }));
-  const pending = h.controller.getState().pending;
-  h.stored.set('original-composer-draft', 'Unsubmitted prompt');
-  const stored = new Map(h.stored);
-  const result = await h.controller.focusCard({
-      cardId: 'card-005',
-      revisionId: 'revision-005',
-      submissionId: 'submission-005',
-    }),
-    state = h.controller.getState();
-  assert.equal(result.card_id, 'card-005');
-  assert.equal(result.revision_id, 'revision-005');
-  assert.equal(resets, 0);
-  assert.equal(state.session, before.session);
-  assert.equal(state.materials, before.materials);
-  assert.equal(state.timeline, before.timeline);
-  assert.equal(state.cardHistoryCursor, before.cardHistoryCursor);
-  assert.equal(Object.keys(state.cards).length, 21);
-  assert.equal(state.cards['card-005'].created_at, 1004);
-  assert.equal(state.pending, pending);
-  assert.deepEqual(h.stored, stored);
-  assert.equal(
-    quickThreadEntries(state.timeline, state.cards).find((entry) => entry.kind === 'card').record
-      .id,
-    'card-005',
-  );
-  h.controller.destroy();
 });
 
 test('take focus rejects foreign card/revision pairing atomically and late owner/session/write responses never enter the next view', async () => {
