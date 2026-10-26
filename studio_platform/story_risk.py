@@ -24,7 +24,7 @@ TEXT = {
         "Several people speak at once.",
         "多个人物同时说话。",
         "Give each speaker a separate shot or window; second-speaker lip sync is a known model limit.",
-        "把不同人物的台词分到独立镜头或窗口；第二说话人口型属于已知模型限制。",
+        "把不同人物的台词分到独立镜头或窗口；两人同时说话时，第二个人的口型可能对不上。",
     ),
     "speech_too_dense": (
         "Speech may not fit the selected duration.",
