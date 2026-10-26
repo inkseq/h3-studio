@@ -940,15 +940,13 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                         continue
                     actual_columns = columns.get(name, [])
                     expected_columns = [column.name for column in table.columns]
-                    # Additive historical migrations can change physical order.
-                    # Both queries below explicitly use canonical column names.
+                    # Explicit columns tolerate historical physical ordering.
                     if len(actual_columns) != len(expected_columns) or set(
                         actual_columns
                     ) != set(expected_columns):
                         raise BackupError("backup_database_version_mismatch")
                     relation = '"' + schema + '"."' + name + '"'
-                    # Bound a row before fetching it into client memory. The
-                    # read-only snapshot is established by the inventory query.
+                    # Inventory fixed the read-only snapshot; bound rows before fetching.
                     count, size, largest = source.execute(
                         text(
                             "SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM "  # noqa: S608 -- identifiers from fixed schema metadata, not user input
@@ -977,6 +975,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                         for name, marker in json_nulls.items()
                     )
                     query_fields = fields + (("," + markers) if markers else "")
+                    batch_rows = min(200, max(1, 4 * MIB // max(1, int(largest))))
                     insert_sql = (
                         'INSERT INTO "'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                         + name
@@ -990,14 +989,14 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     with source.execute(
                         text(
                             "SELECT " + query_fields + " FROM " + relation  # noqa: S608 -- identifiers from fixed schema metadata, not user input
-                        ).execution_options(stream_results=True, max_row_buffer=200)
+                        ).execution_options(
+                            stream_results=True, max_row_buffer=batch_rows
+                        )
                     ) as rows:
-                        while batch := rows.mappings().fetchmany(200):
+                        while batch := rows.mappings().fetchmany(batch_rows):
                             if time.monotonic() > deadline:
                                 raise BackupError("backup_snapshot_size_or_time_limit")
-                            # JSON null and SQL NULL both arrive as Python None;
-                            # preserve the distinction instead of silently
-                            # changing later IS NULL/query behavior on recovery.
+                            # Markers distinguish JSON null from SQL NULL (both None).
                             values = [
                                 tuple(
                                     json.dumps(
@@ -1014,6 +1013,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                             ]
                             output.exec_driver_sql(insert_sql, values)
                             actual += len(batch)
+                            del values, batch  # Release before the next fetch.
                     if actual != count:
                         raise BackupError("backup_snapshot_count_mismatch")
                     counts[name] = actual
