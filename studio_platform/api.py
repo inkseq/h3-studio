@@ -1462,6 +1462,9 @@ def create_app(
     from .generation_stats import register_routes as register_generation_stats
 
     register_generation_stats(app)
+    from .review_loop import register_routes as register_review_loop
+
+    register_review_loop(app)
     from .operator_host_routes import register_routes as register_operator_host_routes
 
     register_operator_host_routes(app)
