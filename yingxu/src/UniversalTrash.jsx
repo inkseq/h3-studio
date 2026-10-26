@@ -291,33 +291,30 @@ export function TrashProvider({ account, children }) {
 }
 export function TrashMenu({ target, onRename, onEdit, onChat, onTrashSettled, disabled = false }) {
   const ctx = useTrash(),
-    { t } = useI18n(),
-    anchor = useRef(null);
+    { t } = useI18n();
   if (!ctx?.account) return null;
   return (
-    <span ref={anchor} className="trash-menu">
-      <ItemMenu disabled={disabled || ctx.busy || !!ctx.pending}>
-        {onRename && <MenuItem onSelect={onRename}>{t('trash.rename')}</MenuItem>}
-        {onEdit && <MenuItem onSelect={onEdit}>{t('trash.edit')}</MenuItem>}
-        {onChat && <MenuItem onSelect={onChat}>{t('trash.editInChat')}</MenuItem>}
-        <MenuItem
-          danger
-          onSelect={async () => {
-            // The menu row may sit in a dialog (the story item list); close it once the
-            // item has really moved to the trash.
-            const dialog = anchor.current?.closest('dialog');
-            const receipt = await ctx.request('trash', [target]);
-            if (dialog?.isConnected) {
-              if (onTrashSettled) onTrashSettled();
-              else if (receipt?.state === 'completed')
-                dialog.dispatchEvent(new Event('inkseq-close-after-trash'));
-            }
-          }}
-        >
-          {t('trash.move')}
-        </MenuItem>
-      </ItemMenu>
-    </span>
+    <ItemMenu disabled={disabled || ctx.busy || !!ctx.pending}>
+      {onRename && <MenuItem onSelect={onRename}>{t('trash.rename')}</MenuItem>}
+      {onEdit && <MenuItem onSelect={onEdit}>{t('trash.edit')}</MenuItem>}
+      {onChat && <MenuItem onSelect={onChat}>{t('trash.editInChat')}</MenuItem>}
+      <MenuItem
+        danger
+        onSelect={async (event) => {
+          // A menu opened inside a dialog (the story item list) renders inside it, so the
+          // row can close that dialog once the item has really moved to the trash.
+          const dialog = event.target?.closest?.('dialog');
+          const receipt = await ctx.request('trash', [target]);
+          if (dialog?.isConnected) {
+            if (onTrashSettled) onTrashSettled();
+            else if (receipt?.state === 'completed')
+              dialog.dispatchEvent(new Event('inkseq-close-after-trash'));
+          }
+        }}
+      >
+        {t('trash.move')}
+      </MenuItem>
+    </ItemMenu>
   );
 }
 // One-click "move to trash" for panels with a single obvious action (no menu).
