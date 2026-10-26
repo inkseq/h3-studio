@@ -1,0 +1,30 @@
+{
+  "max_module_lines": 1500,
+  "oversized_modules": {
+    "studio_platform/api.py": 1524,
+    "studio_platform/assets.py": 1542,
+    "studio_platform/backup.py": 1941,
+    "studio_platform/dstack_capacity.py": 2562,
+    "studio_platform/dstack_controller.py": 1527,
+    "studio_platform/dstack_operator.py": 3557,
+    "studio_platform/operator_capacity.py": 2064,
+    "studio_platform/quick_chat.py": 3945,
+    "studio_platform/quick_chat_migration.py": 1554,
+    "studio_platform/render_backend.py": 1639,
+    "studio_platform/repository.py": 3732,
+    "studio_platform/worker.py": 1533
+  },
+  "rules": {
+    "B007": 7,
+    "B008": 7,
+    "B018": 3,
+    "B023": 0,
+    "B904": 3,
+    "B905": 15,
+    "C901": 51,
+    "F401": 0,
+    "F841": 0,
+    "S608": 0
+  },
+  "version": 1
+}

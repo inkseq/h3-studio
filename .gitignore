@@ -23,6 +23,13 @@ inventory.json
 !requirements.lock.txt
 !requirements.dev.in
 !requirements.dev.lock.txt
+!requirements.audit.in
+!requirements.audit.lock.txt
+!tools/check_maintainability.py
+!tools/maintainability-baseline.json
+!tools/audit_dependencies.py
+!docs/MAINTAINABILITY.md
+!.github/dependabot.yml
 !pyproject.toml
 !comfy_workflow.py
 !comfy-object-info.json
@@ -852,6 +859,7 @@ inventory.json
 !tests/test_creator_controls_v6.py
 !tools/audit_creator_controls.py
 !docs/CREATOR-CONTROLS.md
+!studio_platform/review_routes.py
 !tests/test_backup_observation.py
 !docs/BACKUP-RECOVERY-655.md
 !deploy/platform/business_backup_recovery.py

@@ -10,9 +10,6 @@ from sqlalchemy import select, insert, update, inspect
 from .repository import (
     documents,
     jobs,
-    attempts,
-    registered_workers,
-    Scope,
     Conflict,
     NotFound,
     request_hash,

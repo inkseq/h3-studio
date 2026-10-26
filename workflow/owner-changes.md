@@ -586,6 +586,18 @@ Whole-take verdicts are explicit keep/redo/null with revision, CAS and actor kin
 picks, stars and range-change marks do not set them. v1 reads one owner at a time;
 all-owners aggregate is a later, content-free view. Frontend remains Claude's lane.
 
+## CR-20261026-68 — backend maintainability ratchets, advisory reports
+
+Owner, 2026-10-26, this session / #257: widen backend Ruff lint to F401, F841,
+bugbear B and C901 (complexity25), retaining fatal checks and recording per-rule
+debt counts that cannot increase. Clean trivial unused names without changing
+behavior; preserve deliberate registration/import compatibility. Reviewed B023
+and S608 false positives receive per-line reasons, not blanket exclusions.
+New backend modules are limited to1500 physical lines; existing oversized modules
+must not grow. Add weekly pip/GitHub Actions Dependabot and non-blocking pip-audit
+reports. Add coverage artifacts without a threshold; owner explicitly selected
+coverage.py over pytest-cov to retain existing unittest/load_tests semantics.
+This is Tier1 source/CI work only, with no production, GPU or charging action.
 ## CR-20261026-69 — creator model controls belong to the TaoMate profile
 
 Owner, 2026-10-26, backend follow-up to inkseq-design#266, tracked in #649:

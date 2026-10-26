@@ -22,7 +22,7 @@ DAY = '2026-10-26'
 NONCE = '9f8335d4-2da3-42ac-81c0-4f4104af2ee8'
 RUNTIME = Path('/opt/inkseq-business-backup-v1/backup_capture_runtime.py')
 SOURCE_SHA = 'dbd53b915a7d9fb795fa1ea6d8b1362986ac81822aaaac4bb33c9c54af1ac32b'
-RUNTIME_SHA = '9e0c7988c74293b69758e80d2b6af1ca63c1af72c40aea50fb630f92647a6252'
+RUNTIME_SHA = 'fed5e0c78078d0c833f983871e5da01960071f756f9453a7552976bda93ba98a'
 ORIGINAL = {
     'intent.json': 'f824f9af7af93a691a9168b8f8ccb7c414b443807b76eb3666997045e5193b6a',
     'phase-snapshot-started.json': 'dd2007a76d2c1afed33d1dc440726c585c50cf77129f0c6da0d2200e7d460a7d',
