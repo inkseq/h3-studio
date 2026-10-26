@@ -164,6 +164,7 @@ def create_guided_router(app, service) -> APIRouter:
             "quick_creation": public_guide()["quick_creation"],
             "examples_url": "/for-agents/guide.json",
             "generation_availability": public_guide()["generation_availability"],
+            "story_risk_review": public_guide()["story_risk_review"],
             "steps": [
                 "Browser account creates scoped API key; pass Bearer on API calls only",
                 "Before choosing quality and FL/REF, preflight and a new GPU submission, GET /v1/generation-availability; follow generation_availability for neutral tier/mode aliases, freshness and administrator/wait guidance. Read current capabilities for supported controls; unavailable tiers never fall back. Existing uncertain jobs retain their original receipt/key.",

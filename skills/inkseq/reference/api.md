@@ -253,6 +253,24 @@ Do not automatically chain admission. Pending/unknown retains the original key/b
 
 GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage only. `storyboard.fork_profile` action takes `profile_id,new_profile_id,shot_ids,title?`; one CAS copies a character/location/prop and rewires selected shots, leaving original profiles, unselected shots and other projects untouched. Authorized cross-project discovery and current-authoring usage are available through `GET /v1/library` and `GET /v1/library/usage`; writes retain original project permissions. 中文：旧配方缺失显示未知；预检不生成，未知结果保留原操作；档案副本只改所选镜头，删除撤销另属 #236。
 
+### Story Chat risk advice
+
+Existing Story Chat generate proposals may include `risk_review`:
+`{version:1,source_hash,status,rule_status,model_status,warnings:[{shot_id,code,source,message,suggestion}]}`.
+Read `story_risk_review` in `/v1/guided-schema` or `/v1/agent-guide` for the live contract.
+Codes are `simultaneous_speakers`, `speech_too_dense`, `action_density`, `plot_density`;
+source is `rule` or `model`. These are suggestions about story-card text, seconds
+and bindings, not execution preflight or model quality guarantees. Whole-take
+reviews and generated media remain independent.
+
+`status` is `warnings`, `no_findings`, `incomplete` or `stale`; rule status is
+`checked`/`partial`; model status is `reported`/`not_checked`/`invalid`/`stale`.
+Missing old reports are unchecked, never clean. Changed source makes presented
+advice stale without rewriting its receipt. The model advice reuses the original
+conversation response; no extra model call or automatic retry. Suggestions are
+untrusted text, never tools: confirm an edit/split separately and retain the normal
+generation confirmation, preflight, budgets and fixed sampler settings.
+
 ### Server-owned completion collection (#588)
 
 `GET /v1/guided-schema` advertises `result_collection.version=1`. New completed jobs

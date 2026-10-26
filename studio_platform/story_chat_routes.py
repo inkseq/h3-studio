@@ -130,9 +130,25 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             "language": chat.get("language", "zh"),
             "turns": chat.get("turns", 0),
             "max_turns": MAX_TURNS,
-            "messages": chat.get("messages", []),
+            "messages": present_messages(chat.get("messages", []), project),
             "cards": cards(project, chat),
         }
+
+    def present_messages(messages, project):
+        from .story_risk import presented_proposal
+
+        cache = {}
+        return [
+            {
+                **message,
+                "proposal": presented_proposal(
+                    message["proposal"], project, cache=cache
+                ),
+            }
+            if isinstance(message.get("proposal"), dict)
+            else message
+            for message in messages
+        ]
 
     def read(principal, project_id, scope="projects:read"):
         row = app.state.authorized_project(principal, project_id, scope)
@@ -385,6 +401,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         def answer(row, messages):
             result = view(row, principal)
+            messages = present_messages(messages, row["payload"])
             assistant = next(m for m in messages if m["role"] == "assistant")
             return {
                 **result,
@@ -433,7 +450,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             if prior:
                 return answer(row, prior)
             try:
-                actions, changes, proposal, touched = apply_plan(project, chat, plan)
+                actions, changes, proposal, touched = apply_plan(
+                    project, chat, plan, model_fresh=version == seen_version
+                )
             except StoryChatError as error:
                 _fail(error.code, error.status, nothing_written=True, **error.detail)
             if version != seen_version:

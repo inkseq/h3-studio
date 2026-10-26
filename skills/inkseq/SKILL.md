@@ -49,7 +49,7 @@ Read a shot's `/versions` for immutable recipes; old missing recipes stay unknow
 
 For an authorized whole-film request, check `capabilities.story_film.enabled`, then follow [one-click film](reference/api.md#one-click-film). Preflight freezes the story; inspect reuse, missing shots and cost before confirming. Observe/resume that original run, retaining per-shot budgets and grants. Read [film recovery](reference/recovery.md#one-click-film-recovery) after an uncertain response.
 
-Caption burn:2 nonempty lines ×18 characters/cue maximum. Confirmation/SRT cannot waive bounds; no silent trim/rewrap.
+Caption burn:2 lines ×18 chars/cue; no silent trim/rewrap. [Risk advice](reference/api.md#story-chat-risk-advice) never authorizes edits/generation.
 
 ## Legacy Quick Create compatibility
 
