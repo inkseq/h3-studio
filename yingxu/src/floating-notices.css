@@ -18,7 +18,7 @@
   gap: 10px;
   max-width: 100%;
   padding: 8px 8px 8px 16px;
-  border: 1px solid var(--line-2, #333);
+  border: 1px solid var(--line-2);
   border-radius: 999px;
   background: var(--surface, var(--surface));
   color: var(--ink, var(--ink));
@@ -34,10 +34,10 @@
   white-space: nowrap;
 }
 .floating-notice.error {
-  border-color: color-mix(in srgb, var(--bad, #e5484d) 55%, transparent);
+  border-color: color-mix(in srgb, var(--bad) 55%, transparent);
 }
 .floating-notice.warn {
-  border-color: color-mix(in srgb, var(--warn, #d9a441) 55%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
 }
 .floating-notice > .floating-notice-action {
   width: auto;
@@ -62,7 +62,7 @@
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: var(--muted, #999);
+  color: var(--muted);
 }
 .floating-notice > button:not(.floating-notice-action):hover {
   color: var(--ink, var(--ink));
@@ -92,7 +92,7 @@
   max-width: 460px;
   margin: 18vh auto 0;
   padding: 24px;
-  border: 1px solid var(--line-2, #333);
+  border: 1px solid var(--line-2);
   border-radius: 16px;
   background: var(--surface, var(--surface));
   color: var(--ink, var(--ink));
@@ -104,7 +104,7 @@
 }
 .page-error p {
   margin: 0 0 18px;
-  color: var(--muted, #999);
+  color: var(--muted);
 }
 .page-error-actions {
   display: flex;

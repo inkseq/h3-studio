@@ -182,7 +182,7 @@
     border: 0;
     border-radius: 0;
     padding: 0;
-    background: #243a304d;
+    background: var(--scrim);
   }
   .qc-shell .qc-history-close {
     display: inline-flex;

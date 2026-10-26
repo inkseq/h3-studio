@@ -100,6 +100,10 @@
   background: var(--good-soft);
   color: var(--good);
 }
+.badge.accent {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
 .badge.local {
   background: var(--warn-soft);
   color: var(--warn);
