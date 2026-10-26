@@ -312,11 +312,14 @@ def review_loop(repo, tenant, owner, *, start, end, now):
         if len({take for when, take in values if when == finished}) > 1:
             reasons.add("first_export_order_ambiguous")
             continue
-        # Strict behavioural definition: exactly one original generation job by
-        # first completed export. Automatic attempts of that job are not redo.
-        if (
-            ident == delivered[key][0]["id"]
-            and sum(row["created_at"] <= finished for row in cohort[key]) == 1
+        # A redo is a new original request after the first take was delivered.
+        # Initial concurrent batch alternatives and retries are not inferred to
+        # be content-driven redo; neither implies a human usability verdict.
+        first = delivered[key][0]
+        if ident == first["id"] and not any(
+            first["created_at"] <= row["created_at"] <= finished
+            for row in cohort[key]
+            if row["id"] != first["job_id"]
         ):
             shipped += 1
     costs = [

@@ -62,10 +62,11 @@ Imports with no generation history are a separate coverage category.
    complete metric `null`, with the known command count reported separately.
 4. **First take shipped rate**, `first_take_shipped_rate`, is behavioural: of the
    cohort's delivered shots, how many first delivered takes appeared in their
-   first completed film export without another original generation job by that
-   export time. Automatic attempts of the same job do not count as redo. Multiple
-   original generation jobs (including batch alternatives) conservatively fail
-   this strict no-additional-generation criterion. A later redo does not rewrite
+   first completed film export without another original generation job submitted
+   between that first delivery and export completion. Automatic attempts of the
+   same job and initial concurrent batch alternatives do not count as redo.
+   This is observed request timing, not an inference of the user's motivation.
+   A later redo does not rewrite
    an earlier export. Repeat exports/downloads count once; a later export of the
    first take cannot erase an earlier export of another take. Trimming or editing
    the source in the film is not a new take: this measures no regeneration, not

@@ -173,6 +173,14 @@ class ReviewLoopTests(LedgerCase):
             self.report()["metrics"]["first_take_shipped_rate"]["value"], 0
         )
 
+    def test_initial_batch_alternatives_are_not_inferred_as_redo(self):
+        first = self.take(created=100, delivered=200)
+        self.take(created=101, delivered=210)
+        self.film(first, at=400)
+        self.assertEqual(
+            self.report()["metrics"]["first_take_shipped_rate"]["value"], 1
+        )
+
     def test_first_job_outside_window_never_reclassifies_a_redo(self):
         self.take(created=25, delivered=40)
         take = self.take(created=100, delivered=200)
