@@ -56,6 +56,9 @@ inventory.json
 !studio_platform/api.py
 !studio_platform/settings.py
 !studio_platform/error_monitoring.py
+!studio_platform/product_feedback.py
+!tests/test_product_feedback.py
+!docs/PRODUCT-FEEDBACK.md
 !studio_platform/subtitle_quality.py
 !studio_platform/runtime_hosts/subtitle_ocr.py
 !tests/test_subtitle_quality.py

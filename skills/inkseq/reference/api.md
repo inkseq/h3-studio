@@ -276,6 +276,25 @@ than100 candidate videos returns `409 take_review_summary_limit`, never silent
 truncation. Use existing paginated versions and individual reads for overflow.
 No writes or extra generation; selection/star still does not imply approval.
 
+### Feedback
+
+For unexpected tool limitations or confusing output, POST `/v1/feedback` once
+with a saved key and a product-only summary. Body: `{category,severity,summary,
+source,suggestion?,intent?,project_id?,shot_id?,artifact_id?,include_context:false}`.
+Read `feedback` in discovery for closed categories, limits and reference rules.
+PAT needs `projects:read`; references need the matching project grant. Never send
+prompts, media, credentials, contact info or URLs. Do not quote customer text;
+include_context:true is disabled. This reports a product issue, not a request to
+generate/retry, change budget, or post a public GitHub issue.
+
+GET `/v1/feedback/REPORT_ID` recovers the original receipt. Same key/body POST
+never forwards again. `forwarding:enqueued` is only local SDK queueing, not
+remote delivery proof; pending/unknown must not be retried with new keys. Owner
+opt-out and account/connection rate limits apply; do not work around403/429.
+Only a human can GET/PATCH `/v1/feedback/settings` with revision CAS and saved key.
+GET `/v1/feedback?category=&source=&limit=50` lists own bounded receipts (PAT only
+its own connection). No global write-intent or automatic reporting hook is active.
+
 ### Story Chat risk advice
 
 Existing Story Chat generate proposals may include `risk_review`:

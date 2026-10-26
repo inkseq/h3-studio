@@ -99,6 +99,7 @@ See [recovery](reference/recovery.md) for refusals.
 
 Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-windows).
 
-## Take reviews
+## Reviews and feedback
 
 [Verdicts, CAS, summaries and suggestions](reference/api.md#explicit-take-reviews).
+[Feedback](reference/api.md#feedback).

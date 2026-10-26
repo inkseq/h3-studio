@@ -287,6 +287,13 @@ def cleanup_plan(
                 or row["project_id"] in purged_projects
             ):
                 continue
+            if row["kind"] == "product_feedback" and (
+                row["payload"].get("body", {}).get("artifact_id") in candidate_artifacts
+                or row["payload"].get("body", {}).get("project_id") in purged_projects
+            ):
+                # Product annotations do not retain this exact owned target;
+                # finish_purge redacts the local report atomically.
+                continue
             # Only explicit universal purge may ignore this owner's completed
             # import audit capsule. Live documents and accepted inputs remain below.
             if (
