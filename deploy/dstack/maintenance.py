@@ -40,6 +40,9 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # Current/rollback readback5be9e18b; no generic compatibility fallback.
+    '6606164343b612d3c99acd6f688ad54dad0d49af': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'e63e64f093bc2e343b8a4128e62de9cf68ae964f': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     # Exact main source pairs for a474 staging and queued backup-fix6b2; host CAS still required.
     'a47462f08257af8682a4b72e194028efa1597054': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     '6b2dae1d1ca7c9298c05e3e32bfb0799af953b85': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
