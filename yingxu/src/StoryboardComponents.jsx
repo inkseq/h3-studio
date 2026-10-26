@@ -39,6 +39,7 @@ import { cutFps, videoCut } from './video-cut-model.js';
 import { trimClip } from './film-edit-model.js';
 import TrimBar from './TrimBar.jsx';
 import ShotSegments from './ShotSegments.jsx';
+import TakeReview from './TakeReview.jsx';
 import ScriptWindows from './ScriptWindows.jsx';
 import { segmentsTotal, sourceTime } from './shot-segments.js';
 import { createPortal } from 'react-dom';
@@ -1752,6 +1753,12 @@ function ShotTrim({ shotId, mediaRef }) {
   );
 }
 
+// Take review needs the cloud review route; local stories and older backends skip it.
+function TakeReviewSlot(props) {
+  const { adapter } = useStore();
+  return adapter?.readTakeReview ? <TakeReview {...props} /> : null;
+}
+
 export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { t: tr, locale } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
@@ -1937,6 +1944,14 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             {!shot.segments?.length && <ShotTrim shotId={shot.id} mediaRef={mediaRef} />}
             <ShotParts shot={shot} mediaRef={mediaRef} />
           </>
+        )}
+        {viewing?.artifactId && ['done', 'succeeded'].includes(viewing?.status) && (
+          <TakeReviewSlot
+            key={viewing.artifactId}
+            shotId={shot.id}
+            artifactId={viewing.artifactId}
+            mediaRef={mediaRef}
+          />
         )}
       </div>
       <div className="ed-form">

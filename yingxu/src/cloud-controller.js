@@ -1788,6 +1788,28 @@ export function createCloudController({
     guard(ctx);
     return value;
   }
+  // Take reviews (h3-studio#626/#627): a whole-take verdict plus range marks on one artifact.
+  // Reads and writes are independent of the story version; the review has its own revision.
+  const takeReviewPath = (ctx, shotId, artifactId) =>
+    `/v1/projects/${encodeURIComponent(ctx.projectId)}/shots/${encodeURIComponent(shotId)}/takes/${encodeURIComponent(artifactId)}/review`;
+  async function readTakeReview(shotId, artifactId) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(takeReviewPath(ctx, shotId, artifactId));
+    guard(ctx);
+    return value;
+  }
+  async function saveTakeReview(shotId, artifactId, body, key) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(takeReviewPath(ctx, shotId, artifactId), {
+      method: 'PATCH',
+      key,
+      body,
+    });
+    guard(ctx);
+    return value;
+  }
   let workbenchQueue = Promise.resolve(),
     workbenchRunning = false;
   async function workbenchCommand(kind, body, { recover = false } = {}) {
@@ -1985,6 +2007,9 @@ export function createCloudController({
     },
     workbenchRead: (suffix) => workbenchRead(suffix),
     previewScriptWindows: (shotId, options) => previewScriptWindows(shotId, options),
+    readTakeReview: (shotId, artifactId) => readTakeReview(shotId, artifactId),
+    saveTakeReview: (shotId, artifactId, body, key) =>
+      saveTakeReview(shotId, artifactId, body, key),
     // Story edits share one version, so they run one after another: a quick second click
     // waits for the first instead of failing. While one is running its journal entry is
     // expected; the person is asked to check it only when it outlives the run.
