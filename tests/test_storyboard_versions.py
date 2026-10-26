@@ -1063,6 +1063,28 @@ class StoryboardVersionTests(unittest.TestCase):
             ]
             self.assertIn('"resolution": "' + resolution + '"', json.dumps(plan))
 
+    def test_quality_tier_sets_resolution_on_a_shot_without_storyboard(self):
+        self.prepare()
+        for operation, resolution in (('final', '768P'), ('draft', '480P')):
+            self.edit(
+                [
+                    {
+                        'op': 'storyboard.bulk',
+                        'shot_ids': ['shot-one'],
+                        'operation': operation,
+                    }
+                ],
+                version=self.current()['version'],
+            ).raise_for_status()
+            data = next(
+                e
+                for e in self.current()['project']['entities']
+                if e['id'] == 'shot-one'
+            )['data']
+            self.assertNotIn('storyboard', data)
+            self.assertEqual(data['qualityIntent'], operation)
+            self.assertEqual(data['h3']['controls']['resolution'], resolution)
+
     def test_preferences_and_preflight_are_owner_scoped(self):
         self.prepare()
         value = self.preflight(copies=1).json()
