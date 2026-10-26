@@ -1336,24 +1336,9 @@ _terminal_no_allocation_shape = terminal_no_allocation_shape
 
 
 def terminal_no_allocation(run, binding):
-    """Pinned no-capacity failure, not missing-identity or billing evidence.
+    from .dstack_allocation_proof import terminal_no_allocation as qualify
 
-    A task has one job and retry is disabled. Require its complete original
-    submission as well as explicit null allocation/runtime fields. Historical
-    allocation, omitted fields or another submission cannot use this exemption.
-    Call only after the exact owned run/spec has been validated.
-    """
-    if not terminal_no_allocation_shape(run, binding):
-        return False
-    latest = run["latest_job_submission"]
-    message = latest.get("termination_reason_message")
-    if isinstance(message, str) and message.startswith("sixnine_vast_attempts_v1:"):
-        # New native outcomes distinguish explicit rejection from an unknown
-        # PUT/returned contract. Unknown never establishes a zero-charge proof.
-        from .dstack_allocation_proof import from_terminal_run
-
-        return from_terminal_run(run, binding) is not None
-    return True
+    return qualify(run, binding, shape_check=terminal_no_allocation_shape)
 
 
 def live_capacity_usage(

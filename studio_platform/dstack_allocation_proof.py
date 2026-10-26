@@ -31,6 +31,24 @@ PROOF_FIELDS = {
 }
 
 
+def terminal_no_allocation(run, binding, *, shape_check):
+    """Pinned no-capacity failure, not missing-identity or billing evidence.
+
+    A task has one job and retry is disabled. Require its complete original
+    submission as well as explicit null allocation/runtime fields. Historical
+    allocation, omitted fields or another submission cannot use this exemption.
+    Call only after the exact owned run/spec has been validated.
+    """
+    if not shape_check(run, binding):
+        return False
+    latest = run["latest_job_submission"]
+    message = latest.get("termination_reason_message")
+    if isinstance(message, str) and message.startswith(PREFIX):
+        # Unknown PUT/returned-contract outcomes never establish zero-charge proof.
+        return from_terminal_run(run, binding) is not None
+    return True
+
+
 def _uuid(value):
     return isinstance(value, str) and str(uuid.UUID(value)) == value
 
