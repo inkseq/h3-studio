@@ -1822,6 +1822,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { state, dispatch, db } = useStore();
   const shot = state.shots.find((s) => s.id === shotId);
   const [copies, setCopies] = useState('1');
+  // Hooks stay above the early return below (rules of hooks).
+  const [regenerating, setRegenerating] = useState(false);
   const [preview, setPreview] = useState(null),
     [picker, setPicker] = useState(null),
     [saving, setSaving] = useState(false),
@@ -1847,7 +1849,6 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const info = expand(shot, db, locale);
   const upd = (patch) => dispatch({ type: 'update', id: shot.id, patch });
   // One new take: a fresh seed only matters when the seed is locked; HD switches the tier first.
-  const [regenerating, setRegenerating] = useState(false);
   const regenerate = async (patch) => {
     if (patch.newSeed && !shot.seedLock) delete patch.newSeed;
     setRegenerating(true);

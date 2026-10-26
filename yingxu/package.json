@@ -13,7 +13,8 @@
     "audit:layout": "node tools/layout-audit.mjs",
     "journeys": "node tools/journeys.mjs",
     "check:tokens": "node tools/check-tokens.mjs",
-    "check:ui": "node tools/check-ui-patterns.mjs"
+    "check:ui": "node tools/check-ui-patterns.mjs",
+    "check:lint": "node tools/check-lint.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "6.3.1",
@@ -34,7 +35,10 @@
     "remotion": "4.0.531"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "eslint": "10.13.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
     "playwright": "1.63.0",
     "prettier": "3.9.10",
     "vite": "^6.1.0"
