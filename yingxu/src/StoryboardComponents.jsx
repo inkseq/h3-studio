@@ -50,7 +50,6 @@ import { createPortal } from 'react-dom';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { KIND_LABEL, TYPE_LABEL, VARIANT_LABEL } from './storyboard-ui-model.js';
 import {
   StoryboardDownloads,
   StoryboardAssetImage,
@@ -62,15 +61,10 @@ import {
   coverOf,
   expand,
   fmt,
-  MODE_LABEL,
-  modeOf,
-  QUALITY_LABEL,
   planDrop,
   segments,
-  shotProfiles,
   shotStatus,
   startFrame,
-  totalDuration,
   variantOf,
   queuePositions,
 } from './storyboard-ui-model.js';
@@ -108,7 +102,7 @@ function displayLabels(tr) {
 /* ---------- thumbs & draggable tiles ---------- */
 
 export function AssetThumb({ asset, size = 36 }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   if (!asset) return <span className="athumb empty" style={{ width: size, height: size }} />;
   if (asset.kind === 'audio')
@@ -125,7 +119,7 @@ export function AssetThumb({ asset, size = 36 }) {
 function Tile({ asset, used, onClick, onZoom, dragId, children }) {
   const { state, dispatch } = useStore();
   const [renaming, setRenaming] = useState(false);
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: dragId || 'asset:' + asset.id,
@@ -202,7 +196,7 @@ function Tile({ asset, used, onClick, onZoom, dragId, children }) {
 }
 
 function ProfileCard({ p, used, onOpen, onAdd }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { db, state } = useStore();
   const drag = useDraggable({ id: 'profile:' + p.id });
@@ -433,8 +427,8 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
 /* ---------- library ---------- */
 
 export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false, onToggle }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
+  const { TYPE_LABEL } = displayLabels(tr);
   const LIB_TABS = [
     ['character', tr('storyboard.detail10'), UserRound],
     ['location', tr('storyboard.detail11'), MapPin],
@@ -699,8 +693,8 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
 }
 
 function InboxRow({ a }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
+  const { TYPE_LABEL } = displayLabels(tr);
   const { state, dispatch, db } = useStore();
   const sug = a.suggest && db.profile(a.suggest.pid || a.suggest.id);
   const [target, setTarget] = useState(sug ? `${sug.id}|${a.suggest.vid || sug.def}` : '');
@@ -768,7 +762,7 @@ function InboxRow({ a }) {
 /* ---------- profile editor ---------- */
 
 function VariantDrop({ pid, vid, children, onFiles }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { setNodeRef, isOver, active } = useDroppable({ id: `vdrop:${pid}:${vid}` });
   return (
@@ -1255,8 +1249,8 @@ const SLOT_ALLOW = {
 };
 
 export function AssetPicker({ shotId, slot, x, y, onClose }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
+  const { TYPE_LABEL } = displayLabels(tr);
   const SLOT_TITLE = {
     start: tr('storyboard.detail33'),
     end: tr('storyboard.detail34'),
@@ -1461,8 +1455,8 @@ export function useShotSortable(id) {
 }
 
 export function ModeChip({ info }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
+  const { MODE_LABEL } = displayLabels(tr);
   return (
     <span className={'mode ' + info.mode.toLowerCase()} title={MODE_LABEL[info.mode] || info.kind}>
       {MODE_LABEL[info.mode] || info.kind}
@@ -1471,7 +1465,7 @@ export function ModeChip({ info }) {
 }
 const Pill = ({ status }) => <span className={'pill ' + status.tone}>{status.label}</span>;
 function Progress({ v }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   if (!v || !Number.isFinite(v.progress) || !['generating', 'running', 'queued'].includes(v.status))
     return null;
@@ -1482,7 +1476,7 @@ function Progress({ v }) {
   );
 }
 export function ShotThumb({ shot }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const v = chosenVersion(shot);
   return v ? (
@@ -1506,7 +1500,7 @@ export function ShotThumb({ shot }) {
 }
 
 export function WhoChips({ shot, small }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { db } = useStore();
   return (
@@ -1576,7 +1570,7 @@ export function ShotCard({
   onSelect,
 }) {
   const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { QUALITY_LABEL } = displayLabels(tr);
   const { state, db, dispatch } = useStore();
   const [picker, setPicker] = useState(null);
   const { setNodeRef, attributes, listeners, style, isOver, active } = useShotSortable(shot.id);
@@ -1672,7 +1666,7 @@ export function ShotCard({
 }
 
 export function AddCard({ onAdd, label }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   if (label === undefined) label = tr('storyboard.detail42');
   return (
@@ -1696,7 +1690,7 @@ export function HelpTip({ text }) {
 }
 
 function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, className = '' }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { setNodeRef, isOver, active } = useDroppable({ id });
   const hot = isOver && /^(asset|profile):/.test(String(active?.id));
@@ -1818,7 +1812,7 @@ function TakeReviewSlot(props) {
 
 export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state, dispatch, db } = useStore();
   const shot = state.shots.find((s) => s.id === shotId);
   const [copies, setCopies] = useState('1');
@@ -2535,7 +2529,7 @@ export function usePlayer(shots) {
 }
 
 export function Screen({ player, big, style }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { seg, t, playing } = player,
     ref = useRef(),
@@ -2616,7 +2610,7 @@ export function Screen({ player, big, style }) {
 }
 
 export function Transport({ player }) {
-  const { t: tr, locale } = useI18n();
+  const { t: tr } = useI18n();
   const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { playing, setPlaying, t, total, setT } = player;
   return (

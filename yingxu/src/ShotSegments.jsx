@@ -4,7 +4,6 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { Button } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
-import { Note } from './ui/Note.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
 import './shot-segments.css';

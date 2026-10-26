@@ -2,7 +2,6 @@
 // The backend enforces require_admin on every route; a panel whose endpoint is not deployed
 // yet says so instead of failing.
 import React, { useEffect, useMemo, useState } from 'react';
-import { FloatingMessage } from './floating-notice.js';
 import { ChevronDown, History } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';

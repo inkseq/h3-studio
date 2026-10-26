@@ -94,7 +94,7 @@ function SampleGroups({ groups = [] }) {
   );
 }
 function LastFailure({ failure }) {
-  const { t, locale } = useI18n();
+  const { locale } = useI18n();
   return (
     <div className="p4-host-failure">
       <span>{failureLabel(failure, locale)}</span>
@@ -349,7 +349,7 @@ export function OfferHostHistory({ members = [], profileId, now = Date.now() }) 
   );
 }
 function PolicyReview({ host, selection, current, busy, onClose, onConfirm }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const active = usePageActive(),
     ref = useRef(),
     opener = useRef(globalThis.document?.activeElement);
@@ -484,7 +484,7 @@ function HostEditor({ host, busy, onSave }) {
   );
 }
 function HostLookup({ controller, target, busy }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [input, setInput] = useState(''),
     [loading, setLoading] = useState(false),
     [error, setError] = useState(''),

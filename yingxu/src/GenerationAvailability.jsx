@@ -1,7 +1,7 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React from 'react';
 import './generation-availability.css';
-import { MODE_LABELS, modeAvailability } from './generation-availability.js';
+import { modeAvailability } from './generation-availability.js';
 
 export default function GenerationAvailability({
   snapshot,
