@@ -880,3 +880,18 @@ dialog.modal.wide {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
+/* Story settings (owner, 2026-10-26): story actions live here, not in the account menu. */
+.story-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.story-settings-actions .trash-button-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

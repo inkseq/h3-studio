@@ -373,10 +373,12 @@ export function createCloudController({
   };
   globalThis.window?.addEventListener('focus', focusSession);
   globalThis.document?.addEventListener('visibilitychange', visibleSession);
-  async function action(fn, { projectId } = {}) {
+  // `quiet` operations (story edits through /actions) still run one at a time but do not
+  // flag the whole page busy, so other buttons stay usable (owner, 2026-10-26).
+  async function action(fn, { projectId, quiet = false } = {}) {
     if (operation) throw Error('上一项云操作还在处理中。');
     operation = true;
-    emit({ busy: true, error: '', message: '' });
+    emit(quiet ? { error: '', message: '' } : { busy: true, error: '', message: '' });
     try {
       return await fn();
     } catch (error) {
@@ -394,7 +396,7 @@ export function createCloudController({
       throw error;
     } finally {
       operation = false;
-      emit({ busy: false });
+      if (!quiet) emit({ busy: false });
     }
   }
   const emptyProjectList = {
@@ -1977,7 +1979,9 @@ export function createCloudController({
         .then(async () => {
           workbenchRunning = true;
           try {
-            return await action(() => workbenchCommand(kind, body, options));
+            return await action(() => workbenchCommand(kind, body, options), {
+              quiet: kind === 'actions',
+            });
           } finally {
             workbenchRunning = false;
           }

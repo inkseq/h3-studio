@@ -30,7 +30,9 @@ export function useCloudAutosave() {
     if (!cloudStory || !workspace.dirty || blocked) return;
     const wait = status.state === 'error' ? RETRY_MS : DELAY_MS;
     timer.current = setTimeout(async () => {
-      if (!store.getState().workspace.dirty || cloud.getState().busy) return;
+      // A story edit (/actions) runs quietly; the version it brings re-runs this effect.
+      if (!store.getState().workspace.dirty || cloud.getState().busy || cloud.workbenchRunning?.())
+        return;
       setStatus({ state: 'saving', error: '' });
       try {
         await cloud.save();
@@ -44,7 +46,12 @@ export function useCloudAutosave() {
   useEffect(() => {
     if (!cloudStory) return;
     const flush = () => {
-      if (store.getState().workspace.dirty && !cloud.getState().busy && !cloud.getState().conflict)
+      if (
+        store.getState().workspace.dirty &&
+        !cloud.getState().busy &&
+        !cloud.workbenchRunning?.() &&
+        !cloud.getState().conflict
+      )
         void cloud.save().catch(() => {});
     };
     const hidden = () => document.visibilityState === 'hidden' && flush();

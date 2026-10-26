@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Upload,
   Pencil,
+  CircleHelp,
 } from 'lucide-react';
 import { Segmented } from './ui/Segmented.jsx';
 import { useDragMove } from './ui/useDragMove.js';
@@ -1625,7 +1626,7 @@ export function AddCard({ onAdd, label }) {
 export function HelpTip({ text }) {
   return (
     <span className="help-tip" tabIndex={0} role="img" aria-label={text} data-tip={text}>
-      ?
+      <CircleHelp size={14} strokeWidth={1.75} aria-hidden="true" />
     </span>
   );
 }
@@ -2324,9 +2325,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               {info.res} · {shortSeconds(info.sec)} {tr('storyboard.secondsUnit')}
             </small>
           </div>
-          {/* #232 (#25): seed lock and copies are occasional; they fold under "More settings". */}
-          <details className="ed-more">
-            <summary>{tr('storyboard.moreSettings')}</summary>
+          {/* Seed lock and takes sit on one line right above Generate (owner, 2026-10-26). */}
+          <div className="row ed-gen-options">
             {shot.versions.length > 0 && (
               <label className="check">
                 <input
@@ -2334,11 +2334,12 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                   checked={shot.seedLock}
                   onChange={(e) => upd({ seedLock: e.target.checked })}
                 />
-                {tr('storyboard.mixed21')}
+                {tr('storyboard.seedLock')}
+                <HelpTip text={tr('storyboard.seedLockHelp')} />
               </label>
             )}
             <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
-          </details>
+          </div>
           <div className="ed-actions">
             <button
               className="primary"

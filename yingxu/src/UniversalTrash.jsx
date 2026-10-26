@@ -350,23 +350,25 @@ export function TrashMenu({ target, onRename, onEdit, onChat, onTrashSettled, di
   );
 }
 // One-click "move to trash" for panels with a single obvious action (no menu).
-export function TrashButton({ target, onTrashSettled, disabled = false }) {
+// With a `label` it is a plain text button, e.g. "Delete this story".
+export function TrashButton({ target, onTrashSettled, label, disabled = false }) {
   const ctx = useTrash(),
     { t } = useI18n();
   if (!ctx?.account) return null;
   return (
     <button
       type="button"
-      className="ghost round trash-button"
-      title={t('trash.move')}
-      aria-label={t('trash.move')}
+      className={label ? 'danger trash-button-text' : 'ghost round trash-button'}
+      title={label || t('trash.move')}
+      aria-label={label || t('trash.move')}
       disabled={disabled || ctx.busy || !!ctx.pending}
       onClick={async () => {
-        await ctx.request('trash', [target]);
-        onTrashSettled?.();
+        const receipt = await ctx.request('trash', [target]);
+        if (receipt?.state === 'completed' || !label) onTrashSettled?.();
       }}
     >
       <Trash2 size={15} />
+      {label}
     </button>
   );
 }
