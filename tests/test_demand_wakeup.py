@@ -38,7 +38,10 @@ class DemandLoopTests(unittest.TestCase):
                 stop.set()
 
         run_demand_loop(
-            stop, Wake(), lambda: True, work,
+            stop,
+            Wake(),
+            lambda: True,
+            work,
             active_seconds=lambda: 15 if notified else 60,
         )
         self.assertEqual(waits, [60, 15])

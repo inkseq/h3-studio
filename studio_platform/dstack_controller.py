@@ -1410,7 +1410,9 @@ def main(argv=None):
                 repo,
                 settings,
                 work_dir,
-                film_setup=lambda DBOS, turns: setup_controller_film(DBOS, turns, repo, film_app),
+                film_setup=lambda DBOS, turns: setup_controller_film(
+                    DBOS, turns, repo, film_app
+                ),
                 account_services=(
                     film_app.state.account_sessions,
                     film_app.state.account_deletion,

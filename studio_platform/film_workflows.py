@@ -23,6 +23,7 @@ def setup_controller_film(DBOS, domain_turns, repo, app):
 
 def register_film_workflows(DBOS, service, principal_for, *, domain_turns=None):
     domain_turns = domain_turns or DomainTurns()
+
     @DBOS.step(name='inkseq_film_turn_v1', retries_allowed=False)
     async def domain_turn(tenant, owner, project_id, run_id):
         for value in (tenant, owner, project_id, run_id):

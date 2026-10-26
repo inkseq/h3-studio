@@ -658,7 +658,9 @@ class DurableExecutor:
             self.repo.generation_transport.client.register_queue(
                 QUEUE, polling_interval_sec=POLL_SECONDS
             )
-            register_generation_workflow(DBOS, self.slots, domain_turns=self.domain_turns)
+            register_generation_workflow(
+                DBOS, self.slots, domain_turns=self.domain_turns
+            )
             from .payments_workflows import register_payment_workflows
 
             register_payment_workflows(
@@ -730,9 +732,7 @@ class DurableExecutor:
             # SDK cancellation leaves them recoverable, not business-cancelled.
             # Keep slot/native fences until the executor has stopped. Existing
             # container grace remains the fallback for a stuck external I/O.
-            self._DBOS.destroy(
-                destroy_registry=True, workflow_completion_timeout_sec=0
-            )
+            self._DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=0)
             self._DBOS = None
         self.slots.close()
 

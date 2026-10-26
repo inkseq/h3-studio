@@ -240,7 +240,11 @@ class ClientTransactionTests(unittest.TestCase):
         from studio_platform.workflow_schema import dbos_config
 
         args = ("test", "superdan", "project", "drain-film")
-        finish, called, sleeping = threading.Event(), threading.Event(), threading.Event()
+        finish, called, sleeping = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
         original_recv = DBOS.recv_async
 
         async def observe_recv(*args, **kwargs):
@@ -253,7 +257,10 @@ class ClientTransactionTests(unittest.TestCase):
 
         def turn(*_):
             called.set()
-            return {"terminal": finish.is_set(), "phase": "completed" if finish.is_set() else "authorization_required"}
+            return {
+                "terminal": finish.is_set(),
+                "phase": "completed" if finish.is_set() else "authorization_required",
+            }
 
         service = SimpleNamespace(tenant="test", turn=turn)
         self.transport.client.register_queue(FILM_VERSION, polling_interval_sec=1)
@@ -262,7 +269,9 @@ class ClientTransactionTests(unittest.TestCase):
             turns = DomainTurns()
             DBOS(config=dbos_config(self.url, executor_id="inkseq-workflows-staging"))
             register_film_workflows(
-                DBOS, service, lambda *_: SimpleNamespace(owner="superdan"),
+                DBOS,
+                service,
+                lambda *_: SimpleNamespace(owner="superdan"),
                 domain_turns=turns,
             )
             DBOS.launch()
@@ -289,8 +298,11 @@ class ClientTransactionTests(unittest.TestCase):
         executor = launch()
         try:
             deadline = time.monotonic() + 25
-            while time.monotonic() < deadline and self.workflows()[0]["status"] != "SUCCESS":
-                time.sleep(.05)
+            while (
+                time.monotonic() < deadline
+                and self.workflows()[0]["status"] != "SUCCESS"
+            ):
+                time.sleep(0.05)
             self.assertEqual(self.workflows()[0]["status"], "SUCCESS")
             self.assertEqual(self.workflows()[0]["workflow_uuid"], ident)
             self.assertEqual(len(self.workflows()), 1)
