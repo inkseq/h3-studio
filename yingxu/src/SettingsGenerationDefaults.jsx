@@ -1,6 +1,7 @@
+import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { FloatingMessage } from './floating-notice.js';
-import { ArrowUpRight, SlidersHorizontal } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { store } from './store.js';
 import {
@@ -65,78 +66,61 @@ export default function SettingsGenerationDefaults({ account, api, active }) {
       : controls[key] === null
         ? t('settings.recommended')
         : String(controls[key]);
+  const status = current
+    ? t(
+        changed
+          ? changed === 1
+            ? 'settings.defaultsChangedOne'
+            : 'settings.defaultsChanged'
+          : 'settings.defaultsRecommended',
+        { count: changed },
+      )
+    : t(error ? 'settings.defaultsFailed' : account ? 'settings.loading' : 'settings.login');
+  const row = (key, text) => (
+    <SettingRow key={key} as="div" label={text}>
+      {key === 'mode'
+        ? recipe
+          ? t(recipe.mode === 'ref' ? 'workspace.status14' : 'workspace.status13')
+          : t('settings.recommended')
+        : key === 'profile'
+          ? current.capabilities?.deployment_profiles?.find(
+              (profile) => profile.id === authored.deployment_profile_id,
+            )?.label ||
+            authored.deployment_profile_id ||
+            t('settings.recommended')
+          : value(key)}
+    </SettingRow>
+  );
   return (
-    <section className="card-box settings-generation-defaults">
-      <div className="row tight">
-        <SlidersHorizontal size={18} />
-        <div>
-          <b>{t('settings.h3Defaults')}</b>
-          <br />
-          <small className="muted">
-            {current
-              ? t(
-                  changed
-                    ? changed === 1
-                      ? 'settings.defaultsChangedOne'
-                      : 'settings.defaultsChanged'
-                    : 'settings.defaultsRecommended',
-                  { count: changed },
-                )
-              : t(
-                  error
-                    ? 'settings.defaultsFailed'
-                    : account
-                      ? 'settings.loading'
-                      : 'settings.login',
-                )}
-          </small>
-        </div>
-      </div>
-      <p className="muted">{t('settings.storyDefaultsScope')}</p>
-      {error && <p role="alert">{t(error)}</p>}
+    <SettingsSection
+      className="settings-generation-defaults"
+      title={t('settings.h3Defaults')}
+      help={status + ' · ' + t('settings.storyDefaultsScope')}
+      actions={
+        <a className="btn settings-story-defaults" href={href || '/'}>
+          <span>{t(href ? 'settings.editStoryDefaults' : 'settings.chooseStoryDefaults')}</span>
+          <ArrowUpRight size={15} />
+        </a>
+      }
+    >
+      {error && (
+        <p role="alert" className="ui-settings-error">
+          {t(error)}
+        </p>
+      )}
       {current && (
         <>
-          <dl>
-            <dt>{t('workbench.mode')}</dt>
-            <dd>
-              {recipe
-                ? t(recipe.mode === 'ref' ? 'workspace.status14' : 'workspace.status13')
-                : t('settings.recommended')}
-            </dd>
-            <dt>{t('workbench.profile')}</dt>
-            <dd>
-              {current.capabilities?.deployment_profiles?.find(
-                (profile) => profile.id === authored.deployment_profile_id,
-              )?.label ||
-                authored.deployment_profile_id ||
-                t('settings.recommended')}
-            </dd>
-            {['resolution', 'aspect_ratio', 'steps', 'generate_audio']
-              .filter((key) => keys.includes(key))
-              .map((key) => (
-                <React.Fragment key={key}>
-                  <dt>{label(key)}</dt>
-                  <dd>{value(key)}</dd>
-                </React.Fragment>
-              ))}
-          </dl>
-          <details>
+          {row('mode', t('workbench.mode'))}
+          {row('profile', t('workbench.profile'))}
+          {['resolution', 'aspect_ratio', 'steps', 'generate_audio']
+            .filter((key) => keys.includes(key))
+            .map((key) => row(key, label(key)))}
+          <details className="ui-settings-more">
             <summary>{t('settings.allDefaultParameters')}</summary>
-            <dl>
-              {keys.map((key) => (
-                <React.Fragment key={key}>
-                  <dt>{label(key)}</dt>
-                  <dd>{value(key)}</dd>
-                </React.Fragment>
-              ))}
-            </dl>
+            {keys.map((key) => row(key, label(key)))}
           </details>
         </>
       )}
-      <a className="settings-story-defaults" href={href || '/'}>
-        <span>{t(href ? 'settings.editStoryDefaults' : 'settings.chooseStoryDefaults')}</span>
-        <ArrowUpRight size={15} />
-      </a>
-    </section>
+    </SettingsSection>
   );
 }

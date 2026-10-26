@@ -1582,23 +1582,26 @@ export function ShotCard({
         <Progress v={latest} />
       </div>
       <div className="card-body">
+        {/* One line: title, who made it, then mode / tier only when this shot differs from the
+            story's usual (#232 #12); the card grows only for cast chips (owner, 2026-10-26). */}
         <div className="card-title" title={shot.title}>
-          {shot.title}
+          <span className="card-title-text">{shot.title}</span>
           <AssistantBadge createdBy={shot.created_by} />
+          <span className="card-meta">
+            {info.mode !== usual.mode && <ModeChip info={info} />}
+            {shot.quality !== usual.quality && (
+              <span className="q">{QUALITY_LABEL[shot.quality]}</span>
+            )}
+            {info.warnings.length > 0 && (
+              <span className="warnbadge" title={info.warnings.join('\n')}>
+                !
+              </span>
+            )}
+          </span>
         </div>
-        <div className="card-meta">
-          {/* #232 (#12): mode and tier only when this shot differs from the story's usual. */}
-          {info.mode !== usual.mode && <ModeChip info={info} />}
-          {shot.quality !== usual.quality && (
-            <span className="q">{QUALITY_LABEL[shot.quality]}</span>
-          )}
-          {info.warnings.length > 0 && (
-            <span className="warnbadge" title={info.warnings.join('\n')}>
-              !
-            </span>
-          )}
-        </div>
-        <WhoChips shot={shot} small />
+        {(shot.cast.length > 0 || shot.place || shot.props.length > 0) && (
+          <WhoChips shot={shot} small />
+        )}
         {['wait', 'busy', 'warn'].includes(status.tone) && <Pill status={status} />}
       </div>
       {plan && (
@@ -2611,10 +2614,11 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
   };
   // The ruler is the one time bar: press and drag on it to scrub (owner, 2026-10-24); the
   // empty track behind the shots scrubs the same way.
-  const scrub = (event) => {
+  // `area` is the bar the position is measured on; the playhead itself measures on the strip.
+  const scrub = (event, area = event.currentTarget) => {
     if (!total || event.button > 0) return;
     const el = event.currentTarget,
-      r = el.getBoundingClientRect();
+      r = area.getBoundingClientRect();
     const at = (x) => Math.max(0, Math.min(total, ((x - r.left) / r.width) * total));
     el.setPointerCapture(event.pointerId);
     setT(at(event.clientX));
@@ -2658,7 +2662,16 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
             onPick={pick}
           />
         ))}
-        <div className="playhead" style={{ left: at }} />
+        {/* The playhead is a handle too (owner, 2026-10-26): grab the line or its grip. */}
+        <div
+          className="playhead"
+          style={{ left: at }}
+          role="presentation"
+          onPointerDown={(event) => {
+            event.stopPropagation();
+            scrub(event, strip.current);
+          }}
+        />
       </div>
       <div
         className="ruler"

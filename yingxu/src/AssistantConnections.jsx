@@ -1,3 +1,4 @@
+import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import TelegramLink, { telegramUserLabel, validTelegramNonce } from './TelegramLink.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { FloatingMessage } from './floating-notice.js';
@@ -81,8 +82,12 @@ export default function AssistantConnections({
     refreshSequence = useRef(0),
     activitySequence = useRef(0),
     connectionsCursor = useRef(undefined);
+  // Only an unfinished operation from before (needing recovery) locks the page. A change in
+  // flight locks just its own row; other clicks wait their turn (owner, 2026-10-26).
   const date = (value) => assistantDate(value, locale, t('assistants.dateUnavailable')),
-    busy = loading || operation.busy || !!operation.pending;
+    locked = !!operation.pending && !operation.busy,
+    busy = locked || (loading && !rows.length),
+    busyId = operation.busy ? operation.pending?.args?.[0] : null;
   const scopeLabel = (value) =>
     t(
       'assistants.' +
@@ -179,7 +184,13 @@ export default function AssistantConnections({
       client.reset();
     };
   }, [client, account, sessionId, projectId]);
-  async function act(fn) {
+  const queue = useRef(Promise.resolve());
+  function act(fn) {
+    const run = queue.current.catch(() => {}).then(() => actNow(fn));
+    queue.current = run;
+    return run;
+  }
+  async function actNow(fn) {
     const at = epoch.current;
     setError('');
     setNotice('');
@@ -362,69 +373,75 @@ export default function AssistantConnections({
             </aside>
           )}
           {!codeAvailable ? (
-            <form onSubmit={issue}>
-              {!telegram && (
-                <Segmented
-                  className="assistant-target"
-                  label={t('telegram.target')}
-                  options={[
-                    { value: 'agent', label: t('telegram.agentTab') },
-                    { value: 'telegram', label: t('telegram.tab') },
-                  ]}
-                  value={target}
-                  onChange={(value) => {
-                    setTarget(value);
-                    setName(value === 'telegram' ? 'Telegram' : 'Codex');
-                    setPermission('generate');
-                    setCap(value === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0');
-                  }}
-                />
-              )}
-              {target === 'telegram' && <p className="muted">{t('telegram.explain')}</p>}
-              <fieldset disabled={busy || !profile}>
-                <legend>{t('assistants.scope')}</legend>
-                {target === 'telegram' ? (
-                  <p>{t('assistants.all')}</p>
-                ) : (
-                  <select
-                    aria-label={t('assistants.scope')}
-                    value={scope}
-                    onChange={(e) => setScope(e.target.value)}
-                  >
-                    {sessionId && <option value="session">{t('assistants.session')}</option>}
-                    {projectId && <option value="story">{t('assistants.story')}</option>}
-                    <option value="all">{t('assistants.all')}</option>
-                  </select>
+            <form onSubmit={issue} className="ui-form">
+              <SettingsSection
+                help={target === 'telegram' ? t('telegram.explain') : null}
+                actions={
+                  <button className="primary" disabled={busy || !profile || !name.trim()}>
+                    {t(target === 'telegram' ? 'telegram.connect' : 'assistants.connect')}
+                  </button>
+                }
+              >
+                {!telegram && (
+                  <div className="ui-settings-tabs">
+                    <Segmented
+                      className="assistant-target"
+                      label={t('telegram.target')}
+                      options={[
+                        { value: 'agent', label: t('telegram.agentTab') },
+                        { value: 'telegram', label: t('telegram.tab') },
+                      ]}
+                      value={target}
+                      onChange={(value) => {
+                        setTarget(value);
+                        setName(value === 'telegram' ? 'Telegram' : 'Codex');
+                        setPermission('generate');
+                        setCap(
+                          value === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0',
+                        );
+                      }}
+                    />
+                  </div>
                 )}
-                <label>
-                  {t('assistants.name')}
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    maxLength={80}
-                    required
-                  />
-                </label>
-                {/* Assistants are connected to create; view-only was never used (owner, 2026-10-22).
-                    Paid work stays bounded by the daily cap below and per-job confirmation. */}
-                {money && (
-                  <>
-                    <label>
-                      <span className="assistant-label-help" title={t('assistants.zero')}>
-                        {t(creditMode ? 'assistants.capCredits' : 'assistants.cap')} <i>?</i>
-                      </span>
+                <fieldset disabled={busy || !profile}>
+                  {target === 'telegram' ? (
+                    <SettingRow as="div" label={t('assistants.scope')}>
+                      {t('assistants.all')}
+                    </SettingRow>
+                  ) : (
+                    <SettingRow label={t('assistants.scope')} wide>
+                      <select value={scope} onChange={(e) => setScope(e.target.value)}>
+                        {sessionId && <option value="session">{t('assistants.session')}</option>}
+                        {projectId && <option value="story">{t('assistants.story')}</option>}
+                        <option value="all">{t('assistants.all')}</option>
+                      </select>
+                    </SettingRow>
+                  )}
+                  <SettingRow label={t('assistants.name')} wide>
+                    <input
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      maxLength={80}
+                      required
+                    />
+                  </SettingRow>
+                  {/* Assistants are connected to create; view-only was never used (owner,
+                      2026-10-22). Paid work stays bounded by this daily cap and per-job
+                      confirmation. */}
+                  {money && (
+                    <SettingRow
+                      label={t(creditMode ? 'assistants.capCredits' : 'assistants.cap')}
+                      help={t('assistants.zero')}
+                    >
                       <input
                         inputMode={creditMode ? 'numeric' : 'decimal'}
                         value={cap}
                         onChange={(e) => setCap(e.target.value)}
                       />
-                    </label>
-                  </>
-                )}
-                <button className="primary" disabled={!name.trim()}>
-                  {t(target === 'telegram' ? 'telegram.connect' : 'assistants.connect')}
-                </button>
-              </fieldset>
+                    </SettingRow>
+                  )}
+                </fieldset>
+              </SettingsSection>
             </form>
           ) : target === 'telegram' ? (
             <TelegramLink
@@ -472,6 +489,7 @@ export default function AssistantConnections({
             hasMore={connectionsPage !== null}
             pendingId={operation.pending?.args?.[0]}
             busy={busy}
+            busyId={busyId}
             scopeLabel={scopeLabel}
             permissionLabel={permissionLabel}
             money={money}
@@ -513,30 +531,32 @@ export default function AssistantConnections({
             </article>
           )}
           {settings && settingsDraft && (
-            <details>
+            <details className="assistant-defaults">
               <summary>{t('assistants.settings')}</summary>
-              <form onSubmit={defaults}>
-                {Object.keys(settings.value).map((field) => (
-                  <label key={field}>
-                    {t('assistants.' + field)}
-                    <input
-                      type="number"
-                      min="1"
-                      step="1"
-                      disabled={busy}
-                      value={settingsDraft[field]}
-                      onChange={(e) =>
-                        setSettingsDraft({ ...settingsDraft, [field]: e.target.value })
-                      }
-                    />
-                  </label>
-                ))}
-                <small>{t('assistants.settingsHelp')}</small>
-                <button disabled={busy}>{t('assistants.saveSettings')}</button>
+              <form onSubmit={defaults} className="ui-form">
+                <SettingsSection
+                  help={t('assistants.settingsHelp')}
+                  actions={<button disabled={busy}>{t('assistants.saveSettings')}</button>}
+                >
+                  {Object.keys(settings.value).map((field) => (
+                    <SettingRow key={field} label={t('assistants.' + field)}>
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        disabled={busy}
+                        value={settingsDraft[field]}
+                        onChange={(e) =>
+                          setSettingsDraft({ ...settingsDraft, [field]: e.target.value })
+                        }
+                      />
+                    </SettingRow>
+                  ))}
+                </SettingsSection>
               </form>
             </details>
           )}
-          <button disabled={busy} onClick={() => act(refresh)}>
+          <button className="small assistant-refresh" disabled={busy} onClick={() => act(refresh)}>
             {t('assistants.refresh')}
           </button>
         </>
@@ -553,6 +573,7 @@ export function ConnectionList({
   hasMore = false,
   pendingId,
   busy,
+  busyId = null,
   scopeLabel,
   permissionLabel,
   money = true,
@@ -570,7 +591,7 @@ export function ConnectionList({
           key={row.id}
           row={row}
           hidden={hidden}
-          busy={busy}
+          busy={busy || busyId === row.id}
           t={t}
           scopeLabel={scopeLabel}
           permissionLabel={permissionLabel}

@@ -223,7 +223,7 @@
 .assistant-connections > h3 {
   margin: 0;
 }
-.assistant-connections > form,
+.assistant-connections > form:not(.ui-form),
 .assistant-connections > article,
 .assistant-connections > aside,
 .assistant-connections > details {
@@ -815,21 +815,6 @@
   color: var(--ink);
   font-weight: 500;
 }
-.ops-adapter .settings-story-defaults {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 36px;
-  padding: 12px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  color: var(--ink);
-  background: var(--surface);
-  text-decoration: none;
-}
-.ops-adapter .settings-story-defaults > span {
-  flex: 1;
-}
 .assistant-badge {
   align-items: center;
   gap: 4px;
@@ -921,36 +906,6 @@
 .ops-adapter .p4-observed-at {
   font-size: 11px;
   line-height: 1.4;
-}
-
-.ops-adapter .settings-generation-defaults dl {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px 16px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-.ops-adapter .settings-generation-defaults dt {
-  color: var(--muted);
-  min-width: 0;
-}
-.ops-adapter .settings-generation-defaults dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  min-width: 0;
-}
-.ops-adapter .settings-generation-defaults summary {
-  font-size: 12px;
-  cursor: pointer;
-  min-height: 32px;
-  align-content: center;
-}
-.ops-adapter .settings-generation-defaults > .settings-story-defaults {
-  height: 36px;
-  min-height: 36px;
-  padding: 0 10px;
-  margin-top: 14px;
-  font-size: 12px;
 }
 
 .spend-breakdown {
@@ -1481,4 +1436,22 @@
   padding: 0 10px;
   font-size: var(--fs-sm);
   justify-self: start;
+}
+
+/* Assistant forms use the shared settings rows (owner, 2026-10-26): compact controls,
+   buttons at their own width. */
+.assistant-connections > form.ui-form,
+.assistant-connections .assistant-defaults > form.ui-form {
+  display: block;
+}
+.assistant-connections > .assistant-refresh,
+.assistant-connections > button {
+  align-self: flex-start;
+}
+.assistant-connections .assistant-defaults > summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.assistant-connections .assistant-defaults[open] > summary {
+  margin-bottom: 12px;
 }
