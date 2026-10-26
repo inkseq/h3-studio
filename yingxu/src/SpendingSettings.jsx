@@ -378,18 +378,7 @@ export default function SpendingSettings({ account }) {
               api={api}
               active={pageActive && section === 'defaults'}
             />
-            <p className="muted">{t('settings.defaultsHelp')}</p>
-            <div className="card-box">
-              <div className="row tight">
-                <SlidersHorizontal size={18} />
-                <div>
-                  <b>{t('takes.preferences')}</b>
-                  <br />
-                  <small className="muted">{t('settings.defaults')}</small>
-                </div>
-              </div>
-              <TakePreferencesSettings api={api} active={pageActive && section === 'defaults'} />
-            </div>
+            <TakePreferencesSettings api={api} active={pageActive && section === 'defaults'} />
           </div>
           {(!user || !draft) &&
             section !== 'account' &&

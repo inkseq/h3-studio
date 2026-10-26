@@ -21,8 +21,21 @@
 }
 .sb-workspace .scene .card-title {
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+.sb-workspace .scene .card-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sb-workspace .scene .card-title .card-meta {
+  margin-left: auto;
+  flex: none;
+  flex-wrap: nowrap;
+  font-weight: 400;
+}
+.sb-workspace .scene .card-title .card-meta:empty {
+  display: none;
 }
 .sb-workspace .library .lib-tabs .sb-library-tab {
   appearance: none;
@@ -1611,4 +1624,41 @@ body.sb-resizing-y video {
 }
 .script-windows-list q {
   color: var(--ink-2);
+}
+/* A playhead you can see and grab on any picture (owner, 2026-10-26): a light line with a
+   dark edge, a round grip on top, and a wider invisible hit area. */
+.timeline .track.video .playhead {
+  top: -8px;
+  bottom: -2px;
+  width: 3px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.55),
+    0 0 6px rgba(0, 0, 0, 0.35);
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  z-index: 4;
+}
+.timeline .track.video .playhead::before {
+  content: '';
+  position: absolute;
+  inset: 0 -7px;
+}
+.timeline .track.video .playhead::after {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+.timeline .track.video .playhead:active {
+  cursor: grabbing;
 }
