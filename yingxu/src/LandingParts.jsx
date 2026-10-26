@@ -2,7 +2,7 @@
 // the seven steps and the before/after slider. Colours come from the skin tokens only, so the
 // page follows the coral look and the system light/dark setting. Motion stops for
 // prefers-reduced-motion (landing-parts.css).
-import React, { useState } from 'react';
+import React from 'react';
 import InkMark from './InkMark.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import './landing-parts.css';
@@ -186,35 +186,5 @@ export function LandingFlow() {
         <small>{t('landing.v2.loop')}</small>
       </div>
     </div>
-  );
-}
-
-export function LandingBeforeAfter() {
-  const { t } = useI18n(),
-    [pos, setPos] = useState(55);
-  return (
-    <figure className="lp-ba">
-      <div className="lp-ba-head">
-        <h2>{t('landing.v2.baTitle')}</h2>
-        <span className="muted">{t('landing.v2.baHint')}</span>
-      </div>
-      <div className="lp-ba-frame" role="img" aria-label={t('landing.v2.baLabel')}>
-        <div className="lp-ba-before" />
-        <div className="lp-ba-after" style={{ clipPath: `inset(0 ${100 - pos}% 0 0)` }} />
-        <span className="lp-ba-line" style={{ left: pos + '%' }} />
-        <span className="lp-ba-tag after">{t('landing.v2.after')}</span>
-        <span className="lp-ba-tag before">{t('landing.v2.before')}</span>
-      </div>
-      <label className="lp-ba-control">
-        <span className="visually-hidden">{t('landing.v2.baHint')}</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          value={pos}
-          onChange={(e) => setPos(Number(e.target.value))}
-        />
-      </label>
-    </figure>
   );
 }

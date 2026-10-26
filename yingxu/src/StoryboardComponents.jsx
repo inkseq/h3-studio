@@ -34,8 +34,7 @@ import { useDragMove } from './ui/useDragMove.js';
 import { Badge, Chip, Note } from './ui/Note.jsx';
 import './profile-editor.css';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
-import { WorkbenchTakes, WorkbenchCopies, WorkbenchDefaults } from './StoryboardWorkbench.jsx';
-import { useCloud } from './CloudStudio.jsx';
+import { WorkbenchTakes, WorkbenchCopies } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -1688,7 +1687,7 @@ export function AddCard({ onAdd, label }) {
 // #232 (#50): a small "?" that explains a field on hover or keyboard focus.
 export function HelpTip({ text }) {
   return (
-    <Tooltip content={text}>
+    <Tooltip content={text} tap>
       <span className="help-tip" tabIndex={0} role="img" aria-label={text}>
         <CircleHelp size={14} strokeWidth={1.75} aria-hidden="true" />
       </span>
@@ -1847,7 +1846,6 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db, locale);
   const upd = (patch) => dispatch({ type: 'update', id: shot.id, patch });
-  const operatorAccess = useCloud().operatorAccess === true;
   // One new take: a fresh seed only matters when the seed is locked; HD switches the tier first.
   const [regenerating, setRegenerating] = useState(false);
   const regenerate = async (patch) => {
@@ -2305,7 +2303,15 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                     if (Number.isFinite(n) && n > 0) upd({ duration: n });
                   }}
                 />
-                <span className="muted">{tr('storyboard.secondsUnit')}</span>
+                {/* The allowed range sits with the field instead of a help icon (owner, 2026-10-27). */}
+                <span className="muted">
+                  {durationRange
+                    ? tr('storyboard.secondsRange', {
+                        min: durationRange.minimum,
+                        max: durationRange.maximum,
+                      })
+                    : tr('storyboard.secondsUnit')}
+                </span>
                 {!durationRange && <small>{tr('storyboard.copy89')}</small>}
               </label>
             </>
@@ -2400,9 +2406,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           ))}
         </details>
 
-        {/* No per-shot model parameters for creators (owner, 2026-10-26): quality, shape, sound,
-            seed and copies below are theirs. Admins keep the raw panel for debugging. */}
-        {operatorAccess && <WorkbenchDefaults shotId={shot.id} />}
+        {/* No model parameters in the shot editor, for anyone (owner, 2026-10-27): quality,
+            shape, sound, seed and copies below are the creator's; raw values belong in admin. */}
         {/* Quality, copies and Generate stay in view at the bottom (owner, 2026-10-24). */}
         <div className="ed-footer">
           <div className="row quality-row">
@@ -2411,21 +2416,25 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               value={shot.quality}
               onChange={(quality) => upd({ quality })}
             />
+            <HelpTip text={tr('storyboard.help.quality')} />
             <small className="muted">
               {info.res} · {shortSeconds(info.sec)} {tr('storyboard.secondsUnit')}
             </small>
           </div>
           <div className="row ed-gen-options">
-            <Segmented
-              label={tr('storyboard.aspect')}
-              options={[
-                ['16:9', 'storyboard.aspectWide'],
-                ['9:16', 'storyboard.aspectTall'],
-                ['1:1', 'storyboard.aspectSquare'],
-              ].map(([value, key]) => ({ value, label: tr(key) }))}
-              value={shot.aspect}
-              onChange={(aspect) => upd({ aspect })}
-            />
+            <span className="row tight">
+              <Segmented
+                label={tr('storyboard.aspect')}
+                options={[
+                  ['16:9', 'storyboard.aspectWide'],
+                  ['9:16', 'storyboard.aspectTall'],
+                  ['1:1', 'storyboard.aspectSquare'],
+                ].map(([value, key]) => ({ value, label: tr(key) }))}
+                value={shot.aspect}
+                onChange={(aspect) => upd({ aspect })}
+              />
+              <HelpTip text={tr('storyboard.help.aspect')} />
+            </span>
             <label className="check">
               <input
                 type="checkbox"
@@ -2454,14 +2463,18 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           <div className="ed-actions">
             {/* After a take: another version (new seed, same settings) or the same in HD. */}
             {shot.versions.length > 0 && (
-              <Button disabled={regenerating} onClick={() => regenerate({ newSeed: true })}>
-                {tr('storyboard.anotherVersion')}
-              </Button>
+              <Tooltip content={tr('storyboard.help.anotherVersion')}>
+                <Button disabled={regenerating} onClick={() => regenerate({ newSeed: true })}>
+                  {tr('storyboard.anotherVersion')}
+                </Button>
+              </Tooltip>
             )}
             {shot.versions.length > 0 && shot.quality !== 'final' && (
-              <Button disabled={regenerating} onClick={() => regenerate({ quality: 'final' })}>
-                {tr('storyboard.regenerateHd')}
-              </Button>
+              <Tooltip content={tr('storyboard.help.remakeSharp')}>
+                <Button disabled={regenerating} onClick={() => regenerate({ quality: 'final' })}>
+                  {tr('storyboard.regenerateHd')}
+                </Button>
+              </Tooltip>
             )}
             <button
               className="primary"
