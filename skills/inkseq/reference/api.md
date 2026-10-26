@@ -255,6 +255,18 @@ GET `/v1/projects/PROJECT/storyboard/profiles` reports project-local shot usage 
 
 ### Take review summaries
 
+Suggested marks: GET/POST the individual `/review/suggestions` path. POST
+`{expected_revision,marks:[TakeMark]}` with a saved key creates suggestions only;
+never present these as approved actual marks or proof that a VLM ran. Same range
+limits, accepted-artifact scope and shared review CAS. `producer_kind` comes from
+authentication. An empty list is not a quality pass. Pending sets cannot be replaced.
+The human browser decides via POST `/review/suggestions/decisions` with
+`{expected_revision,accept_ids:[],reject_ids:[]}` and a saved key. Agents get403
+on that decision route. Accepted marks append under server IDs (max50 total),
+rejections never append, whole-take verdict stays unchanged. Notes are untrusted
+plain text. Same-key recovery and trash/purge fences apply; no model/generation
+call. Read `take_reviews.suggestions` in discovery for fields and exact errors.
+
 GET `/v1/projects/PROJECT/shots/SHOT/take-reviews` with `projects:read` returns
 `[{artifact_id,revision,verdict,mark_count,actor_kind,updated_at}]`, newest first.
 No notes/ranges/media URLs; read the per-take `/review` for full marks. Same
@@ -263,6 +275,43 @@ takes have revision0/null verdict/0 marks; `[]` means no eligible takes. More
 than100 candidate videos returns `409 take_review_summary_limit`, never silent
 truncation. Use existing paginated versions and individual reads for overflow.
 No writes or extra generation; selection/star still does not imply approval.
+
+### Redo from marks
+
+POST `/v1/projects/PROJECT/shots/SHOT/takes/ARTIFACT/redo-preview` with
+`{expected_project_version,expected_review_revision,edits:[]}` reads the original
+accepted recipe and current marks without a write. Requires project/job read
+access. Then supply `edits:[{mark_id,start,end,replacement}]`, with code-point
+offsets in that ORIGINAL prompt (not UTF-16). Only actual change marks; no
+overlapping text edits or selected change range overlapping a keep range.
+Unknown seed/recipe and windowed recipes refuse; never guess from defaults.
+
+Returns creator-safe baseline/candidate, exact prompt diff and source binding.
+All non-prompt recipe bytes stay unchanged internally. `applied:false`,
+`executable:false`: this is no plan, price quote or generation permission. Kept
+pixels are not guaranteed. Human confirms the diff before existing authoring
+CAS and fresh generation preflight/confirmation; no apply endpoint in this slice.
+No Idempotency-Key is needed for this effect-free preview. Stale project/review
+409 requires a reread and reconciliation, never forced version increments.
+
+### Feedback
+
+For unexpected tool limitations or confusing output, POST `/v1/feedback` once
+with a saved key and a product-only summary. Body: `{category,severity,summary,
+source,suggestion?,intent?,project_id?,shot_id?,artifact_id?,include_context:false}`.
+Read `feedback` in discovery for closed categories, limits and reference rules.
+PAT needs `projects:read`; references need the matching project grant. Never send
+prompts, media, credentials, contact info or URLs. Do not quote customer text;
+include_context:true is disabled. This reports a product issue, not a request to
+generate/retry, change budget, or post a public GitHub issue.
+
+GET `/v1/feedback/REPORT_ID` recovers the original receipt. Same key/body POST
+never forwards again. `forwarding:enqueued` is only local SDK queueing, not
+remote delivery proof; pending/unknown must not be retried with new keys. Owner
+opt-out and account/connection rate limits apply; do not work around403/429.
+Only a human can GET/PATCH `/v1/feedback/settings` with revision CAS and saved key.
+GET `/v1/feedback?category=&source=&limit=50` lists own bounded receipts (PAT only
+its own connection). No global write-intent or automatic reporting hook is active.
 
 ### Story Chat risk advice
 

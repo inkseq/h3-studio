@@ -56,6 +56,9 @@ inventory.json
 !studio_platform/api.py
 !studio_platform/settings.py
 !studio_platform/error_monitoring.py
+!studio_platform/product_feedback.py
+!tests/test_product_feedback.py
+!docs/PRODUCT-FEEDBACK.md
 !studio_platform/subtitle_quality.py
 !studio_platform/runtime_hosts/subtitle_ocr.py
 !tests/test_subtitle_quality.py
@@ -655,7 +658,9 @@ inventory.json
 !docs/STORY-RISK-LINT.md
 !studio_platform/take_reviews.py
 !tests/test_take_reviews.py
+!tests/test_take_suggestions.py
 !docs/TAKE-REVIEWS.md
+!docs/TAKE-SUGGESTIONS.md
 !tests/test_storyboard_versions.py
 !studio_platform/story_chat.py
 !studio_platform/story_chat_routes.py
@@ -841,3 +846,10 @@ inventory.json
 !tests/test_domain_turns.py
 !studio_platform/controller_idle.py
 !tests/test_controller_idle.py
+!studio_platform/take_redo.py
+!tests/test_take_redo.py
+!docs/TAKE-REDO-PREVIEW.md
+!studio_platform/creator_controls.py
+!tests/test_creator_controls.py
+!tools/audit_creator_controls.py
+!docs/CREATOR-CONTROLS.md

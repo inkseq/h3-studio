@@ -70,6 +70,7 @@ function StoryboardDownload({ media }) {
         referrerPolicy="no-referrer"
         aria-disabled={!!issue}
         tabIndex={issue ? -1 : undefined}
+        title={media.type === 'video' ? t('storyboard.help.download') : undefined}
         onClick={follow}
       >
         <Download size={14} />

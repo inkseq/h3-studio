@@ -82,6 +82,9 @@ export function Dialog({
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();
+        // A dialog opened from inside this one (portal) bubbles its own cancel through React;
+        // Escape closes only the top one.
+        if (event.target !== event.currentTarget) return;
         // Escape closes an open item menu first, not the dialog around it.
         if (!ref.current?.querySelector('.item-menu [aria-expanded="true"]')) close();
       }}

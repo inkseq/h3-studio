@@ -585,3 +585,22 @@ named behavioural first-take-shipped rate; never merge it with explicit usabilit
 Whole-take verdicts are explicit keep/redo/null with revision, CAS and actor kind;
 picks, stars and range-change marks do not set them. v1 reads one owner at a time;
 all-owners aggregate is a later, content-free view. Frontend remains Claude's lane.
+
+## CR-20261026-69 — creator model controls belong to the TaoMate profile
+
+Owner, 2026-10-26, backend follow-up to inkseq-design#266, tracked in #649:
+creator requests retain quality tier, mode, duration, seed and copies; stored
+shot/story/account internal controls must not override TaoMate v7 defaults or
+cause stale steps=50 to fail new compilation. Filter new creator inputs before
+compiling; TaoMate remains five steps. Explicitly permitted human-admin internal
+API overrides continue to use strict profile validation. Preserve accepted
+requests and historical receipts. Report staging/production incompatibility
+counts read-only and propose cleanup separately; no production data write is
+authorized here. Tier2 independent review and usual release gates apply.
+Charging and Checkout remain OFF. CR68 is reserved by the separate maintainability
+ratchet PR #644; this change does not replace that pending decision.
+
+Review clarification #650/6415940764: existing `aspect_ratio` and
+`generate_audio` are creator output choices, not model-tuning controls. Preserve
+them with their existing enum/bool validation so portrait or silent output does
+not silently revert when hidden tuning overrides are filtered.
