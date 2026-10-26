@@ -1357,9 +1357,9 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
       <div className="picker-head" {...handle}>
         <b>{SLOT_TITLE[slot]}</b>
         <small>「{shot.title}」</small>
-        <button className="x" onClick={onClose} aria-label={tr('storyboard.copy58')}>
+        <IconButton size="xs" onClick={onClose} label={tr('storyboard.copy58')}>
           <X size={14} />
-        </button>
+        </IconButton>
       </div>
       <input
         ref={input}
@@ -1719,14 +1719,14 @@ function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, class
         </span>
         <span>
           {onPick && (
-            <button className="x" title={tr('storyboard.finish9')} onClick={open}>
+            <IconButton size="xs" label={tr('storyboard.finish9')} onClick={open}>
               <Search size={14} />
-            </button>
+            </IconButton>
           )}
           {onClear && (
-            <button className="x" onClick={onClear} aria-label={tr('storyboard.remove')}>
+            <IconButton size="xs" onClick={onClear} label={tr('storyboard.remove')}>
               <X size={14} />
-            </button>
+            </IconButton>
           )}
         </span>
       </div>
@@ -1933,9 +1933,9 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         )}
         <TrashButton target={{ kind: 'entity', project_id: state.project.id, id: shot.id }} />
         {onClose && (
-          <button className="x big" aria-label={tr('storyboard.closeEditor')} onClick={onClose}>
-            <X size={14} />
-          </button>
+          <IconButton size="sm" label={tr('storyboard.closeEditor')} onClick={onClose}>
+            <X size={16} />
+          </IconButton>
         )}
       </header>
 
@@ -2099,13 +2099,13 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                           ))}
                         </select>
                       </div>
-                      <button
-                        className="x"
+                      <IconButton
+                        size="xs"
                         onClick={() => dispatch({ type: 'uncast', shot: shot.id, id: c.id })}
-                        aria-label={tr('storyboard.remove')}
+                        label={tr('storyboard.remove')}
                       >
                         <X size={14} />
-                      </button>
+                      </IconButton>
                     </div>
                   );
                 })}
@@ -2145,13 +2145,13 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                             ))}
                           </select>
                         </div>
-                        <button
-                          className="x"
+                        <IconButton
+                          size="xs"
                           onClick={() => dispatch({ type: 'unplace', shot: shot.id })}
-                          aria-label={tr('storyboard.remove')}
+                          label={tr('storyboard.remove')}
                         >
                           <X size={14} />
-                        </button>
+                        </IconButton>
                       </div>
                     );
                   })()}
@@ -2171,13 +2171,13 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                           </button>
                           <small>{tr('storyboard.copy88')}</small>
                         </div>
-                        <button
-                          className="x"
+                        <IconButton
+                          size="xs"
                           onClick={() => dispatch({ type: 'unprop', shot: shot.id, id })}
-                          aria-label={tr('storyboard.remove')}
+                          label={tr('storyboard.remove')}
                         >
                           <X size={14} />
-                        </button>
+                        </IconButton>
                       </div>
                     )
                   );
@@ -2343,13 +2343,13 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                         <span key={a.id} className="ref">
                           <AssetThumb asset={a} size={28} />
                           {a.name}
-                          <button
-                            className="x"
+                          <IconButton
+                            size="xs"
                             onClick={() => dispatch({ type: 'unref', shot: shot.id, asset: a.id })}
-                            aria-label={tr('storyboard.remove')}
+                            label={tr('storyboard.remove')}
                           >
                             <X size={14} />
-                          </button>
+                          </IconButton>
                         </span>
                       ))}
                   </div>
