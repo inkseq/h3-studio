@@ -13,12 +13,11 @@ import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import re
 import uuid
 
 from .backup import (
-    BackupError,
+    BackupError,  # noqa: F401 - public exception re-export for remote backup callers.
     MIB,
     _absolute,
     _digest,

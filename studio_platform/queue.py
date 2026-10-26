@@ -24,7 +24,6 @@ from .repository import (
     Conflict,
     InvalidTransition,
     LeaseLost,
-    NotFound,
     artifacts,
     attempts,
     canonical,

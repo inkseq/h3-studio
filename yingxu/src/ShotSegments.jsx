@@ -4,7 +4,6 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { Button } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
-import { Note } from './ui/Note.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
 import './shot-segments.css';
@@ -210,8 +209,7 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
       </div>
       {/* The × sits above its part, clear of the resize edges. */}
       {selected !== null && list[selected] && (
-        <button
-          type="button"
+        <Button
           className="parts-bar-x"
           style={{ left: pct((list[selected].start + list[selected].end) / 2) }}
           aria-label={t('segments.remove', { n: selected + 1 })}
@@ -219,7 +217,7 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
           onClick={() => remove(selected)}
         >
           <X size={11} />
-        </button>
+        </Button>
       )}
       {list.length <= 1 && (
         <small className="parts-bar-hint muted">

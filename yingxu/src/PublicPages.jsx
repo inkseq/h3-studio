@@ -1,5 +1,6 @@
 // Public pages (h3-studio#308): /pricing, /terms, /privacy, /content. No sign-in needed.
 import React, { useEffect, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { Check, Coins } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import { createCloudClient } from './cloud-client.js';
@@ -113,14 +114,14 @@ export function PricingPage({ account }) {
               </div>
             ))}
           </div>
-          <button
-            type="button"
-            className="primary keep-label pricing-cta"
+          <Button
+            variant="primary"
+            className="keep-label pricing-cta"
             onClick={() => navigateApp(account ? '/settings?tab=credits' : '/quick-chat')}
           >
             <Coins size={15} aria-hidden="true" />
             {t(account ? 'pricing.topUp' : 'pricing.start')}
-          </button>
+          </Button>
         </section>
 
         <section className="card-box">

@@ -1,8 +1,4 @@
 /* Presentation and input validation only. Capability/preflight remain authoritative. */
-export const CHAT_MODELS = [
-  { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-  { id: 'gemma-4-31b-it', label: 'Gemma 4 31B IT' },
-];
 export const ROLE_LABELS = {
   reference: '普通参考',
   first_frame: '首帧',
@@ -521,18 +517,6 @@ export function newExcerptControl(field, schema) {
     duration_seconds: duration,
   };
 }
-export function safeSessionId(value) {
-  return typeof value === 'string' && /^[A-Za-z0-9_-]{1,160}$/.test(value) ? value : null;
-}
-export function sessionHref(sessionId) {
-  const id = safeSessionId(sessionId);
-  return id ? `/quick-chat?session=${encodeURIComponent(id)}` : '/quick-chat';
-}
-export function failureText(error) {
-  return error?.detail?.code === 'version_conflict'
-    ? '内容已被其他窗口或 Agent 更新。请刷新后再编辑；当前输入仍保留。'
-    : error?.message || '请求没有完成，请核对原记录后继续。';
-}
 export function bindingPayload(binding) {
   return Object.fromEntries(
     Object.entries(binding).filter(([key]) =>
@@ -661,47 +645,4 @@ export function mergeTimelineTurns(events) {
     )
       turns.set(event.record.id, event.record);
   return [...turns.values()].sort((a, b) => a.seq - b.seq);
-}
-export function bindingsForInputs(inputs = {}, catalog = []) {
-  const result = [];
-  for (const [slot, value] of Object.entries(inputs)) {
-    const entries = Array.isArray(value) ? value : value ? [value] : [];
-    for (const entry of entries) {
-      const assetId = entry.asset_id || entry.media_id,
-        known = catalog.find((item) => item.asset_id === assetId);
-      result.push({
-        binding_id: known?.binding_id || `${slot}-${assetId}`,
-        version: known?.version ?? 0,
-        asset_id: assetId,
-        kind:
-          known?.kind ||
-          {
-            images: 'image',
-            first_frame: 'image',
-            last_frame: 'image',
-            videos: 'video',
-            audios: 'audio',
-          }[slot],
-        asset: known?.asset,
-        slot,
-        purpose:
-          entry.purpose ||
-          {
-            first_frame: 'firstFrame',
-            last_frame: 'lastFrame',
-            images: 'reference',
-            videos: 'motion',
-            audios: 'audio',
-            guides: 'reference',
-          }[slot],
-        enabled: true,
-        ...(entry.source_range ? { source_range: clone(entry.source_range) } : {}),
-        ...(slot === 'videos' ? { include_audio: entry.include_audio !== false } : {}),
-        ...(slot === 'guides'
-          ? { time_seconds: entry.time_seconds, use_audio: entry.use_audio === true }
-          : {}),
-      });
-    }
-  }
-  return result;
 }

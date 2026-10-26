@@ -73,7 +73,7 @@ export function StoryboardSplitter({
   onDouble,
   title,
 }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   return (
     <div
       className={'splitter ' + axis + ' ' + className}

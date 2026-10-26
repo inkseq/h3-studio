@@ -353,7 +353,7 @@ def _candidate(row, registry, chosen, filters, now, matching_count):
         qualified = binding.enabled and binding.expires_at > now + chosen["ttl_seconds"]
         if not qualified:
             blockers.append("operator_deployment_not_qualified")
-    except ValueError as error:
+    except ValueError:
         qualified = False
         blockers.append(
             "operator_provider_start_unqualified"

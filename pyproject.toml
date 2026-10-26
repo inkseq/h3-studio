@@ -12,11 +12,27 @@ force-exclude = true
 unsafe-fixes = false
 
 [tool.ruff.lint]
-# Start with fatal correctness diagnostics; broader lint is a separate baseline.
-select = ["E9", "F63", "F7", "F82"]
+# Fatal diagnostics remain blocking; tools/check_maintainability.py ratchets debt.
+select = ["E9", "F63", "F7", "F82", "F401", "F841", "B", "C901", "S608"]
 fixable = []
+
+[tool.ruff.lint.mccabe]
+max-complexity = 25
+
+[tool.ruff.lint.per-file-ignores]
+# This ratchet covers backend modules. Test files retain the original fatal gate.
+"tests/**/*.py" = ["F401", "F841", "B", "C901", "S608"]
 
 [tool.ruff.format]
 quote-style = "preserve"
 line-ending = "lf"
 docstring-code-format = false
+
+[tool.coverage.run]
+source = ["studio_platform", "platform_app"]
+relative_files = true
+parallel = true
+
+[tool.coverage.report]
+fail_under = 0
+show_missing = true

@@ -17,15 +17,6 @@ export function Field({ label, help, error, children, className = '' }) {
   );
 }
 
-export function Checkbox({ label, className = '', ...props }) {
-  return (
-    <label className={('ui-check ' + className).trim()}>
-      <input type="checkbox" {...props} />
-      <span>{label}</span>
-    </label>
-  );
-}
-
 export function Spinner({ size = 14, label }) {
   return (
     <span

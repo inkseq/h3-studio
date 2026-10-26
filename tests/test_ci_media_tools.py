@@ -165,8 +165,12 @@ class MediaToolTests(unittest.TestCase):
             required <= set(ci_test_shards.POSTGRES_MODULES),
             "PostgreSQL must retain the Quick Chat, connection and pool/first-last contract checks",
         )
-        self.assertIn("python tools/ci_test_shards.py --suite postgres", postgres)
-        self.assertIn("python tools/ci_test_shards.py --suite python", source)
+        runner = (
+            "python -m coverage run --data-file coverage-data/.coverage "
+            "tools/ci_test_shards.py"
+        )
+        self.assertIn(runner + " --suite postgres", postgres)
+        self.assertIn(runner + " --suite python", source)
 
 
 if __name__ == "__main__":

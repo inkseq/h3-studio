@@ -322,29 +322,6 @@ export function freestyleProject(title) {
   p.journey = { workspace: 'freestyle', stage: 4, reviewShotId: shot };
   return p;
 }
-export function removeFreestyleInput(project, shotId, assetId, { guide = false, roles = [] } = {}) {
-  const shot = project.entities.find((e) => e.id === shotId);
-  if (!shot) return false;
-  let changed = false;
-  if (guide) {
-    const before = shot.data.h3?.guides || [],
-      after = before.filter((g) => g.media_id !== assetId);
-    changed = before.length !== after.length;
-    shot.data.h3 = { ...shot.data.h3, guides: after };
-  } else {
-    const removed = project.links.filter(
-      (l) => l.target === shotId && l.source === assetId && roles.includes(l.role),
-    );
-    changed = removed.length > 0;
-    project.links = project.links.filter((l) => !removed.includes(l));
-    for (const link of removed)
-      if (shot.data.referenceRanges) delete shot.data.referenceRanges[link.id];
-  }
-  if (!changed) return false;
-  shot.status = 'review';
-  shot.version++;
-  return true;
-}
 export function copyForCloud(project) {
   const p = clone(project);
   p.id = 'project-' + crypto.randomUUID();

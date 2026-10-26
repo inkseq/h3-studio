@@ -1,6 +1,7 @@
 // Small in-place editors for the asset library (owner, 2026-10-22): rename, tag and file a
 // picture where it is, instead of opening a dialog and coming back.
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Button } from '../ui/Button.jsx';
 import { Check, Pencil, Plus, Upload, X } from 'lucide-react';
 import { useI18n } from '../i18n/I18nProvider.jsx';
 
@@ -57,8 +58,7 @@ export function InlineName({ value, onSave, disabled, className = '' }) {
       />
     );
   return (
-    <button
-      type="button"
+    <Button
       className={'lib-inline-label ' + className}
       title={t('library.renameHint')}
       disabled={disabled}
@@ -69,7 +69,7 @@ export function InlineName({ value, onSave, disabled, className = '' }) {
     >
       <span className="clip">{value}</span>
       <Pencil size={12} aria-hidden="true" />
-    </button>
+    </Button>
   );
 }
 
@@ -91,15 +91,14 @@ export function TagEditor({ tags, suggestions = [], onChange, disabled }) {
       {tags.map((tag) => (
         <span key={tag} className="tagchip on">
           {tag}
-          <button
-            type="button"
+          <Button
             className="x"
             disabled={disabled}
             aria-label={t('library.removeTag', { tag })}
             onClick={() => onChange(tags.filter((x) => x !== tag))}
           >
             <X size={11} />
-          </button>
+          </Button>
         </span>
       ))}
       <input
@@ -196,9 +195,8 @@ export function ReferencePicker({ items, loadProfiles, onFile, onCreate, disable
           {profiles.length ? (
             <div className="lib-pop-list">
               {profiles.map((p) => (
-                <button
+                <Button
                   key={p.target.id}
-                  type="button"
                   onClick={(e) => {
                     closeDetails(e.currentTarget);
                     onFile(items, p);
@@ -206,7 +204,7 @@ export function ReferencePicker({ items, loadProfiles, onFile, onCreate, disable
                 >
                   <small className="muted">{t('trash.kind.' + p.type)}</small>
                   <span className="clip">{p.title}</span>
-                </button>
+                </Button>
               ))}
             </div>
           ) : (
@@ -231,21 +229,16 @@ export function ReferencePicker({ items, loadProfiles, onFile, onCreate, disable
                   aria-label={t('library.newName')}
                   onChange={(e) => setName(e.target.value)}
                 />
-                <button className="small primary" disabled={!name.trim()}>
+                <Button variant="primary" size="sm" type="submit" disabled={!name.trim()}>
                   {t('library.referenceNew')}
-                </button>
+                </Button>
               </form>
             ) : (
               types.map((type) => (
-                <button
-                  key={type}
-                  type="button"
-                  className="small ghost"
-                  onClick={() => setMaking(type)}
-                >
+                <Button variant="ghost" size="sm" key={type} onClick={() => setMaking(type)}>
                   <Plus size={13} />
                   {t('library.new.' + type)}
-                </button>
+                </Button>
               ))
             )}
           </div>
@@ -307,9 +300,9 @@ export function UploadMenu({ projects, defaultStory, onFiles, disabled }) {
             <Upload size={20} aria-hidden="true" />
             <span>
               {t('library.uploadDrop')}{' '}
-              <button type="button" className="linkish" onClick={() => input.current?.click()}>
+              <Button className="linkish" onClick={() => input.current?.click()}>
                 {t('library.uploadPick')}
-              </button>
+              </Button>
             </span>
             <small className="muted">{t('library.uploadNote')}</small>
           </div>
@@ -379,10 +372,10 @@ export function CreateProfileMenu({ type, projects, defaultStory, onCreate, disa
               ))}
             </select>
           </label>
-          <button className="primary" disabled={!name.trim()}>
+          <Button variant="primary" type="submit" disabled={!name.trim()}>
             <Check size={14} />
             {t('library.create')}
-          </button>
+          </Button>
         </form>
       )}
     </PopMenu>
@@ -445,14 +438,9 @@ export function FloatingPanel({ anchor, label, onClose, children }) {
       aria-label={label}
       style={pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' }}
     >
-      <button
-        type="button"
-        className="lib-float-close"
-        aria-label={t('trash.close')}
-        onClick={onClose}
-      >
+      <Button className="lib-float-close" aria-label={t('trash.close')} onClick={onClose}>
         <X size={16} />
-      </button>
+      </Button>
       {children}
     </aside>
   );

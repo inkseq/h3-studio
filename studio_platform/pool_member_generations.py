@@ -13,7 +13,6 @@ from .repository import (
     budget_reservations,
     capacity_pool_members,
     capacity_member_generations,
-    instance_intents,
     jobs,
     registered_devices,
     registered_workers,

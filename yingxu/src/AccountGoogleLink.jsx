@@ -3,6 +3,7 @@
 // a linked or hosted account sees the verified email it signs in with. Loading and read
 // failures are shown with a retry instead of silently hiding the card.
 import React, { useCallback, useEffect, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { Link2, RefreshCw } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { hostedLinkUrl, hostedSignInEnabled } from './account-access.js';
@@ -41,10 +42,10 @@ export default function AccountGoogleLink({ api }) {
       {state.kind === 'error' && (
         <p className="muted" role="alert">
           {t('account.linkError')}{' '}
-          <button type="button" className="linkish" onClick={load}>
+          <Button className="linkish" onClick={load}>
             <RefreshCw size={13} aria-hidden="true" />
             {t('account.linkRetry')}
-          </button>
+          </Button>
         </p>
       )}
       {state.kind === 'linked' && (
@@ -55,14 +56,14 @@ export default function AccountGoogleLink({ api }) {
       {state.kind === 'unlinked' && (
         <>
           <p className="muted">{t('account.linkBody')}</p>
-          <button
-            type="button"
-            className="primary keep-label account-link-button"
+          <Button
+            variant="primary"
+            className="keep-label account-link-button"
             onClick={() => window.location.assign(hostedLinkUrl('/settings'))}
           >
             <Link2 size={15} aria-hidden="true" />
             {t('account.linkButton')}
-          </button>
+          </Button>
         </>
       )}
     </div>

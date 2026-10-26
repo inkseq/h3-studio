@@ -1,5 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { FloatingMessage } from './floating-notice.js';
+import { Button } from './ui/Button.jsx';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Image as ImageIcon, Play, Pause, Download } from 'lucide-react';
 import { getFile, nativeMediaSource } from './media.js';
@@ -131,7 +131,7 @@ export function useStoryboardMediaUrl(asset, { thumbnail = false } = {}) {
       alive = false;
       if (owned) URL.revokeObjectURL(owned);
     };
-  }, [direct, fileId, native]);
+  }, [direct, fileId, native, t]);
   // A failed request (for example a temporary 429) must not remove the media
   // element. Keep its captured source so metadata can recover or an explicit
   // retry can reload it; never re-resolve it under a later account.
@@ -241,9 +241,9 @@ export function StoryboardAssetImage({
         <ImageIcon size={20} aria-hidden="true" />
         {shownError && <small>{t('library.previewUnavailable')}</small>}
         {shownError && retryable && playbackUrl && (
-          <button
-            className="small ghost"
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             onPointerDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
@@ -257,7 +257,7 @@ export function StoryboardAssetImage({
           >
             <RefreshCw size={13} />
             {t('workspace.copy60')}
-          </button>
+          </Button>
         )}
       </span>
     );
@@ -345,10 +345,10 @@ export function StoryboardVideo({
       {error && (props.controls || videoRef) && (
         <div className="storyboard-media-error" role="alert">
           <span>{error}</span>
-          <button type="button" className="small" onClick={reload}>
+          <Button size="sm" onClick={reload}>
             <RefreshCw size={13} />
             {t('workspace.copy60')}
-          </button>
+          </Button>
         </div>
       )}
     </>
@@ -426,8 +426,7 @@ export function StoryboardPlayButton({ asset, start = 0, len = null, label }) {
     currentAudio = { audio, stop };
   };
   return (
-    <button
-      type="button"
+    <Button
       className={'play' + (playing ? ' on' : '')}
       disabled={!url}
       onPointerDown={(event) => event.stopPropagation()}
@@ -437,6 +436,6 @@ export function StoryboardPlayButton({ asset, start = 0, len = null, label }) {
     >
       {playing ? <Pause size={14} /> : <Play size={14} />}
       {label && ' ' + label}
-    </button>
+    </Button>
   );
 }

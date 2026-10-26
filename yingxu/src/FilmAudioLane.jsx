@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { Music, Plus, Trash2, Upload, Volume2, VolumeX } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
@@ -166,16 +167,10 @@ export default function FilmAudioLane({
   return (
     <div className="film-audio-bar">
       <div className="film-audio-add">
-        <button
-          type="button"
-          className="small"
-          disabled={busy}
-          aria-expanded={menu}
-          onClick={() => setMenu((v) => !v)}
-        >
+        <Button size="sm" disabled={busy} aria-expanded={menu} onClick={() => setMenu((v) => !v)}>
           <Plus size={13} />
           {t('editor.addAudio')}
-        </button>
+        </Button>
         {menu && (
           <div className="film-audio-menu" role="menu">
             <label className="film-audio-whole">
@@ -186,8 +181,7 @@ export default function FilmAudioLane({
               />
               {t('editor.wholeFilm')}
             </label>
-            <button
-              type="button"
+            <Button
               role="menuitem"
               onClick={() => {
                 setMenu(false);
@@ -196,11 +190,10 @@ export default function FilmAudioLane({
             >
               <Upload size={13} />
               {t('editor.uploadAudio')}
-            </button>
+            </Button>
             {audioAssets.map((asset) => (
-              <button
+              <Button
                 key={asset.id}
-                type="button"
                 role="menuitem"
                 onClick={() => {
                   setMenu(false);
@@ -209,7 +202,7 @@ export default function FilmAudioLane({
               >
                 <Music size={13} />
                 {asset.title}
-              </button>
+              </Button>
             ))}
           </div>
         )}
@@ -259,17 +252,16 @@ export default function FilmAudioLane({
                 </select>
               </label>
             ))}
-          <button
-            type="button"
-            className="small"
+          <Button
+            size="sm"
             onClick={() => onSet(current.track.id, { muted: !current.track.muted })}
           >
             {current.track.muted ? <Volume2 size={13} /> : <VolumeX size={13} />}
             {t(current.track.muted ? 'editor.unmute' : 'editor.mute')}
-          </button>
-          <button
-            type="button"
-            className="small ghost"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               onRemove(current.track.id);
               onSelect(null);
@@ -277,7 +269,7 @@ export default function FilmAudioLane({
           >
             <Trash2 size={13} />
             {t('editor.removeAudio')}
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

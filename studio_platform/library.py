@@ -581,7 +581,7 @@ class Library:
                 tags = (
                     data.get('tags', [])
                     if kind == 'entity'
-                    else project.get('journey', {})
+                    else project.get('journey', {})  # noqa: B023 -- append runs before advancing project loop
                     .get('libraryTags', {})
                     .get(kind + ':' + ident, [])
                 )
@@ -591,22 +591,22 @@ class Library:
                     else []
                 )
                 used = (
-                    set(usage.get(ident, []))
+                    set(usage.get(ident, []))  # noqa: B023 -- append runs before advancing project loop
                     if kind == 'entity'
-                    else set(receipt_usage.get((kind, ident), []))
+                    else set(receipt_usage.get((kind, ident), []))  # noqa: B023 -- append runs before advancing project loop
                 )
                 for k, v in (
                     ('asset', data.get('cloudAssetId')),
                     ('artifact', data.get('cloudArtifactId')),
                 ):
                     if v:
-                        used.update(receipt_usage.get((k, v), []))
-                        attached.add((k, v))
+                        used.update(receipt_usage.get((k, v), []))  # noqa: B023 -- append runs before advancing project loop
+                        attached.add((k, v))  # noqa: B023 -- append runs before advancing project loop
                 results.append(
                     {
                         'target': {'project_id': pid, 'kind': kind, 'id': ident},
                         'type': typ,
-                        'title': project.get('journey', {})
+                        'title': project.get('journey', {})  # noqa: B023 -- append runs before advancing project loop
                         .get('libraryTitles', {})
                         .get(kind + ':' + ident, title),
                         'tags': tags,
@@ -614,14 +614,14 @@ class Library:
                         or (ident if kind == 'asset' else None),
                         'artifact_id': data.get('cloudArtifactId')
                         or (ident if kind == 'artifact' else None),
-                        'project_version': row['version'],
+                        'project_version': row['version'],  # noqa: B023 -- append runs before advancing project loop
                         'source_project_id': pid,
-                        'source_project_title': project.get('title', ''),
+                        'source_project_title': project.get('title', ''),  # noqa: B023 -- append runs before advancing project loop
                         'provenance': data.get('importSource'),
-                        'filed_in': [pid for pid, ids in filed.items() if ident in ids],
+                        'filed_in': [pid for pid, ids in filed.items() if ident in ids],  # noqa: B023 -- append runs before advancing project loop
                         'inbox': typ in FILES
                         and data.get('storyboardInbox') is not False
-                        and not any(ident in ids for ids in filed.values()),
+                        and not any(ident in ids for ids in filed.values()),  # noqa: B023 -- append runs before advancing project loop
                         'usage': [
                             {
                                 'project_id': pid,

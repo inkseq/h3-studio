@@ -1,5 +1,13 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
-import React, { useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Button } from './ui/Button.jsx';
+import React, {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useEffectEvent,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { Player } from '@remotion/player';
 import { AbsoluteFill, Html5Audio, Html5Video, Sequence } from 'remotion';
@@ -138,8 +146,9 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
 // know the source length yet, reads it from the video's metadata.
 function ClipSource({ asset, needsDuration, onUrl, onDuration }) {
   const { playbackUrl } = useStoryboardMediaUrl({ entity: asset, fileId: asset.data.fileId });
+  const onUrlEvent = useEffectEvent((...args) => onUrl(...args));
   React.useEffect(() => {
-    if (playbackUrl) onUrl(asset.id, playbackUrl);
+    if (playbackUrl) onUrlEvent(asset.id, playbackUrl);
   }, [asset.id, playbackUrl]);
   return needsDuration && playbackUrl ? (
     <video
@@ -386,6 +395,8 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
     end: (c.from + c.frames) / cutFps,
     rate: c.rate,
   }));
+  // Audio blocks follow the cut's content, not the array rebuilt on every render.
+  const cutKey = JSON.stringify(cutTimeline);
   // Render v5 controls show only when the server advertises them (#408).
   const caps = cloudController.getState().capabilities?.chapter_render,
     v5 = caps?.render_contract_version >= 5,
@@ -395,8 +406,8 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
     crossfades = (v5 && caps.clip_sound_crossfade_values_s) || null,
     crossfade = crossfades ? clipSoundCrossfade(project, chapterId) : 0;
   const blocks = useMemo(
-    () => audioBlocks(project, chapterId, cutTimeline),
-    [project, chapterId, JSON.stringify(cutTimeline)],
+    () => audioBlocks(project, chapterId, JSON.parse(cutKey)),
+    [project, chapterId, cutKey],
   );
   const audioAssets = project.entities.filter(
     (e) => e.type === 'audio' && e.data.fileId && !e.data.missingFile && !e.data.sourceJobId,
@@ -496,8 +507,9 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
         )}
         <CloudSaveStatus />
         {/* #232 (#31): export from where the cut is made; the film dialog keeps its own confirm. */}
-        <button
-          className="primary small"
+        <Button
+          variant="primary"
+          size="sm"
           onClick={() => {
             onClose();
             window.dispatchEvent(new Event('inkseq-open-film'));
@@ -505,15 +517,16 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
         >
           <Clapperboard size={14} />
           {t('film.open')}
-        </button>
-        <button
-          className="ghost round"
+        </Button>
+        <Button
+          variant="ghost"
+          className="round"
           aria-label={t('editor.close')}
           title={t('editor.close')}
           onClick={onClose}
         >
           <X size={18} />
-        </button>
+        </Button>
       </header>
       {assets.map((clip) => (
         <ClipSource
@@ -558,9 +571,9 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                 <b>
                   {selected.index + 1}. {selected.title}
                 </b>
-                <button
-                  type="button"
-                  className="small ghost"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   disabled={busy}
                   onClick={() =>
                     edit((p) => setIncluded(p, chapterId, selected.id, !selected.included))
@@ -568,9 +581,8 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                 >
                   {selected.included ? <EyeOff size={13} /> : <Eye size={13} />}
                   {t(selected.included ? 'editor.exclude' : 'editor.include')}
-                </button>
-                <button
-                  type="button"
+                </Button>
+                <Button
                   className={'small ghost' + (selectedSound?.state === 'on' ? ' on' : '')}
                   disabled={
                     busy ||
@@ -583,7 +595,7 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                 >
                   {selectedSound?.state === 'on' ? <Volume2 size={13} /> : <VolumeX size={13} />}
                   {t(selectedSound?.state === 'on' ? 'editor.clipSoundOn' : 'editor.clipSoundOff')}
-                </button>
+                </Button>
               </div>
               {selected.playable ? (
                 <div className="film-inspector-body">
@@ -663,9 +675,9 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                       {selectedSound.state === 'detached' ? (
                         <small className="muted">{t('editor.soundIsDetached')}</small>
                       ) : (
-                        <button
-                          type="button"
-                          className="small ghost"
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           disabled={busy}
                           title={t('editor.detachHint')}
                           onClick={() => {
@@ -676,7 +688,7 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                         >
                           <Unlink size={13} />
                           {t('editor.detachSound')}
-                        </button>
+                        </Button>
                       )}
                     </div>
                   )}
@@ -713,9 +725,9 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
                 </select>
               </label>
             )}
-            <button type="button" className="small ghost" onClick={() => setZoom(null)}>
+            <Button variant="ghost" size="sm" onClick={() => setZoom(null)}>
               {t('editor.fit')}
-            </button>
+            </Button>
           </div>
           <div
             className="film-timeline"
@@ -783,14 +795,13 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
             <div className="film-excluded">
               <small className="muted">{t('editor.excludedList')}</small>
               {excluded.map((clip) => (
-                <button
+                <Button
                   key={clip.id}
-                  type="button"
                   className={'small ghost' + (selected?.id === clip.id ? ' on' : '')}
                   onClick={() => select(clip)}
                 >
                   {clip.index + 1}. {clip.title}
-                </button>
+                </Button>
               ))}
             </div>
           )}

@@ -1,9 +1,9 @@
 import { Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
 import { operatorOfferReadiness as rawOfferReadiness } from './operator-model.js';
-import { FloatingMessage } from './floating-notice.js';
 import { operatorNodeStatus as rawOperatorNodeStatus } from './operator-presentation.js';
 import { operatorFormatters, operatorDisplay } from './i18n/legacyOperatorPresentation.js';
-import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
+import { useI18n } from './i18n/I18nProvider.jsx';
 import React from 'react';
 import {
   ChevronRight,
@@ -16,27 +16,8 @@ import {
   ShieldCheck,
   Square,
 } from 'lucide-react';
-import {
-  age,
-  deadlineLabel,
-  nodeDeadline,
-  nodeRemovalConfirmation,
-  dollars,
-  reasonText,
-  stateLabel,
-  stateTone,
-  providerLabel,
-  operatorOfferReadiness,
-  operatorSlotsLabel,
-  roundedSpec,
-  operatorRankReason,
-} from './operator-model.js';
-import {
-  uniqueOperatorReasons,
-  historicalNode,
-  operatorNodeStatus,
-  operatorBootstrap,
-} from './operator-presentation.js';
+import { reasonText, stateTone } from './operator-model.js';
+import { uniqueOperatorReasons, historicalNode } from './operator-presentation.js';
 
 const known = (value) => (Number.isFinite(value) ? value : '—');
 const date = (value) =>
@@ -45,7 +26,7 @@ const date = (value) =>
     : '尚未记录';
 const short = (value) => String(value || '尚未确认').slice(0, 12);
 export function Reasons({ items = [] }) {
-  const { t: lo, locale } = useI18n();
+  const { locale } = useI18n();
   const { reasonText } = operatorFormatters(locale);
   const reasons = uniqueOperatorReasons(items);
   return reasons.length ? (
@@ -73,7 +54,7 @@ export function Badge({ state, stale = false }) {
   );
 }
 function Status({ node, now }) {
-  const { t: lo, locale } = useI18n();
+  const { locale } = useI18n();
   const { operatorNodeStatus } = operatorFormatters(locale);
   const status = operatorNodeStatus(node, now);
   return (
@@ -109,8 +90,7 @@ export function MachineRow({
     deadline = nodeDeadline(node, now);
   return (
     <article className={'op-machine-row' + (history ? ' historical' : '')}>
-      <button
-        type="button"
+      <Button
         className="op-machine-open"
         aria-label={lo('legacyOp.copy321', {
           x0: providerLabel(node.provider),
@@ -154,28 +134,18 @@ export function MachineRow({
           </small>
         </span>
         <ChevronRight size={17} />
-      </button>
+      </Button>
       {!history && node.actions?.extend && (
-        <button
-          type="button"
-          className="op-row-extend"
-          disabled={disabled}
-          onClick={() => onExtend(node)}
-        >
+        <Button className="op-row-extend" disabled={disabled} onClick={() => onExtend(node)}>
           <Clock size={14} />
           {lo('legacyOp.copy330')}
-        </button>
+        </Button>
       )}
       {node.actions?.manual_review?.allowed && (
-        <button
-          type="button"
-          className="op-row-extend"
-          disabled={disabled}
-          onClick={() => onReview(node)}
-        >
+        <Button className="op-row-extend" disabled={disabled} onClick={() => onReview(node)}>
           <ShieldCheck size={14} />
           {lo('legacyOp.copy19')}
-        </button>
+        </Button>
       )}
     </article>
   );
@@ -470,31 +440,31 @@ export function NodeCard({ node, profiles = [], disabled, onAction, now = Date.n
         <p>{lo('legacyOp.copy390')}</p>
       </details>
       <footer>
-        <button
+        <Button
           disabled={disabled || !node.actions?.drain?.allowed}
           onClick={() => onAction('drain', node)}
         >
           <Pause size={14} />
           {lo('legacyOp.copy207')}
-        </button>
-        <button
+        </Button>
+        <Button
           disabled={disabled || !node.actions?.stop?.allowed}
           onClick={() => onAction('stop', node)}
         >
           <Square size={13} />
           {lo('legacyOp.copy208')}
-        </button>
+        </Button>
         {!history && node.actions?.extend && (
-          <button disabled={disabled} onClick={() => onAction('extend', node)}>
+          <Button disabled={disabled} onClick={() => onAction('extend', node)}>
             <Clock size={14} />
             {lo('legacyOp.copy330')}
-          </button>
+          </Button>
         )}
         {node.actions?.manual_review?.allowed && (
-          <button disabled={disabled} onClick={() => onAction('manualReview', node)}>
+          <Button disabled={disabled} onClick={() => onAction('manualReview', node)}>
             <ShieldCheck size={14} />
             {lo('legacyOp.copy19')}
-          </button>
+          </Button>
         )}
       </footer>
       {!history && !node.actions?.manual_review?.allowed && (
@@ -507,15 +477,8 @@ export function NodeCard({ node, profiles = [], disabled, onAction, now = Date.n
 
 export function CandidateCard({ row, index, current, busy, onStart }) {
   const { t: lo, locale } = useI18n();
-  const {
-    date,
-    providerLabel,
-    dollars,
-    operatorOfferReadiness,
-    operatorSlotsLabel,
-    roundedSpec,
-    operatorRankReason,
-  } = operatorFormatters(locale);
+  const { date, providerLabel, dollars, operatorSlotsLabel, roundedSpec, operatorRankReason } =
+    operatorFormatters(locale);
   const stock = Number.isFinite(row.available_count) && row.available_count > 0,
     readiness = !stock
       ? Number.isFinite(row.available_count)
@@ -619,15 +582,14 @@ export function CandidateCard({ row, index, current, busy, onStart }) {
                 ? lo('legacyOp.copy409')
                 : lo('legacyOp.copy410')}
         </span>
-        <button
+        <Button
           className="op-primary"
-          type="button"
           disabled={busy || !current || !stock || blocked}
           onClick={() => onStart(row)}
         >
           <Play size={13} />
           {row.offer_kind === 'resource_sku' ? lo('legacyOp.copy411') : lo('legacyOp.copy412')}
-        </button>
+        </Button>
       </footer>
     </article>
   );

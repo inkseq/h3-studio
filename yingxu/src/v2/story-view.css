@@ -103,17 +103,7 @@
   min-width: 16px;
   flex: none;
 }
-.sb-workspace .dock-right > .sb-timeline-hint {
-  display: block;
-  position: static;
-  flex: none;
-  line-height: 1.4;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 11px;
-  min-height: 14px;
-}
+
 .sb-workspace .dock-right > .timeline {
   flex: none;
   min-width: 0;
@@ -257,8 +247,7 @@
   object-fit: contain;
   background: var(--black);
 }
-.sb-workspace .ed-media:has(.storyboard-takes.comparing) > .ed-preview,
-.sb-workspace .ed-media:has(.storyboard-takes.comparing) > .saveframe {
+.sb-workspace .ed-media:has(.storyboard-takes.comparing) > .ed-preview {
   display: none;
 }
 @media (max-width: 1000px) {
@@ -514,9 +503,7 @@
     .slot-empty small,
     .sent-prompt em,
     .sent-item small,
-    .frame-pick,
     .lib-tabs button small,
-    .lib-sep,
     .tile-audio small,
     .tile-name,
     .tile-badge,
@@ -540,8 +527,8 @@
   left: 0;
   right: 0;
 }
-.sb-workspace button:not(:is(.tile, .ver, .frame-pick, .card, .sb-library-backdrop)),
-.sb-portal button:not(:is(.tile, .frame-pick)) {
+.sb-workspace button:not(:is(.tile, .ver, .card, .sb-library-backdrop)),
+.sb-portal button:not(.tile) {
   min-height: 32px;
   display: inline-flex;
   align-items: center;
@@ -736,10 +723,6 @@ body.sb-resizing-y video {
   font-size: 11px;
   color: var(--muted);
 }
-.sb-confirm-row {
-  border-top: 1px solid var(--line);
-  padding: 12px 0;
-}
 .sb-portal.sb-dialog {
   width: min(440px, calc(100vw - 32px));
 }
@@ -753,10 +736,6 @@ body.sb-resizing-y video {
   display: flex;
   flex-direction: column;
   gap: 6px;
-}
-.sb-portal .sb-dialog-actions {
-  justify-content: flex-end;
-  margin-top: 10px;
 }
 
 /* Continuous storyboard: chapter dividers between scene groups (owner, 2026-10-21). */
@@ -773,9 +752,7 @@ body.sb-resizing-y video {
   margin-bottom: 4px;
   border-bottom: 2px solid var(--line-2, var(--line));
 }
-.sb-chapter-head:has(.item-menu-popover) {
-  z-index: 5;
-}
+
 .sb-chapter-head h2 {
   display: flex;
   align-items: baseline;
@@ -1008,11 +985,6 @@ body.sb-resizing-y video {
   box-shadow:
     inset 3px 0 0 var(--accent),
     inset 0 0 0 2px var(--accent);
-}
-.v2-export-menu .export-hint {
-  display: block;
-  font-size: 11px;
-  font-weight: 400;
 }
 
 /* The board column is a flex column so the selection bar can sit at the bottom edge even

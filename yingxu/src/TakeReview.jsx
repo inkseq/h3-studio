@@ -2,6 +2,7 @@
 // that say which second to keep or change. Picks, stars and parts never set either one.
 // Read and saved through the shared data layer: only this panel's own buttons wait.
 import React, { useEffect, useRef, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -129,16 +130,15 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
         <span className="take-review-title">{t('review.title')}</span>
         <div className="take-review-verdict" role="group" aria-label={t('review.verdict')}>
           {['keep', 'redo'].map((value) => (
-            <button
+            <Button
               key={value}
-              type="button"
               className={'take-review-pick ' + value + (shown?.verdict === value ? ' on' : '')}
               aria-pressed={shown?.verdict === value}
               disabled={saving}
               onClick={() => commit({ verdict: nextVerdict(shown.verdict, value) })}
             >
               {t('review.' + value)}
-            </button>
+            </Button>
           ))}
         </div>
       </header>
@@ -149,9 +149,8 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
         onPointerDown={begin}
       >
         {marks.map((mark) => (
-          <button
+          <Button
             key={mark.id}
-            type="button"
             className={'take-review-mark ' + mark.verdict}
             style={{ left: pct(mark.start_s), width: pct(mark.end_s - mark.start_s) }}
             aria-label={t('review.markLabel', {
@@ -195,9 +194,8 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
           </div>
           <div className="take-review-tags" role="group" aria-label={t('review.tags')}>
             {TAGS.map((tag) => (
-              <button
+              <Button
                 key={tag}
-                type="button"
                 className={'take-review-tag' + (draft.tags.includes(tag) ? ' on' : '')}
                 aria-pressed={draft.tags.includes(tag)}
                 onClick={() =>
@@ -209,7 +207,7 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
                 }
               >
                 {t('review.tag.' + tag)}
-              </button>
+              </Button>
             ))}
           </div>
           <label className="take-review-note">
@@ -223,9 +221,8 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
           </label>
           <div className="take-review-actions">
             {!editing.isNew && (
-              <button
-                type="button"
-                className="ghost danger"
+              <Button
+                variant="ghost-danger"
                 disabled={saving}
                 onClick={() => {
                   commit({ marks: marks.filter((m) => m.id !== draft.id) });
@@ -233,15 +230,14 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
                 }}
               >
                 {t('review.delete')}
-              </button>
+              </Button>
             )}
             <span className="spacer" />
-            <button type="button" className="ghost" onClick={() => setEditing(null)}>
+            <Button variant="ghost" onClick={() => setEditing(null)}>
               {t('review.cancel')}
-            </button>
-            <button
-              type="button"
-              className="primary"
+            </Button>
+            <Button
+              variant="primary"
               disabled={saving}
               onClick={() => {
                 commit({
@@ -253,7 +249,7 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
               }}
             >
               {t('review.save')}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -262,8 +258,7 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
         <ol className="take-review-list">
           {marks.map((mark) => (
             <li key={mark.id}>
-              <button
-                type="button"
+              <Button
                 className="take-review-row"
                 onClick={() => {
                   seek(mark.start_s);
@@ -279,16 +274,16 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
                   {mark.tags.map((tag) => t('review.tag.' + tag)).join(' · ')}
                 </span>
                 {mark.note && <span className="take-review-row-note">{mark.note}</span>}
-              </button>
-              <button
-                type="button"
-                className="ghost round"
+              </Button>
+              <Button
+                variant="ghost"
+                className="round"
                 aria-label={t('review.delete')}
                 disabled={saving}
                 onClick={() => commit({ marks: marks.filter((m) => m.id !== mark.id) })}
               >
                 <X size={13} />
-              </button>
+              </Button>
             </li>
           ))}
         </ol>
