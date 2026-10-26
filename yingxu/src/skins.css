@@ -170,8 +170,7 @@ html[data-skin='nordic'] .story-card .cover:not(:has(img, video)) {
     linear-gradient(200deg, transparent 50%, rgba(207, 214, 220, 0.7) 50%),
     linear-gradient(180deg, #9fb3c2, #dfe6ea);
 }
-html[data-skin='nordic'] .account-menu-panel,
-html[data-skin='nordic'] .story-account-panel {
+html[data-skin='nordic'] .account-menu-panel {
   box-shadow: var(--shadow-lg);
 }
 
@@ -391,16 +390,7 @@ html[data-skin='aegean'] .credits-chip svg {
     linear-gradient(135deg, var(--p-accent), var(--p-third));
   opacity: 0.9;
 }
-.skin-swatch {
-  display: flex;
-  gap: 4px;
-}
-.skin-swatch i {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-}
+
 /* "Match system": half dark, half light. */
 .skin-preview.system {
   display: flex;

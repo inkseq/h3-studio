@@ -1,4 +1,6 @@
 import { Badge, EmptyState, Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
+import { Dialog } from './ui/Dialog.jsx';
 import { currentSupportView } from './support-view.js';
 import { Spinner } from './ui/Field.jsx';
 import './v2/works-adapter.css';
@@ -23,7 +25,6 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { ChatDialog } from './QuickChatControls.jsx';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useThumbnailSource } from './use-thumbnail-source.js';
@@ -149,9 +150,8 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
     const active = state.workspace.mode === kind && state.project.id === p.id,
       I = kind === 'cloud' ? Cloud : HardDrive;
     return (
-      <button
+      <Button
         key={kind + ':' + p.id}
-        type="button"
         className="story-nav-item"
         aria-current={active ? 'page' : undefined}
         disabled={working}
@@ -167,7 +167,7 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
           </small>
         </span>
         {active && <Check size={13} />}
-      </button>
+      </Button>
     );
   };
   return (
@@ -177,8 +177,7 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
           <BookOpen size={17} />
           {t('account.copy1')}
         </h2>
-        <button
-          type="button"
+        <Button
           className="story-nav-refresh"
           disabled={working}
           aria-label={t('account.accessible1')}
@@ -191,24 +190,23 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
           }
         >
           <RefreshCw size={13} />
-        </button>
+        </Button>
       </div>
-      <button type="button" className="story-nav-create" disabled={working} onClick={begin}>
+      <Button className="story-nav-create" disabled={working} onClick={begin}>
         <Plus size={15} />
         {t('account.copy2')}
-      </button>
+      </Button>
       {creating && (
         <form className="story-nav-form" onSubmit={create}>
           <div>
             <label htmlFor="new-sidebar-story-title">{t('account.copy3')}</label>
-            <button
-              type="button"
+            <Button
               disabled={working}
               aria-label={t('account.accessible2')}
               onClick={() => setCreating(false)}
             >
               <X size={14} />
-            </button>
+            </Button>
           </div>
           <input
             ref={inputRef}
@@ -233,9 +231,9 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
             <option value="local">{t('account.copy5')}</option>
           </select>
           <small>{source === 'cloud' ? t('legacy.visible8') : t('legacy.visible9')}</small>
-          <button type="submit" disabled={working || !title.trim()}>
+          <Button type="submit" disabled={working || !title.trim()}>
             {t('account.copy6')}
-          </button>
+          </Button>
         </form>
       )}
       <div id="sidebar-story-list">
@@ -264,28 +262,25 @@ export default function StoryNavigation({ state, onOpenCloud, onOpenLocal, onSel
           )}
         </nav>
         {c.moreProjects && (
-          <button
-            type="button"
+          <Button
             className="story-nav-more"
             disabled={working}
             onClick={() => act(t('legacy.visible10'), () => cloud.loadMoreProjects())}
           >
             {t('account.copy12')}
-          </button>
+          </Button>
         )}
         {query && c.moreProjects && <Note>{t('account.copy13')}</Note>}
         {library.error && (
           <p className="story-nav-error" role="alert">
             {t('account.copy14')}
-            <button type="button" onClick={onOpenLocal}>
-              {t('account.copy15')}
-            </button>
+            <Button onClick={onOpenLocal}>{t('account.copy15')}</Button>
           </p>
         )}
         {!c.account && (
-          <button type="button" className="story-nav-more" onClick={onOpenCloud}>
+          <Button className="story-nav-more" onClick={onOpenCloud}>
             {t('account.copy16')}
-          </button>
+          </Button>
         )}
       </div>
       {state.workspace.mode === 'cloud' && state.workspace.dirty && (
@@ -412,11 +407,11 @@ function useLibraryReader(account) {
     return value;
   }, [account]);
   useEffect(() => () => reader.reset(), [reader]);
-  const guard = () => {
-    if (!account || cloud.getState().account !== account) throw Error(t('legacy.visible14'));
-  };
-  return useMemo(
-    () => ({
+  return useMemo(() => {
+    const guard = () => {
+      if (!account || cloud.getState().account !== account) throw Error(t('legacy.visible14'));
+    };
+    return {
       project: async (id) => {
         guard();
         const record = checkedProjectRecord(await reader.project(id));
@@ -430,9 +425,8 @@ function useLibraryReader(account) {
         guard();
         return Object.freeze({ href, assertCurrent: guard });
       },
-    }),
-    [reader, account],
-  );
+    };
+  }, [reader, account, t]);
 }
 
 function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPick }) {
@@ -471,11 +465,12 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
     if (ref.current) observer.observe(ref.current);
     return () => observer.disconnect();
   }, []);
+  const hasEntities = Array.isArray(story.project.entities);
   useEffect(() => {
     let alive = true;
     setLoaded(null);
     setDetailError(false);
-    if (!visible || story.mode !== 'cloud' || Array.isArray(story.project.entities)) return;
+    if (!visible || story.mode !== 'cloud' || hasEntities) return;
     reader
       .project(story.project.id)
       .then((project) => {
@@ -494,19 +489,24 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
     story.project.id,
     story.project.version,
     story.project.updated_at,
-    Array.isArray(story.project.entities),
+    hasEntities,
   ]);
+  // Keyed on the file's identity, not the summary object rebuilt on every render.
+  const fileId = file?.fileId,
+    fileKind = file?.kind,
+    filePath = file?.cloudPath;
   useEffect(() => {
+    const key = filePath || fileId;
     let alive = true,
       url = '';
     setCover(null);
     setCoverError(false);
-    if (!visible || !file) return;
-    if (file.cloudPath) {
+    if (!visible || !key) return;
+    if (filePath) {
       try {
-        const target = reader.cover(file);
+        const target = reader.cover({ cloudPath: filePath });
         target.assertCurrent();
-        setCover({ reader, key: coverKey, url: target.href, target });
+        setCover({ reader, key, url: target.href, target });
       } catch {
         setCoverError(true);
       }
@@ -514,15 +514,15 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
         alive = false;
       };
     }
-    getFile(file.fileId)
+    getFile(fileId)
       .then((blob) => {
         if (!alive) return;
-        if (!blob?.size || (blob.type && !blob.type.startsWith(file.kind + '/'))) {
+        if (!blob?.size || (blob.type && !blob.type.startsWith(fileKind + '/'))) {
           setCoverError(true);
           return;
         }
         url = URL.createObjectURL(blob);
-        setCover({ reader, key: coverKey, url });
+        setCover({ reader, key, url });
       })
       .catch(() => {
         if (alive) setCoverError(true);
@@ -531,7 +531,7 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
       alive = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [visible, reader, file?.fileId, file?.kind, file?.cloudPath]);
+  }, [visible, reader, fileId, fileKind, filePath]);
   const small = useThumbnailSource(reader, coverUrl, { enabled: !!file?.cloudPath }),
     coverSrc = file?.cloudPath ? small.src : coverUrl;
   const coverFailed = () => {
@@ -552,9 +552,8 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
           />
         </label>
       )}
-      <button
+      <Button
         ref={ref}
-        type="button"
         className="story-card"
         data-ui-surface="card"
         aria-describedby={
@@ -638,7 +637,7 @@ function StoryLibraryCard({ story, reader, working, onOpen, picked = false, onPi
           </span>
           <time>{editedLabel(summary.updatedAt, locale)}</time>
         </small>
-      </button>
+      </Button>
       {story.mode === 'cloud' && (
         <TrashMenu
           target={{ kind: 'project', project_id: story.project.id, id: story.project.id }}
@@ -793,8 +792,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           </label>
           {/* The only library action, so a direct button instead of a one-item "..." menu. */}
           <span className="item-menu">
-            <button
-              type="button"
+            <Button
               disabled={working}
               aria-label={t('account.accessible7')}
               title={t('account.accessible7')}
@@ -806,7 +804,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
               }
             >
               <RefreshCw size={15} aria-hidden="true" />
-            </button>
+            </Button>
           </span>
         </div>
         <a
@@ -818,9 +816,9 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           <MessageSquare size={16} />
           <span>{t('nav.quickCreate')}</span>
         </a>
-        <button
-          type="button"
-          className="primary v2-home-new"
+        <Button
+          variant="primary"
+          className="v2-home-new"
           disabled={working}
           onClick={begin}
           aria-label={t('account.copy2')}
@@ -828,10 +826,10 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
         >
           <Plus size={16} />
           <span>{t('account.copy2')}</span>
-        </button>
+        </Button>
       </header>
       {creating && (
-        <ChatDialog
+        <Dialog
           title={t('account.copy2')}
           onClose={() => {
             if (!working) setCreating(false);
@@ -870,46 +868,42 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
                 {t('account.copy4')} · {t('account.copy21')}
               </p>
             )}
-            <button type="submit" className="primary" disabled={working || !title.trim()}>
+            <Button variant="primary" type="submit" disabled={working || !title.trim()}>
               {t('account.copy6')}
-            </button>
+            </Button>
           </form>
-        </ChatDialog>
+        </Dialog>
       )}
       {!c.account && (
         <p className="story-library-note signed-out">
           {t('account.copy22')}
-          <button type="button" onClick={onOpenCloud}>
-            {t('account.copy23')}
-          </button>
+          <Button onClick={onOpenCloud}>{t('account.copy23')}</Button>
         </p>
       )}
       <StoryOpenNotice onOpened={onSelect} quietLoading />
       {selecting && (
         <div className="works-select-bar" role="toolbar" aria-label={t('trash.selectStory')}>
           <b>{t('trash.selectedCount', { count: picked.size })}</b>
-          <button
-            type="button"
+          <Button
             className="linkish"
             onClick={() =>
               setPicked(new Set(visible.filter(pickable).map((story) => story.project.id)))
             }
           >
             {t('trash.selectAll')}
-          </button>
+          </Button>
           <span className="spacer" />
-          <button type="button" className="ghost" onClick={() => setPicked(new Set())}>
+          <Button variant="ghost" onClick={() => setPicked(new Set())}>
             {t('library.cancel')}
-          </button>
-          <button
-            type="button"
-            className="danger"
+          </Button>
+          <Button
+            variant="danger"
             disabled={trash?.busy || !!trash?.pending}
             onClick={() => void trashPicked()}
           >
             <Trash2 size={14} aria-hidden="true" />
             {t('trash.moveSelected', { count: picked.size })}
-          </button>
+          </Button>
         </div>
       )}
       <div className={'story-grid' + (selecting ? ' selecting' : '')}>
@@ -934,7 +928,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
             }
           />
         ))}
-        <button
+        <Button
           className="story-card new"
           data-ui-surface="card"
           disabled={working}
@@ -943,7 +937,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           <Plus size={40} strokeWidth={1.5} />
           <b>{t('account.copy2')}</b>
           <small>{t('v2.newStoryHint')}</small>
-        </button>
+        </Button>
       </div>
       <footer className="home-foot">
         <a href="/trash">
@@ -965,18 +959,16 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
         text={c.account && !c.projectsLoaded ? t('account.copy24') : null}
       />
       {visible.length > visibleLimit ? (
-        <button
-          type="button"
+        <Button
           className="story-library-more"
           disabled={working}
           onClick={() => setVisibleLimit((value) => value + 12)}
         >
           {t('account.copy25')}
-        </button>
+        </Button>
       ) : (
         c.moreProjects && (
-          <button
-            type="button"
+          <Button
             className="story-library-more"
             disabled={working}
             onClick={() =>
@@ -987,7 +979,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
             }
           >
             {t('account.copy26')}
-          </button>
+          </Button>
         )
       )}
       {c.moreProjects && query && <Note>{t('account.copy27')}</Note>}
@@ -1035,8 +1027,7 @@ export function RecentStoriesDropdown({ state, onOpenCloud, onOpenLocal, onSelec
       <div className="story-recent-menu">
         <b>{t('account.copy30')}</b>
         {stories.map((story) => (
-          <button
-            type="button"
+          <Button
             key={story.mode + ':' + story.project.id}
             disabled={library.working}
             aria-current={
@@ -1061,18 +1052,10 @@ export function RecentStoriesDropdown({ state, onOpenCloud, onOpenLocal, onSelec
           >
             <span>{storyTitle(story.project, t('legacy.visible24'))}</span>
             <StoryLocation mode={story.mode} />
-          </button>
+          </Button>
         ))}
-        {!library.c.account && (
-          <button type="button" onClick={onOpenCloud}>
-            {t('account.copy23')}
-          </button>
-        )}
-        {library.library.error && (
-          <button type="button" onClick={onOpenLocal}>
-            {t('account.copy15')}
-          </button>
-        )}
+        {!library.c.account && <Button onClick={onOpenCloud}>{t('account.copy23')}</Button>}
+        {library.library.error && <Button onClick={onOpenLocal}>{t('account.copy15')}</Button>}
         {library.pending && <small role="status">{library.pending}</small>}
         {library.error && <small role="alert">{library.error}</small>}
       </div>

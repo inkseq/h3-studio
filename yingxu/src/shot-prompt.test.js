@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { storyboardPrompt, promptDraftPatch, restorePromptPatch } from './shot-prompt.js';
+import { storyboardPrompt } from './shot-prompt.js';
 const project = {
   entities: [
     {
@@ -43,20 +43,4 @@ test('draft uses effective cast, explicit shot and linked locations, not whole s
     storyboardPrompt(project, 'shot', { includeCharacters: false, includeLocations: false }),
     /黄色雨衣|空荡的候车室/,
   );
-});
-test('adoption preserves previous prompt and refuses to overwrite edits made after preview', () => {
-  const shot = structuredClone(project.entities[1]),
-    patch = promptDraftPatch(shot, '用户核对后的草稿', '保留原提示词');
-  assert.equal(patch.promptDraftPrevious.text, '保留原提示词');
-  assert.equal(shot.data.prompt, '保留原提示词');
-  shot.data = { ...shot.data, ...patch };
-  assert.deepEqual(restorePromptPatch(shot), { prompt: '保留原提示词', promptDraftPrevious: null });
-  shot.data.prompt = '后来修改';
-  assert.throws(() => restorePromptPatch(shot), /保护新修改/);
-  assert.throws(() => promptDraftPatch(shot, '草稿', '保留原提示词'), /已经改变/);
-});
-test('empty and oversized drafts cannot erase original prompt', () => {
-  const shot = project.entities[1];
-  assert.throws(() => promptDraftPatch(shot, '', '保留原提示词'), /为空/);
-  assert.throws(() => promptDraftPatch(shot, '字'.repeat(12001), '保留原提示词'), /超过/);
 });

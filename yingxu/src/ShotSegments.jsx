@@ -209,8 +209,7 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
       </div>
       {/* The × sits above its part, clear of the resize edges. */}
       {selected !== null && list[selected] && (
-        <button
-          type="button"
+        <Button
           className="parts-bar-x"
           style={{ left: pct((list[selected].start + list[selected].end) / 2) }}
           aria-label={t('segments.remove', { n: selected + 1 })}
@@ -218,7 +217,7 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
           onClick={() => remove(selected)}
         >
           <X size={11} />
-        </button>
+        </Button>
       )}
       {list.length <= 1 && (
         <small className="parts-bar-hint muted">

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Button } from './ui/Button.jsx';
+import { Dialog } from './ui/Dialog.jsx';
 import { Clapperboard, Save } from 'lucide-react';
-import { ChatDialog } from './QuickChatControls.jsx';
 import { StoryboardVideo } from './StoryboardMedia.jsx';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -246,40 +247,30 @@ export default function StoryFilmControl({
     ) : null;
   return (
     <span className="story-film-control">
-      <button
-        type="button"
+      <Button
         disabled={!scoped || (!ready && !state.saved && !run && !pending)}
         title={mode !== 'cloud' ? t('film.local') : !ready ? t('film.unavailable') : undefined}
         onClick={() => setOpen(true)}
       >
         <Clapperboard size={15} />
         {run && run.phase !== 'preflight' ? t('film.view') : t('film.open')}
-      </button>
+      </Button>
       {completed && (
         <span className="film-complete-notice" role="status">
           {t('film.completedNotice')}
         </span>
       )}
       {open && scoped && (
-        <ChatDialog
-          title={t('film.title')}
-          wide
-          className="film-dialog"
-          onClose={() => setOpen(false)}
-        >
+        <Dialog title={t('film.title')} wide className="film-dialog" onClose={() => setOpen(false)}>
           <p>{t('film.intro')}</p>
           {!ready && <p role="status">{t('film.unavailable')}</p>}
           {dirty && !run?.accepted_at && (
             <p className="film-save">
               <span>{t('film.saveFirst')}</span>
-              <button
-                type="button"
-                disabled={state.busy || externalBusy || pending}
-                onClick={() => call(onSave)}
-              >
+              <Button disabled={state.busy || externalBusy || pending} onClick={() => call(onSave)}>
                 <Save size={14} />
                 {t('film.save')}
-              </button>
+              </Button>
             </p>
           )}
           {(!run || run.phase === 'preflight' || filmTerminal(run)) && (
@@ -306,15 +297,14 @@ export default function StoryFilmControl({
                 {t('film.captions')}
               </label>
               <small>{t('film.captionHint')}</small>
-              <button
-                type="button"
+              <Button
                 disabled={!newAllowed || dirty || !Number.isInteger(serverVersion)}
                 onClick={() =>
                   call(() => controller.preflight({ resolution, burn_subtitles: captions }))
                 }
               >
                 {t('film.preflight')}
-              </button>
+              </Button>
             </div>
           )}
           {(state.error || readError) && (
@@ -323,13 +313,9 @@ export default function StoryFilmControl({
           {state.pending && (
             <div className="film-pending" role="status">
               <p>{t('film.pending')}</p>
-              <button
-                type="button"
-                disabled={state.busy}
-                onClick={() => call(() => controller.recover())}
-              >
+              <Button disabled={state.busy} onClick={() => call(() => controller.recover())}>
                 {t('film.recover')}
-              </button>
+              </Button>
             </div>
           )}
           <FilmRunView
@@ -356,7 +342,7 @@ export default function StoryFilmControl({
           />
           {state.busy && <p role="status">{t('film.busy')}</p>}
           {notice && <p role="status">{notice}</p>}
-        </ChatDialog>
+        </Dialog>
       )}
     </span>
   );

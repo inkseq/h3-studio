@@ -1,4 +1,5 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
+import { Button } from './ui/Button.jsx';
 import React, { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Clock, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -311,9 +312,9 @@ export default function CapacitySettings({ settings, api, onSaved }) {
         extra={
           <>
             {suggested && (
-              <button type="button" className="linkish" onClick={() => recommend([id])}>
+              <Button className="linkish" onClick={() => recommend([id])}>
                 {t('capacity.recommended', { value: toText(id, leaf(defaults, id)) })}
-              </button>
+              </Button>
             )}
             {problem(id)}
           </>
@@ -374,9 +375,9 @@ export default function CapacitySettings({ settings, api, onSaved }) {
         <div className="cap-banner" role="note">
           <p>{t('capacity.notAdopted')}</p>
           {recommendedIds.length > 0 && (
-            <button type="button" className="ghost small" onClick={() => recommend(recommendedIds)}>
+            <Button variant="ghost" size="sm" onClick={() => recommend(recommendedIds)}>
               {t('capacity.useRecommended')}
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -439,26 +440,22 @@ export default function CapacitySettings({ settings, api, onSaved }) {
             <small className="muted">{t('capacity.reasonHelp')}</small>
           </label>
           <div className="cap-actions">
-            <button type="button" className="ghost" disabled={busy} onClick={() => setReview(null)}>
+            <Button variant="ghost" disabled={busy} onClick={() => setReview(null)}>
               {t('capacity.back')}
-            </button>
-            <button
-              type="button"
-              className="primary"
-              disabled={busy || !reason.trim()}
-              onClick={confirm}
-            >
+            </Button>
+            <Button variant="primary" disabled={busy || !reason.trim()} onClick={confirm}>
               {t('capacity.confirm')}
-            </button>
+            </Button>
           </div>
         </section>
       ) : (
         <div className="cap-bar">
           <span>{count > 0 ? t('capacity.changes', { count }) : ''}</span>
           {count > 0 && (
-            <button
-              type="button"
-              className="ghost small keep-label"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="keep-label"
               disabled={busy}
               onClick={() => {
                 setDraft(draftFrom(base));
@@ -467,16 +464,11 @@ export default function CapacitySettings({ settings, api, onSaved }) {
             >
               <RotateCcw size={14} aria-hidden="true" />
               {t('capacity.undo')}
-            </button>
+            </Button>
           )}
-          <button
-            type="button"
-            className="primary"
-            disabled={busy || count === 0 || invalid}
-            onClick={check}
-          >
+          <Button variant="primary" disabled={busy || count === 0 || invalid} onClick={check}>
             {t('capacity.review')}
-          </button>
+          </Button>
         </div>
       )}
     </div>

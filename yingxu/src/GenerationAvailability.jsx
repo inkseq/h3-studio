@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import React from 'react';
 import './generation-availability.css';
 import { modeAvailability } from './generation-availability.js';
@@ -41,9 +42,9 @@ export default function GenerationAvailability({
       </details>
       <div className="qc-availability-actions">
         {onRefresh && (
-          <button type="button" disabled={checking} onClick={onRefresh}>
+          <Button disabled={checking} onClick={onRefresh}>
             {checking ? t('availability.checking') : t('availability.refresh')}
-          </button>
+          </Button>
         )}
         {operator && !current.available && <a href="/operator">{t('availability.console')}</a>}
       </div>

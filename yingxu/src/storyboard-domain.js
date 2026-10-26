@@ -1,7 +1,7 @@
 import { shotSegments } from './shot-segments.js';
 import { translate } from './i18n/locale.js';
 /* Layout A projection of the existing v4 document. No second project store. */
-import { children, ancestors } from './store.js';
+import { children } from './store.js';
 import { effectiveLimits, effectiveControlSchema, roleSupported } from './quick-chat-model.js';
 const uid = (kind) => kind + '-' + crypto.randomUUID();
 const find = (p, id) => p.entities.find((e) => e.id === id);
@@ -631,19 +631,6 @@ export function storyboardDrop(shot, item, slot, state) {
         ? '参考已保存，切到全能参考时发送。'
         : '已加入附加参考，控制方式由预检核对。',
     hint: '松开：加入参考',
-  };
-}
-export function storyboardSnapshot(project, shotId) {
-  const shot = find(project, shotId),
-    chap = ancestors(project, shotId).find((e) => e.type === 'chapter'),
-    shots = chap ? chapterShots(project, chap.id) : [],
-    at = shots.findIndex((s) => s.id === shotId);
-  return {
-    shot,
-    style: project.journey?.storyboard?.style || '',
-    profiles: project.entities.filter((e) => ['character', 'location', 'prop'].includes(e.type)),
-    assets: project.entities.filter((e) => ['image', 'video', 'audio'].includes(e.type)),
-    previous: shot?.data.storyboard?.continuePrevious ? shots[at - 1]?.data.selectedAssetId : null,
   };
 }
 // Aspect, "keep sound" and a fresh seed for "another version" (owner spec 2026-10-26).

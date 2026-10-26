@@ -6,9 +6,6 @@
 
 export const LEGAL_STATUS = 'draft';
 export const SUPPORT_EMAIL = 'support@inkseq.com';
-// Operator details from the Australian Business Register (owner, 2026-10-21).
-// The public name only (owner, 2026-10-21): no personal name or ABN on the site.
-export const OPERATOR = { name: 'Inkseq', state: 'Victoria' };
 
 export const LEGAL = {
   terms: {

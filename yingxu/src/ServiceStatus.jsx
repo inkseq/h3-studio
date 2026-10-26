@@ -1,9 +1,7 @@
-import { translate } from './i18n/locale.js';
+import './i18n/locale.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React from 'react';
-import { executionStatus, inputUsage } from './service-model.js';
-const known = (value, locale) =>
-  Number.isFinite(value) ? value : translate(locale, 'adjunct.unknown');
+import { executionStatus } from './service-model.js';
 export function ServiceStatus({ capabilities, projectId }) {
   const { t: at, locale } = useI18n();
   const status = executionStatus(capabilities, locale),
@@ -64,68 +62,5 @@ export function ServiceStatus({ capabilities, projectId }) {
         <p>{at('adjunct.serviceStatus.copy126')}</p>
       </details>
     </details>
-  );
-}
-export function InputUsage({ project, shot, recipe, uploadMax }) {
-  const { t: at, locale } = useI18n();
-  const usage = inputUsage(project, shot.id, recipe, locale),
-    limits = recipe?.limits;
-  if (!limits) return <p className="cloud-warning">{at('adjunct.serviceStatus.copy127')}</p>;
-  return (
-    <section className="input-usage" aria-label={at('adjunct.serviceStatus.copy128')}>
-      <b>{at('adjunct.serviceStatus.copy129')}</b>
-      <p>
-        {at('adjunct.serviceStatus.copy130')}
-        {usage.frames}
-        {at('adjunct.serviceStatus.copy131')}
-        {usage.groups.image.count}/{known(limits.max_images, locale)}
-        {at('adjunct.serviceStatus.copy132')}
-        {usage.groups.video.count}/{known(limits.max_videos, locale)}
-        {at('adjunct.serviceStatus.copy133')}
-        {usage.groups.audio.count}/{known(limits.max_audios, locale)}
-        {at('adjunct.serviceStatus.copy134')}
-        {usage.total}/{known(limits.max_total_files, locale)}
-        {at('adjunct.serviceStatus.copy135')}
-        {usage.guides}/{known(limits.max_guides, locale)}
-      </p>
-      <p>
-        {at('adjunct.serviceStatus.copy136')}
-        {known(limits.min_clip_duration, locale)}–{known(limits.max_clip_duration, locale)}
-        {at('adjunct.serviceStatus.copy137')}
-        {known(limits.max_total_video_duration, locale)}
-        {at('adjunct.serviceStatus.copy138')}
-        {known(limits.max_total_audio_duration, locale)}
-        {at('adjunct.serviceStatus.copy139')}
-      </p>
-      <p>
-        {at('adjunct.serviceStatus.copy140')}
-        {Number(usage.groups.video.duration.toFixed(3))}
-        {at('adjunct.serviceStatus.copy141')}
-        {Number(usage.groups.audio.duration.toFixed(3))}
-        {at('adjunct.serviceStatus.copy142')}
-        {usage.unknownDurations
-          ? at('adjunct.serviceStatus.copy143', { v0: usage.unknownDurations })
-          : ''}
-        {at('adjunct.serviceStatus.copy144')}
-      </p>
-      {Number.isFinite(uploadMax) && (
-        <p>
-          {at('adjunct.serviceStatus.copy145')}
-          {(uploadMax / 1024 ** 2).toFixed(0)}
-          {at('adjunct.serviceStatus.copy146')}
-        </p>
-      )}
-      {usage.issues.length > 0 && (
-        <div role="status">
-          <b>{at('adjunct.serviceStatus.copy147')}</b>
-          <ul>
-            {usage.issues.map((issue, index) => (
-              <li key={index}>{issue}</li>
-            ))}
-          </ul>
-          <p>{at('adjunct.serviceStatus.copy148')}</p>
-        </div>
-      )}
-    </section>
   );
 }

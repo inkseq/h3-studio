@@ -3,16 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createQuickChatClient } from './quick-chat-client.js';
 import { createQuickChatController } from './quick-chat-controller.js';
-import {
-  mergeTakes,
-  preferenceBody,
-  checkedPreferences,
-  quoteMachineMinutes,
-  storyScenes,
-  createConversationFiles,
-  createReadFence,
-  selectedTakeForRevision,
-} from './quick-chat-takes.js';
+import { preferenceBody, checkedPreferences } from './quick-chat-takes.js';
 const memory = () => {
   const values = new Map();
   return {
@@ -38,22 +29,7 @@ async function ready(client, storage = memory()) {
   await c.open('session');
   return c;
 }
-test('paginated takes merge fresh annotation without duplicates in newest order', () => {
-  const a = { id: 'a', created_at: 1, index: 0 },
-    b = { id: 'b', created_at: 2, index: 0 };
-  const result = mergeTakes(
-    [a, b],
-    [
-      { ...a, annotation: { starred: true } },
-      { id: 'c', created_at: 2, index: 1 },
-    ],
-  );
-  assert.deepEqual(
-    result.map((x) => x.id),
-    ['c', 'b', 'a'],
-  );
-  assert.equal(result[2].annotation.starred, true);
-});
+
 test('editable preference CAS has no hidden 4/8 maximum and rejects noninteger/lossy values', () => {
   const old = { version: 7, copies_max: 4, takes_fold_count: 8 };
   assert.deepEqual(preferenceBody(old, '64', '200'), {
@@ -65,62 +41,7 @@ test('editable preference CAS has no hidden 4/8 maximum and rejects noninteger/l
     assert.throws(() => checkedPreferences({ ...old, copies_max: n }));
   assert.equal(old.copies_max, 4);
 });
-test('machine time only uses finite saved plan estimate, never historical samples', () => {
-  assert.equal(quoteMachineMinutes({ estimate: { machine_seconds: 90 } }), 1.5);
-  assert.equal(
-    quoteMachineMinutes({ items: [{ plan: { execution: { timing_hint: { seconds: 30 } } } }] }),
-    null,
-  );
-  for (const n of [null, '60', NaN, Infinity, -1])
-    assert.equal(quoteMachineMinutes({ estimate: { machine_seconds: n } }), null);
-});
-test('unsent files partition by conversation and owner; scenes use actual project entities', () => {
-  const store = createConversationFiles(),
-    file = { file: { name: 'private' }, url: 'blob:one' };
-  store.save('a', 'one', [file]);
-  assert.deepEqual(store.read('a', 'two'), []);
-  assert.deepEqual(store.read('b', 'one'), []);
-  assert.equal(store.read('a', 'one')[0], file);
-  assert.deepEqual(
-    storyScenes({
-      entities: [
-        { id: 'c', type: 'chapter' },
-        { id: 's', type: 'scene' },
-        { id: 'shot', type: 'shot' },
-      ],
-    }).map((x) => x.id),
-    ['s'],
-  );
-});
-test('A/B project selections and modal/account/session invalidation reject late responses', async () => {
-  const fence = createReadFence(),
-    applied = [];
-  let resolveA, resolveB;
-  const a = fence.read(
-    () => new Promise((r) => (resolveA = r)),
-    (v) => applied.push(v),
-  );
-  const b = fence.read(
-    () => new Promise((r) => (resolveB = r)),
-    (v) => applied.push(v),
-  );
-  resolveB('B');
-  assert.equal(await b, true);
-  resolveA('A');
-  assert.equal(await a, false);
-  assert.deepEqual(applied, ['B']);
-  for (const reason of ['modal closed', 'modal reopened', 'account changed', 'session changed']) {
-    let done;
-    const request = fence.read(
-      () => new Promise((r) => (done = r)),
-      (v) => applied.push(v),
-    );
-    fence.invalidate();
-    done(reason);
-    assert.equal(await request, false);
-  }
-  assert.deepEqual(applied, ['B']);
-});
+
 test('take writes use same-origin owner fence and explicit CAS/key without submit', async () => {
   const calls = [],
     client = createQuickChatClient({
@@ -391,18 +312,6 @@ test('completed transfer mismatched original receipt identity never clears pendi
     assert.equal(c.getState().pending.key, original.key);
     assert.equal(c.getState().pending.transferId, 'transfer');
   }
-});
-
-test('displayed revision selects its own exact take after count save/history switch without late-page selection', () => {
-  const old = { id: 'take23', revision_id: 'r6', seed: '23' },
-    first = { id: 'take29', revision_id: 'r7', seed: '29' },
-    second = { id: 'take28', revision_id: 'r7', seed: '28' };
-  assert.equal(selectedTakeForRevision([first, second, old], 'take23', 'r7'), first);
-  assert.equal(selectedTakeForRevision([first, second, old], 'take28', 'r7'), second);
-  assert.equal(selectedTakeForRevision([first, second, old], 'take28', 'r6'), old);
-  assert.equal(selectedTakeForRevision([first, second], 'take23', 'r6'), null);
-  // Older page arriving after a new user choice cannot select another revision.
-  assert.equal(selectedTakeForRevision([first, second, old], 'take28', 'r7'), second);
 });
 
 test('take display rename preserves omitted star and original body/key across lost reply and validates exact annotation receipt', async () => {

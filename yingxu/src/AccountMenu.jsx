@@ -1,4 +1,5 @@
 import { setPreviewAsUser } from './preview-as-user.js';
+import { Button } from './ui/Button.jsx';
 // One account menu for every page (#358): who you are on top, page actions, then
 // Settings / Trash / Sign out. Pages add their own actions through `items` (ui/Menu rows).
 // The menu itself is the shared Radix menu (#514 phase 2): portal, outside click, Escape and
@@ -26,13 +27,9 @@ export default function AccountMenu({ account, items, onSignIn }) {
       className="account-menu-panel"
       label={who.label || t('story.copy14')}
       trigger={
-        <button
-          type="button"
-          className="avatar account-menu-trigger"
-          title={who.label || t('story.copy14')}
-        >
+        <Button className="avatar account-menu-trigger" title={who.label || t('story.copy14')}>
           {account ? who.initial : <UserRound size={17} aria-hidden="true" />}
-        </button>
+        </Button>
       }
     >
       {account ? (

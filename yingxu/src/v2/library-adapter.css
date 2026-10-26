@@ -83,20 +83,7 @@
   margin-bottom: 0;
   min-width: 0;
 }
-.libp-detail .field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.libp-detail .libp-tags {
-  padding: 0;
-}
-.libp-detail .libp-actions {
-  margin-top: auto;
-}
-.libp-detail .library-usage-note {
-  font-size: 11px;
-}
+
 @media (max-width: 760px) {
   .libp-side > .library-source-tools {
     flex: none;
@@ -156,9 +143,7 @@
   min-height: 28px;
   border-radius: var(--r-sm);
 }
-/* The shared header (.hbar) keeps its own geometry on every page. */
-.lib-shell button:not([data-ui-surface]):not(.hbar *),
-.libp-detail button {
+.lib-shell button:not([data-ui-surface]):not(.hbar *) {
   height: 32px;
   min-height: 32px;
   padding-block: 0;
@@ -195,14 +180,7 @@
   padding: 0;
   justify-content: center;
 }
-.lib-shell .libp-detail > header > button {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0;
-  justify-content: center;
-}
+
 .lib-shell .libp-tile {
   min-width: 0;
 }

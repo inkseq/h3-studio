@@ -12,6 +12,7 @@ export default [
     plugins: { 'react-hooks': hooks },
     rules: {
       'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
       'no-dupe-keys': 'error',
       'no-dupe-args': 'error',
       'no-duplicate-case': 'error',

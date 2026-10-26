@@ -1,4 +1,5 @@
 import React from 'react';
+import { Button } from './ui/Button.jsx';
 import { Download, RefreshCw, Square, Play, Check } from 'lucide-react';
 import { formatMoneyMicros } from './money.js';
 import { filmTerminal } from './story-film.js';
@@ -117,15 +118,14 @@ export function FilmRunView({
             />
             {t('film.confirmLabel')}
           </label>
-          <button
-            type="button"
-            className="primary"
+          <Button
+            variant="primary"
             disabled={locked || stale || !quoted || !confirmed}
             onClick={onConfirm}
           >
             <Play size={14} />
             {t('film.confirm')}
-          </button>
+          </Button>
         </>
       )}
       {run.phase === 'admission_blocked' && <p role="status">{t('film.waiting')}</p>}
@@ -134,35 +134,35 @@ export function FilmRunView({
       {run.phase === 'completed' && run.export.artifact_id && (
         <div className="film-result">
           {preview}
-          <button type="button" disabled={locked} onClick={onDownload}>
+          <Button disabled={locked} onClick={onDownload}>
             <Download size={14} />
             {t('film.download')}
-          </button>
+          </Button>
         </div>
       )}
       <div className="film-actions">
-        <button type="button" disabled={state.busy || !!state.pending} onClick={onRefresh}>
+        <Button disabled={state.busy || !!state.pending} onClick={onRefresh}>
           <RefreshCw size={14} />
           {t('film.refresh')}
-        </button>
+        </Button>
         {!terminal && !preflight && !run.cancel_requested && (
           <>
             {['blocked', 'admission_blocked', 'authorization_required'].includes(run.phase) && (
-              <button type="button" disabled={locked} onClick={onResume}>
+              <Button disabled={locked} onClick={onResume}>
                 <Play size={14} />
                 {t('film.resume')}
-              </button>
+              </Button>
             )}
-            <button type="button" disabled={locked} onClick={onCancel}>
+            <Button disabled={locked} onClick={onCancel}>
               <Square size={14} />
               {t('film.cancel')}
-            </button>
+            </Button>
           </>
         )}
         {state.pending && (
-          <button type="button" disabled={state.busy} onClick={onRecover}>
+          <Button disabled={state.busy} onClick={onRecover}>
             {t('film.recover')}
-          </button>
+          </Button>
         )}
       </div>
       {!terminal && !preflight && <p className="muted">{t('film.cancelNote')}</p>}

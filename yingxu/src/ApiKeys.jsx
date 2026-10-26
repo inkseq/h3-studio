@@ -1,7 +1,8 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import './i18n/workspace-language.css';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'react';
 import { Copy, KeyRound, RefreshCw, ShieldCheck, X } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { translate } from './i18n/locale.js';
@@ -71,13 +72,14 @@ export default function ApiKeys({
     const data = await client.apiKeys();
     if (live.current) setKeys(data.api_keys || []);
   }
+  const refreshEvent = useEffectEvent((...args) => refresh(...args));
   useEffect(() => {
     live.current = true;
     setCreated(null);
     setKeys([]);
     setError('');
     setBusy(true);
-    refresh()
+    refreshEvent()
       .catch(() => {
         if (live.current) setError(t('account.status62'));
       })
@@ -88,7 +90,7 @@ export default function ApiKeys({
       live.current = false;
       client.reset();
     };
-  }, [client]);
+  }, [client, t]);
   async function act(fn) {
     setBusy(true);
     setError('');
@@ -159,10 +161,10 @@ export default function ApiKeys({
         <h3>
           <KeyRound size={17} /> {t('account.more.keyTitle')}
         </h3>
-        <button type="button" disabled={busy} onClick={() => act(refresh)}>
+        <Button disabled={busy} onClick={() => act(refresh)}>
           <RefreshCw size={14} />
           {t('account.copy31')}
-        </button>
+        </Button>
       </div>
       <p>
         {t('account.more.intro')}
@@ -173,8 +175,7 @@ export default function ApiKeys({
         <section className="api-key-created" aria-label={t('account.accessible10')}>
           <div>
             <b>{t('account.copy32')}</b>
-            <button
-              type="button"
+            <Button
               aria-label={t('account.accessible11')}
               onClick={() => {
                 setCreated(null);
@@ -182,7 +183,7 @@ export default function ApiKeys({
               }}
             >
               <X size={16} />
-            </button>
+            </Button>
           </div>
           <input
             aria-label={t('account.accessible12')}
@@ -193,13 +194,13 @@ export default function ApiKeys({
             spellCheck={false}
           />
           <div>
-            <button type="button" onClick={() => setReveal(!reveal)}>
+            <Button onClick={() => setReveal(!reveal)}>
               {reveal ? t('account.status70') : t('account.status71')}
-            </button>
-            <button type="button" onClick={copy}>
+            </Button>
+            <Button onClick={copy}>
               <Copy size={14} />
               {t('account.copy33')}
-            </button>
+            </Button>
           </div>
           <small>{t('account.copy34')}</small>
         </section>
@@ -281,13 +282,14 @@ export default function ApiKeys({
             <small>{t('account.copy46')}</small>
           </fieldset>
         )}
-        <button
-          className="primary"
+        <Button
+          variant="primary"
+          type="submit"
           disabled={busy || !name.trim() || (!allProjects && !selected.length)}
         >
           <KeyRound size={14} />
           {t('account.copy47')}
-        </button>
+        </Button>
       </form>
       <FloatingMessage tone="error" text={error ? error : null} />
       {notice && <p role="status">{notice}</p>}
@@ -323,17 +325,17 @@ export default function ApiKeys({
               (confirmRevoke === k.id ? (
                 <div className="api-key-revoke">
                   <p>{t('account.copy49')}</p>
-                  <button type="button" disabled={busy} onClick={() => revoke(k.id)}>
+                  <Button disabled={busy} onClick={() => revoke(k.id)}>
                     {t('account.copy50')}
-                  </button>
-                  <button type="button" disabled={busy} onClick={() => setConfirmRevoke(null)}>
+                  </Button>
+                  <Button disabled={busy} onClick={() => setConfirmRevoke(null)}>
                     {t('account.copy51')}
-                  </button>
+                  </Button>
                 </div>
               ) : (
-                <button type="button" disabled={busy} onClick={() => setConfirmRevoke(k.id)}>
+                <Button disabled={busy} onClick={() => setConfirmRevoke(k.id)}>
                   {t('account.copy52')}
-                </button>
+                </Button>
               ))}
           </article>
         ))}

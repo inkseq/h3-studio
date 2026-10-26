@@ -8,7 +8,7 @@
     "test": "node --test src/*.test.js",
     "format": "prettier --write \"src/**/*.{js,jsx,css}\" vite.config.js eslint.config.js tools/check-changed.mjs tools/layout-audit.mjs tools/journeys.mjs package.json .prettierrc.json",
     "format:check": "prettier --check \"src/**/*.{js,jsx,css}\" vite.config.js eslint.config.js tools/check-changed.mjs tools/layout-audit.mjs tools/journeys.mjs package.json .prettierrc.json",
-    "lint": "eslint \"src/**/*.{js,jsx}\" vite.config.js eslint.config.js tools/check-changed.mjs tools/layout-audit.mjs tools/journeys.mjs --max-warnings 0 tools/check-tokens.mjs tools/check-ui-patterns.mjs && node tools/check-tokens.mjs && node tools/check-ui-patterns.mjs",
+    "lint": "eslint \"src/**/*.{js,jsx}\" vite.config.js eslint.config.js tools/check-changed.mjs tools/layout-audit.mjs tools/journeys.mjs --max-warnings 0 tools/check-tokens.mjs tools/check-ui-patterns.mjs tools/check-css-classes.mjs && node tools/check-tokens.mjs && node tools/check-ui-patterns.mjs && node tools/check-css-classes.mjs",
     "check:changed": "node tools/check-changed.mjs",
     "audit:layout": "node tools/layout-audit.mjs",
     "journeys": "node tools/journeys.mjs",

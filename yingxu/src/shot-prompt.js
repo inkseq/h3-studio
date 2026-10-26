@@ -51,16 +51,3 @@ export function storyboardPrompt(
   if (includeScene) add('本场动作与台词（请只保留当前镜头需要的部分）', scene?.data.script);
   return parts.join('\n\n');
 }
-export function promptDraftPatch(shot, next, expected) {
-  if (String(shot.data.prompt ?? shot.description ?? '') !== expected)
-    throw Error('原提示词已经改变。请重新预览，避免覆盖刚才的修改。');
-  if (!text(next)) throw Error('草稿为空，原提示词已保留。');
-  if (next.length > 12000) throw Error('草稿超过 12000 字符，请删去不属于这个镜头的内容。');
-  return { prompt: next, promptDraftPrevious: { text: expected, applied: next } };
-}
-export function restorePromptPatch(shot) {
-  const previous = shot.data.promptDraftPrevious;
-  if (!previous || shot.data.prompt !== previous.applied)
-    throw Error('采用后已继续编辑。为保护新修改，请从下方复制原提示词。');
-  return { prompt: previous.text, promptDraftPrevious: null };
-}
