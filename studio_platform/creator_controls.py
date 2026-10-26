@@ -6,7 +6,9 @@ TAOMATE = "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
 POLICY = "taomate-creator-v1"
 # resolution is the existing wire representation of Standard / HD (#582).
 # Mode, quality selection, copies and reference assets live outside controls.
-CREATOR_CONTROLS = frozenset({"duration", "seed", "resolution"})
+CREATOR_CONTROLS = frozenset(
+    {"duration", "seed", "resolution", "aspect_ratio", "generate_audio"}
+)
 
 
 def controls(profile_id, value):

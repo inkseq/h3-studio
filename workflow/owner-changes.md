@@ -599,3 +599,8 @@ counts read-only and propose cleanup separately; no production data write is
 authorized here. Tier2 independent review and usual release gates apply.
 Charging and Checkout remain OFF. CR68 is reserved by the separate maintainability
 ratchet PR #644; this change does not replace that pending decision.
+
+Review clarification #650/6415940764: existing `aspect_ratio` and
+`generate_audio` are creator output choices, not model-tuning controls. Preserve
+them with their existing enum/bool validation so portrait or silent output does
+not silently revert when hidden tuning overrides are filtered.

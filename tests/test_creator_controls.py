@@ -31,6 +31,8 @@ class CreatorControlsTests(unittest.TestCase):
                     "shift_audio": 50,
                     "video_decode": "normal",
                     "video_tile_size": 999,
+                    "aspect_ratio": "9:16",
+                    "generate_audio": False,
                 }
                 h3 = {
                     "recipeId": fixture.RECIPE,
@@ -60,6 +62,8 @@ class CreatorControlsTests(unittest.TestCase):
                 self.assertEqual(effective["video_tile_size"], 256)
                 self.assertEqual(effective["resolution"], "768P")
                 self.assertEqual(effective["seed"], "123")
+                self.assertEqual(effective["aspect_ratio"], "9:16")
+                self.assertIs(effective["generate_audio"], False)
                 self.assertEqual(f.read(project), before)
 
     def test_implicit_default_creator_shot_ignores_stale_hidden_controls(self):
@@ -95,7 +99,12 @@ class CreatorControlsTests(unittest.TestCase):
             h3={
                 "recipeId": fixture.RECIPE,
                 "deploymentProfileId": TAOMATE,
-                "controls": {"steps": 50, "seed": "12"},
+                "controls": {
+                    "steps": 50,
+                    "seed": "12",
+                    "aspect_ratio": "9:16",
+                    "generate_audio": False,
+                },
             }
         )
         app = create_app(f.settings, repository=f.repo)
@@ -107,11 +116,16 @@ class CreatorControlsTests(unittest.TestCase):
         self.assertTrue(
             selected_recipe_current(project, "shot-one", original, {}, caps)
         )
-        changed = copy.deepcopy(project)
-        changed["entities"][-1]["data"]["h3"]["controls"]["seed"] = "13"
-        self.assertFalse(
-            selected_recipe_current(changed, "shot-one", original, {}, caps)
-        )
+        for key, value in (
+            ("seed", "13"),
+            ("aspect_ratio", "16:9"),
+            ("generate_audio", True),
+        ):
+            changed = copy.deepcopy(project)
+            changed["entities"][-1]["data"]["h3"]["controls"][key] = value
+            self.assertFalse(
+                selected_recipe_current(changed, "shot-one", original, {}, caps)
+            )
         self.assertEqual(original, before)
 
     def test_historical_take_comparison_keeps_its_internal_controls(self):
@@ -153,3 +167,34 @@ class CreatorControlsTests(unittest.TestCase):
         original = {"steps": 50, "duration": 5}
         self.assertEqual(controls(fixture.PROFILE, original), original)
         self.assertIsNone(controls(TAOMATE, None))
+
+    def test_creator_output_choices_keep_native_validation(self):
+        f = self.fixture
+        for invalid in ({"aspect_ratio": "invalid"}, {"generate_audio": "false"}):
+            body = generation_request(tier="standard", mode="fl", controls=invalid)
+            resolved, _ = normalize(f.settings, f.repo, f.user, body)
+            self.assertEqual(resolved["controls"], invalid)
+            with self.assertRaises(ValueError):
+                compile_request(resolved, lambda _: None, backend="wangp-worker")
+
+    def test_census_counts_non_default_aspects_by_layer_without_raw_values(self):
+        from unittest.mock import Mock
+        from tools.audit_creator_controls import census
+
+        connection = Mock()
+        connection.execute.return_value.mappings.return_value = [
+            {
+                "layer": layer,
+                "owner_id": "synthetic",
+                "controls": {"aspect_ratio": aspect},
+            }
+            for layer in ("shot", "story", "account")
+            for aspect in ("9:16", "1:1", "16:9", None, "", "PRIVATE_TEXT")
+        ]
+        result = census(connection, "tenant")
+        for bucket in result["layers"].values():
+            self.assertEqual(bucket["records_with_non_default_aspect"], 3)
+            self.assertEqual(bucket["non_default_aspects"], {"9:16": 1, "1:1": 1})
+            self.assertEqual(bucket["records_with_invalid_aspect"], 1)
+            self.assertEqual(bucket["records_with_hidden_controls"], 0)
+        self.assertNotIn("PRIVATE_TEXT", str(result))

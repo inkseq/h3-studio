@@ -14,7 +14,7 @@ from studio_platform.inference.wangp_full_compiler import control_schema
 from studio_platform.settings import Settings
 
 PROFILE = "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
-CREATOR = {"duration", "seed", "resolution"}
+CREATOR = {"duration", "seed", "resolution", "aspect_ratio", "generate_audio"}
 SQL = """
 SELECT owner_id, 'account' AS layer, payload::jsonb->'controls' AS controls
 FROM platform_documents WHERE tenant_id=:tenant AND kind='storyboard_preferences'
@@ -74,10 +74,14 @@ def census(connection, tenant):
             "records_with_definite_refusal": 0,
             "context_dependent_records": 0,
             "refused_fields": collections.Counter(),
+            "records_with_non_default_aspect": 0,
+            "non_default_aspects": collections.Counter(),
+            "records_with_invalid_aspect": 0,
         }
         for layer in ("account", "story", "shot")
     }
     owners = set()
+    aspect_schema = control_schema(PROFILE, "fl")["aspect_ratio"]
     for row in connection.execute(text(SQL), {"tenant": tenant}).mappings():
         value = row["controls"]
         if not isinstance(value, dict) or not value:
@@ -85,6 +89,14 @@ def census(connection, tenant):
         bucket = buckets[row["layer"]]
         bucket["records_with_controls"] += 1
         bucket["records_with_hidden_controls"] += bool(set(value) - CREATOR)
+        aspect = value.get("aspect_ratio")
+        if aspect is not None and aspect != "" and aspect != aspect_schema["default"]:
+            bucket["records_with_non_default_aspect"] += 1
+            if isinstance(aspect, str) and aspect in aspect_schema["enum"]:
+                bucket["non_default_aspects"][aspect] += 1
+            else:
+                # Never emit arbitrary stored strings in an aggregate report.
+                bucket["records_with_invalid_aspect"] += 1
         refused, contextual = refused_fields(value)
         if refused:
             owners.add(row["owner_id"])
