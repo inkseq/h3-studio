@@ -297,6 +297,32 @@ class FilesystemTests(unittest.TestCase):
             patch.stop()
         self.temporary.cleanup()
 
+    def test_hosted_check_reads_large_frozen_manifest_and_still_rejects_unavailable(
+        self,
+    ):
+        operation = self.state / 'hosted-check'
+        snapshot = operation / 'snapshot'
+        snapshot.mkdir(parents=True, mode=0o700)
+        manifest = snapshot / 'manifest.json'
+        manifest.write_text(
+            json.dumps(
+                {'hosted_users': {'status': 'unavailable'}, 'padding': 'x' * 70000}
+            )
+        )
+        manifest.chmod(0o400)
+        with self.assertRaisesRegex(ValueError, 'business_confirmed'):
+            host.require_hosted_coverage(operation)
+        manifest.chmod(0o600)
+        manifest.write_text(json.dumps({'hosted_users': {'status': 'complete'}}))
+        manifest.chmod(0o400)
+        host.require_hosted_coverage(operation)
+        manifest.chmod(0o600)
+        manifest.unlink()
+        manifest.symlink_to(self.base / 'outside')
+        (self.base / 'outside').write_text('{}')
+        with self.assertRaises(ValueError):
+            host.require_hosted_coverage(operation)
+
     def make_day(self, day):
         outer = '00000000-0000-4000-8000-' + day.replace('-', '').zfill(12)
         inner = '11111111-1111-4111-8111-' + day.replace('-', '').zfill(12)
