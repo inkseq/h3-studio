@@ -26,9 +26,13 @@ import {
   CircleHelp,
 } from 'lucide-react';
 import { Segmented } from './ui/Segmented.jsx';
+import { Button, IconButton } from './ui/Button.jsx';
+import { Field } from './ui/Field.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Tooltip } from './ui/Tooltip.jsx';
 import { useDragMove } from './ui/useDragMove.js';
-import { Chip, Note } from './ui/Note.jsx';
+import { Badge, Chip, Note } from './ui/Note.jsx';
+import './profile-editor.css';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
 import { WorkbenchTakes, WorkbenchCopies } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
@@ -341,47 +345,35 @@ const nativeDrop = (onFiles) => ({
 
 // Choose files already in the library, or bring new ones from the computer.
 function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
   const { state } = useStore();
   const [q, setQ] = useState('');
   const input = useRef();
-  const [moved, handle] = useDragMove();
   const list = state.assets.filter(
     (a) => a.kind === kind && !exclude.has(a.id) && (!q || a.name.includes(q)),
   );
-  return createPortal(
-    <div
-      className="sb-portal choose-overlay"
-      onClick={onClose}
-      onKeyDown={(e) => e.key === 'Escape' && onClose()}
-    >
+  // Its own modal on top of whatever opened it (e.g. the profile editor), via ui/Dialog.
+  return (
+    <Dialog title={title} onClose={onClose} portal wide className="sb-portal pe-choose">
       <div
-        className="choose"
-        style={{ transform: `translate(${moved.x}px, ${moved.y}px)` }}
-        onClick={(e) => e.stopPropagation()}
+        className="pe-choose-body"
         {...nativeDrop((files) => {
           onFiles(files);
           onClose();
         })}
       >
-        <div className="picker-head" {...handle}>
-          <b>{title}</b>
-          <button className="x" onClick={onClose} aria-label={tr('storyboard.copy58')}>
-            <X size={14} />
-          </button>
-        </div>
-        <div className="row tight">
+        <div className="pe-row">
           <input
-            className="lib-search"
-            autoFocus
+            className="pe-grow"
+            type="search"
+            aria-label={tr('storyboard.finish1')}
             placeholder={tr('storyboard.finish1')}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
-          <button className="primary" onClick={() => input.current.click()}>
+          <Button variant="primary" onClick={() => input.current.click()}>
             {tr('storyboard.copy38')}
-          </button>
+          </Button>
           <input
             ref={input}
             type="file"
@@ -398,24 +390,30 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
           {tr('storyboard.copy39')}
         </Note>
         {kind === 'image' ? (
-          <div className="picker-grid">
+          <div className="pe-choose-grid">
             {list.map((a) => (
-              <button key={a.id} className="tile" onClick={() => onPick(a.id)} title={a.name}>
+              <button
+                key={a.id}
+                type="button"
+                className="pe-choose-tile"
+                onClick={() => onPick(a.id)}
+                title={a.name}
+              >
                 <StoryboardAssetImage asset={a} />
-                <span className="tile-name">{a.name}</span>
+                <small className="clip">{a.name}</small>
               </button>
             ))}
           </div>
         ) : (
-          <div className="alist">
+          <div className="pe-choose-list">
             {list.map((a) => (
-              <div key={a.id} className="arow">
+              <div key={a.id} className="pe-row">
                 <PlayButton asset={a} />
-                <span className="clip">{a.name}</span>
-                <small>{a.seconds}s</small>
-                <button className="small" onClick={() => onPick(a.id)}>
+                <span className="pe-grow clip">{a.name}</span>
+                <small className="muted">{a.seconds}s</small>
+                <Button size="sm" onClick={() => onPick(a.id)}>
                   {tr('storyboard.copy40')}
-                </button>
+                </Button>
               </div>
             ))}
           </div>
@@ -428,8 +426,7 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
           </p>
         )}
       </div>
-    </div>,
-    document.body,
+    </Dialog>
   );
 }
 
@@ -778,7 +775,9 @@ function VariantDrop({ pid, vid, children, onFiles }) {
     <div
       ref={setNodeRef}
       {...nativeDrop(onFiles)}
-      className={'vimages' + (isOver && String(active?.id).startsWith('asset:') ? ' drop-hot' : '')}
+      className={
+        'pe-photos' + (isOver && String(active?.id).startsWith('asset:') ? ' drop-hot' : '')
+      }
     >
       {children}
     </div>
@@ -786,91 +785,101 @@ function VariantDrop({ pid, vid, children, onFiles }) {
 }
 
 function VoiceSection({ p }) {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
   const { dispatch, db } = useStore();
   const [choose, setChoose] = useState(false);
   const voices = p.voices || [];
   const { setNodeRef, isOver, active } = useDroppable({ id: 'voicedrop:' + p.id });
   const hot = isOver && db.asset(String(active?.id).slice(6))?.kind === 'audio';
   return (
-    <div
+    <section
       ref={setNodeRef}
-      className={'voices' + (hot ? ' drop-hot' : '')}
+      className={'pe-section' + (hot ? ' drop-hot' : '')}
       {...nativeDrop((files) =>
         dispatch({ type: 'uploadFiles', files, target: { kind: 'voice', pid: p.id } }),
       )}
     >
-      <div className="row tight">
-        <b>{tr('storyboard.copy51')}</b>
+      <header className="pe-section-head">
+        <h3>{tr('storyboard.copy51')}</h3>
         <small className="muted">{tr('storyboard.copy52')}</small>
-        <button className="small" onClick={() => setChoose(true)}>
+        <Button size="sm" onClick={() => setChoose(true)}>
+          <Plus size={14} aria-hidden="true" />
           {tr('storyboard.copy53')}
-        </button>
-      </div>
-      <div className="drop-line">{tr('storyboard.copy54')}</div>
-      {!voices.length && <div className="slot-empty">{tr('storyboard.copy55')}</div>}
-      {voices.map((v) => {
-        const a = db.asset(v.asset);
-        if (!a) return null;
-        const max = Math.max(0, (Number.isFinite(a.seconds) ? a.seconds : 3) - 3);
-        return (
-          <div key={v.asset} className={'voice' + (p.voice === v.asset ? ' main' : '')}>
-            <div className="row tight">
-              <label className="check">
+        </Button>
+      </header>
+      {voices.length ? (
+        voices.map((v) => {
+          const a = db.asset(v.asset);
+          if (!a) return null;
+          const max = Math.max(0, (Number.isFinite(a.seconds) ? a.seconds : 3) - 3);
+          return (
+            <div key={v.asset} className={'pe-voice' + (p.voice === v.asset ? ' main' : '')}>
+              <div className="pe-row">
+                <label className="ui-check">
+                  <input
+                    type="radio"
+                    name={'voice-' + p.id}
+                    checked={p.voice === v.asset}
+                    onChange={() =>
+                      dispatch({ type: 'profile', id: p.id, patch: { voice: v.asset } })
+                    }
+                  />
+                  <span>{tr('storyboard.copy56')}</span>
+                </label>
+                <span className="pe-grow clip">
+                  <b>{a.name}</b>{' '}
+                  <small className="muted">
+                    ·{' '}
+                    {Number.isFinite(a.seconds)
+                      ? a.seconds + tr('storyboard.detail22')
+                      : tr('storyboard.detail23')}
+                    {a.source === 'upload' ? tr('storyboard.detail24') : ''}
+                  </small>
+                </span>
+                <PlayButton asset={a} label={tr('storyboard.finish2')} />
+                <IconButton
+                  size="sm"
+                  label={tr('storyboard.finish3')}
+                  onClick={() => dispatch({ type: 'removeVoice', pid: p.id, asset: v.asset })}
+                >
+                  <X size={14} />
+                </IconButton>
+              </div>
+              <div className="pe-row">
+                <small className="muted">{tr('storyboard.copy57')}</small>
                 <input
-                  type="radio"
-                  checked={p.voice === v.asset}
-                  onChange={() =>
-                    dispatch({ type: 'profile', id: p.id, patch: { voice: v.asset } })
+                  className="pe-grow"
+                  aria-label={a.name + tr('storyboard.detail25')}
+                  type="range"
+                  min={0}
+                  max={max}
+                  step={0.5}
+                  value={Math.min(v.start, max)}
+                  disabled={!max}
+                  onChange={(e) =>
+                    dispatch({
+                      type: 'voice',
+                      pid: p.id,
+                      asset: v.asset,
+                      patch: { start: +e.target.value },
+                    })
                   }
                 />
-                {tr('storyboard.copy56')}
-              </label>
-              <span className="clip">
-                <b>{a.name}</b> ·{' '}
-                {Number.isFinite(a.seconds)
-                  ? a.seconds + tr('storyboard.detail22')
-                  : tr('storyboard.detail23')}
-                {a.source === 'upload' ? tr('storyboard.detail24') : ''}
-              </span>
-              <PlayButton asset={a} label={tr('storyboard.finish2')} />
-              <button
-                className="x"
-                title={tr('storyboard.finish3')}
-                onClick={() => dispatch({ type: 'removeVoice', pid: p.id, asset: v.asset })}
-                aria-label={tr('storyboard.remove')}
-              >
-                <X size={14} />
-              </button>
+                <small className="muted">
+                  {tr('storyboard.finish16', { start: v.start, end: v.start + 3 })}
+                </small>
+                <PlayButton asset={a} start={v.start} len={3} label={tr('storyboard.finish4')} />
+              </div>
             </div>
-            <div className="row tight">
-              <span className="muted">{tr('storyboard.copy57')}</span>
-              <input
-                aria-label={a.name + tr('storyboard.detail25')}
-                type="range"
-                min={0}
-                max={max}
-                step={0.5}
-                value={Math.min(v.start, max)}
-                disabled={!max}
-                onChange={(e) =>
-                  dispatch({
-                    type: 'voice',
-                    pid: p.id,
-                    asset: v.asset,
-                    patch: { start: +e.target.value },
-                  })
-                }
-              />
-              <span className="muted">
-                {tr('storyboard.finish16', { start: v.start, end: v.start + 3 })}
-              </span>
-              <PlayButton asset={a} start={v.start} len={3} label={tr('storyboard.finish4')} />
-            </div>
-          </div>
-        );
-      })}
+          );
+        })
+      ) : (
+        <p className="pe-drop">
+          {tr('storyboard.copy55')}
+          <br />
+          <small>{tr('storyboard.copy54')}</small>
+        </p>
+      )}
       {choose && (
         <ChooseFiles
           kind="audio"
@@ -886,13 +895,15 @@ function VoiceSection({ p }) {
           onClose={() => setChoose(false)}
         />
       )}
-    </div>
+    </section>
   );
 }
 
+// Character, place or prop profile on the shared Dialog/Field/Button/Segmented (owner,
+// 2026-10-26: one framework everywhere). Edits save as you type, like before.
 export function ProfileEditor() {
-  const { t: tr, locale } = useI18n();
-  const { TYPE_LABEL, VARIANT_LABEL, KIND_LABEL, MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
+  const { t: tr } = useI18n();
+  const { TYPE_LABEL, VARIANT_LABEL } = displayLabels(tr);
   const { state, dispatch, db } = useStore();
   const p = state.openProfile && db.profile(state.openProfile);
   const [vid, setVid] = useState(null),
@@ -906,185 +917,204 @@ export function ProfileEditor() {
     setNewVariant(false);
   }, [state.openProfile]);
   if (!p) return null;
+  const close = () => dispatch({ type: 'openProfile', id: null });
+  const eyebrow = tr('storyboard.finish17', { kind: TYPE_LABEL[p.type] });
   const v = variantOf(p, vid || p.def);
   if (!v)
     return (
-      <div className="profile-overlay">
-        <section className="profile">
-          <h3>{p.name}</h3>
-          <p>{tr('storyboard.mixed17', { kind: VARIANT_LABEL[p.type] })}</p>
-          <button onClick={() => dispatch({ type: 'addVariant', pid: p.id, name: '默认' })}>
+      <Dialog title={p.name} eyebrow={eyebrow} onClose={close} className="pe-dialog">
+        <p className="muted">{tr('storyboard.mixed17', { kind: VARIANT_LABEL[p.type] })}</p>
+        <DialogActions>
+          <Button onClick={close}>{tr('storyboard.copy58')}</Button>
+          <Button
+            variant="primary"
+            onClick={() => dispatch({ type: 'addVariant', pid: p.id, name: '默认' })}
+          >
             {tr('storyboard.mixed18', { kind: VARIANT_LABEL[p.type] })}
-          </button>
-          <button onClick={() => dispatch({ type: 'openProfile', id: null })}>
-            {tr('storyboard.copy58')}
-          </button>
-        </section>
-      </div>
+          </Button>
+        </DialogActions>
+      </Dialog>
     );
-  const close = () => dispatch({ type: 'openProfile', id: null });
   const audios = state.assets.filter((a) => a.kind === 'audio');
   const usedIn = state.shots.filter(
     (s) => s.cast.some((c) => c.id === p.id) || s.place?.id === p.id || s.props.includes(p.id),
   );
   const upload = (files) =>
     dispatch({ type: 'uploadFiles', files, target: { kind: 'image', pid: p.id, vid: v.id } });
+  const describe =
+    p.type === 'character'
+      ? tr('storyboard.detail26')
+      : p.type === 'location'
+        ? tr('storyboard.detail27')
+        : tr('storyboard.detail28');
   return (
-    <div className="profile-overlay" onClick={close}>
-      <section className="profile" onClick={(e) => e.stopPropagation()}>
-        <header className="ed-head">
-          <div>
-            <small>{tr('storyboard.finish17', { kind: TYPE_LABEL[p.type] })}</small>
+    <Dialog
+      title={p.name || tr('storyboard.finish5')}
+      eyebrow={eyebrow}
+      onClose={close}
+      wide
+      className="pe-dialog"
+    >
+      <div className="pe-body">
+        <div className="pe-grid">
+          <Field label={tr('storyboard.finish5')}>
             <input
-              className="ed-title"
-              aria-label={tr('storyboard.finish5')}
               value={p.name}
               onChange={(e) =>
                 dispatch({ type: 'profile', id: p.id, patch: { name: e.target.value } })
               }
             />
-          </div>
-          <TrashMenu target={{ kind: 'entity', project_id: state.project.id, id: p.id }} />
-          <button className="x big" onClick={close} aria-label={tr('storyboard.copy58')}>
-            <X size={14} />
-          </button>
-        </header>
-        <label className="field">
-          <span>
-            {p.type === 'character'
-              ? tr('storyboard.detail26')
-              : p.type === 'location'
-                ? tr('storyboard.detail27')
-                : tr('storyboard.detail28')}
-            {tr('storyboard.finish24')}
-          </span>
-          <textarea
-            rows={2}
-            value={p.desc}
-            onChange={(e) =>
-              dispatch({ type: 'profile', id: p.id, patch: { desc: e.target.value } })
-            }
-          />
-        </label>
+          </Field>
+          <Field label={describe} help={tr('storyboard.finish24').replace(/^\s*·\s*/, '')}>
+            <textarea
+              rows={2}
+              value={p.desc}
+              onChange={(e) =>
+                dispatch({ type: 'profile', id: p.id, patch: { desc: e.target.value } })
+              }
+            />
+          </Field>
+        </div>
 
         {p.type !== 'prop' && (
-          <div className="vtabs">
-            {p.variants.map((x) => (
-              <button key={x.id} className={x.id === v.id ? 'on' : ''} onClick={() => setVid(x.id)}>
-                {x.name}
-                {x.id === p.def && <em>{tr('storyboard.copy59')}</em>}
-                <small>{x.images.length}</small>
-              </button>
-            ))}
-            <button className="ghost" disabled={state.busy} onClick={() => setNewVariant(true)}>
-              <Plus size={14} />
+          <div className="pe-looks">
+            <Segmented
+              tabs
+              label={VARIANT_LABEL[p.type]}
+              value={v.id}
+              onChange={setVid}
+              options={p.variants.map((x) => ({
+                value: x.id,
+                label: (
+                  <>
+                    {x.name}
+                    {x.id === p.def && <Badge tone="accent">{tr('storyboard.copy59')}</Badge>}
+                    <small className="muted">{x.images.length}</small>
+                  </>
+                ),
+              }))}
+            />
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={state.busy}
+              onClick={() => setNewVariant(true)}
+            >
+              <Plus size={14} aria-hidden="true" />
               {VARIANT_LABEL[p.type]}
-            </button>
+            </Button>
           </div>
         )}
 
-        <div className="variant">
+        <section className="pe-section">
           {p.type !== 'prop' && (
-            <div className="row tight">
-              <input
-                aria-label={VARIANT_LABEL[p.type] + tr('storyboard.detail29')}
-                value={v.name}
-                onChange={(e) =>
-                  dispatch({
-                    type: 'variant',
-                    pid: p.id,
-                    vid: v.id,
-                    patch: { name: e.target.value },
-                  })
-                }
-                style={{ maxWidth: 160 }}
-              />
-              <input
-                aria-label={VARIANT_LABEL[p.type] + tr('storyboard.detail30')}
-                value={v.desc}
-                placeholder={
-                  p.type === 'character' ? tr('storyboard.detail31') : tr('storyboard.detail32')
-                }
-                onChange={(e) =>
-                  dispatch({
-                    type: 'variant',
-                    pid: p.id,
-                    vid: v.id,
-                    patch: { desc: e.target.value },
-                  })
-                }
-              />
-              <TrashMenu
-                target={{
-                  kind: p.type === 'character' ? 'look' : 'location_version',
-                  project_id: state.project.id,
-                  id: v.id,
-                  parent_id: p.id,
-                }}
-              />
-              {v.id !== p.def && (
-                <button
-                  className="small"
-                  onClick={() => dispatch({ type: 'profile', id: p.id, patch: { def: v.id } })}
-                >
-                  {tr('storyboard.copy60')}
-                </button>
-              )}
+            <div className="pe-variant">
+              <Field label={tr('storyboard.variantName', { kind: VARIANT_LABEL[p.type] })}>
+                <input
+                  value={v.name}
+                  onChange={(e) =>
+                    dispatch({
+                      type: 'variant',
+                      pid: p.id,
+                      vid: v.id,
+                      patch: { name: e.target.value },
+                    })
+                  }
+                />
+              </Field>
+              <Field label={tr('storyboard.variantDesc', { kind: VARIANT_LABEL[p.type] })}>
+                <input
+                  value={v.desc}
+                  placeholder={
+                    p.type === 'character' ? tr('storyboard.detail31') : tr('storyboard.detail32')
+                  }
+                  onChange={(e) =>
+                    dispatch({
+                      type: 'variant',
+                      pid: p.id,
+                      vid: v.id,
+                      patch: { desc: e.target.value },
+                    })
+                  }
+                />
+              </Field>
+              <div className="pe-variant-actions">
+                {v.id !== p.def && (
+                  <Button
+                    size="sm"
+                    onClick={() => dispatch({ type: 'profile', id: p.id, patch: { def: v.id } })}
+                  >
+                    {tr('storyboard.copy60')}
+                  </Button>
+                )}
+                <TrashMenu
+                  target={{
+                    kind: p.type === 'character' ? 'look' : 'location_version',
+                    project_id: state.project.id,
+                    id: v.id,
+                    parent_id: p.id,
+                  }}
+                />
+              </div>
             </div>
           )}
-          <div className="row tight">
-            <b>{tr('storyboard.copy61')}</b>
+          <header className="pe-section-head">
+            <h3>{tr('storyboard.copy61')}</h3>
             <small className="muted">{tr('storyboard.copy62')}</small>
-            <button className="small" onClick={() => setChoose(true)}>
+            <Button size="sm" onClick={() => setChoose(true)}>
+              <Plus size={14} aria-hidden="true" />
               {tr('storyboard.copy63')}
-            </button>
-          </div>
+            </Button>
+          </header>
           <VariantDrop pid={p.id} vid={v.id} onFiles={upload}>
             {v.images.map((id, i) => {
               const a = db.asset(id);
               return (
                 a && (
-                  <div key={id} className="vimg">
+                  <figure key={id} className="pe-photo">
                     <StoryboardAssetImage asset={a} />
-                    {i === 0 ? (
-                      <em>{tr('storyboard.copy64')}</em>
-                    ) : (
-                      <button
-                        className="small"
-                        onClick={() =>
-                          dispatch({ type: 'coverImage', pid: p.id, vid: v.id, asset: id })
-                        }
-                      >
-                        {tr('storyboard.copy65')}
-                      </button>
-                    )}
-                    {a.source === 'ai' && <span className="tile-badge ai">AI</span>}
-                    <button
-                      className="x"
+                    <IconButton
+                      size="sm"
+                      className="pe-photo-remove"
+                      label={tr('storyboard.remove')}
                       onClick={() =>
                         dispatch({ type: 'unfileImage', pid: p.id, vid: v.id, asset: id })
                       }
-                      aria-label={tr('storyboard.remove')}
                     >
                       <X size={14} />
-                    </button>
-                    <small className="clip">{a.name}</small>
-                  </div>
+                    </IconButton>
+                    {a.source === 'ai' && <Badge className="pe-photo-ai">AI</Badge>}
+                    <figcaption>
+                      <small className="clip">{a.name}</small>
+                      {i === 0 ? (
+                        <Badge tone="accent">{tr('storyboard.copy64')}</Badge>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() =>
+                            dispatch({ type: 'coverImage', pid: p.id, vid: v.id, asset: id })
+                          }
+                        >
+                          {tr('storyboard.copy65')}
+                        </Button>
+                      )}
+                    </figcaption>
+                  </figure>
                 )
               );
             })}
-            <div className="vimg add" onClick={() => setChoose(true)}>
-              {tr('storyboard.copy63')}
-              <br />
+            <button type="button" className="pe-photo-add" onClick={() => setChoose(true)}>
+              <Plus size={18} aria-hidden="true" />
+              <span>{tr('storyboard.copy63')}</span>
               <small>{tr('storyboard.copy66')}</small>
-            </div>
+            </button>
           </VariantDrop>
           {p.type === 'character' && !v.images.length && (
-            <div className="warn">{tr('storyboard.copy67')}</div>
+            <Note tone="warn">{tr('storyboard.copy67')}</Note>
           )}
           {p.type === 'character' && (p.voices || []).length > 1 && (
-            <label className="row tight">
-              <span className="muted">{tr('storyboard.copy68')}</span>
+            <Field label={tr('storyboard.copy68').replace(/[：:]\s*$/, '')}>
               <select
                 value={v.voice || ''}
                 onChange={(e) =>
@@ -1103,87 +1133,114 @@ export function ProfileEditor() {
                   </option>
                 ))}
               </select>
-            </label>
+            </Field>
           )}
-        </div>
+        </section>
 
         {p.type === 'character' && <VoiceSection p={p} />}
         {p.type === 'location' && (
-          <label className="row tight">
-            <b>{tr('storyboard.copy70')}</b>
-            <select
-              aria-label={tr('storyboard.finish6')}
-              value={p.ambient || ''}
-              onChange={(e) =>
-                dispatch({ type: 'profile', id: p.id, patch: { ambient: e.target.value || null } })
-              }
-            >
-              <option value="">{tr('storyboard.copy71')}</option>
-              {audios.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.name}（
-                  {Number.isFinite(a.seconds)
-                    ? a.seconds + tr('storyboard.detail22')
-                    : tr('storyboard.detail23')}
-                  ）
-                </option>
-              ))}
-            </select>
-            {p.ambient && <PlayButton asset={db.asset(p.ambient)} />}
-            <button className="small" onClick={() => setAmbientChoose(true)}>
-              {tr('storyboard.copy72')}
-            </button>
-            <small className="muted">{tr('storyboard.copy73')}</small>
-          </label>
+          <section className="pe-section">
+            <header className="pe-section-head">
+              <h3>{tr('storyboard.copy70')}</h3>
+              <small className="muted">{tr('storyboard.copy73')}</small>
+              <Button size="sm" onClick={() => setAmbientChoose(true)}>
+                <Plus size={14} aria-hidden="true" />
+                {tr('storyboard.copy72')}
+              </Button>
+            </header>
+            <div className="pe-row">
+              <select
+                className="pe-grow"
+                aria-label={tr('storyboard.finish6')}
+                value={p.ambient || ''}
+                onChange={(e) =>
+                  dispatch({
+                    type: 'profile',
+                    id: p.id,
+                    patch: { ambient: e.target.value || null },
+                  })
+                }
+              >
+                <option value="">{tr('storyboard.copy71')}</option>
+                {audios.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name}（
+                    {Number.isFinite(a.seconds)
+                      ? a.seconds + tr('storyboard.detail22')
+                      : tr('storyboard.detail23')}
+                    ）
+                  </option>
+                ))}
+              </select>
+              {p.ambient && <PlayButton asset={db.asset(p.ambient)} />}
+            </div>
+          </section>
         )}
 
-        <div className="usedin">
-          <b>
+        <section className="pe-used">
+          <h3>
             {tr(usedIn.length === 1 ? 'storyboard.usedInOne' : 'storyboard.finish18', {
               count: usedIn.length,
             })}
-          </b>
-          {usedIn.map((s) => (
-            <Chip key={s.id}>{s.title}</Chip>
-          ))}
-          {usedIn.length > 0 && <small className="muted">{tr('storyboard.copy74')}</small>}
-        </div>
-        {ambientChoose && (
-          <ChooseFiles
-            kind="audio"
-            title={tr('storyboard.finish26', { name: p.name })}
-            exclude={new Set()}
-            onPick={(asset) => {
-              dispatch({ type: 'profile', id: p.id, patch: { ambient: asset } });
-              setAmbientChoose(false);
-            }}
-            onFiles={(files) =>
-              dispatch({ type: 'uploadFiles', files, target: { kind: 'ambient', pid: p.id } })
-            }
-            onClose={() => setAmbientChoose(false)}
-          />
-        )}
-        {choose && (
-          <ChooseFiles
-            kind="image"
-            title={tr('storyboard.mixed11', { p0: p.name, p1: v.name })}
-            exclude={new Set(v.images)}
-            onPick={(id) => dispatch({ type: 'fileImage', asset: id, pid: p.id, vid: v.id })}
-            onFiles={upload}
-            onClose={() => setChoose(false)}
-          />
-        )}
-        {newVariant && (
-          <StoryboardNameDialog
-            key={p.id}
-            title={tr('storyboard.mixed12', { p0: VARIANT_LABEL[p.type] })}
-            label={tr('storyboard.mixed13', { p0: VARIANT_LABEL[p.type] })}
-            onSubmit={(name) => dispatch({ type: 'addVariant', pid: p.id, name })}
-            onClose={() => setNewVariant(false)}
-          />
-        )}
-      </section>
-    </div>
+          </h3>
+          {usedIn.length > 0 && (
+            <>
+              <div className="pe-chips">
+                {usedIn.map((s) => (
+                  <Chip key={s.id}>{s.title}</Chip>
+                ))}
+              </div>
+              <small className="muted">{tr('storyboard.copy74')}</small>
+            </>
+          )}
+        </section>
+      </div>
+      <DialogActions>
+        <TrashButton
+          target={{ kind: 'entity', project_id: state.project.id, id: p.id }}
+          label={tr('storyboard.profileDelete')}
+          onTrashSettled={close}
+        />
+        <span className="pe-grow" />
+        <Button variant="primary" onClick={close}>
+          {tr('storyboard.profileDone')}
+        </Button>
+      </DialogActions>
+      {ambientChoose && (
+        <ChooseFiles
+          kind="audio"
+          title={tr('storyboard.finish26', { name: p.name })}
+          exclude={new Set()}
+          onPick={(asset) => {
+            dispatch({ type: 'profile', id: p.id, patch: { ambient: asset } });
+            setAmbientChoose(false);
+          }}
+          onFiles={(files) =>
+            dispatch({ type: 'uploadFiles', files, target: { kind: 'ambient', pid: p.id } })
+          }
+          onClose={() => setAmbientChoose(false)}
+        />
+      )}
+      {choose && (
+        <ChooseFiles
+          kind="image"
+          title={tr('storyboard.mixed11', { p0: p.name, p1: v.name })}
+          exclude={new Set(v.images)}
+          onPick={(id) => dispatch({ type: 'fileImage', asset: id, pid: p.id, vid: v.id })}
+          onFiles={upload}
+          onClose={() => setChoose(false)}
+        />
+      )}
+      {newVariant && (
+        <StoryboardNameDialog
+          key={p.id}
+          title={tr('storyboard.mixed12', { p0: VARIANT_LABEL[p.type] })}
+          label={tr('storyboard.mixed13', { p0: VARIANT_LABEL[p.type] })}
+          onSubmit={(name) => dispatch({ type: 'addVariant', pid: p.id, name })}
+          onClose={() => setNewVariant(false)}
+        />
+      )}
+    </Dialog>
   );
 }
 
