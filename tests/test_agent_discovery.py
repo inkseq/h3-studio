@@ -139,6 +139,21 @@ class AgentDiscoveryTests(unittest.TestCase):
         for path in paths:
             self.assertEqual(self.client.get(path).content, anonymous[path])
 
+    def test_take_suggestion_contract_is_shared_by_public_and_authenticated_guides(
+        self,
+    ):
+        public = self.client.get("/for-agents/guide.json").json()["take_reviews"][
+            "suggestions"
+        ]
+        self.assertTrue(public["path"].endswith("/review/suggestions"))
+        self.assertIn("human session", public["decide"])
+        self.assertIn("No model call", public["propose"])
+        self.login()
+        for path in ("/v1/guided-schema", "/v1/agent-guide"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["take_reviews"]["suggestions"], public)
+
     def test_public_video_contract_and_downloads_use_only_quality_identities(self):
         from studio_platform.quality_tiers import (
             MODE_RECIPES,

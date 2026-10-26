@@ -101,4 +101,4 @@ Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-wi
 
 ## Take reviews
 
-[Verdicts, marks, CAS and batch summaries](reference/api.md#explicit-take-reviews).
+[Verdicts, CAS, summaries and suggestions](reference/api.md#explicit-take-reviews).

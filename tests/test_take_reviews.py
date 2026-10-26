@@ -663,6 +663,7 @@ class TakeReviewPurgeTests(LedgerCase):
         review = {
             "artifact_id": artifact,
             "marks": [{"note": "PRIVATE PURGE NOTE"}],
+            "suggestions": [{"note": "PRIVATE SUGGESTION", "status": "accepted"}],
             "verdict": "keep",
         }
         self.repo.put_document(self.scope, "take_review", artifact, review)
@@ -707,7 +708,13 @@ class TakeReviewPurgeTests(LedgerCase):
             self.scope,
             "take_review",
             "kept-artifact",
-            {"marks": [{"note": "PRIVATE PROJECT NOTE"}], "verdict": "keep"},
+            {
+                "marks": [{"note": "PRIVATE PROJECT NOTE"}],
+                "verdict": "keep",
+                "suggestions": [
+                    {"note": "PRIVATE PROJECT SUGGESTION", "status": "pending"}
+                ],
+            },
         )
         moved = self.trash.apply(
             self.principal, self.body("project", self.scope.project_id), "trash-project"

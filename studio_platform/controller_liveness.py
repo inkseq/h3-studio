@@ -5,14 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
 import uuid
 from types import SimpleNamespace
-
-from sqlalchemy import insert, select, update
-from sqlalchemy.exc import IntegrityError
-
-from .operator_capacity import operator_heartbeats
-from .repository import outbox
 
 INTERVAL = 60
 STALE_AFTER = 180
@@ -31,6 +26,9 @@ class Progress:
         self.last = None
 
     def beat(self, active, *, starting=False):
+        from sqlalchemy import insert, select, update
+        from .operator_capacity import operator_heartbeats
+
         now = self.repo.clock()
         if not starting and self.last is not None and 0 <= now - self.last < INTERVAL:
             return
@@ -58,6 +56,11 @@ class Progress:
 
 def inspect(repo, tenant, *, stale_after=STALE_AFTER):
     """One bounded ledger observation + deterministic alert; no paid-resource action."""
+    from sqlalchemy import insert, select
+    from sqlalchemy.exc import IntegrityError
+    from .operator_capacity import operator_heartbeats
+    from .repository import outbox
+
     if type(stale_after) is not int or not 120 <= stale_after <= 1800:
         raise ValueError("controller_liveness_threshold_invalid")
     with repo.engine.connect() as conn:
@@ -72,16 +75,11 @@ def inspect(repo, tenant, *, stale_after=STALE_AFTER):
         )
     now = repo.clock()
     stamp = row["observed_at"] if row else None
-    valid = type(stamp) in (int, float) and math.isfinite(stamp) and 0 <= stamp <= now
-    if (
-        row
-        and valid
-        and now - stamp <= stale_after
-        and row["state"] in {"running", "idle"}
-    ):
+    fresh = fresh_state(row, now, stale_after)
+    if fresh == "healthy":
         return {"state": "healthy", "new_alert": False}
     # A new process gets bounded initialization time, not indefinite fake progress.
-    if row and valid and now - stamp <= stale_after and row["state"] == "starting":
+    if fresh == "starting":
         return {"state": "starting", "new_alert": False}
     fingerprint = (
         (row["controller_id"], str(stamp), row["state"]) if row else ("missing",)
@@ -127,18 +125,77 @@ def inspect(repo, tenant, *, stale_after=STALE_AFTER):
     return {"state": "stale", "new_alert": created}
 
 
+def fresh_state(row, now, stale_after=STALE_AFTER):
+    """Same durable progress proof for the cheap probe and alerting observer."""
+    stamp = row["observed_at"] if row else None
+    valid = type(stamp) in (int, float) and math.isfinite(stamp) and 0 <= stamp <= now
+    if not row or not valid or now - stamp > stale_after:
+        return None
+    if row["state"] in {"running", "idle"}:
+        return "healthy"
+    return "starting" if row["state"] == "starting" else None
+
+
+def healthy_without_pending(database_url, tenant, *, clock=time.time):
+    """Read-only fast path; stale/missing progress or pending alerts use the observer.
+
+    Avoid constructing SQLAlchemy metadata and exporters on every healthy tick.
+    SQL reads the existing tables only. No schema creation, heartbeat renewal,
+    job/provider action or acknowledgement is possible through this connection.
+    """
+    if not database_url.startswith("postgresql+psycopg://"):
+        raise ValueError("controller_liveness_postgres_required")
+    import psycopg
+
+    dsn = "postgresql://" + database_url.removeprefix("postgresql+psycopg://")
+    # Keep the configured database namespace (including isolated test schemas),
+    # while the final options enforce the observer's own timeout bounds.
+    original_options = psycopg.conninfo.conninfo_to_dict(dsn).get("options", "")
+    with psycopg.connect(
+        dsn,
+        connect_timeout=4,
+        options=original_options + " -c statement_timeout=4000 -c lock_timeout=1000",
+    ) as connection:
+        connection.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        row = connection.execute(
+            "SELECT observed_at, state FROM platform_operator_capacity_heartbeats WHERE id = %s",
+            (key(tenant),),
+        ).fetchone()
+        progress = {"observed_at": row[0], "state": row[1]} if row else None
+        if fresh_state(progress, clock()) != "healthy":
+            return False
+        # Mirror pending_reports' original tenant/ack semantics. A pending alert
+        # must still be retried even after the controller itself has recovered.
+        pending = connection.execute(
+            "SELECT 1 FROM platform_outbox AS alert "
+            "WHERE alert.event_type = 'capacity.health_alert' "
+            "AND alert.payload->>'tenant_id' = %s "
+            "AND NOT EXISTS (SELECT 1 FROM platform_outbox AS ack "
+            "WHERE ack.event_type = 'capacity.health_alert_reported' "
+            "AND ack.payload->>'alert_event_id' = alert.id) LIMIT 1",
+            (tenant,),
+        ).fetchone()
+        return pending is None and fresh_state(progress, clock()) == "healthy"
+
+
 def main():
     """Docker health process: independent of the possibly blocked controller loop."""
-    from sqlalchemy.engine import make_url
     from .settings import Settings
-    from .repository import Repository
-    from .capacity_health import pending_reports
-    from .error_monitoring import create_client, report_capacity_health
-    from .telemetry import configured_telemetry
 
     repo = client = telemetry = None
     try:
         settings = Settings.from_environment()
+        if healthy_without_pending(settings.database_url, settings.tenant_id):
+            print('{"state":"healthy","new_alert":false}', flush=True)
+            return 0
+        # Preserve the existing independent alert writer/exporter for stale
+        # progress and queued delivery; never hide a fault behind a fast check.
+        from sqlalchemy.engine import make_url
+        from .repository import Repository
+        from .capacity_health import pending_reports
+        from .error_monitoring import create_client, report_capacity_health
+        from .telemetry import configured_telemetry
+
         url = make_url(settings.database_url)
         if url.drivername != "postgresql+psycopg":
             raise ValueError("controller_liveness_postgres_required")
