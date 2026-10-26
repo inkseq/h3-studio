@@ -5,7 +5,7 @@ import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import StudioHeader from './StudioHeader.jsx';
-import AccountMenu, { MenuItem } from './AccountMenu.jsx';
+import AccountMenu from './AccountMenu.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Landing from './Landing.jsx';
@@ -14,7 +14,7 @@ import Library from './Library.jsx';
 import UniversalTrash, {
   TrashProvider,
   useTrash,
-  TrashMenu,
+  TrashButton,
   StoryItemManager,
 } from './UniversalTrash.jsx';
 import { deletionImpact } from './entity-references.js';
@@ -343,36 +343,10 @@ function SeriesApp({ sidebarView, onSidebarView }) {
       state.workspace.account === c.account &&
       state.project.id === linkTarget.projectId;
   const chapterList = p.entities.filter((e) => e.type === 'chapter').sort(byOrder);
-  const accountMenu = (
-    <AccountMenu
-      account={c.account}
-      onSignIn={() => open({ type: 'cloud' })}
-      items={
-        <>
-          <MenuItem icon={Download} disabled={busy} onClick={backup}>
-            {t('story.copy53')}
-          </MenuItem>
-          <MenuItem icon={Upload} onClick={() => open({ type: 'projects' })}>
-            {t('story.copy54')}
-          </MenuItem>
-          <MenuItem icon={Bot} onClick={() => open({ type: 'agent' })}>
-            {t('story.copy31')}
-          </MenuItem>
-          {state.workspace.mode === 'cloud' && (
-            <>
-              <MenuItem onClick={() => open({ type: 'manage-items' })}>
-                {t('trash.manage')}
-              </MenuItem>
-              <TrashMenu
-                target={{ kind: 'project', project_id: p.id, id: p.id }}
-                onRename={() => open({ type: 'project-settings' })}
-              />
-            </>
-          )}
-        </>
-      }
-    />
-  );
+  // Account menu holds account things only (owner, 2026-10-26). Backup lives under Export,
+  // Connect AI has its own button, local projects sit on the works page and the story list,
+  // and rename / manage items / delete belong to Story settings.
+  const accountMenu = <AccountMenu account={c.account} onSignIn={() => open({ type: 'cloud' })} />;
   return (
     <>
       <div className="home" hidden={sidebarView !== 'library'}>
@@ -540,12 +514,12 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           </button>
           <button
             className="ghost"
-            title={t('settings.title')}
-            aria-label={t('settings.title')}
+            title={t('story.settings')}
+            aria-label={t('story.settings')}
             onClick={() => open({ type: 'project-settings' })}
           >
             <Settings2 size={15} />
-            <span className="bar-label">{t('settings.title')}</span>
+            <span className="bar-label">{t('story.settings')}</span>
           </button>
           {accountMenu}
         </header>
@@ -785,6 +759,18 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               <Field label={t('story.copy95')}>
                 <textarea name="logline" rows={4} maxLength={2000} defaultValue={p.logline} />
               </Field>
+              {state.workspace.mode === 'cloud' && (
+                <div className="story-settings-actions">
+                  <button type="button" onClick={() => open({ type: 'manage-items' })}>
+                    {t('trash.manage')}
+                  </button>
+                  <TrashButton
+                    target={{ kind: 'project', project_id: p.id, id: p.id }}
+                    label={t('story.deleteStory')}
+                    onTrashSettled={close}
+                  />
+                </div>
+              )}
               {error && (
                 <p role="alert" className="inline-error">
                   {error}
