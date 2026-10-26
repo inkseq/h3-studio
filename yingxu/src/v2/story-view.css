@@ -1524,7 +1524,8 @@ body.sb-resizing-y video {
   font-weight: 600;
   line-height: 1;
 }
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab.alert > small {
+/* Unsorted items: a readable count on the warn pill, open or collapsed. */
+.sb-workspace .library .lib-tabs .sb-library-tab.alert > small {
   background: var(--warn);
   color: #1a1205;
 }
