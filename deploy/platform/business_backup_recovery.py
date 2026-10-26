@@ -63,7 +63,7 @@ def quiet():
     value = json.loads(host.docker(['exec', APP, 'python', '-B', '-c', QUIET],timeout=60))
     host.require(type(value.get('nonterminal_jobs')) is int and value['nonterminal_jobs'] == 0,
         'backup_recovery_zero_work_required')
-    processes = host.docker(['top', APP, '-eo', 'args'])
+    processes = host.docker(['top', APP, '-eo', 'pid,args'])
     host.require('studio_platform.backup_cli' not in processes
         and 'studio_platform.backup_remote_cli' not in processes,
         'backup_recovery_snapshot_writer_active')

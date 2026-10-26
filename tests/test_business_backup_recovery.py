@@ -192,6 +192,18 @@ class RecoveryTests(unittest.TestCase):
 
 
 class RecoveryGateTests(unittest.TestCase):
+    def test_quiet_process_query_includes_docker_required_pid_column(self):
+        def docker(args, **kwargs):
+            if args[0] == 'exec':
+                return json.dumps({'nonterminal_jobs': 0})
+            if args[0] == 'top':
+                self.assertEqual(args, ['top', recovery.APP, '-eo', 'pid,args'])
+                return 'PID COMMAND\n123 python app'
+            return 'sixnine-platform-app-1'
+
+        with patch.object(host, 'docker', side_effect=docker):
+            recovery.quiet()
+
     def test_busy_or_unknown_work_rejects_without_stop_or_cancel(self):
         for value in (1, True, None):
             with patch.object(
