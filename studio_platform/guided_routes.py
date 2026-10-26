@@ -167,6 +167,7 @@ def create_guided_router(app, service) -> APIRouter:
             "quick_creation": public_guide()["quick_creation"],
             "examples_url": "/for-agents/guide.json",
             "generation_availability": public_guide()["generation_availability"],
+            "story_risk_review": public_guide()["story_risk_review"],
             "take_reviews": public_guide()["take_reviews"],
             "steps": [
                 "Browser account creates scoped API key; pass Bearer on API calls only",

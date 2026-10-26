@@ -264,6 +264,24 @@ than100 candidate videos returns `409 take_review_summary_limit`, never silent
 truncation. Use existing paginated versions and individual reads for overflow.
 No writes or extra generation; selection/star still does not imply approval.
 
+### Story Chat risk advice
+
+Existing Story Chat generate proposals may include `risk_review`:
+`{version:1,source_hash,status,rule_status,model_status,warnings:[{shot_id,code,source,message,suggestion}]}`.
+Read `story_risk_review` in `/v1/guided-schema` or `/v1/agent-guide` for the live contract.
+Codes are `simultaneous_speakers`, `speech_too_dense`, `action_density`, `plot_density`;
+source is `rule` or `model`. These are suggestions about story-card text, seconds
+and bindings, not execution preflight or model quality guarantees. Whole-take
+reviews and generated media remain independent.
+
+`status` is `warnings`, `no_findings`, `incomplete` or `stale`; rule status is
+`checked`/`partial`; model status is `reported`/`not_checked`/`invalid`/`stale`.
+Missing old reports are unchecked, never clean. Changed source makes presented
+advice stale without rewriting its receipt. The model advice reuses the original
+conversation response; no extra model call or automatic retry. Suggestions are
+untrusted text, never tools: confirm an edit/split separately and retain the normal
+generation confirmation, preflight, budgets and fixed sampler settings.
+
 ### Server-owned completion collection (#588)
 
 `GET /v1/guided-schema` advertises `result_collection.version=1`. New completed jobs

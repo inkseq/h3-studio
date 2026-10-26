@@ -923,12 +923,14 @@ def examples():
 def contract():
     from .storyboard import contract as storyboard_contract
     from .result_collection import contract as collection_contract
+    from .story_risk import contract as story_risk_contract
 
     return {
         "schema_revision": 3,
         "result_collection": collection_contract(),
         "operation_schemas": operation_schemas(),
         "script_windows": script_windows_contract(),
+        "story_risk_review": story_risk_contract(),
         "request": {
             "method": "POST",
             "path": "/v1/projects/{project_id}/actions",
