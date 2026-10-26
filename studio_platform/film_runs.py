@@ -1108,7 +1108,7 @@ class FilmRuns:
             self.repo, self.tenant, principal.owner, compiled, admission.execution
         )
         digest = request_hash(compiled)
-        plan = self.repo.create_plan(
+        self.repo.create_plan(
             self.access.scope(principal, value["project_id"]),
             compiled,
             admission.execution,
@@ -1289,11 +1289,11 @@ class FilmRuns:
                     target = next(
                         item
                         for item in current["chapters"]
-                        if item["chapter_id"] == chapter["chapter_id"]
+                        if item["chapter_id"] == chapter["chapter_id"]  # noqa: B023 -- called synchronously in this iteration
                     )
-                    if target["artifact_id"] not in {None, result["artifact_id"]}:
+                    if target["artifact_id"] not in {None, result["artifact_id"]}:  # noqa: B023 -- called synchronously in this iteration
                         raise Conflict("film_result_identity_conflict")
-                    target["artifact_id"] = result["artifact_id"]
+                    target["artifact_id"] = result["artifact_id"]  # noqa: B023 -- called synchronously in this iteration
 
                 value = self._mutate(principal, project_id, run_id, record_chapter)
             job = self.access.job(principal, chapter["job_id"])
@@ -1306,7 +1306,7 @@ class FilmRuns:
                 meta = item["metadata"]
                 return {
                     "kind": meta["kind"],
-                    "simulation": job["request"].get("simulation", False),
+                    "simulation": job["request"].get("simulation", False),  # noqa: B023 -- called synchronously in this iteration
                     "object": {
                         "key": meta["object_key"],
                         "size_bytes": meta["size_bytes"],

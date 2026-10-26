@@ -28,8 +28,8 @@ from .inference.outputs import (
 from .inference.protocol import BackendError
 from .repository import BudgetExceeded, NotFound, identifier, request_hash
 from .qualification_profiles import (
-    FL50_PROFILE,
-    MULTIMODAL_PROFILE,
+    FL50_PROFILE,  # noqa: F401 -- public qualification profile export
+    MULTIMODAL_PROFILE,  # noqa: F401 -- public qualification profile export
     QUEUED_TASK_PROFILE,
     RUNTIME_PROFILES,
     MULTIMODAL_INPUT_LIMITS,

@@ -19,7 +19,6 @@ import signal
 import stat
 import subprocess
 import threading
-import time
 
 from .slot_lock import slot_lock
 
@@ -29,7 +28,7 @@ _slot_lock = slot_lock
 from .media import ffmpeg, probe
 from .queue import TaskQueue
 from .repository import Conflict, LeaseLost, Scope, money
-from .storage import ObjectAlreadyExists, ObjectNotFound, StorageWriteUncertain
+from .storage import ObjectAlreadyExists, ObjectNotFound, StorageWriteUncertain  # noqa: F401 -- public worker compatibility export
 from .telemetry import ERROR_CODES as TELEMETRY_ERROR_CODES, NullStage, NullTelemetry
 
 # Compatibility exports retain the same objects for existing worker callers.
@@ -44,7 +43,7 @@ from .inference.protocol import (
     SubmissionRejected,
     SubmissionUncertain,
     TAG,
-    TASK,
+    TASK,  # noqa: F401 -- public worker compatibility export
     safe_failure_code,
 )
 

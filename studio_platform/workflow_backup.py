@@ -81,7 +81,7 @@ def export(connection, directory, *, deadline=None):
         fields = ','.join('"' + c + '"::text AS "' + c + '"' for c in columns)
         relation = '"inkseq_workflows"."' + name + '"'
         count, size, largest = connection.exec_driver_sql(
-            'SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),'
+            'SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
             'COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM '
             '(SELECT ' + fields + ' FROM ' + relation + ') t'
         ).one()
@@ -92,7 +92,7 @@ def export(connection, directory, *, deadline=None):
         )
         rows = []
         with connection.exec_driver_sql(
-            'SELECT row_to_json(t)::text FROM (SELECT '
+            'SELECT row_to_json(t)::text FROM (SELECT '  # noqa: S608 -- identifiers from fixed schema metadata, not user input
             + fields
             + ' FROM '
             + relation
@@ -176,7 +176,7 @@ def restore(connection, directory, expected):
     for name in order:
         require(
             not connection.exec_driver_sql(
-                'SELECT 1 FROM "inkseq_workflows"."' + name + '" LIMIT 1'
+                'SELECT 1 FROM "inkseq_workflows"."' + name + '" LIMIT 1'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
             ).first(),
             'workflow_restore_target_not_empty',
         )
@@ -188,7 +188,7 @@ def restore(connection, directory, expected):
             for i, t in enumerate(columns.values())
         )
         sql = text(
-            'INSERT INTO "inkseq_workflows"."'
+            'INSERT INTO "inkseq_workflows"."'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
             + name
             + '" ('
             + fields
@@ -201,7 +201,7 @@ def restore(connection, directory, expected):
                 sql, {'v' + str(i): row[c] for i, c in enumerate(columns)}
             )
     connection.exec_driver_sql(
-        "INSERT INTO inkseq_workflows.event_dispatch_kv "
+        "INSERT INTO inkseq_workflows.event_dispatch_kv "  # noqa: S608 -- trusted workflow version constant, not user input
         "(service_name,workflow_fn_name,key,value) VALUES "
         "('inkseq.recovery','"
         + WORKFLOW_APPLICATION_VERSION

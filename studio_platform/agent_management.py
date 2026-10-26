@@ -4,7 +4,7 @@ import copy
 import json
 import uuid
 from sqlalchemy import select, insert, update, inspect
-from .repository import documents, Scope, request_hash, money, spending_settings
+from .repository import documents, request_hash, money, spending_settings
 from .spending_limits import (
     lock_owner,
     read_settings,

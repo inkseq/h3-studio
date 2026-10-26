@@ -10,7 +10,6 @@ from __future__ import annotations
 from .asset_objects import ASSET_OBJECT_ROLES
 from .schema_version import (
     PAYMENT_REVISION,
-    PAYMENT_REVISIONS,
     LIVE_PAYMENT_REVISION,
     CREDIT_ADMISSION_REVISIONS,
 )
@@ -71,7 +70,7 @@ def _schemas(
 ):
     # Register the same additive business tables as the application, without
     # constructing services or creating/migrating a source schema.
-    from . import operator_capacity, capacity_market, dstack_workspace
+    from . import operator_capacity, capacity_market, dstack_workspace  # noqa: F401 -- register additive backup schema tables
     from .repository import metadata
     from .assets import metadata as assets
     from .storage_asset_journal import _schema as quota
@@ -396,9 +395,9 @@ def _export_business_db(snapshot, destination):
                 counts[name] = 0
                 continue
             columns = ",".join('"' + c.name + '"' for c in table.columns)
-            select_sql = 'SELECT ' + columns + ' FROM "' + name + '"'
+            select_sql = 'SELECT ' + columns + ' FROM "' + name + '"'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
             insert_sql = (
-                'INSERT INTO "'
+                'INSERT INTO "'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                 + name
                 + '" ('
                 + columns
@@ -952,7 +951,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     # read-only snapshot is established by the inventory query.
                     count, size, largest = source.execute(
                         text(
-                            "SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM "
+                            "SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM "  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                             + relation
                             + " t"
                         )
@@ -979,7 +978,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     )
                     query_fields = fields + (("," + markers) if markers else "")
                     insert_sql = (
-                        'INSERT INTO "'
+                        'INSERT INTO "'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                         + name
                         + '" ('
                         + fields
@@ -990,7 +989,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     actual = 0
                     with source.execute(
                         text(
-                            "SELECT " + query_fields + " FROM " + relation
+                            "SELECT " + query_fields + " FROM " + relation  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                         ).execution_options(stream_results=True, max_row_buffer=200)
                     ) as rows:
                         while batch := rows.mappings().fetchmany(200):
@@ -1315,7 +1314,7 @@ def verify_local(directory, *, allow_incomplete=False):
             # Verify its original table set, then create safe empty additions
             # only inside the NEW restoration target.
             counts = {
-                name: db.execute('SELECT count(*) FROM "' + name + '"').fetchone()[0]
+                name: db.execute('SELECT count(*) FROM "' + name + '"').fetchone()[0]  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                 for name in _tables()
                 if name in existing
             }

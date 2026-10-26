@@ -10,7 +10,7 @@ def metadata_families(
 ):
     # These three modules extend repository.metadata; register them before
     # collecting it, independent of which API/worker happened to import first.
-    from . import operator_capacity, capacity_market, dstack_workspace
+    from . import operator_capacity, capacity_market, dstack_workspace  # noqa: F401 -- register additive schema tables
     from .repository import metadata as repository
     from .assets import metadata as assets
     from .storage_asset_journal import _schema as asset_journal
