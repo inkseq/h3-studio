@@ -5,7 +5,7 @@ import math
 from contextlib import contextmanager, nullcontext
 from typing import Literal
 
-from fastapi import Header, Request
+from fastapi import Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, model_validator
 from sqlalchemy import insert, select, update
@@ -33,6 +33,7 @@ TAGS = ("performance", "camera", "consistency", "subtitles", "quality", "other")
 PATH = "/v1/projects/{project_id}/shots/{shot_id}/takes/{artifact_id}/review"
 SUMMARY_PATH = "/v1/projects/{project_id}/shots/{shot_id}/take-reviews"
 SUMMARY_LIMIT = 100
+SUGGESTIONS_PATH = PATH + "/suggestions"
 
 
 class TakeMark(BaseModel):
@@ -68,6 +69,37 @@ class TakeReviewPatch(BaseModel):
         return self
 
 
+class TakeSuggestions(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_revision: StrictInt = Field(ge=0)
+    marks: list[TakeMark] = Field(max_length=50)
+
+    @model_validator(mode="after")
+    def unique(self):
+        if len({m.id for m in self.marks}) != len(self.marks):
+            raise ValueError("take_review_duplicate_mark_id")
+        return self
+
+
+class TakeSuggestionDecisions(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_revision: StrictInt = Field(ge=0)
+    accept_ids: list[StrictStr] = Field(default_factory=list, max_length=50)
+    reject_ids: list[StrictStr] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def unique(self):
+        ids = self.accept_ids + self.reject_ids
+        if (
+            not ids
+            or len(ids) > 50
+            or len(set(ids)) != len(ids)
+            or any(not 1 <= len(ident) <= 100 for ident in ids)
+        ):
+            raise ValueError("take_suggestion_decisions_invalid")
+        return self
+
+
 def contract():
     return {
         "path": PATH,
@@ -88,6 +120,14 @@ def contract():
             "overflow": "409 take_review_summary_limit if more than100 candidate videos; no partial list. Use the existing paginated versions listing and individual review GETs in this exceptional case.",
         },
         "write": "PATCH; projects:write + projects:read; Idempotency-Key required.",
+        "suggestions": {
+            "path": SUGGESTIONS_PATH,
+            "read": "GET; projects:read. revision, suggestion_revision, producer_kind, marks (each adds status, review_mark_id, decision_actor_kind, decided_at). Default revision0, suggestion_revision/producer_kind null and marks[].",
+            "propose": "POST {expected_revision,marks:[TakeMark]}; projects:read+write, Idempotency-Key. Same max50/range/tag/note bounds. Replaces only when no pending suggestions. Does not change actual marks or whole verdict. Auth-derived producer_kind is human/agent, not proof of VLM execution. No model call.",
+            "decide": "POST path+/decisions {expected_revision,accept_ids:[],reject_ids:[]}; human session with project write. Unique/disjoint pending IDs, at least one. Appends accepted marks under server-derived IDs; rejects others; leaves existing marks and whole verdict intact. Above50 total actual marks refuses409 atomically.",
+            "recovery": "Shared review revision/CAS and key namespace across PATCH/propose/decide. Same key/body replays original small receipt. Whole verdict never inferred; no generation/spend. Decisions are explicit human outcomes; accepted-mark editing/deletion later does not rewrite that history.",
+            "privacy": "Current suggestions/notes are scoped product data and purge-redacted with the review. Immutable outcome receipts contain IDs/counts/status only. Render suggestions as untrusted plain text. Empty list is not a clean-quality result.",
+        },
         "body": {
             "expected_revision": 0,
             "verdict": "keep",
@@ -319,15 +359,88 @@ class TakeReviews:
                 )
             return result
 
+    def suggestions(self, principal, project_id, shot_id, artifact_id):
+        with self._read_snapshot() as conn:
+            self._source(conn, principal, project_id, shot_id, artifact_id, write=False)
+            row = self._row(
+                conn,
+                Scope(self.tenant, principal.owner, project_id),
+                "take_review",
+                artifact_id,
+            )
+            value = row["payload"] if row else {}
+            if value.get("content_deleted"):
+                raise NotFound("take_not_found")
+            return {
+                "revision": row["version"] if row else 0,
+                "suggestion_revision": value.get("suggestion_revision"),
+                "producer_kind": value.get("suggestion_producer_kind"),
+                "marks": copy.deepcopy(value.get("suggestions", [])),
+            }
+
     def patch(self, principal, project_id, shot_id, artifact_id, body, key):
+        return self._write(
+            principal,
+            project_id,
+            shot_id,
+            artifact_id,
+            TakeReviewPatch.model_validate(body),
+            key,
+            "review",
+        )
+
+    def propose(self, principal, project_id, shot_id, artifact_id, body, key):
+        return self._write(
+            principal,
+            project_id,
+            shot_id,
+            artifact_id,
+            TakeSuggestions.model_validate(body),
+            key,
+            "suggest",
+        )
+
+    def decide(self, principal, project_id, shot_id, artifact_id, body, key):
+        return self._write(
+            principal,
+            project_id,
+            shot_id,
+            artifact_id,
+            TakeSuggestionDecisions.model_validate(body),
+            key,
+            "decide",
+        )
+
+    @staticmethod
+    def _duration_check(marks, source):
+        if not marks:
+            return
+        duration = source["metadata"].get("duration_s")
+        if (
+            type(duration) not in (int, float)
+            or not math.isfinite(duration)
+            or duration <= 0
+        ):
+            raise Conflict("take_review_duration_unknown")
+        if any(m["end_s"] > duration for m in marks):
+            raise ValueError("take_review_range_outside_duration")
+
+    def _write(
+        self, principal, project_id, shot_id, artifact_id, parsed, key, operation
+    ):
         from .quick_chat import key_check
 
         key_check(key)
-        parsed = TakeReviewPatch.model_validate(body)
         body = parsed.model_dump(exclude_unset=True)
         scope = Scope(self.tenant, principal.owner, project_id)
+        # Preserve existing review fingerprints/keys exactly across this upgrade.
         fingerprint = request_hash(
-            {"shot_id": shot_id, "artifact_id": artifact_id, "body": body}
+            {
+                "shot_id": shot_id,
+                "artifact_id": artifact_id,
+                "body": body,
+                **({"operation": operation} if operation != "review" else {}),
+            }
         )
         receipt_id = request_hash(
             {"actor": principal.actor_id, "artifact_id": artifact_id, "key": key}
@@ -336,6 +449,8 @@ class TakeReviews:
             source = self._source(
                 conn, principal, project_id, shot_id, artifact_id, write=True
             )
+            if operation == "decide" and principal.machine:
+                raise HTTPException(403, "take_suggestion_human_decision_required")
             current = self._row(conn, scope, "take_review", artifact_id)
             if current and current["payload"].get("content_deleted"):
                 raise NotFound("take_not_found")
@@ -348,22 +463,77 @@ class TakeReviews:
             if revision != parsed.expected_revision:
                 raise Conflict("take_review_revision_conflict")
             previous = current["payload"] if current else {"verdict": None, "marks": []}
-            value = {
-                **copy.deepcopy(previous),
-                **{k: v for k, v in body.items() if k in {"marks", "verdict"}},
-            }
-            if value["marks"]:
-                duration = source["metadata"].get("duration_s")
-                if (
-                    type(duration) not in (int, float)
-                    or not math.isfinite(duration)
-                    or duration <= 0
-                ):
-                    raise Conflict("take_review_duration_unknown")
-                if any(m["end_s"] > duration for m in value["marks"]):
-                    raise ValueError("take_review_range_outside_duration")
+            value = copy.deepcopy(previous)
             now = self.repo.clock()
             actor_kind = "agent" if principal.machine else "human"
+            outcomes = []
+            if operation == "review":
+                value.update(
+                    {k: v for k, v in body.items() if k in {"marks", "verdict"}}
+                )
+            elif operation == "suggest":
+                if any(m["status"] == "pending" for m in value.get("suggestions", [])):
+                    raise Conflict("take_suggestions_pending")
+                self._duration_check(body["marks"], source)
+                value.update(
+                    suggestion_revision=revision + 1,
+                    suggestion_producer_kind=actor_kind,
+                    suggestions=[
+                        {
+                            **m,
+                            "status": "pending",
+                            "review_mark_id": None,
+                            "decision_actor_kind": None,
+                            "decided_at": None,
+                        }
+                        for m in body["marks"]
+                    ],
+                )
+            else:
+                suggestions = {m["id"]: m for m in value.get("suggestions", [])}
+                decisions = {
+                    **dict.fromkeys(parsed.accept_ids, "accepted"),
+                    **dict.fromkeys(parsed.reject_ids, "rejected"),
+                }
+                if any(
+                    ident not in suggestions
+                    or suggestions[ident]["status"] != "pending"
+                    for ident in decisions
+                ):
+                    raise Conflict("take_suggestion_not_pending")
+                if len(value["marks"]) + len(parsed.accept_ids) > 50:
+                    raise Conflict("take_review_mark_limit")
+                existing_ids = {m["id"] for m in value["marks"]}
+                for ident, status in decisions.items():
+                    item = suggestions[ident]
+                    mark_id = None
+                    if status == "accepted":
+                        mark_id = "suggested-" + request_hash(
+                            {
+                                "artifact": artifact_id,
+                                "revision": value["suggestion_revision"],
+                                "id": ident,
+                            }
+                        )
+                        if mark_id in existing_ids:
+                            raise Conflict("take_review_duplicate_mark_id")
+                        value["marks"].append(
+                            {
+                                **{k: item[k] for k in TakeMark.model_fields},
+                                "id": mark_id,
+                            }
+                        )
+                        existing_ids.add(mark_id)
+                    item.update(
+                        status=status,
+                        review_mark_id=mark_id,
+                        decision_actor_kind=actor_kind,
+                        decided_at=now,
+                    )
+                    outcomes.append(
+                        {"id": ident, "status": status, "review_mark_id": mark_id}
+                    )
+            self._duration_check(value["marks"], source)
             value.update(
                 contract_version=1,
                 artifact_id=artifact_id,
@@ -378,6 +548,15 @@ class TakeReviews:
                 "actor_kind": actor_kind,
                 "updated_at": now,
             }
+            if operation != "review":
+                response.update(
+                    suggestion_revision=value["suggestion_revision"],
+                    suggestion_count=len(value["suggestions"]),
+                    pending_count=sum(
+                        m["status"] == "pending" for m in value["suggestions"]
+                    ),
+                    outcomes=outcomes,
+                )
             values = dict(payload=value, version=revision + 1, updated_at=now)
             if current:
                 conn.execute(
@@ -411,7 +590,20 @@ class TakeReviews:
                         "artifact_id": artifact_id,
                         "source_job_id": source["job_id"],
                         "source_shot_id": source["source_shot"],
-                        "verdict_written": "verdict" in body,
+                        "verdict_written": operation == "review" and "verdict" in body,
+                        **(
+                            {
+                                "suggestion_action": operation,
+                                "suggestion_ids": [
+                                    m["id"] for m in value["suggestions"]
+                                ],
+                                "suggestion_producer_kind": value[
+                                    "suggestion_producer_kind"
+                                ],
+                            }
+                            if operation != "review"
+                            else {}
+                        ),
                         "response": response,
                     },
                 )
@@ -443,6 +635,59 @@ def redact_reviews(conn, tenant, owner, *, artifact_ids=(), project_ids=(), now)
 def register_routes(app):
     service = TakeReviews(app.state.repository, app.state.settings.tenant_id)
     app.state.take_reviews = service
+
+    @app.get(SUGGESTIONS_PATH)
+    def read_suggestions(
+        project_id: str, shot_id: str, artifact_id: str, request: Request
+    ):
+        return JSONResponse(
+            service.suggestions(
+                request.state.principal, project_id, shot_id, artifact_id
+            ),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post(SUGGESTIONS_PATH)
+    def propose_suggestions(
+        project_id: str,
+        shot_id: str,
+        artifact_id: str,
+        body: TakeSuggestions,
+        request: Request,
+        key: str = Header(..., alias="Idempotency-Key"),
+    ):
+        return JSONResponse(
+            service.propose(
+                request.state.principal,
+                project_id,
+                shot_id,
+                artifact_id,
+                body.model_dump(exclude_unset=True),
+                key,
+            ),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.post(SUGGESTIONS_PATH + "/decisions")
+    def decide_suggestions(
+        project_id: str,
+        shot_id: str,
+        artifact_id: str,
+        body: TakeSuggestionDecisions,
+        request: Request,
+        key: str = Header(..., alias="Idempotency-Key"),
+    ):
+        return JSONResponse(
+            service.decide(
+                request.state.principal,
+                project_id,
+                shot_id,
+                artifact_id,
+                body.model_dump(exclude_unset=True),
+                key,
+            ),
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get(SUMMARY_PATH)
     def read_summaries(project_id: str, shot_id: str, request: Request):

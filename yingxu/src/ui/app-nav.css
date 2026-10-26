@@ -1,0 +1,85 @@
+/* Main navigation (<AppNav>): a segmented bar centred in the desktop header, a bottom tab bar
+ * on phones. Colours come from tokens so every skin, light or dark, repaints it. */
+.app-nav {
+  display: flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.app-nav > .app-nav-item {
+  min-height: 28px;
+  padding: 4px 14px;
+  font-size: 13px;
+  white-space: nowrap;
+  color: var(--ink-2);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+}
+.app-nav > .app-nav-item.on {
+  color: var(--ink);
+  background: var(--surface-4);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.35),
+    0 0 0 0.5px rgba(255, 255, 255, 0.08) inset;
+}
+.app-nav-icon {
+  display: none;
+}
+@media (min-width: 761px) {
+  .app-nav {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .app-nav > .app-nav-item:hover {
+    color: var(--ink);
+    background: transparent;
+  }
+}
+@media (max-width: 760px) {
+  /* One equal column per tab (4 for users, 5 with the admin GPU tab), so the bar stays centred. */
+  .app-nav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    backdrop-filter: blur(16px) saturate(1.4);
+    border-width: 1px 0 0;
+    border-radius: 0;
+  }
+  .app-nav > .app-nav-item {
+    position: relative;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    height: 36px;
+    min-height: 36px;
+    padding: 3px 2px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 12px;
+    letter-spacing: 0.01em;
+    color: var(--muted);
+  }
+  .app-nav > .app-nav-item:is(.on, :hover) {
+    background: transparent;
+    box-shadow: none;
+  }
+  .app-nav > .app-nav-item.on {
+    color: var(--accent);
+  }
+  .app-nav-icon {
+    display: block;
+    width: 16px;
+    height: 16px;
+  }
+}

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { preferenceBody, takeError } from './quick-chat-takes.js';
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
@@ -34,9 +35,9 @@ export default function QuickChatPreferences({ controller, value, onSaved, busy 
         title={t('takes.preferences')}
         help={t('takes.preferencesHelp')}
         actions={
-          <button type="submit" disabled={busy} className="primary">
+          <Button variant="primary" type="submit" disabled={busy}>
             {t('takes.save')}
-          </button>
+          </Button>
         }
       >
         <SettingRow label={t('takes.copiesMax')}>{number(copies, setCopies)}</SettingRow>

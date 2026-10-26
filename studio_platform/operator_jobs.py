@@ -10,7 +10,6 @@ from fastapi import Header, Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, insert, select
 
-from .auth import Principal
 from .job_cancellation import cancel_eligibility, cancel_snapshot, cancellation_columns
 from .dstack_operator import _actor
 from .operator_capacity import OperatorError, operator_commands

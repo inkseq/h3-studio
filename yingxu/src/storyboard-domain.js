@@ -1,7 +1,7 @@
 import { shotSegments } from './shot-segments.js';
 import { translate } from './i18n/locale.js';
 /* Layout A projection of the existing v4 document. No second project store. */
-import { children, ancestors } from './store.js';
+import { children } from './store.js';
 import { effectiveLimits, effectiveControlSchema, roleSupported } from './quick-chat-model.js';
 const uid = (kind) => kind + '-' + crypto.randomUUID();
 const find = (p, id) => p.entities.find((e) => e.id === id);
@@ -213,6 +213,9 @@ export function storyboardView(
       previousFrame: b.previousFrame?.frameAssetId,
       quality: b.quality ?? s.data.qualityIntent ?? 'draft',
       seedLock: !!s.data.h3?.controls?.seed,
+      // Creator generation choices (owner spec 2026-10-26); the tier fixes everything else.
+      aspect: s.data.h3?.controls?.aspect_ratio || '16:9',
+      keepAudio: s.data.h3?.controls?.generate_audio !== false,
       versions,
       chosen: s.data.selectedAssetId || '',
       // Kept parts of the chosen take, in playback order (#512); empty = the whole take.
@@ -630,18 +633,20 @@ export function storyboardDrop(shot, item, slot, state) {
     hint: '松开：加入参考',
   };
 }
-export function storyboardSnapshot(project, shotId) {
-  const shot = find(project, shotId),
-    chap = ancestors(project, shotId).find((e) => e.type === 'chapter'),
-    shots = chap ? chapterShots(project, chap.id) : [],
-    at = shots.findIndex((s) => s.id === shotId);
-  return {
-    shot,
-    style: project.journey?.storyboard?.style || '',
-    profiles: project.entities.filter((e) => ['character', 'location', 'prop'].includes(e.type)),
-    assets: project.entities.filter((e) => ['image', 'video', 'audio'].includes(e.type)),
-    previous: shot?.data.storyboard?.continuePrevious ? shots[at - 1]?.data.selectedAssetId : null,
-  };
+// Aspect, "keep sound" and a fresh seed for "another version" (owner spec 2026-10-26).
+// generate_audio defaults to on, so only "off" is stored.
+const CREATOR_KEYS = ['aspect', 'keepAudio', 'newSeed'];
+function patchCreatorControls(shot, patch) {
+  if (!CREATOR_KEYS.some((key) => Object.hasOwn(patch, key))) return;
+  const controls = { ...shot.data.h3?.controls };
+  if (Object.hasOwn(patch, 'aspect')) controls.aspect_ratio = patch.aspect;
+  if (Object.hasOwn(patch, 'keepAudio')) {
+    if (patch.keepAudio) delete controls.generate_audio;
+    else controls.generate_audio = false;
+  }
+  if (patch.newSeed && controls.seed)
+    controls.seed = String(1 + Math.floor(Math.random() * 2147483646));
+  shot.data.h3 = { ...shot.data.h3, controls };
 }
 export function patchStoryboardShot(project, id, patch) {
   const shot = find(project, id);
@@ -704,6 +709,7 @@ export function patchStoryboardShot(project, id, patch) {
             role: find(project, source)?.type === 'audio' ? 'audio' : 'reference',
           });
     }
+    patchCreatorControls(shot, patch);
     shot.version++;
     if (shot.data.selectedAssetId) shot.status = 'review';
     return;
@@ -767,6 +773,7 @@ export function patchStoryboardShot(project, id, patch) {
       inputMode: b.mode,
       recipeId: b.mode === 'ref' ? 'h3-base-ref2va-v1' : 'h3-base-fl2va-v1',
     };
+  patchCreatorControls(shot, patch);
   shot.data.storyboard = b;
   shot.version++;
   if (shot.data.selectedAssetId) shot.status = 'review';

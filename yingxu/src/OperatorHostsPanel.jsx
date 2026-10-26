@@ -1,7 +1,8 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { usePageActive } from './AppRouteCache.jsx';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useEffectEvent } from 'react';
 import {
   failureLabel,
   hostPolicyOptions,
@@ -94,7 +95,7 @@ function SampleGroups({ groups = [] }) {
   );
 }
 function LastFailure({ failure }) {
-  const { t, locale } = useI18n();
+  const { locale } = useI18n();
   return (
     <div className="p4-host-failure">
       <span>{failureLabel(failure, locale)}</span>
@@ -349,7 +350,7 @@ export function OfferHostHistory({ members = [], profileId, now = Date.now() }) 
   );
 }
 function PolicyReview({ host, selection, current, busy, onClose, onConfirm }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const active = usePageActive(),
     ref = useRef(),
     opener = useRef(globalThis.document?.activeElement);
@@ -360,9 +361,11 @@ function PolicyReview({ host, selection, current, busy, onClose, onConfirm }) {
       return;
     }
     dialog.showModal();
+    const openerRef = opener;
     return () => {
       dialog.close();
-      if (opener.current?.isConnected && !opener.current.closest('[inert]')) opener.current.focus();
+      if (openerRef.current?.isConnected && !openerRef.current.closest('[inert]'))
+        openerRef.current.focus();
     };
   }, [active]);
   return (
@@ -382,20 +385,20 @@ function PolicyReview({ host, selection, current, busy, onClose, onConfirm }) {
             {localizedPolicy(host.policy.manual, t)} → {localizedPolicy(selection, t)}
           </p>
         </div>
-        <button disabled={busy} onClick={onClose}>
+        <Button disabled={busy} onClick={onClose}>
           {t('operator.copy32')}
-        </button>
+        </Button>
       </header>
       <p>{t('operator.copy172')}</p>
       {selection === 'prefer' && <p className="p4-meta">{t('operator.copy173')}</p>}
       {!current && <p role="alert">{t('operator.copy174')}</p>}
       <footer>
-        <button disabled={busy} onClick={onClose}>
+        <Button disabled={busy} onClick={onClose}>
           {t('operator.copy175')}
-        </button>
-        <button className="p4-primary" disabled={busy || !current} onClick={onConfirm}>
+        </Button>
+        <Button className="p4-primary" disabled={busy || !current} onClick={onConfirm}>
           {busy ? t('operator.status83') : t('operator.status84')}
-        </button>
+        </Button>
       </footer>
     </dialog>
   );
@@ -458,9 +461,9 @@ function HostEditor({ host, busy, onSave }) {
             ))}
           </select>
         </label>
-        <button type="submit" disabled={busy || selection === host.policy.manual}>
+        <Button type="submit" disabled={busy || selection === host.policy.manual}>
           {t('operator.copy177')}
-        </button>
+        </Button>
         <small>
           {t('operatorPanel.revision', {
             revision: host.policy.revision,
@@ -484,7 +487,7 @@ function HostEditor({ host, busy, onSave }) {
   );
 }
 function HostLookup({ controller, target, busy }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const [input, setInput] = useState(''),
     [loading, setLoading] = useState(false),
     [error, setError] = useState(''),
@@ -532,9 +535,9 @@ function HostLookup({ controller, target, busy }) {
             }}
           />
         </label>
-        <button type="submit" disabled={busy || loading || !valid}>
+        <Button type="submit" disabled={busy || loading || !valid}>
           {loading ? t('operator.status85') : t('operator.status86')}
-        </button>
+        </Button>
       </form>
       <p className="p4-meta">{t('operator.copy179')}</p>
       <FloatingMessage tone="error" text={error ? error : null} />
@@ -556,12 +559,14 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
     [loading, setLoading] = useState(false),
     [error, setError] = useState(''),
     generation = useRef(0);
+  const readEvent = useEffectEvent((...args) => read(...args));
   useEffect(() => {
     generation.current++;
     setError('');
-    void read();
+    void readEvent();
+    const generationRef = generation;
     return () => {
-      generation.current++;
+      generationRef.current++;
     };
   }, [controller, state.account, admin]);
   async function read(offset = 0) {
@@ -590,9 +595,9 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
             {admin ? t('operator.status90') : t('operator.status91')} {t('operatorPanel.grouping')}
           </p>
         </div>
-        <button disabled={blocked} onClick={() => void read()}>
+        <Button disabled={blocked} onClick={() => void read()}>
           {loading ? t('operator.status70') : t('operator.status92')}
-        </button>
+        </Button>
       </header>
       {error && (
         <p className="p4-error" role="alert">
@@ -626,9 +631,9 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
             <p className="ui-empty ui-empty-compact">{t('operator.copy180')}</p>
           )}
           {value.has_more && (
-            <button disabled={blocked} onClick={() => void read(value.offset + value.limit)}>
+            <Button disabled={blocked} onClick={() => void read(value.offset + value.limit)}>
               {t('operator.copy181')}
-            </button>
+            </Button>
           )}
           <p className="p4-meta">{t('operator.copy182')}</p>
         </>
@@ -655,7 +660,7 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
             <p>{t('operator.copy184')}</p>
           )}
           {state.hostAudits?.has_more && (
-            <button
+            <Button
               disabled={blocked}
               onClick={() =>
                 void controller
@@ -664,7 +669,7 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
               }
             >
               {t('operator.copy185')}
-            </button>
+            </Button>
           )}
         </details>
       )}

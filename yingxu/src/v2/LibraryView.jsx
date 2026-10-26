@@ -1,6 +1,8 @@
 // View ported from design/inkseq-v2-prototype/src/library.jsx.
 // All ownership, uploads, commands and receipts are supplied by Library.jsx.
 import React, { useRef, useState } from 'react';
+import { Button } from '../ui/Button.jsx';
+import { SideNav, SideNavItem } from '../ui/SideNav.jsx';
 import {
   Box,
   Check,
@@ -153,15 +155,16 @@ export default function LibraryView({
   const sideButton = (k) => {
     const I = ICONS[k];
     return (
-      <button
+      <SideNavItem
         key={k}
-        className={filters.type === k ? 'on' : ''}
+        active={filters.type === k}
+        icon={I}
+        count={count(k)}
+        countTitle={countTitle(k)}
         onClick={() => change({ type: k })}
       >
-        <I size={14} />
-        <span>{label(k)}</span>
-        <small title={countTitle(k)}>{count(k)}</small>
-      </button>
+        {label(k)}
+      </SideNavItem>
     );
   };
   if (!account)
@@ -189,55 +192,53 @@ export default function LibraryView({
     <div className="home lib-shell">
       <StudioHeader account={account} active="library" />
       <div className="libp" style={{ '--lib-side': side.width + 'px' }}>
-        <aside className="libp-side">
+        <SideNav as="aside" className="libp-side">
           <div className="libp-group">{t('library.view.files')}</div>
           {['file', 'image', 'video', 'audio'].map(sideButton)}
           <div className="libp-group">{t('library.view.profiles')}</div>
           {['character', 'location', 'prop'].map(sideButton)}
           <div className="libp-group">{t('library.view.works')}</div>
-          <button
-            className={!filters.project_id && !filters.unused ? 'on' : ''}
+          <SideNavItem
+            active={!filters.project_id && !filters.unused}
             onClick={() => change({ project_id: '', work: '', unused: '' })}
           >
             {t('library.view.allWorks')}
-          </button>
+          </SideNavItem>
           {projects.map((p) => (
-            <button
+            <SideNavItem
               key={p.id}
               title={p.title}
               aria-label={p.title}
-              className={filters.project_id === p.id ? 'on' : ''}
+              active={filters.project_id === p.id}
               onClick={() => change({ project_id: p.id, work: '', unused: '' })}
             >
-              <span className="clip" title={p.title}>
-                {p.title}
-              </span>
-            </button>
+              {p.title}
+            </SideNavItem>
           ))}
-          <button
-            className={filters.unused ? 'on' : ''}
+          <SideNavItem
+            active={!!filters.unused}
             onClick={() => change({ project_id: '', work: '', unused: true })}
           >
             {t('library.view.unused')}
-          </button>
+          </SideNavItem>
           {!!tags.length && (
             <>
               <div className="libp-group">{t('library.tagHeading')}</div>
               <div className="libp-tags">
                 {tags.map((tag) => (
-                  <button
+                  <Button
                     key={tag}
                     className={'tagchip' + (filters.tag === tag ? ' on' : '')}
                     onClick={() => change({ tag: filters.tag === tag ? '' : tag })}
                   >
                     {tag}
                     <small>{rows.filter((r) => r.tags?.includes(tag)).length}</small>
-                  </button>
+                  </Button>
                 ))}
               </div>
             </>
           )}
-        </aside>
+        </SideNav>
         <div
           className="libp-resize"
           role="separator"
@@ -282,26 +283,26 @@ export default function LibraryView({
                 {filters.unused
                   ? t('library.view.unused')
                   : projects.find((p) => p.id === filters.project_id)?.title}
-                <button
+                <Button
                   className="x"
                   aria-label={t('library.clear')}
                   onClick={() => change({ project_id: '', work: '', unused: '' })}
                 >
                   <X size={11} />
-                </button>
+                </Button>
               </span>
             )}
             {filters.tag && (
               <span className="pill">
                 <Tag size={11} />
                 {filters.tag}
-                <button
+                <Button
                   className="x"
                   aria-label={t('library.clear')}
                   onClick={() => change({ tag: '' })}
                 >
                   <X size={11} />
-                </button>
+                </Button>
               </span>
             )}
             <input
@@ -372,9 +373,9 @@ export default function LibraryView({
                       <option key={s} value={s} />
                     ))}
                   </datalist>
-                  <button className="small primary" disabled={!bulkTag.trim()}>
+                  <Button variant="primary" size="sm" type="submit" disabled={!bulkTag.trim()}>
                     {t('library.add')}
-                  </button>
+                  </Button>
                 </form>
               </PopMenu>
               {!profile && (
@@ -387,20 +388,21 @@ export default function LibraryView({
                 />
               )}
               {/* Trash works across stories (one request carries every project's version). */}
-              <button className="small danger" disabled={locked} onClick={onDelete}>
+              <Button variant="danger" size="sm" disabled={locked} onClick={onDelete}>
                 <Trash2 size={13} />
                 {t('trash.move')}
-              </button>
+              </Button>
               <div className="spacer" />
-              <button
-                className="small ghost"
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setSelected(rows.map((r) => libraryKey(r.target)))}
               >
                 {t('library.select')}
-              </button>
-              <button className="small ghost" onClick={() => setSelected([])}>
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelected([])}>
                 {t('library.clear')}
-              </button>
+              </Button>
             </div>
           )}
           {loading && rows.length === 0 && (
@@ -411,7 +413,7 @@ export default function LibraryView({
           <div className={profile ? 'libp-profiles' : 'libp-grid'}>
             {rows.map((row) =>
               profile ? (
-                <button
+                <Button
                   key={libraryKey(row.target)}
                   data-lib-key={libraryKey(row.target)}
                   className={'libp-pcard' + (openKey === libraryKey(row.target) ? ' open' : '')}
@@ -429,7 +431,7 @@ export default function LibraryView({
                     </small>
                     <small>{usedText(row)}</small>
                   </span>
-                </button>
+                </Button>
               ) : (
                 <div
                   key={libraryKey(row.target)}
@@ -453,7 +455,7 @@ export default function LibraryView({
                       : onDetail(row)
                   }
                 >
-                  <button
+                  <Button
                     className="libp-check"
                     aria-label={displayName(row, t)}
                     aria-pressed={selected.includes(libraryKey(row.target))}
@@ -463,7 +465,7 @@ export default function LibraryView({
                     }}
                   >
                     {selected.includes(libraryKey(row.target)) && <Check size={12} />}
-                  </button>
+                  </Button>
                   {row.type === 'audio' ? (
                     <div className="libp-audio">
                       <Music size={24} aria-hidden="true" />
@@ -493,9 +495,9 @@ export default function LibraryView({
             <p className="muted">{t(profile ? 'library.noneProfile' : 'library.noneFiles')}</p>
           )}
           {next !== null && (
-            <button disabled={loading || locked} onClick={onMore}>
+            <Button disabled={loading || locked} onClick={onMore}>
               {t('library.more')}
-            </button>
+            </Button>
           )}
         </main>
         {children}

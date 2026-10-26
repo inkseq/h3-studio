@@ -6,10 +6,14 @@ const VARIANTS = {
   ghost: 'ghost',
   danger: 'danger',
   'ghost-danger': 'ghost danger',
+  // A large left-aligned choice, e.g. a conversation starter.
+  option: 'option',
+  // Round icon button over a picture or video (remove an attachment, open a menu).
+  'on-media': 'on-media',
 };
 
 export function buttonClass({ variant = 'secondary', size = 'md', className = '' } = {}) {
-  return [VARIANTS[variant] ?? '', size === 'sm' ? 'small' : '', className]
+  return [VARIANTS[variant] ?? '', { sm: 'small', xs: 'xsmall' }[size] || '', className]
     .filter(Boolean)
     .join(' ');
 }

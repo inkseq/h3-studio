@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from .render_limits import MAX_AUDIO_TRACKS
-from .repository import Conflict, NotFound, request_hash
+from .repository import NotFound, request_hash
 from .project_validation import validate_generated_audio_binding
 from .caption_server import PRESET as CAPTION_PRESET, compile_subtitles
 

@@ -1,7 +1,8 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
+import { Button } from './ui/Button.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import TelegramLink, { telegramUserLabel, validTelegramNonce } from './TelegramLink.jsx';
 import { Segmented } from './ui/Segmented.jsx';
-import { FloatingMessage } from './floating-notice.js';
 
 // Daily credit cap suggested for a new Telegram link; USD caps (admins) start uncapped.
 const TELEGRAM_DEFAULT_CAP = '200';
@@ -9,7 +10,7 @@ import { microsToDollars } from './money.js';
 import SpendingBreakdown from './SpendingBreakdown.jsx';
 import { Bot } from 'lucide-react';
 import { assistantCatalogs } from './i18n/assistantCatalogs.js';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { createQuickChatClient } from './quick-chat-client.js';
 import {
@@ -73,6 +74,7 @@ export default function AssistantConnections({
     [name, setName] = useState(telegram ? 'Telegram' : 'Codex'),
     [target, setTarget] = useState(telegram ? 'telegram' : 'agent'),
     [error, setError] = useState(''),
+    [revoking, setRevoking] = useState(null),
     [notice, setNotice] = useState(''),
     [loading, setLoading] = useState(false),
     [activity, setActivity] = useState(null),
@@ -128,6 +130,14 @@ export default function AssistantConnections({
         : old;
     });
   }
+  const refreshEvent = useEffectEvent((...args) => refresh(...args));
+  // Defaults for a new connection, read when the scope changes; a later credit-mode change
+  // does not wipe what the person typed.
+  const resetDefaults = useEffectEvent(() => {
+    // The bot makes films, so a Telegram link defaults to generate with a modest daily cap.
+    setName(target === 'telegram' ? 'Telegram' : 'Codex');
+    setCap(target === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0');
+  });
   useEffect(() => {
     const at = ++epoch.current;
     setRows([]);
@@ -136,9 +146,7 @@ export default function AssistantConnections({
     connectionsCursor.current = undefined;
     activitySequence.current++;
     setCreated(null);
-    // The bot makes films, so a Telegram link defaults to generate with a modest daily cap.
-    setName(target === 'telegram' ? 'Telegram' : 'Codex');
-    setCap(target === 'telegram' ? (creditMode ? TELEGRAM_DEFAULT_CAP : '0') : '0');
+    resetDefaults();
     setPermission('generate');
     setSettings(null);
     setSettingsDraft(null);
@@ -158,7 +166,7 @@ export default function AssistantConnections({
     let timer;
     if (account) {
       setLoading(true);
-      refresh()
+      refreshEvent()
         .catch(() => {
           if (epoch.current === at) setError(t('assistants.error'));
         })
@@ -170,20 +178,21 @@ export default function AssistantConnections({
         if (visible.current) {
           setNow(Date.now());
           try {
-            await refresh();
+            await refreshEvent();
           } catch {}
         }
         if (epoch.current === at) timer = setTimeout(poll, 5000);
       };
       timer = setTimeout(poll, 5000);
     }
+    const epochRef = epoch;
     return () => {
-      epoch.current++;
+      epochRef.current++;
       current.destroy();
       clearTimeout(timer);
       client.reset();
     };
-  }, [client, account, sessionId, projectId]);
+  }, [client, account, sessionId, projectId, t]);
   const queue = useRef(Promise.resolve());
   function act(fn) {
     const run = queue.current.catch(() => {}).then(() => actNow(fn));
@@ -352,9 +361,9 @@ export default function AssistantConnections({
       {!account ? (
         <div className="assistant-signin">
           <p>{t('assistants.login')}</p>
-          <button type="button" className="primary keep-label" onClick={onLogin}>
+          <Button variant="primary" className="keep-label" onClick={onLogin}>
             {t('story.copy14')}
-          </button>
+          </Button>
         </div>
       ) : (
         <>
@@ -367,9 +376,9 @@ export default function AssistantConnections({
                   {permissionLabel(operation.pending.body.permission)}
                 </p>
               )}
-              <button disabled={operation.busy || operation.pending.corrupt} onClick={recover}>
+              <Button disabled={operation.busy || operation.pending.corrupt} onClick={recover}>
                 {t('assistants.recover')}
-              </button>
+              </Button>
             </aside>
           )}
           {!codeAvailable ? (
@@ -377,9 +386,13 @@ export default function AssistantConnections({
               <SettingsSection
                 help={target === 'telegram' ? t('telegram.explain') : null}
                 actions={
-                  <button className="primary" disabled={busy || !profile || !name.trim()}>
+                  <Button
+                    variant="primary"
+                    type="submit"
+                    disabled={busy || !profile || !name.trim()}
+                  >
                     {t(target === 'telegram' ? 'telegram.connect' : 'assistants.connect')}
-                  </button>
+                  </Button>
                 }
               >
                 {!telegram && (
@@ -462,7 +475,7 @@ export default function AssistantConnections({
                 <pre>{metadata}</pre>
               </details>
               <div className="assistant-actions">
-                <button
+                <Button
                   onClick={async () => {
                     const at = epoch.current;
                     try {
@@ -476,8 +489,8 @@ export default function AssistantConnections({
                   }}
                 >
                   {t('assistants.copy')}
-                </button>
-                <button onClick={() => setCreated(null)}>{t('assistants.hide')}</button>
+                </Button>
+                <Button onClick={() => setCreated(null)}>{t('assistants.hide')}</Button>
               </div>
               <small>{t('assistants.single', { date: date(connection.expires_at) })}</small>
             </article>
@@ -496,16 +509,31 @@ export default function AssistantConnections({
             onPatch={(row, body) =>
               act(() => ops.current.execute('updateConnection', [row.id], body))
             }
-            onRevoke={(row) => {
-              if (window.confirm(t('assistants.revokeConfirm')))
-                void act(() => ops.current.execute('revokeConnection', [row.id]));
-            }}
+            onRevoke={setRevoking}
             onActivity={activityPage}
           />
+          {revoking && (
+            <Dialog title={t('assistants.revoke')} onClose={() => setRevoking(null)}>
+              <p>{t('assistants.revokeConfirm')}</p>
+              <DialogActions>
+                <Button onClick={() => setRevoking(null)}>{t('assistants.cancel')}</Button>
+                <Button
+                  variant="danger"
+                  onClick={() => {
+                    const row = revoking;
+                    setRevoking(null);
+                    void act(() => ops.current.execute('revokeConnection', [row.id]));
+                  }}
+                >
+                  {t('assistants.revoke')}
+                </Button>
+              </DialogActions>
+            </Dialog>
+          )}
           {connectionsPage !== null && (
-            <button disabled={busy} onClick={moreConnections}>
+            <Button disabled={busy} onClick={moreConnections}>
               {t('assistants.more')}
-            </button>
+            </Button>
           )}
           {activity && (
             <article>
@@ -524,9 +552,9 @@ export default function AssistantConnections({
               ))}
               {!activity.events.length && <p>{t('assistants.noActivity')}</p>}
               {activity.has_more && (
-                <button disabled={busy} onClick={() => activityPage({ id: activity.id }, true)}>
+                <Button disabled={busy} onClick={() => activityPage({ id: activity.id }, true)}>
                   {t('assistants.more')}
-                </button>
+                </Button>
               )}
             </article>
           )}
@@ -536,7 +564,11 @@ export default function AssistantConnections({
               <form onSubmit={defaults} className="ui-form">
                 <SettingsSection
                   help={t('assistants.settingsHelp')}
-                  actions={<button disabled={busy}>{t('assistants.saveSettings')}</button>}
+                  actions={
+                    <Button type="submit" disabled={busy}>
+                      {t('assistants.saveSettings')}
+                    </Button>
+                  }
                 >
                   {Object.keys(settings.value).map((field) => (
                     <SettingRow key={field} label={t('assistants.' + field)}>
@@ -556,9 +588,14 @@ export default function AssistantConnections({
               </form>
             </details>
           )}
-          <button className="small assistant-refresh" disabled={busy} onClick={() => act(refresh)}>
+          <Button
+            size="sm"
+            className="assistant-refresh"
+            disabled={busy}
+            onClick={() => act(refresh)}
+          >
             {t('assistants.refresh')}
-          </button>
+          </Button>
         </>
       )}
       {error && <p role="alert">{error}</p>}
@@ -602,8 +639,7 @@ export function ConnectionList({
         />
       ))}
       {view.inactiveCount > 0 && (
-        <button
-          type="button"
+        <Button
           className="link assistant-inactive-toggle"
           aria-expanded={showInactive}
           onClick={onToggleInactive}
@@ -616,7 +652,7 @@ export function ConnectionList({
                 : 'assistants.showInactive',
             { count: view.inactiveCount },
           )}
-        </button>
+        </Button>
       )}
       {!rows.length && <p>{t('assistants.empty')}</p>}
       {rows.length > 0 && view.activeCount === 0 && !showInactive && (
@@ -678,21 +714,21 @@ function ConnectionRow({
         </span>
         <span className="assistant-row-scope">{scopeLabel(row.scope)}</span>
         <div className="assistant-actions">
-          <button
-            className="small"
+          <Button
+            size="sm"
             disabled={busy || !editable}
             onClick={() => onPatch({ expected_version: row.state_version, paused: !row.paused })}
           >
             {t(row.paused ? 'assistants.resume' : 'assistants.pause')}
-          </button>
-          <button
-            className="small"
+          </Button>
+          <Button
+            size="sm"
             title={t('assistants.workStays')}
             disabled={busy || closed}
             onClick={onRevoke}
           >
             {t('assistants.revoke')}
-          </button>
+          </Button>
         </div>
       </div>
       <details className="assistant-row-details">
@@ -729,17 +765,19 @@ function ConnectionRow({
               disabled={busy || !editable}
             />
           </label>
-          <button disabled={busy || !editable}>{t('assistants.saveCap')}</button>
+          <Button type="submit" disabled={busy || !editable}>
+            {t('assistants.saveCap')}
+          </Button>
           {draft && (
-            <button type="button" disabled={busy} onClick={() => setDraft(null)}>
+            <Button disabled={busy} onClick={() => setDraft(null)}>
               {t('assistants.reloadCap')}
-            </button>
+            </Button>
           )}
           {error && <p role="alert">{error}</p>}
         </form>
-        <button className="small" disabled={busy} onClick={onActivity}>
+        <Button size="sm" disabled={busy} onClick={onActivity}>
           {t('assistants.activity')}
-        </button>
+        </Button>
       </details>
     </article>
   );

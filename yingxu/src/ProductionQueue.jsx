@@ -1,5 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { FloatingMessage } from './floating-notice.js';
+import { Button } from './ui/Button.jsx';
 import React, { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { store } from './store.js';
@@ -13,7 +13,6 @@ import {
   selectedProductionRows,
   batchSummary,
   queueFilters,
-  reviewLabels,
 } from './production-model.js';
 import './production-queue.css';
 
@@ -49,10 +48,11 @@ export default function ProductionQueue({ project, onInspect }) {
     setQuery('');
     setConfirmed('');
   }, [project.id]);
-  useEffect(
-    () => setSelected((ids) => ids.filter((id) => rows.some((row) => row.id === id))),
-    [project.id, rows.length],
-  );
+  const rowIds = rows.map((row) => row.id).join('|');
+  useEffect(() => {
+    const live = new Set(rowIds.split('|'));
+    setSelected((ids) => ids.filter((id) => live.has(id)));
+  }, [project.id, rowIds]);
   const changeSelection = (next) => {
     setSelected(next);
     setConfirmed('');
@@ -75,10 +75,10 @@ export default function ProductionQueue({ project, onInspect }) {
     <section className="cloud-production" aria-label={lt('legacy.route91')}>
       <div className="cloud-section-head">
         <h2>{lt('legacy.route68')}</h2>
-        <button disabled={c.busy} onClick={() => run(cloud.refresh())}>
+        <Button disabled={c.busy} onClick={() => run(cloud.refresh())}>
           <RefreshCw size={14} />
           {lt('legacy.route69')}
-        </button>
+        </Button>
       </div>
       <p>{lt('legacy.explain21')}</p>
       {c.capabilities?.simulation && <p className="cloud-warning">{lt('legacy.explain18')}</p>}
@@ -147,7 +147,7 @@ export default function ProductionQueue({ project, onInspect }) {
         </label>
       </div>
       {(chapterId || status !== 'all' || query) && (
-        <button
+        <Button
           onClick={() => {
             setChapterId('');
             setStatus('all');
@@ -155,7 +155,7 @@ export default function ProductionQueue({ project, onInspect }) {
           }}
         >
           {lt('legacy.route74')}
-        </button>
+        </Button>
       )}
       <div className="cloud-actions queue-select">
         <span role="status">
@@ -165,7 +165,7 @@ export default function ProductionQueue({ project, onInspect }) {
             chosen: chosen.length,
           })}
         </span>
-        <button
+        <Button
           disabled={c.busy || !visible.some((row) => row.canSelect)}
           onClick={() =>
             changeSelection([
@@ -177,26 +177,26 @@ export default function ProductionQueue({ project, onInspect }) {
           }
         >
           {lt('legacy.route75')}
-        </button>
-        <button
+        </Button>
+        <Button
           disabled={c.busy || !visible.some((row) => selected.includes(row.id))}
           onClick={() => changeSelection(selected.filter((id) => !visibleIds.has(id)))}
         >
           {lt('legacy.route76')}
-        </button>
-        <button disabled={c.busy || !chosen.length} onClick={() => changeSelection([])}>
+        </Button>
+        <Button disabled={c.busy || !chosen.length} onClick={() => changeSelection([])}>
           {lt('legacy.route77')}
-        </button>
+        </Button>
       </div>
       {hidden > 0 && (
         <p className="cloud-warning">
           {lt('queue.hidden', { count: hidden })}
-          <button
+          <Button
             disabled={c.busy}
             onClick={() => changeSelection(selected.filter((id) => visibleIds.has(id)))}
           >
             {lt('legacy.route78')}
-          </button>
+          </Button>
         </p>
       )}
       {!visible.length && <p className="ui-empty ui-empty-compact">{lt('legacy.explain20')}</p>}
@@ -256,16 +256,16 @@ export default function ProductionQueue({ project, onInspect }) {
                 </p>
               ))}
             <div className="cloud-actions">
-              <button onClick={() => onInspect(row.id)}>
+              <Button onClick={() => onInspect(row.id)}>
                 {['failed', 'error', 'blocked', 'stale', 'expired'].includes(row.phase)
                   ? lt('queue.revise')
                   : lt('queue.configure')}
-              </button>
-              <button onClick={() => openReview(row.id)}>{lt('legacy.route79')}</button>
+              </Button>
+              <Button onClick={() => openReview(row.id)}>{lt('legacy.route79')}</Button>
               {c.unknown?.[row.id] && (
-                <button disabled={c.busy} onClick={() => run(cloud.submit(row.id))}>
+                <Button disabled={c.busy} onClick={() => run(cloud.submit(row.id))}>
                   {lt('legacy.route80')}
-                </button>
+                </Button>
               )}
             </div>
           </article>
@@ -294,21 +294,23 @@ export default function ProductionQueue({ project, onInspect }) {
                     {row.path} · {row.label}
                   </small>
                 </span>
-                <button onClick={() => onInspect(row.id)}>{lt('legacy.route81')}</button>
+                <Button size="sm" onClick={() => onInspect(row.id)}>
+                  {lt('legacy.route81')}
+                </Button>
               </li>
             ))}
           </ol>
           <div className="cloud-actions">
-            <button
+            <Button
               disabled={c.busy || !chosen.length || chosen.some((row) => !row.canSelect)}
               onClick={preflight}
             >
               {lt('queue.preflight', { count: chosen.length })}
-            </button>
+            </Button>
             {summary.blocked > 0 && ready.length > 0 && (
-              <button disabled={c.busy} onClick={() => changeSelection(ready.map((row) => row.id))}>
+              <Button disabled={c.busy} onClick={() => changeSelection(ready.map((row) => row.id))}>
                 {lt('queue.keep', { count: ready.length })}
-              </button>
+              </Button>
             )}
           </div>
           {summary.estimates.map((estimate, i) => (
@@ -332,8 +334,8 @@ export default function ProductionQueue({ project, onInspect }) {
             />
             {lt('legacy.route82')}
           </label>
-          <button
-            className="primary"
+          <Button
+            variant="primary"
             disabled={
               c.busy ||
               !submitReady ||
@@ -346,7 +348,7 @@ export default function ProductionQueue({ project, onInspect }) {
             }
           >
             {lt('queue.submit', { count: chosen.length })}
-          </button>
+          </Button>
           <p>{lt('legacy.explain25')}</p>
         </section>
       )}
@@ -357,9 +359,9 @@ export default function ProductionQueue({ project, onInspect }) {
               ? lt('queue.confirming')
               : lt('queue.pending', { count: c.batchPending.shotIds.length })}
           </p>
-          <button disabled={c.busy} onClick={() => run(cloud.recoverBatch())}>
+          <Button disabled={c.busy} onClick={() => run(cloud.recoverBatch())}>
             {lt('legacy.route83')}
-          </button>
+          </Button>
         </div>
       )}
       <details className="queue-batches">
@@ -397,23 +399,23 @@ export default function ProductionQueue({ project, onInspect }) {
                       <code>{item.error_code}</code>
                     </details>
                     {row && (
-                      <button onClick={() => onInspect(row.id)}>{lt('legacy.route85')}</button>
+                      <Button onClick={() => onInspect(row.id)}>{lt('legacy.route85')}</Button>
                     )}
                   </div>
                 );
               })}
             {['active', 'admitting', 'cancel_requested'].includes(batch.status) && (
-              <button disabled={c.busy} onClick={() => run(cloud.cancelBatch(batch.id))}>
+              <Button disabled={c.busy} onClick={() => run(cloud.cancelBatch(batch.id))}>
                 {lt('legacy.route86')}
-              </button>
+              </Button>
             )}
           </article>
         ))}
         {c.moreBatches && (
           <div className="queue-history">
-            <button disabled={c.busy} onClick={() => run(cloud.loadMoreBatches())}>
+            <Button disabled={c.busy} onClick={() => run(cloud.loadMoreBatches())}>
               {lt('legacy.route87')}
-            </button>
+            </Button>
             <p>{lt('legacy.explain17')}</p>
           </div>
         )}
@@ -424,9 +426,9 @@ export default function ProductionQueue({ project, onInspect }) {
       {!shownJobs.length && <p className="muted">{lt('legacy.route89')}</p>}
       {c.moreJobs && (
         <div className="queue-history">
-          <button disabled={c.busy} onClick={() => run(cloud.loadMoreJobs())}>
+          <Button disabled={c.busy} onClick={() => run(cloud.loadMoreJobs())}>
             {lt('legacy.route90')}
-          </button>
+          </Button>
           <p>{lt('legacy.explain22')}</p>
         </div>
       )}

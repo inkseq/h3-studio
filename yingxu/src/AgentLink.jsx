@@ -1,5 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { FloatingMessage } from './floating-notice.js';
+import { Button } from './ui/Button.jsx';
 import React, { useEffect, useState } from 'react';
 import { readAgentLink } from './agent-navigation.js';
 import { cloudController as cloud } from './cloud-controller.js';
@@ -60,7 +60,7 @@ export default function AgentLink({ state, onOpenCloud, onLocate, onActivity }) 
         </p>
       </div>
       <div>
-        <button className="primary" disabled={c.busy} onClick={follow}>
+        <Button variant="primary" disabled={c.busy} onClick={follow}>
           {!c.account
             ? at('adjunct.agentLink.copy52')
             : here
@@ -70,8 +70,8 @@ export default function AgentLink({ state, onOpenCloud, onLocate, onActivity }) 
                   ? at('adjunct.agentLink.copy54')
                   : at('adjunct.agentLink.copy55')
               : at('adjunct.agentLink.copy56')}
-        </button>
-        <button onClick={() => setHidden(true)}>{at('adjunct.agentLink.copy57')}</button>
+        </Button>
+        <Button onClick={() => setHidden(true)}>{at('adjunct.agentLink.copy57')}</Button>
       </div>
       {error && <p role="alert">{error}</p>}
     </aside>

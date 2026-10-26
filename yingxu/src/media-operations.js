@@ -6,13 +6,6 @@ import { captureWorkspace, assertWorkspace } from './workspace-context.js';
 import { setLocationReferences } from './location-model.js';
 import { effectiveReferenceCount } from './cloud-model.js';
 
-const mediaIdentity = (entity) =>
-  JSON.stringify([
-    entity?.type,
-    entity?.data.fileId ?? null,
-    entity?.data.cloudAssetId ?? null,
-    entity?.data.cloudArtifactId ?? null,
-  ]);
 const find = (store, id) => store.getState().project.entities.find((e) => e.id === id);
 const requireCommit = (store, ok) => {
   if (!ok) throw Error(store.getState().notice || '这次素材关联未保存，请核对当前作品后重试。');
@@ -32,45 +25,6 @@ async function guardedUpload(store, context, unchanged, message, upload) {
   } finally {
     unsubscribe();
   }
-}
-
-export async function replaceEntityMedia({ store, entityId, file, upload }) {
-  const context = captureWorkspace(store),
-    target = find(store, entityId);
-  if (!target || !['image', 'video', 'audio'].includes(target.type))
-    throw Error('原素材已删除，请重新选择。');
-  const identity = mediaIdentity(target),
-    result = await guardedUpload(
-      store,
-      context,
-      () => {
-        const live = find(store, entityId);
-        return !!live && identity === mediaIdentity(live);
-      },
-      '上传期间这份素材已被替换或删除；保留你刚才的选择，请重新选择文件。',
-      () => upload(file, target.type),
-    );
-  // Merge only newly uploaded media fields. Keep description, notes and any
-  // unrelated metadata edited while the file was being transferred.
-  requireCommit(
-    store,
-    store.updateEntity(entityId, {
-      data: {
-        cloudAssetId: null,
-        cloudArtifactId: null,
-        cloudContentPath: null,
-        sourceJobId: null,
-        sourceShotId: null,
-        sourceShotVersion: null,
-        sourceHash: null,
-        oldVersion: false,
-        simulation: false,
-        metadata: {},
-        ...result.data,
-      },
-    }),
-  );
-  return result;
 }
 
 export async function uploadLookImage({ store, characterId, lookId, slot, file, upload }) {

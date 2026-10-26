@@ -1,4 +1,6 @@
 import React, { useRef, useState } from 'react';
+import { Button } from './ui/Button.jsx';
+import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from './ui/Menu.jsx';
 import { Music, Plus, Trash2, Upload, Volume2, VolumeX } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
@@ -124,8 +126,7 @@ export default function FilmAudioLane({
   onFade,
 }) {
   const { t } = useI18n();
-  const [menu, setMenu] = useState(false),
-    [wholeFilm, setWholeFilm] = useState(false),
+  const [wholeFilm, setWholeFilm] = useState(false),
     file = useRef(null);
   const current = blocks.find((b) => b.track.id === selected);
   if (part === 'lane') {
@@ -166,53 +167,28 @@ export default function FilmAudioLane({
   return (
     <div className="film-audio-bar">
       <div className="film-audio-add">
-        <button
-          type="button"
-          className="small"
-          disabled={busy}
-          aria-expanded={menu}
-          onClick={() => setMenu((v) => !v)}
+        <Menu
+          trigger={
+            <Button size="sm" disabled={busy}>
+              <Plus size={13} />
+              {t('editor.addAudio')}
+            </Button>
+          }
+          align="start"
         >
-          <Plus size={13} />
-          {t('editor.addAudio')}
-        </button>
-        {menu && (
-          <div className="film-audio-menu" role="menu">
-            <label className="film-audio-whole">
-              <input
-                type="checkbox"
-                checked={wholeFilm}
-                onChange={(e) => setWholeFilm(e.target.checked)}
-              />
-              {t('editor.wholeFilm')}
-            </label>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setMenu(false);
-                file.current?.click();
-              }}
-            >
-              <Upload size={13} />
-              {t('editor.uploadAudio')}
-            </button>
-            {audioAssets.map((asset) => (
-              <button
-                key={asset.id}
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setMenu(false);
-                  onAdd(asset, { wholeFilm });
-                }}
-              >
-                <Music size={13} />
-                {asset.title}
-              </button>
-            ))}
-          </div>
-        )}
+          <MenuCheckboxItem checked={wholeFilm} onCheckedChange={setWholeFilm}>
+            {t('editor.wholeFilm')}
+          </MenuCheckboxItem>
+          <MenuSeparator />
+          <MenuItem icon={Upload} onSelect={() => file.current?.click()}>
+            {t('editor.uploadAudio')}
+          </MenuItem>
+          {audioAssets.map((asset) => (
+            <MenuItem key={asset.id} icon={Music} onSelect={() => onAdd(asset, { wholeFilm })}>
+              {asset.title}
+            </MenuItem>
+          ))}
+        </Menu>
         <input
           ref={file}
           type="file"
@@ -259,17 +235,16 @@ export default function FilmAudioLane({
                 </select>
               </label>
             ))}
-          <button
-            type="button"
-            className="small"
+          <Button
+            size="sm"
             onClick={() => onSet(current.track.id, { muted: !current.track.muted })}
           >
             {current.track.muted ? <Volume2 size={13} /> : <VolumeX size={13} />}
             {t(current.track.muted ? 'editor.unmute' : 'editor.mute')}
-          </button>
-          <button
-            type="button"
-            className="small ghost"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => {
               onRemove(current.track.id);
               onSelect(null);
@@ -277,7 +252,7 @@ export default function FilmAudioLane({
           >
             <Trash2 size={13} />
             {t('editor.removeAudio')}
-          </button>
+          </Button>
         </div>
       ) : null}
     </div>

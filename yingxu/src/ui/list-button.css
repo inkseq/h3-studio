@@ -1,0 +1,33 @@
+/* Selectable list rows (<ListButton>). */
+.list-button {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  border-radius: 8px;
+}
+.list-button:hover {
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+}
+.list-button[aria-current='page'] {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.list-button > span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.list-button > small {
+  color: var(--muted);
+  font-size: 11px;
+}

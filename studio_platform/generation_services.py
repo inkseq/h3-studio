@@ -417,6 +417,15 @@ class GenerationPlanning:
             )
             if actual != split["timing"]:
                 raise Conflict("script_windows_timing_changed")
+        if stored_selection:
+            from .creator_controls import policy_for_profile
+
+            policy = policy_for_profile(compiled.get("deployment_profile_id"))
+            if policy is not None:
+                from .repository import request_hash
+
+                compiled["creator_control_policy"] = policy
+                fingerprint = request_hash(compiled)
         if quality is not None:
             from .repository import request_hash
 

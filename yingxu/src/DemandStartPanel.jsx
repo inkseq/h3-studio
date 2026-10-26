@@ -1,4 +1,5 @@
 import { Note } from './ui/Note.jsx';
+import { Button } from './ui/Button.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import React, { useState } from 'react';
@@ -87,7 +88,7 @@ export default function DemandStartPanel({ controller, state, busy }) {
         </div>
       </dl>
       {confirm === null ? (
-        <button
+        <Button
           className={value.enabled ? '' : 'p4-primary'}
           disabled={busy || saving}
           onClick={() => {
@@ -97,7 +98,7 @@ export default function DemandStartPanel({ controller, state, busy }) {
           }}
         >
           {t(value.enabled ? 'demand.turnOff' : 'demand.turnOn')}
-        </button>
+        </Button>
       ) : null}
       {confirm !== null && (
         <form
@@ -119,12 +120,12 @@ export default function DemandStartPanel({ controller, state, busy }) {
           </label>
           <Note>{t(confirm.enabled ? 'demand.onNote' : 'demand.offNote')}</Note>
           <div className="p4-between">
-            <button type="button" disabled={saving} onClick={() => setConfirm(null)}>
+            <Button disabled={saving} onClick={() => setConfirm(null)}>
               {t('takes.cancel')}
-            </button>
-            <button className="p4-primary" disabled={saving || !reason.trim()}>
+            </Button>
+            <Button type="submit" className="p4-primary" disabled={saving || !reason.trim()}>
               {t(confirm.enabled ? 'demand.turnOn' : 'demand.turnOff')}
-            </button>
+            </Button>
           </div>
         </form>
       )}

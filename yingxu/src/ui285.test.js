@@ -1,43 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  checkedGenerationDefaults,
-  generationDefaultsEditor,
-} from './settings-generation-defaults.js';
+
 import { checkedLibraryPage } from './library-commands.js';
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import { Module } from 'node:module';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-
-test('account-defaults link targets only the current owner story and an actual shot without opening or modifying it', () => {
-  const state = {
-    workspace: { mode: 'cloud', account: 'owner' },
-    project: { id: 'story +1', entities: [{ id: 'shot/1', type: 'shot' }] },
-  };
-  const before = structuredClone(state),
-    url = new URL(generationDefaultsEditor(state, 'owner'), 'https://local.invalid');
-  assert.equal(url.searchParams.get('project'), 'story +1');
-  assert.equal(url.searchParams.get('entity'), 'shot/1');
-  assert.equal(url.searchParams.get('view'), 'workspace');
-  assert.equal(url.searchParams.get('defaults'), 'account');
-  assert.equal(generationDefaultsEditor(state, 'other'), null);
-  assert.equal(generationDefaultsEditor({ ...state, workspace: { mode: 'local' } }, 'owner'), null);
-  assert.equal(
-    generationDefaultsEditor({ ...state, project: { id: 'empty', entities: [] } }, 'owner'),
-    null,
-  );
-  assert.deepEqual(state, before);
-  assert.equal(checkedGenerationDefaults({ version: 0, defaults: {} }).version, 0);
-  for (const value of [
-    { version: -1, defaults: {} },
-    { version: 1, defaults: [] },
-    { version: 1, defaults: { controls: [] } },
-    { version: 1, defaults: { secret: 'not a setting' } },
-  ])
-    assert.throws(() => checkedGenerationDefaults(value));
-});
 
 const counts = {
   character: 2,

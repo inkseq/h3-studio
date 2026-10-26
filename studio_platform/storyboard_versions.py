@@ -19,7 +19,6 @@ from .repository import (
     documents,
     jobs,
     artifacts,
-    plans,
     request_hash,
 )
 from .content_lifecycle import owner_reference_gate, assert_project_writable

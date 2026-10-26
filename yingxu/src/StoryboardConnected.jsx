@@ -1,156 +1,30 @@
-import { clickedOutside } from './ui/Dialog.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
+import { Button } from './ui/Button.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
-import { FloatingMessage } from './floating-notice.js';
 import StoryFilmControl from './StoryFilmControl.jsx';
 import { formatMoneyMicros } from './money.js';
 import { createQuickChatClient } from './quick-chat-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { StoryboardWorkspace } from './StoryboardWorkspace.jsx';
 import { store } from './store.js';
 import { useCloud } from './CloudStudio.jsx';
 import { cloudController as cloud } from './cloud-controller.js';
 import { createP4OperatorClient } from './p4-operator-client.js';
-import OperatorBudgetPanel from './OperatorBudgetPanel.jsx';
-import {
-  storyboardView,
-  expandStoryboard,
-  storyboardDrop,
-  storyboardGenerationProfile,
-  patchStoryboardShot,
-} from './storyboard-domain.js';
+import { storyboardView, expandStoryboard, storyboardDrop } from './storyboard-domain.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
 import { uploadLibraryFiles } from './media-operations.js';
 import { uploadFile } from './media.js';
 import { captureWorkspace, assertWorkspace } from './workspace-context.js';
 import { isActiveTrashItem } from './trash-commands.js';
-import { estimateLabel, stableJSON, shotSnapshot } from './cloud-model.js';
-
-function Confirmation({ ids, onClose }) {
-  const { t: at, locale } = useI18n();
-  const c = useCloud(),
-    ref = useRef(),
-    [submitting, setSubmitting] = useState(false),
-    [error, setError] = useState('');
-  const p = useSyncExternalStore(store.subscribe, store.getState, store.getState).project;
-  useEffect(() => {
-    ref.current.showModal();
-    return () => ref.current?.close();
-  }, []);
-  const rows = ids.map((id) => ({
-      id,
-      shot: p.entities.find((e) => e.id === id),
-      plan: c.plans[id],
-      error: c.preflightErrors[id],
-    })),
-    ready = rows.filter(
-      (r) =>
-        r.plan?.status === 'ready' && r.plan.sourceSnapshot === stableJSON(shotSnapshot(p, r.id)),
-    );
-  return (
-    <dialog
-      className="modal wide sb-confirm"
-      ref={ref}
-      aria-label={at('adjunct.storyboardConnected.copy315')}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!submitting) onClose();
-      }}
-      onClick={(event) => {
-        if (clickedOutside(event) && !submitting) onClose();
-      }}
-    >
-      <div className="modal-heading">
-        <h2>{at('adjunct.storyboardConnected.copy316')}</h2>
-        <button disabled={submitting} onClick={onClose}>
-          {at('adjunct.storyboardConnected.copy317')}
-        </button>
-      </div>
-      <p>{at('adjunct.storyboardConnected.copy318')}</p>
-      {rows.map(({ id, shot, plan, error }) => (
-        <section key={id} className="sb-confirm-row">
-          <h3>
-            {shot?.title || at('adjunct.storyboardConnected.copy319')} ·{' '}
-            {plan?.status === 'ready'
-              ? at('adjunct.storyboardConnected.copy320')
-              : at('adjunct.storyboardConnected.copy321')}
-          </h3>
-          {error && <p role="alert">{error}</p>}
-          {plan && (
-            <>
-              <p>
-                {plan.effective_request.model} ·{' '}
-                {plan.effective_request.mode === 'ref'
-                  ? at('adjunct.storyboardConnected.copy322')
-                  : at('adjunct.storyboardConnected.copy323')}{' '}
-                · {plan.effective_request.duration}
-                {at('adjunct.storyboardConnected.copy324')}
-                {plan.effective_request.resolution} · {plan.effective_request.steps}
-                {at('adjunct.storyboardConnected.copy325')}
-              </p>
-              <p>{estimateLabel(plan.estimate, locale)}</p>
-              <details open>
-                <summary>{at('adjunct.storyboardConnected.copy326')}</summary>
-                <pre>{plan.effective_request.prompt}</pre>
-                {plan.storyboardPreview?.references?.map((item, index) => (
-                  <p key={index} className={item.sent ? '' : 'muted'}>
-                    {item.sent
-                      ? at('adjunct.storyboardConnected.copy327')
-                      : at('adjunct.storyboardConnected.copy328')}
-                    ：{p.entities.find((e) => e.id === item.entity_id)?.title || item.why} ·{' '}
-                    {item.why}
-                    {item.reason ? ' · ' + item.reason : ''}
-                  </p>
-                ))}
-                {plan.storyboardPreview?.notes?.map((note) => (
-                  <p key={note}>{note}</p>
-                ))}
-              </details>
-              {plan.blockers?.map((block, index) => (
-                <p role="alert" key={index}>
-                  {typeof block === 'string'
-                    ? block
-                    : block.message || block.reason || block.code || JSON.stringify(block)}
-                </p>
-              ))}
-              {plan.sourceSnapshot !== stableJSON(shotSnapshot(p, id)) && (
-                <p role="alert">{at('adjunct.storyboardConnected.copy329')}</p>
-              )}
-            </>
-          )}
-        </section>
-      ))}
-      {error && <p role="alert">{error}</p>}
-      <OperatorBudgetPanel account={c.account} compact />
-      <div className="modal-actions">
-        <button disabled={submitting} onClick={onClose}>
-          {at('adjunct.storyboardConnected.copy330')}
-        </button>
-        <button
-          className="primary"
-          disabled={submitting || !ready.length || c.busy}
-          onClick={async () => {
-            setSubmitting(true);
-            setError('');
-            try {
-              if (ready.length === 1) await cloud.submit(ready[0].id);
-              else await cloud.submitBatch(ready.map((r) => r.id));
-              onClose();
-            } catch (e) {
-              setError(e.message);
-            } finally {
-              setSubmitting(false);
-            }
-          }}
-        >
-          {submitting
-            ? at('adjunct.storyboardConnected.copy331')
-            : at('adjunct.storyboardConnected.copy332', { v0: ready.length })}
-        </button>
-      </div>
-    </dialog>
-  );
-}
+import { stableJSON, shotSnapshot } from './cloud-model.js';
 
 function planRecipe(plan, capabilities) {
   const request = plan?.effective_request;
@@ -193,17 +67,12 @@ function planRecipe(plan, capabilities) {
   };
 }
 function WorkbenchConfirmation({ receipt, onClose }) {
-  const { t, locale } = useI18n(),
+  const { t } = useI18n(),
     c = useCloud(),
-    ref = useRef(),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     scope = useRef({ account: c.account, project: s.project.id });
-  useEffect(() => {
-    ref.current.showModal();
-    return () => ref.current?.close();
-  }, []);
   const same =
     scope.current.account === c.account &&
     scope.current.project === s.project.id &&
@@ -216,19 +85,13 @@ function WorkbenchConfirmation({ receipt, onClose }) {
       ? formatMoneyMicros(receipt.estimate.cost_microusd)
       : t('workbench.unknown');
   return (
-    <dialog
-      className="modal wide sb-confirm"
-      ref={ref}
-      aria-label={t('workbench.confirm')}
-      onCancel={(e) => {
-        e.preventDefault();
-        if (!busy) onClose();
-      }}
-      onClick={(e) => {
-        if (clickedOutside(e) && !busy) onClose();
-      }}
+    <Dialog
+      title={t('workbench.confirm')}
+      onClose={onClose}
+      busy={busy}
+      wide
+      className="sb-confirm"
     >
-      <h2>{t('workbench.confirm')}</h2>
       <p>{t('workbench.estimate', { amount: money })}</p>
       <p>
         {Number.isFinite(receipt.estimate?.machine_seconds)
@@ -255,59 +118,61 @@ function WorkbenchConfirmation({ receipt, onClose }) {
       ))}
       {!same && <p role="alert">{t('workbench.changed')}</p>}
       {error && <p role="alert">{error}</p>}
-      <button disabled={busy} onClick={onClose}>
-        {t('workbench.cancel')}
-      </button>
-      {receipt.closed_preflight && (
-        <button
-          disabled={busy}
+      <DialogActions>
+        <Button disabled={busy} onClick={onClose}>
+          {t('workbench.cancel')}
+        </Button>
+        {receipt.closed_preflight && (
+          <Button
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              try {
+                await cloud.workbenchAbandonClosed(receipt.id);
+                onClose();
+              } catch {
+                setError(t('workbench.requestFailed'));
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            {t('workbench.acknowledge')}
+          </Button>
+        )}
+        <Button
+          variant="primary"
+          disabled={busy || !same || !receipt.ready}
           onClick={async () => {
             setBusy(true);
             try {
-              await cloud.workbenchAbandonClosed(receipt.id);
+              await cloud.workbenchCommand('batch', {
+                projectVersion: receipt.project_version,
+                plan_ids: receipt.items.map((i) => i.plan_id),
+              });
               onClose();
-            } catch {
-              setError(t('workbench.requestFailed'));
+            } catch (e) {
+              setError(
+                t(e.message.startsWith('workbench.') ? e.message : 'workbench.requestFailed'),
+              );
             } finally {
               setBusy(false);
             }
           }}
         >
-          {t('workbench.acknowledge')}
-        </button>
-      )}
-      <button
-        className="primary"
-        disabled={busy || !same || !receipt.ready}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await cloud.workbenchCommand('batch', {
-              projectVersion: receipt.project_version,
-              plan_ids: receipt.items.map((i) => i.plan_id),
-            });
-            onClose();
-          } catch (e) {
-            setError(t(e.message.startsWith('workbench.') ? e.message : 'workbench.requestFailed'));
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        {t('workbench.submit')}
-      </button>
-    </dialog>
+          {t('workbench.submit')}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
 export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScene }) {
-  const { t: at, locale } = useI18n();
+  const { t: at } = useI18n();
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     c = useCloud(),
     [queue, setQueue] = useState(null),
     [busy, setBusy] = useState(false),
-    [error, setError] = useState(''),
-    [confirmation, setConfirmation] = useState(null),
     [lastAdded, setLastAdded] = useState(null),
     serial = useRef(false);
   const [workbenchReceipt, setWorkbenchReceipt] = useState(null),
@@ -334,9 +199,12 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     c.account && s.workspace.mode === 'cloud' && !cloud.workbenchRunning()
       ? cloud.workbenchPending()?.kind
       : null;
+  const recoverPending = useEffectEvent(() =>
+    dispatch({ type: 'workbenchRecover' }).catch(() => {}),
+  );
   useEffect(() => {
     if (!['actions', 'preferences', 'copies'].includes(pendingKind)) return;
-    void dispatch({ type: 'workbenchRecover' }).catch(() => {});
+    void recoverPending();
   }, [pendingKind, s.project.id]);
   useEffect(() => {
     if (!c.account || !c.operatorAccess) {
@@ -407,11 +275,11 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
         // Only page-switching cloud work locks the storyboard; generate and upload guard
         // their own second press (serial) instead of greying out everything (owner, 2026-10-26).
         busy: c.busy,
-        error: error || c.error,
+        error: c.error,
       }),
       lastAdded,
     }),
-    [s.project, s.scopeId, c.capabilities, c.jobs, queue, c.busy, error, c.error, lastAdded],
+    [s.project, s.scopeId, c.capabilities, c.jobs, queue, c.busy, c.error, lastAdded],
   );
   const view = useMemo(
     () => ({
@@ -437,47 +305,6 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     if (!ok) throw Error(store.getState().notice || at('adjunct.storyboardConnected.copy333'));
     if (action.type === 'add') setLastAdded(receipt?.id);
     return receipt || { ok: true };
-  };
-  const materialize = (id, quality, source) => {
-    const live = currentView(),
-      shot = live.shots.find((s) => s.id === id);
-    if (!shot) throw Error(at('adjunct.storyboardConnected.copy334'));
-    const inputMode = source?.effectiveRequest?.mode || shot.mode.toLowerCase(),
-      profile = storyboardGenerationProfile(cloud.getState().capabilities, shot, {
-        quality,
-        sourceRequest: source?.effectiveRequest,
-      });
-    if (!profile || profile.generation_support?.[inputMode]?.enabled !== true)
-      throw Error(at('adjunct.storyboardConnected.copy335'));
-    const ok = store.editProject((p) => {
-      const entity = p.entities.find((e) => e.id === id),
-        before = stableJSON({ storyboard: entity.data.storyboard, h3: entity.data.h3 });
-      if (!entity.data.storyboard)
-        patchStoryboardShot(p, id, {
-          mode: shot.mode,
-          cast: shot.cast,
-          place: shot.place,
-          props: shot.props,
-          start: shot.start,
-          end: shot.end,
-          refs: shot.refs,
-          continuePrev: shot.continuePrev,
-        });
-      if (quality) entity.data.storyboard.quality = quality;
-      entity.data.storyboard.mode = inputMode;
-      entity.data.h3 = {
-        ...entity.data.h3,
-        inputMode,
-        recipeId: inputMode === 'ref' ? 'h3-base-ref2va-v1' : 'h3-base-fl2va-v1',
-        deploymentProfileId: profile.id,
-        controls: { ...entity.data.h3?.controls, duration: entity.data.seconds },
-      };
-      if (before !== stableJSON({ storyboard: entity.data.storyboard, h3: entity.data.h3 })) {
-        entity.version++;
-        if (entity.data.selectedAssetId) entity.status = 'review';
-      }
-    });
-    if (!ok) throw Error(store.getState().notice);
   };
   const dispatch = async (action) => {
     if (action.type === 'workbenchShotSettings') {
@@ -601,68 +428,6 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       return { ok: true };
     }
 
-    if (action.type === 'generate') {
-      if (serial.current) throw Error(at('adjunct.storyboardConnected.copy336'));
-      if (s.workspace.mode !== 'cloud') throw Error(at('adjunct.storyboardConnected.copy337'));
-      serial.current = true;
-      setBusy(true);
-      setError('');
-      const context = captureWorkspace(store),
-        ids = [...new Set(action.ids)],
-        errors = {},
-        prepared = [];
-      try {
-        for (const id of ids) {
-          assertWorkspace(store, context);
-          try {
-            const shot = currentView().shots.find((s) => s.id === id);
-            let source =
-              action.sourceVersion && shot?.versions.find((v) => v.id === action.sourceVersion);
-            if (
-              action.sourceVersion &&
-              (!source?.jobId || shot.chosen !== source.id || source.status !== 'done')
-            )
-              throw Error(at('adjunct.storyboardConnected.copy338'));
-            if (source && !source.effectiveRequest) {
-              const receipt = await cloud.jobReceipt(source.jobId);
-              assertWorkspace(store, context);
-              if (
-                receipt.status !== 'succeeded' ||
-                receipt.client_ref?.shot_id !== id ||
-                !receipt.effective_request
-              )
-                throw Error(at('adjunct.storyboardConnected.copy339'));
-              source = { ...source, effectiveRequest: receipt.effective_request };
-            }
-            materialize(id, action.quality, source);
-            await cloud.prepareStoryboard(id, { sourceJobId: source?.jobId });
-            assertWorkspace(store, context);
-            prepared.push(id);
-          } catch (e) {
-            assertWorkspace(store, context);
-            errors[id] = e.message;
-          }
-        }
-        assertWorkspace(store, context);
-        if (Object.keys(errors).length) {
-          setError(
-            Object.entries(errors)
-              .map(
-                ([id, msg]) =>
-                  (store.getState().project.entities.find((e) => e.id === id)?.title || id) +
-                  '：' +
-                  msg,
-              )
-              .join('；'),
-          );
-        }
-        if (prepared.length) setConfirmation(prepared);
-        return { ok: prepared.length > 0 };
-      } finally {
-        serial.current = false;
-        setBusy(false);
-      }
-    }
     if (action.type === 'update' && Object.hasOwn(action.patch, 'quality'))
       return dispatch({
         type: 'workbenchAction',
@@ -769,6 +534,9 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
   // A shot with no chosen take and exactly one finished take uses it without a click
   // (owner, 2026-10-25). An existing choice is never replaced by a newer take.
   const autoPicked = useRef(new Set());
+  const choose = useEffectEvent((shot, version) =>
+    dispatch({ type: 'choose', shot, version }).catch(() => {}),
+  );
   useEffect(() => {
     if (busy || serial.current) return;
     const shot = view.shots.find((item) => {
@@ -783,11 +551,12 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     if (!shot) return;
     autoPicked.current.add(shot.id);
     const version = shot.versions.find((v) => v.status === 'done');
-    void dispatch({ type: 'choose', shot: shot.id, version: version.id }).catch(() => {});
+    void choose(shot.id, version.id);
   }, [view, busy]);
   const adapter = {
     previewScriptWindows: (id, options) => cloud.previewScriptWindows(id, options),
     readTakeReview: (shot, artifact) => cloud.readTakeReview(shot, artifact),
+    readTakeReviewSummaries: (shot) => cloud.readTakeReviewSummaries(shot),
     saveTakeReview: (shot, artifact, body, key) => cloud.saveTakeReview(shot, artifact, body, key),
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),
@@ -899,8 +668,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
           receipt={workbenchReceipt}
           onClose={() => setWorkbenchReceipt(null)}
         />
-      )}{' '}
-      {confirmation && <Confirmation ids={confirmation} onClose={() => setConfirmation(null)} />}
+      )}
     </>
   );
 }

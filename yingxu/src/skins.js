@@ -5,6 +5,9 @@
 // characters, logos or names from someone else's work.
 
 export const SKINS = [
+  // Brand look (owner, 2026-10-26): white or near-black with one coral accent; follows the system.
+  { id: 'coral', swatch: ['#ffffff', '#ff5a36', '#0f1115'], light: true },
+  { id: 'coral-dark', swatch: ['#0b0c0e', '#ff6b47', '#f4f4f5'] },
   { id: 'default', swatch: ['#0b0c0c', '#cdf26e'] },
   {
     id: 'taisho',
@@ -27,8 +30,8 @@ export const SKINS = [
 const KEY = 'inkseq.skin';
 // Light and dark base looks (owner, 2026-10-26): until the viewer picks one, the app follows
 // the system setting, live.
-export const LIGHT = 'nordic',
-  DARK = 'default';
+export const LIGHT = 'coral',
+  DARK = 'coral-dark';
 const systemDark = () => {
   try {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -37,10 +40,23 @@ const systemDark = () => {
   }
 };
 
+// Until 2026-10-26 the header light/dark toggle stored the old pair (nordic / default), which
+// would pin those viewers to the old look. Move that pair to coral once; a later deliberate
+// pick in the skin list is kept.
+const MIGRATED = 'inkseq.skin.coral-v1';
+const OLD_PAIR = { nordic: 'coral', default: 'coral-dark' };
+function migrateOldPair(id) {
+  if (localStorage.getItem(MIGRATED)) return id;
+  localStorage.setItem(MIGRATED, '1');
+  if (!OLD_PAIR[id]) return id;
+  localStorage.setItem(KEY, OLD_PAIR[id]);
+  return OLD_PAIR[id];
+}
+
 // The viewer's explicit choice, or '' when the app should follow the system.
 export function chosenSkin() {
   try {
-    const id = localStorage.getItem(KEY);
+    const id = migrateOldPair(localStorage.getItem(KEY));
     return SKINS.some((skin) => skin.id === id) ? id : '';
   } catch {
     return '';

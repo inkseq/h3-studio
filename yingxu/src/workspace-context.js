@@ -14,24 +14,3 @@ export function assertWorkspace(store, context) {
   if (Object.keys(context).some((key) => context[key] !== live[key]))
     throw Error('账户或作品已经切换；迟到的素材结果没有写入当前作品，已保存的原文件不会被删除。');
 }
-
-// Set synchronously before the first await; React state alone cannot prevent
-// two drop/change events in the same render from starting duplicate uploads.
-export function createUploadGate() {
-  let busy = false;
-  return {
-    get busy() {
-      return busy;
-    },
-    async run(fn) {
-      if (busy) return false;
-      busy = true;
-      try {
-        await fn();
-        return true;
-      } finally {
-        busy = false;
-      }
-    },
-  };
-}

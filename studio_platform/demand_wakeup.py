@@ -145,7 +145,7 @@ def run_demand_loop(
         # a notification buffered on the already-subscribed connection.
         active = has_demand()
         seconds = (
-            active_seconds
+            (active_seconds() if callable(active_seconds) else active_seconds)
             if active
             else max(0, next_safety - clock())
             if safety

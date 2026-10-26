@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Button } from './ui/Button.jsx';
 import InkLoader from './InkLoader.jsx';
 import StudioHeader from './StudioHeader.jsx';
 import { createCloudClient } from './cloud-client.js';
@@ -47,12 +48,10 @@ export default function LegacyQuickChatLink({ account, sessionId }) {
           <h2>{t('legacyChat.title')}</h2>
           <p>{t('legacyChat.body')}</p>
           <div className="story-open-actions">
-            <button type="button" onClick={() => navigateApp('/')}>
-              {t('legacyChat.works')}
-            </button>
-            <button type="button" onClick={() => navigateApp('/quick-chat')}>
+            <Button onClick={() => navigateApp('/')}>{t('legacyChat.works')}</Button>
+            <Button onClick={() => navigateApp('/quick-chat')}>
               {t('legacyChat.quickCreate')}
-            </button>
+            </Button>
           </div>
         </section>
       </main>

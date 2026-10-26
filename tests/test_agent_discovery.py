@@ -139,6 +139,75 @@ class AgentDiscoveryTests(unittest.TestCase):
         for path in paths:
             self.assertEqual(self.client.get(path).content, anonymous[path])
 
+    def test_redo_preview_discovery_and_route_require_authentication(self):
+        public = self.client.get("/for-agents/guide.json").json()["take_redo"]
+        self.assertEqual(public["method"], "POST")
+        path = public["path"].format(project_id="p", shot_id="s", artifact_id="a")
+        body = {"expected_project_version": 1, "expected_review_revision": 0}
+        self.assertEqual(self.client.post(path, json=body).status_code, 401)
+        self.login()
+        for route in ("/v1/guided-schema", "/v1/agent-guide"):
+            self.assertEqual(self.client.get(route).json()["take_redo"], public)
+        self.assertEqual(self.client.post(path, json=body).status_code, 404)
+
+    def test_feedback_contract_and_authenticated_routes_keep_private_receipts_private(
+        self,
+    ):
+        public = self.client.get("/for-agents/guide.json").json()["feedback"]
+        self.assertEqual(public["path"], "/v1/feedback")
+        self.assertIn("model_limit", public["categories"])
+        self.assertEqual(self.client.get("/v1/feedback").status_code, 401)
+        self.login()
+        for path in ("/v1/guided-schema", "/v1/agent-guide"):
+            self.assertEqual(self.client.get(path).json()["feedback"], public)
+        body = {
+            "category": "documentation",
+            "severity": "low",
+            "summary": "The usage example is unclear",
+            "source": "agent",
+        }
+        self.assertEqual(self.client.post("/v1/feedback", json=body).status_code, 422)
+        receipt = self.client.post(
+            "/v1/feedback", json=body, headers={"Idempotency-Key": "feedback-http"}
+        )
+        self.assertEqual(receipt.status_code, 200, receipt.text)
+        self.assertEqual(receipt.headers["Cache-Control"], "no-store")
+        self.assertEqual(receipt.json()["forwarding"], "disabled")
+        self.assertEqual(
+            self.client.get("/v1/feedback/" + receipt.json()["report_id"]).json(),
+            receipt.json(),
+        )
+        self.assertEqual(
+            self.client.get("/v1/feedback/settings").json()["enabled"], True
+        )
+        private = self.client.get(
+            "/v1/feedback?category=documentation&source=agent"
+        ).json()
+        self.assertEqual(len(private["reports"]), 1)
+        self.client.cookies.clear()
+        self.assertEqual(
+            self.client.get("/v1/feedback/" + receipt.json()["report_id"]).status_code,
+            401,
+        )
+        self.assertEqual(
+            self.client.get("/for-agents/guide.json").json()["feedback"], public
+        )
+
+    def test_take_suggestion_contract_is_shared_by_public_and_authenticated_guides(
+        self,
+    ):
+        public = self.client.get("/for-agents/guide.json").json()["take_reviews"][
+            "suggestions"
+        ]
+        self.assertTrue(public["path"].endswith("/review/suggestions"))
+        self.assertIn("human session", public["decide"])
+        self.assertIn("No model call", public["propose"])
+        self.login()
+        for path in ("/v1/guided-schema", "/v1/agent-guide"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["take_reviews"]["suggestions"], public)
+
     def test_public_video_contract_and_downloads_use_only_quality_identities(self):
         from studio_platform.quality_tiers import (
             MODE_RECIPES,

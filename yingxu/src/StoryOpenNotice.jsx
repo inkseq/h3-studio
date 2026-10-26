@@ -1,4 +1,6 @@
 import React, { useEffect, useId, useState } from 'react';
+import { Button } from './ui/Button.jsx';
+import { Dialog } from './ui/Dialog.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { createPortal } from 'react-dom';
 import { usePageActive } from './AppRouteCache.jsx';
@@ -69,8 +71,6 @@ export default function StoryOpenNotice({
     cloud.dismissProjectOpen();
     onClose?.();
   };
-  // A version choice or an open error needs an answer: show it as a centred dialog
-  // instead of a banner at the top of the page that is easy to miss.
   const choice = matching && (c.draftOffer || c.legacyOffer?.record || opening?.status === 'error');
   // Waiting for an opening only holds the dialog while it loads; a failed open must
   // always have a way out (owner, 2026-10-24: a link to another account's story trapped him).
@@ -79,12 +79,6 @@ export default function StoryOpenNotice({
   // Server rendering and tests have no document: keep the inline notice there.
   const portal = typeof document !== 'undefined';
   const ownsDialog = useDialogOwner(portal && pageActive && !!choice) || !portal;
-  useEffect(() => {
-    if (!choice || !ownsDialog || holding) return undefined;
-    const onKey = (event) => event.key === 'Escape' && close();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
   if (!matching && !waiting) return null;
   if (choice && !ownsDialog) return null;
   const floating = (label) => {
@@ -109,34 +103,13 @@ export default function StoryOpenNotice({
   // nothing where the page already shows its own opening indicator.
   if (!choice && (!opening || opening.status === 'loading'))
     return floating(t('storyOpen.loading'));
-  const notice = (
-    <section
-      className={'story-open-notice' + (choice && portal ? ' story-open-dialog' : '')}
-      role={choice && portal ? 'dialog' : undefined}
-      aria-modal={choice && portal ? 'true' : undefined}
-      onClick={choice && portal ? (event) => event.stopPropagation() : undefined}
-      aria-label={
-        legacy
-          ? t('storyOpen.legacyTitle')
-          : offer
-            ? t('storyOpen.draftTitle')
-            : t('storyOpen.loading')
-      }
-    >
-      <div className="story-open-heading">
-        <h2>
-          {legacy
-            ? storyTitle(legacy.project, t('legacy.visible24'))
-            : offer
-              ? storyTitle(offer.record.project, t('legacy.visible24'))
-              : t(opening?.status === 'error' ? 'storyOpen.errorHeading' : 'storyOpen.loading')}
-        </h2>
-        {!waiting && (
-          <button type="button" onClick={close}>
-            {t('storyOpen.close')}
-          </button>
-        )}
-      </div>
+  const heading = legacy
+    ? storyTitle(legacy.project, t('legacy.visible24'))
+    : offer
+      ? storyTitle(offer.record.project, t('legacy.visible24'))
+      : t(opening?.status === 'error' ? 'storyOpen.errorHeading' : 'storyOpen.loading');
+  const body = (
+    <>
       {legacy ? (
         <>
           <b>{t('storyOpen.legacyTitle')}</b>
@@ -148,12 +121,9 @@ export default function StoryOpenNotice({
             })}
           </small>
           <div className="story-open-actions">
-            <button
-              type="button"
-              onClick={() => jsonDownload(legacy.project, legacy.id + '.original.json')}
-            >
+            <Button onClick={() => jsonDownload(legacy.project, legacy.id + '.original.json')}>
               {t('storyOpen.downloadOriginal')}
-            </button>
+            </Button>
           </div>
           <details>
             <summary>{t('storyOpen.original')}</summary>
@@ -168,23 +138,21 @@ export default function StoryOpenNotice({
             <p>{t('storyOpen.versionConflict')}</p>
           )}
           <div className="story-open-actions">
-            <button
-              className="primary"
-              type="button"
+            <Button
+              variant="primary"
               disabled={c.busy || offer.draft.serverVersion !== offer.record.version}
               onClick={() => open({ restoreDraft: true })}
             >
               {t('storyOpen.continueDraft')}
-            </button>
-            <button type="button" disabled={c.busy} onClick={() => open({ keepDraft: true })}>
+            </Button>
+            <Button disabled={c.busy} onClick={() => open({ keepDraft: true })}>
               {t('storyOpen.openCloud')}
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               onClick={() => jsonDownload(offer.draft.project, offer.record.id + '.unsynced.json')}
             >
               {t('storyOpen.downloadDraft')}
-            </button>
+            </Button>
           </div>
         </>
       ) : opening?.status === 'error' ? (
@@ -193,39 +161,51 @@ export default function StoryOpenNotice({
             {t(opening.key, { status: opening.statusCode || opening.statusLabel || 'read' })}
           </p>
           <div className="story-open-actions">
-            {waiting && (
-              <button type="button" onClick={close}>
-                {t('storyOpen.back')}
-              </button>
-            )}
+            {waiting && <Button onClick={close}>{t('storyOpen.back')}</Button>}
             {opening.key !== 'storyOpen.removed' && (
-              <button type="button" disabled={c.busy} onClick={() => open()}>
+              <Button disabled={c.busy} onClick={() => open()}>
                 {t('storyOpen.retry')}
-              </button>
+              </Button>
             )}
             {retained?.dirty && (
-              <button
-                type="button"
+              <Button
                 onClick={() => jsonDownload(retained.project, opening.projectId + '.unsynced.json')}
               >
                 {t('storyOpen.downloadDraft')}
-              </button>
+              </Button>
             )}
           </div>
         </>
       ) : (
         <p role="status">{t('storyOpen.loading')}</p>
       )}
+    </>
+  );
+  // A version choice or an open error needs an answer: a centred dialog, not a banner.
+  if (choice && portal)
+    return (
+      <Dialog title={heading} onClose={close} busy={holding} portal className="story-open-dialog">
+        {body}
+      </Dialog>
+    );
+  return (
+    <section
+      className="story-open-notice"
+      aria-label={
+        legacy
+          ? t('storyOpen.legacyTitle')
+          : offer
+            ? t('storyOpen.draftTitle')
+            : t('storyOpen.loading')
+      }
+    >
+      <div className="story-open-heading">
+        <h2>{heading}</h2>
+        {!waiting && <Button onClick={close}>{t('storyOpen.close')}</Button>}
+      </div>
+      {body}
     </section>
   );
-  return choice && portal
-    ? createPortal(
-        <div className="story-open-overlay" onClick={holding ? undefined : close}>
-          {notice}
-        </div>,
-        document.body,
-      )
-    : notice;
 }
 
 export function PreservedStoryDrafts({ account, projectId }) {
@@ -233,11 +213,8 @@ export function PreservedStoryDrafts({ account, projectId }) {
   if (!account || cloud.getState().account !== account) return null;
   const drafts = store.getPreservedCloudDrafts(account, projectId);
   return drafts.length ? (
-    <button
-      type="button"
-      onClick={() => jsonDownload(drafts, projectId + '.preserved-drafts.json')}
-    >
+    <Button onClick={() => jsonDownload(drafts, projectId + '.preserved-drafts.json')}>
       {t('storyOpen.downloadKept')}
-    </button>
+    </Button>
   ) : null;
 }

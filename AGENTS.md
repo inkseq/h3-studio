@@ -8,17 +8,17 @@
 - Share issue API routes/JSON/errors before work; post changes there. Board: github.com/orgs/inkseq/projects/1; routing: `workflow/project.json`.
 - Claim scope/integration owner/branch/worktree/base before edits; preserve parallel work. One issue in progress + one in review per lane. GitHub only; no task database.
 - Latest owner decisions win: record in `workflow/owner-changes.md`, relay one line for Codex; re-read it on origin/main before production writes/spend.
-- Replace, never stack labels: `needs-claude-review` (Tier2 options) / `needs-claude-acceptance` (staged). Claude's 2h pass comments, sets `accepted`/`changes-requested`, removes request label. Read new comments before tasks. End turns: `Waiting on: <who/what, #issue>`.
+- Replace, never stack labels: `needs-claude-review` (Tier2 PRs only) / `needs-claude-acceptance` (staged). Claude's 2h pass comments, sets `accepted`/`changes-requested`, removes request label. Read new comments before tasks. End turns: `Waiting on: <who/what, #issue>`.
 - Keep one same-thread 30min watchdog. A wake is idle: poll once regardless of stale working markers, prioritize owner handoffs, then resume unfinished CI/deploy/task receipts. Mark idle before external waits; see amended CR52.
 
 ## Delivery
 | Tier | Changes | Gate and write-up |
 |---|---|---|
 | 0 | UI/copy/layout/docs | CI, automatic staging, self-check; PR description only, no receipts. |
-| 1 | APIs/additive schema/non-money features | Affected tests, staging self-check; one short issue comment with changes and staging SHA. |
-| 2 | Money/GPU/queue/DBOS/auth/isolation/deletion | Safety tests, non-author safety review, relevant staging acceptance checklist and Claude sign-off. Evidence links. |
+| 1 | APIs/additive schema/queue/DBOS/GPU logic that spends nothing new | Affected tests, staging self-check; author merges on green CI; one short issue comment with changes and staging SHA. No review request. |
+| 2 | **Closed list (CR-20261027-70):** money (charging, credits, Checkout, provider rental/spend), schema change or user-data deletion, auth/permissions/credentials, production host machinery (release/promotion helpers, backup/restore, alert installs) | Safety tests, ONE non-author review of the PR (no separate options review), relevant staging acceptance. Author then merges/adopts without another hand-back. |
 
-Classify behavior; check slices once. Merge small PRs; flag unfinished features. CI auto-deploys staging. Promote identical accepted bytes immediately without rebuild, any day (CR47); Tier2 needs Claude sign-off. Close on promotion, not merge. Continue independent staged milestones while waiting.
+Classify behavior; check slices once. If unsure between Tier1 and Tier2, it is Tier1 unless it is on the closed list. Merge small PRs; flag unfinished features. CI auto-deploys staging. Promote identical accepted bytes immediately without rebuild, any day (CR47); Tier2 needs Claude sign-off. Close on promotion, not merge. Continue independent staged milestones while waiting.
 
 Order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start <=2 (staging soak first) -> go-live checklist -> frontend repo merge into `yingxu` -> #347 editor. No new epics before M1.
 
@@ -28,5 +28,5 @@ Order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start
 - Staging pre-authorized (2026-10-20): QA accounts/test connections/keys/grants (revoke after), Stripe TEST, USD20/task GPUs, config/backfills. Ask once, batched at task start, only for production/live money/real users' data/new credentials or provider accounts/overrun/permanent deletion. Owner owns live payments/legal. After2h without direction, post five evidence/options lines and change bounded approach.
 - Use central AI Registry loaders/exact profiles; read instructions before credentials/cleanup. No secrets in project env/logs/GitHub.
 - Chrome via cua_repl; staging qa-admin/qa-user. No repeated login, DevTools MCP or autoConnect.
-- Tier2: compare fix-only/small/larger options in issue; Claude reviews, disagreements to owner. New queue/scheduler/storage/provider/table family needs owner approval; prefer delete/reuse.
+- Tier2: state fix-only/small/larger options in the issue and proceed with the smallest safe one; the single PR review covers it (no separate options review). Disagreements to owner. New queue/scheduler/storage/provider/table family needs owner approval; prefer delete/reuse.
 - Chinese handoffs: Tier0 1-2 lines; Tier1/2 ~10: user gain, flow/failure effect, code/test/staging/prod proof, 1-3 "Owner 技术理解" points, SHAs/links. GitHub English. Release claims: Session: Unclaimed. [WORKFLOW.md](WORKFLOW.md).

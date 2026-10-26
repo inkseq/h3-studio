@@ -1,7 +1,8 @@
 // Credits chip, Settings → Credits and the not-enough-credits prompt (h3-studio#306/#307).
 // Port of prototype account.jsx. Hidden until GET /v1/credits answers, so it can merge early.
-import React, { useEffect, useMemo, useState } from 'react';
-import { FloatingMessage } from './floating-notice.js';
+import React, { useEffect, useEffectEvent, useMemo, useState } from 'react';
+import { Button } from './ui/Button.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import {
   Check,
   Coins,
@@ -75,8 +76,7 @@ export function CreditsChip({ account }) {
   if (!credits) return null;
   const low = credits.available < 100;
   return (
-    <button
-      type="button"
+    <Button
       className={'credits-chip keep-label' + (low ? ' low' : '')}
       title={t('credits.chipTitle')}
       aria-label={t('credits.chipLabel', { count: formatCredits(credits.available, locale) })}
@@ -85,7 +85,7 @@ export function CreditsChip({ account }) {
       <Coins size={14} aria-hidden="true" />
       <b>{formatCredits(credits.available, locale)}</b>
       <span className="credits-word">{t('credits.word')}</span>
-    </button>
+    </Button>
   );
 }
 
@@ -126,24 +126,27 @@ export function CreditsPanel({ account, active }) {
   }, [api, active]);
 
   // Back from Stripe: ?paid=<session>. Credits arrive by webhook, so poll briefly.
+  const waitForPaid = useEffectEvent((isLive, params) => {
+    const before = credits?.balance ?? null;
+    waitForPurchase(() => api.request('/v1/credits').then(creditSummary), before).then((now) => {
+      if (!isLive()) return;
+      setPaid(now ? 'done' : 'slow');
+      if (now) {
+        setCredits(now);
+        window.dispatchEvent(new Event(CREDITS_CHANGED));
+        api.request('/v1/credits/entries').then((body) => isLive() && setLog(entryList(body)));
+      }
+      params.delete('paid');
+      navigateApp('/settings?' + params, { replace: true, scroll: false });
+    });
+  });
   useEffect(() => {
     if (!active) return undefined;
     const params = new URLSearchParams(location.search);
     if (!params.has('paid')) return undefined;
     let live = true;
     setPaid('waiting');
-    const before = credits?.balance ?? null;
-    waitForPurchase(() => api.request('/v1/credits').then(creditSummary), before).then((now) => {
-      if (!live) return;
-      setPaid(now ? 'done' : 'slow');
-      if (now) {
-        setCredits(now);
-        window.dispatchEvent(new Event(CREDITS_CHANGED));
-        api.request('/v1/credits/entries').then((body) => live && setLog(entryList(body)));
-      }
-      params.delete('paid');
-      navigateApp('/settings?' + params, { replace: true, scroll: false });
-    });
+    waitForPaid(() => live, params);
     return () => {
       live = false;
     };
@@ -233,9 +236,8 @@ export function CreditsPanel({ account, active }) {
           <h4>{t('credits.topUp')}</h4>
           <div className="packs">
             {packs.map((pack) => (
-              <button
+              <Button
                 key={pack.id}
-                type="button"
                 className={'pack keep-label' + (pack.id === popular ? ' best' : '')}
                 data-ui-surface="pack"
                 disabled={!!buying}
@@ -254,7 +256,7 @@ export function CreditsPanel({ account, active }) {
                     ? t('credits.opening')
                     : formatPrice(pack.cents, pack.currency)}
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
           <small className="muted">
@@ -318,9 +320,9 @@ export function CreditsPanel({ account, active }) {
           <p className="muted">{t('credits.noHistory')}</p>
         )}
         {log.next && (
-          <button type="button" className="ghost small" onClick={() => void more()}>
+          <Button variant="ghost" size="sm" onClick={() => void more()}>
             {t('credits.more')}
-          </button>
+          </Button>
         )}
         <small className="muted">{t('credits.support')}</small>
       </div>
@@ -337,50 +339,31 @@ export function LowCreditsDialog() {
     window.addEventListener(INSUFFICIENT_CREDITS, open);
     return () => window.removeEventListener(INSUFFICIENT_CREDITS, open);
   }, []);
-  useEffect(() => {
-    if (!block) return undefined;
-    const onKey = (event) => event.key === 'Escape' && setBlock(null);
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [block]);
   if (!block) return null;
   const close = () => setBlock(null);
   return (
-    <div className="choose-overlay" onClick={close}>
-      <div
-        className="choose low-credits"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="low-credits-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="picker-head">
-          <b id="low-credits-title">{t('credits.lowTitle')}</b>
-        </div>
-        <p>
-          {t('credits.lowBody', {
-            need: formatCredits(block.need, locale),
-            have: formatCredits(block.have, locale),
-          })}
-        </p>
-        <p className="muted">{t('credits.lowHint')}</p>
-        <div className="row tight low-credits-actions">
-          <button type="button" onClick={close}>
-            {t('credits.lowBack')}
-          </button>
-          <button
-            type="button"
-            className="primary keep-label"
-            onClick={() => {
-              close();
-              navigateApp('/settings?tab=credits');
-            }}
-          >
-            <Coins size={15} aria-hidden="true" />
-            {t('credits.lowTopUp')}
-          </button>
-        </div>
-      </div>
-    </div>
+    <Dialog title={t('credits.lowTitle')} onClose={close} portal className="low-credits">
+      <p>
+        {t('credits.lowBody', {
+          need: formatCredits(block.need, locale),
+          have: formatCredits(block.have, locale),
+        })}
+      </p>
+      <p className="muted">{t('credits.lowHint')}</p>
+      <DialogActions>
+        <Button onClick={close}>{t('credits.lowBack')}</Button>
+        <Button
+          variant="primary"
+          className="keep-label"
+          onClick={() => {
+            close();
+            navigateApp('/settings?tab=credits');
+          }}
+        >
+          <Coins size={15} aria-hidden="true" />
+          {t('credits.lowTopUp')}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }

@@ -1,0 +1,69 @@
+/* Section navigation (<SideNav>, <SideNavItem>): a quiet vertical list, the current row
+ * filled; a scrollable row of pills on phones. */
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.side-nav > .side-nav-item {
+  justify-content: flex-start;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--h-md);
+  padding: 6px 10px;
+  font-size: var(--fs-md);
+  white-space: nowrap;
+  color: var(--ink-2);
+  background: transparent;
+  border-color: transparent;
+}
+.side-nav > .side-nav-item:hover {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+.side-nav > .side-nav-item.on {
+  color: var(--ink);
+  background: var(--surface-3);
+}
+.side-nav-item > svg {
+  color: var(--muted);
+}
+.side-nav-item.on > svg {
+  color: var(--accent);
+}
+.side-nav-item > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.side-nav-item > small {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.side-nav-item.alert > small {
+  color: var(--accent);
+}
+@media (max-width: 760px) {
+  .side-nav {
+    flex-direction: row;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .side-nav > .side-nav-item {
+    flex: none;
+    width: auto;
+    min-height: 36px;
+    padding: 5px 12px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+  .side-nav-item > span {
+    flex: none;
+  }
+}

@@ -1,8 +1,8 @@
 // Admin panels for /admin (h3-studio#304, #537): users, pricing and the audit log.
 // The backend enforces require_admin on every route; a panel whose endpoint is not deployed
 // yet says so instead of failing.
-import React, { useEffect, useMemo, useState } from 'react';
-import { FloatingMessage } from './floating-notice.js';
+import React, { useEffect, useMemo, useState, useEffectEvent } from 'react';
+import { Button } from './ui/Button.jsx';
 import { ChevronDown, History } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -40,8 +40,9 @@ function usePaged(api, path, active) {
       setError(failure.message);
     }
   };
+  const loadEvent = useEffectEvent((...args) => load(...args));
   useEffect(() => {
-    if (active) void load();
+    if (active) void loadEvent();
   }, [api, path, active]);
   return { rows, setRows, next, state, error, load };
 }
@@ -142,15 +143,15 @@ export function AdminUsers({ api, active }) {
                 {apiDate(user.created_at)?.toLocaleDateString(locale) || '—'}
               </span>
               <span>
-                <button
-                  type="button"
-                  className="ghost small"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   aria-expanded={open === user.id}
                   onClick={() => setOpen(open === user.id ? null : user.id)}
                 >
                   {t('admin.manage')}
                   <ChevronDown size={13} aria-hidden="true" />
-                </button>
+                </Button>
               </span>
             </div>
             {open === user.id && (
@@ -172,19 +173,18 @@ export function AdminUsers({ api, active }) {
                     onChange={(event) => setReason(event.target.value)}
                   />
                 </label>
-                <button
-                  type="button"
-                  className="primary"
+                <Button
+                  variant="primary"
                   disabled={busy || !/^-?[1-9]\d*$/.test(delta) || !reason.trim()}
                   onClick={() => void update(user, { delta: Number(delta) }, '/credits', 'POST')}
                 >
                   {t('admin.adjust')}
-                </button>
+                </Button>
                 <span className="user-adjust-actions">
                   {user.role !== 'admin' && (
-                    <button
-                      type="button"
-                      className="ghost small"
+                    <Button
+                      variant="ghost"
+                      size="sm"
                       disabled={busy || !reason.trim()}
                       title={t('admin.viewAsHelp')}
                       onClick={async () => {
@@ -201,20 +201,19 @@ export function AdminUsers({ api, active }) {
                       }}
                     >
                       {t('admin.viewAs')}
-                    </button>
+                    </Button>
                   )}
-                  <button
-                    type="button"
-                    className="ghost small"
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     disabled={busy}
                     onClick={() =>
                       void update(user, { role: user.role === 'admin' ? 'user' : 'admin' })
                     }
                   >
                     {t(user.role === 'admin' ? 'admin.makeUser' : 'admin.makeAdmin')}
-                  </button>
-                  <button
-                    type="button"
+                  </Button>
+                  <Button
                     className={'ghost small' + (user.status === 'suspended' ? '' : ' danger')}
                     disabled={busy}
                     onClick={() =>
@@ -224,7 +223,7 @@ export function AdminUsers({ api, active }) {
                     }
                   >
                     {t(user.status === 'suspended' ? 'admin.restore' : 'admin.suspend')}
-                  </button>
+                  </Button>
                 </span>
               </div>
             )}
@@ -233,13 +232,9 @@ export function AdminUsers({ api, active }) {
       </div>
       {list.state === 'ready' && !list.rows.length && <p className="muted">{t('admin.noUsers')}</p>}
       {list.next && (
-        <button
-          type="button"
-          className="ghost small"
-          onClick={() => void list.load(list.next, false)}
-        >
+        <Button variant="ghost" size="sm" onClick={() => void list.load(list.next, false)}>
           {t('credits.more')}
-        </button>
+        </Button>
       )}
     </div>
   );
@@ -457,13 +452,9 @@ export function AdminAudit({ api, active }) {
       </div>
       {list.state === 'ready' && !list.rows.length && <p className="muted">{t('admin.noAudit')}</p>}
       {list.next && (
-        <button
-          type="button"
-          className="ghost small"
-          onClick={() => void list.load(list.next, false)}
-        >
+        <Button variant="ghost" size="sm" onClick={() => void list.load(list.next, false)}>
           {t('credits.more')}
-        </button>
+        </Button>
       )}
     </div>
   );

@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from './store.js';
 import { uploadFile, setCloudMediaHandlers, nativeMediaSource, getFile } from './media.js';
-import { captureWorkspace, assertWorkspace, createUploadGate } from './workspace-context.js';
-import { replaceEntityMedia, uploadLookImage, uploadFreestyleFiles } from './media-operations.js';
+import { captureWorkspace, assertWorkspace } from './workspace-context.js';
+import { uploadLookImage, uploadFreestyleFiles } from './media-operations.js';
 
 const deferred = () => {
   let resolve, reject;
@@ -207,104 +207,6 @@ test('delayed cloud upload is rejected after same project enters another account
   assert.equal(localWrites, 0);
 });
 
-test('late replacement preserves concurrent metadata edits and clears stale generated provenance', async () => {
-  const h = fixture(),
-    wait = deferred();
-  h.store.updateEntity(h.image, {
-    data: {
-      cloudArtifactId: 'old-artifact',
-      sourceJobId: 'old-job',
-      sourceHash: 'old-hash',
-      simulation: true,
-      metadata: { duration: 99 },
-    },
-  });
-  const pending = replaceEntityMedia({
-    store: h.store,
-    entityId: h.image,
-    file: file(),
-    upload: () => wait.promise,
-  });
-  h.store.updateEntity(h.image, {
-    title: '刚改的名字',
-    description: '刚改的描述',
-    data: { note: '上传时新增备注' },
-  });
-  wait.resolve(uploaded());
-  await pending;
-  const live = entity(h, h.image);
-  assert.equal(live.title, '刚改的名字');
-  assert.equal(live.description, '刚改的描述');
-  assert.equal(live.data.note, '上传时新增备注');
-  assert.equal(live.data.fileId, 'new-file');
-  assert.equal(live.data.cloudArtifactId, null);
-  assert.equal(live.data.sourceJobId, null);
-  assert.deepEqual(live.data.metadata, {});
-});
-
-test('manual file replacement defeats old upload without permanently reserving the entity ID', async () => {
-  const h = fixture(),
-    wait = deferred(),
-    pending = replaceEntityMedia({
-      store: h.store,
-      entityId: h.image,
-      file: file(),
-      upload: () => wait.promise,
-    }),
-    rejected = assert.rejects(pending, /已被替换/);
-  h.store.updateEntity(h.image, { data: { fileId: 'manual-file' } });
-  wait.resolve(uploaded());
-  await rejected;
-  assert.equal(entity(h, h.image).data.fileId, 'manual-file');
-  await replaceEntityMedia({
-    store: h.store,
-    entityId: h.image,
-    file: file(),
-    upload: async () => uploaded(),
-  });
-  assert.equal(entity(h, h.image).data.fileId, 'new-file');
-});
-
-test('deleted upload target is never recreated by a late response', async () => {
-  const h = fixture(),
-    wait = deferred(),
-    pending = replaceEntityMedia({
-      store: h.store,
-      entityId: h.image,
-      file: file(),
-      upload: () => wait.promise,
-    }),
-    rejected = assert.rejects(pending, /替换或删除/);
-  h.store.deleteEntity(h.image);
-  wait.resolve(uploaded());
-  await rejected;
-  assert.equal(entity(h, h.image), undefined);
-});
-test('replacing and undoing a file still invalidates the old upload without blocking a later attempt', async () => {
-  const h = fixture(),
-    wait = deferred(),
-    pending = replaceEntityMedia({
-      store: h.store,
-      entityId: h.image,
-      file: file(),
-      upload: () => wait.promise,
-    }),
-    rejected = assert.rejects(pending, /已被替换/);
-  h.store.updateEntity(h.image, { data: { fileId: 'temporary-replacement' } });
-  h.store.undo();
-  assert.equal(entity(h, h.image).data.fileId, 'old-file');
-  wait.resolve(uploaded());
-  await rejected;
-  assert.equal(entity(h, h.image).data.fileId, 'old-file');
-  await replaceEntityMedia({
-    store: h.store,
-    entityId: h.image,
-    file: file(),
-    upload: async () => uploaded(),
-  });
-  assert.equal(entity(h, h.image).data.fileId, 'new-file');
-});
-
 test('gallery manual selection wins over delayed upload; next explicit upload can still work', async () => {
   const h = fixture(),
     wait = deferred(),
@@ -334,31 +236,6 @@ test('gallery manual selection wins over delayed upload; next explicit upload ca
     upload: async () => uploaded(),
   });
   assert.equal(entity(h, h.character).data.looks[0].gallery.front, fresh);
-});
-
-test('one synchronous drop gate prevents a second transfer and releases after failure', async () => {
-  const gate = createUploadGate(),
-    wait = deferred();
-  let transfers = 0;
-  const run = () =>
-    gate.run(async () => {
-      transfers++;
-      await wait.promise;
-    });
-  const first = run();
-  assert.equal(await run(), false);
-  assert.equal(transfers, 1);
-  wait.resolve();
-  assert.equal(await first, true);
-  assert.equal(gate.busy, false);
-  await assert.rejects(
-    gate.run(async () => {
-      throw Error('test failure');
-    }),
-    /test failure/,
-  );
-  assert.equal(await gate.run(async () => transfers++), true);
-  assert.equal(transfers, 2);
 });
 
 test('freestyle rechecks live slot capacity after transfer without adding an orphan entity or overwriting manual input', async () => {
