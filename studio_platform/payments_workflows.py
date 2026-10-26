@@ -9,6 +9,7 @@ import hashlib
 import json
 
 from .payments import PaymentCore
+from .domain_turns import DomainTurns
 
 PAYMENT_WORKFLOW = "inkseq.payment.event.v1"
 
@@ -22,7 +23,10 @@ def payment_workflow_id(tenant, event_id):
     )
 
 
-def register_payment_workflows(DBOS, repo, settings, *, gateway_factory=None):
+def register_payment_workflows(
+    DBOS, repo, settings, *, gateway_factory=None, domain_turns=None
+):
+    domain_turns = domain_turns or DomainTurns()
     core = PaymentCore(repo, settings)
     operation_limit = asyncio.Semaphore(4)
 
@@ -50,7 +54,7 @@ def register_payment_workflows(DBOS, repo, settings, *, gateway_factory=None):
     @DBOS.step(name="inkseq.payment.event-turn.v1", retries_allowed=False)
     async def event_turn(tenant, event_id):
         async with operation_limit:
-            return await asyncio.to_thread(turn, tenant, event_id)
+            return await domain_turns.call(turn, tenant, event_id)
 
     @DBOS.workflow(name=PAYMENT_WORKFLOW, max_recovery_attempts=None)
     async def process(tenant, event_id):
