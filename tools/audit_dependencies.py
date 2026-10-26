@@ -1,6 +1,7 @@
 """Advisory scan of checked-in pinned requirements; never installs or fixes them."""
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -71,7 +72,20 @@ def main():
     (directory / "summary.json").write_text(
         json.dumps(results, indent=2) + "\n", encoding="utf-8"
     )
-    return int(any(row["status"] != "clean" for row in results))
+    findings = any(row["status"] != "clean" for row in results)
+    if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(summary, "a", encoding="utf-8") as stream:
+            stream.write(
+                "## Advisory dependency audit\n\nNo automatic fixes; no promotion gate. "
+                "See the dependency-audit artifact for details. Errors are not clean results.\n\n"
+            )
+            for row in results:
+                stream.write(f"- `{row['requirements']}`: **{row['status']}**\n")
+    if findings and os.environ.get("GITHUB_ACTIONS") == "true":
+        print(
+            "::warning::Dependency audit has findings or errors; see the advisory artifact and job summary."
+        )
+    return int(findings)
 
 
 if __name__ == "__main__":
