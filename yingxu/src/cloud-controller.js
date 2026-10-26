@@ -1642,15 +1642,16 @@ export function createCloudController({
         throw Error('workbench.capabilities');
       const mode = recipe.mode,
         support = profile ? profile.generation_support?.[mode] : recipe;
+      // Shots made through the API or the AI assistant may carry no storyboard yet; the
+      // saved server draft is still the plan, so an absent storyboard reads as empty.
       const shot = current().project.entities.find((row) => row.id === shotId),
-        b = shot?.data.storyboard;
+        b = shot?.data.storyboard || {};
       if (!shot) throw Error('workbench.changed');
       if (shot.data.h3?.explicitReferences) {
         if (preview.project_version !== current().workspace.serverVersion || preview.issues?.length)
           throw Error('workbench.inputsInvalid');
         continue;
       }
-      if (!b) throw Error('workbench.changed');
       if (b.continuePrevious && (mode === 'fl' || support?.input_support?.first_frame === true)) {
         const project = current().project,
           chapter = project.entities.find(

@@ -1001,6 +1001,37 @@ test('aggregate preflight syncs inputs once without a legacy plan or inherited-d
     h.controller.destroy();
   }
 });
+test('aggregate preflight accepts an API-made shot that has no storyboard yet', async () => {
+  const h = await harness();
+  try {
+    const row = h.remote.get(h.store.getState().project.id);
+    delete row.project.entities.find((e) => e.id === h.shot).data.storyboard;
+    await h.controller.open(row.id);
+    assert.equal(
+      h.store.getState().project.entities.find((e) => e.id === h.shot).data.storyboard,
+      undefined,
+    );
+    h.api.request = async (path, options) => ({
+      request_hash: await digest(options.body),
+      id: 'api-shot-preflight',
+      project_id: h.store.getState().project.id,
+      project_version: options.body.expected_version,
+      status: 'completed',
+      ready: true,
+      items: [
+        { shot_id: h.shot, index: 0, seed: '1', plan_id: 'plan-0', plan: { status: 'ready' } },
+      ],
+    });
+    const value = await h.controller.workbenchCommand('preflight', {
+      shot_ids: [h.shot],
+      copies: 1,
+      capabilities_version: 'story-v1',
+    });
+    assert.equal(value.id, 'api-shot-preflight');
+  } finally {
+    h.controller.destroy();
+  }
+});
 test('aggregate preflight late response cannot open or clear another workspace operation', async () => {
   const h = await harness();
   try {
