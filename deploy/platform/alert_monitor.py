@@ -29,9 +29,9 @@ SERVICES = ('app', 'db', 'caddy', 'dstack', 'controller')
 MAX_BYTES = 1024 * 1024
 MAX_PENDING = 128
 BACKUP_STATE = Path('/var/lib/inkseq-business-backup')
-# Daily timer: 16:30 UTC + <=5m jitter + <=65m service timeout. Allow
-# another 20m before declaring the scheduled copy missing. Review with timer changes.
-BACKUP_DEADLINE_HOUR = 18
+# Daily timer: 16:30 UTC + <=5m jitter + <=95m service + 20m grace.
+# About 26h since the previous scheduled start, not a restore/freshness claim.
+BACKUP_DEADLINE_MINUTE = 18 * 60 + 30
 THRESHOLD_FIELDS = frozenset({'gpu_max_seconds', 'stuck_seconds', 'wake_count', 'cpu_percent',
     'memory_percent', 'host_sustain_seconds', 'health_down_seconds', 'http_5xx_min',
     'http_5xx_ratio', 'max_sample_gap_seconds', 'terminal_reservation_seconds'})
@@ -255,7 +255,7 @@ def backup_copy_missing(*, now, root=BACKUP_STATE):
     try:
         current = datetime.fromtimestamp(now, timezone.utc)
         days = [current.date()]
-        if current.hour < BACKUP_DEADLINE_HOUR:
+        if current.hour * 60 + current.minute < BACKUP_DEADLINE_MINUTE:
             days.append(current.date() - timedelta(days=1))
         protected_directory(root)
         for day in days:

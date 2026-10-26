@@ -1,8 +1,10 @@
 # Business backup observation and recovery (#655)
 
-This first slice adds diagnostics and alarms. It does **not** reconcile an old
-intent, adopt a host helper, rerun a backup, delete data, or assert a new restore.
-Normal non-author review, exact-byte helper adoption and zero-work gates remain.
+This slice prepares a fixed original-operation recovery, bounded capture wait,
+diagnostics and alarms. Nothing here is an installation or successful-copy receipt.
+Non-author exact-byte review, helper CAS adoption and zero-work gates remain.
+Priority follows Claude review 6419059531: production recovery, alarms, staging
+missing-local-media diagnosis, then Sentry.
 
 ## Read-only findings (2026-10-26)
 
@@ -27,6 +29,18 @@ evidence for later reconciliation, not authority to create a replacement prefix.
 Both historical intents and original snapshots remain intact. The historical
 unfinished-operation guard still blocks subsequent scheduled copies.
 
+Read-only qualification `a10f4e02-4c95-4130-9e0e-6f0a0f3ea46f` found the old
+production image/release no longer retained. Do not fabricate their approval or
+recapture the data. The currently approved production image
+`sha256:375b439ff88697761abe1318871027d3a3e1976dfd014c7499a8dbc5100de705`
+at `b78510e6991f5acccb0996981e8016be5434693f` retains the v3 verifier/copy protocol.
+Offline command `b0a226cf-e533-4850-84a1-9c7b0bd50513` verified the original data
+using that image, network disabled, read-only payload/root, uid10001, no credentials:
+1937 files / 1,359,916,299 bytes; manifest SHA256
+`37a5e05898b9288f58b7eaa802b6bcb880d3935054bcbe6ee51b401a363fa965`;
+1935 available objects, two explicitly deleted misses, zero unexpected misses.
+No upload, live DB write, retention or application restart was performed.
+
 ## Operator alerts
 
 The existing minute monitor reads only the fixed backup systemd unit and root-pinned
@@ -37,9 +51,11 @@ deduplication, retry bounds and destinations. No AWS resources or identities cha
 - `business_backup_failed`: confirmed failed oneshot; unknown/running observations
   cannot resolve it.
 - `business_backup_missing`: no validated receipt for the last due daily copy.
-  The reviewed deadline is **18:00 UTC**, from the existing 16:30 UTC timer, up to
-  five minutes of jitter, 65-minute service budget and 20 minutes of grace. Before
-  18:00, yesterday's copy is sufficient; after 18:00 today's copy is required.
+  The proposed deadline is **18:30 UTC**, from the existing 16:30 UTC timer, up to
+  five minutes of jitter, 95-minute service budget and 20 minutes of grace. Before
+  18:30, yesterday's copy is sufficient; after 18:30 today's copy is required.
+  This is approximately 26 hours from the previous scheduled start, not an exact
+  age-since-completion metric. Original snapshot day governs recovery freshness.
   Re-review this constant if the timer or service budget changes.
 - `business_backup_unobservable`: protected receipt state cannot be read or is
   invalid. This is separate from missing, so unknown evidence never fabricates
@@ -65,7 +81,12 @@ does not prove the container-side work stopped. Diagnostic files never satisfy
 `check_history`, authorize a retry, or mint a `completed.json`/restore receipt.
 Only finite error codes are printed; subprocess output, arguments and arbitrary
 exception text are omitted. A failure to write diagnostics preserves the original
-exception and intent. The current timeout and replay guards are unchanged.
+exception and intent. Snapshot caller wait rises from 900 to **2400 seconds**,
+over twice the observed 1010s duration. Handoff remains 900s, transfer 1800s;
+systemd bounds the whole daily invocation to 5700s including 600s validation
+headroom. A timeout remains unknown, never a retry permission. The service uses
+`--daily-preserve` during this recovery window, so neither recovery nor subsequent
+scheduled daily copies delete local snapshots. Explicit retention is separate.
 
 The post-copy hosted-user check uses the existing bounded payload reader, because
 the frozen snapshot intentionally belongs to uid10001 and a real manifest may
@@ -75,16 +96,35 @@ still fails visibly after the original business-copy receipt is saved.
 
 ## Remaining gated recovery
 
-1. Review and adopt the exact monitor/helper bytes under the existing CAS/backup
-   installation protocol, first staging. Do not remove original intent files.
-2. Qualify a separate bounded recovery of the original production snapshot using
-   its pinned image/manifest, no active process and exact empty remote-prefix proof.
-   A timeout correction must fit the whole service budget; do not blindly replay
-   `docker exec` or allocate a new operation UUID.
-3. Determine how the absent staging local media can be recovered. If explicit
+1. Review the exact recovery/helper/unit bytes and the transport-image substitution
+   above. Preserve installed helper/unit bytes as rollback with their hashes; adopt
+   only against fresh matching installed hashes (production helper previously
+   `ff671c65030b6a3c2de7fe590d29be40b20abaeeacc737f2254e58606dd6f676`).
+   The fixed recovery helper is a new root-controlled file beside `business_backup.py`;
+   it is not loaded by the timer. Hold the existing release lock during adoption,
+   require an inactive backup service and a fresh zero-work observation. No app
+   deployment, image pull, new AWS resource/credential or cleanup is involved.
+2. Default `python3 -B business_backup_recovery.py` qualifies only the exact original
+   operation. Its optional `--execute` invocation must be reviewed and bounded by a
+   4800s service/caller deadline (600s source verification + 900s handoff + 600s
+   frozen verification + 1800s transfer + validation headroom). It pins current
+   release/image as well as original intent and manifest, checks zero jobs/no
+   surviving snapshot process, and refuses any prior recovery/transfer output.
+   An exclusive fsynced recovery intent is written before handoff. The existing
+   copy protocol checks empty version history of the **original** prefix before
+   conditional writes. Unknown/partial outcomes require read-only reconciliation;
+   do not rerun this helper, remove its fence, or invent completion.
+3. Recovery records original day/commit in `completed.json`, and actual transport
+   image in `recovery-intent.json`. It does not satisfy today's freshness alarm.
+   Recheck zero-work and history, then run the one bounded daily-preserve service;
+   reconcile that exact service/SSM receipt, current-day completion and pinned S3
+   object versions. Only that fresh capture meets the production recovery goal.
+   Rollback restores helper/unit bytes only, never deletes an operation or undoes
+   an acknowledged upload. Do not overlap recovery and the scheduled daily timer.
+4. Determine how the absent staging local media can be recovered. If explicit
    incomplete capture is needed, review a contract change that lists unexpected
    loss and preserves it in copy/restore reports. No forced "expected deletion".
-4. Under a fresh zero-work gate, obtain a new pinned S3 copy and an isolated restore
-   verification. Report exact dates, coverage and original command receipts.
-5. Sentry wiring is a separate #655 follow-up through the existing deployment config
+5. An isolated staging restore drill is separately gated, not a consequence of
+   today's upload. Preserve its original receipts and report actual data dates.
+6. Sentry wiring is a separate #655 follow-up through the existing deployment config
    path and acceptance gates. Charging/Checkout remain off.

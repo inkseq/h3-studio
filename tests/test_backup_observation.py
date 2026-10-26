@@ -60,10 +60,10 @@ class BackupObservationTests(unittest.TestCase):
     def test_daily_deadline_and_midnight_do_not_require_premature_backup(self):
         self.completed('2026-10-25')
         self.assertFalse(self.observe('2026-10-26T00:01:00'))
-        self.assertFalse(self.observe('2026-10-26T17:59:59'))
-        self.assertTrue(self.observe('2026-10-26T18:00:00'))
+        self.assertFalse(self.observe('2026-10-26T18:29:59'))
+        self.assertTrue(self.observe('2026-10-26T18:30:00'))
         self.completed('2026-10-26')
-        self.assertFalse(self.observe('2026-10-26T18:00:00'))
+        self.assertFalse(self.observe('2026-10-26T18:30:00'))
         self.assertFalse(self.observe('2026-10-27T00:00:00'))
 
     def test_no_copy_and_partial_intent_never_pass_and_future_day_is_ignored(self):

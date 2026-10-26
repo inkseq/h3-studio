@@ -26,6 +26,7 @@ HELPERS = Path('/opt/inkseq-release-staging-v1')
 HOSTS = {'staging': 'i-07805df7bd6984bd9', 'production': 'i-03d81d2d153b5e2fd'}
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
 PHASES = frozenset({'snapshot', 'handoff', 'transfer'})
+SNAPSHOT_TIMEOUT = 2400  # 1010s observed capture + >2x headroom, still bounded.
 DIAGNOSTIC_CODES = frozenset({'backup_prior_outcome_requires_reconciliation',
     'backup_prior_receipt_invalid', 'backup_disk_reserve_required', 'backup_release_not_ready',
     'backup_docker_failed_or_unknown', 'backup_hosted_users_unavailable_business_confirmed',
@@ -232,8 +233,9 @@ def require_hosted_coverage(operation):
             'backup_hosted_users_unavailable_business_confirmed')
 
 
-def finish_daily(operation, summary, cfg, image):
-    result = {**summary, 'retention':retention_after_success(cfg,image)}
+def finish_daily(operation, summary, cfg, image, *, preserve=False):
+    result = {**summary, 'retention':({'state':'preserved_by_operator'} if preserve
+        else retention_after_success(cfg,image))}
     require_hosted_coverage(operation)
     return result
 
@@ -556,7 +558,7 @@ def retention_after_success(cfg, image):
 
 
 def run(mode="daily"):
-    require(os.geteuid() == 0 and mode in ('daily','retention-plan','retention-apply'), 'backup_root_or_mode_required')
+    require(os.geteuid() == 0 and mode in ('daily','daily-preserve','retention-plan','retention-apply'), 'backup_root_or_mode_required')
     cfg = validate_config(read(CONFIG), Path('/var/lib/cloud/data/instance-id').read_text().strip())
     protected(STATE, True); protected(HELPERS, True)
     # Load only already installed root-controlled release validation helpers.
@@ -582,12 +584,13 @@ def run(mode="daily"):
         require(app['image'] == image and app['running'] is True, 'backup_app_image_mismatch')
         require(any(m['Destination'] == '/data' and m['Source'] == str(ROOT/'platform-data')
             and m['Type'] == 'bind' for m in app['mounts']), 'backup_data_mount_mismatch')
-        if mode != 'daily':
+        if mode not in ('daily', 'daily-preserve'):
             return retain_backups(cfg,image,apply=mode == 'retention-apply')
         # A previous unknown transfer blocks new prefixes: reconciliation first.
         operation = STATE/day
         if check_history(STATE, day):
-            return finish_daily(operation,completed_summary(operation,day),cfg,image)
+            return finish_daily(operation,completed_summary(operation,day),cfg,image,
+                preserve=mode == 'daily-preserve')
         require(shutil.disk_usage(ROOT).free >= 5*1024**3, 'backup_disk_reserve_required')
         nonce = str(uuid.uuid4())
         new_directory(operation)
@@ -600,7 +603,7 @@ def run(mode="daily"):
             "from pathlib import Path;p=Path('/data/business-backups');p.mkdir(mode=0o700,exist_ok=True);assert p.is_dir() and not p.is_symlink()"])
         with phase(operation, 'snapshot'):
             docker(['exec', ids[0], 'python', '-B', '-m', 'studio_platform.backup_cli', 'configured',
-                '--destination', snapshot_container] + (['--allow-missing-media'] if cfg['version'] >= 2 else []) + (['--classify-expected-deletions'] if cfg['version'] == 3 else []), timeout=900)
+                '--destination', snapshot_container] + (['--allow-missing-media'] if cfg['version'] >= 2 else []) + (['--classify-expected-deletions'] if cfg['version'] == 3 else []), timeout=SNAPSHOT_TIMEOUT)
         # Private handoff: cp without -L retains symlinks, which are rejected.
         # The app cannot replace this root-controlled transport mount source.
         snapshot_host = operation/'snapshot'
@@ -628,7 +631,8 @@ def run(mode="daily"):
             'completion_sha256': receipt['completion_sha256'], 'completion_version_id': receipt['completion_version_id'],
             'receipt_sha256': hashlib.sha256((operation/'receipt.json').read_bytes()).hexdigest(),
             'restore_verified': False, **coverage(receipt)})
-        return finish_daily(operation,{'state':'copied_not_restored','day':day,**coverage(receipt)},cfg,image)
+        return finish_daily(operation,{'state':'copied_not_restored','day':day,**coverage(receipt)},cfg,image,
+            preserve=mode == 'daily-preserve')
     finally:
         os.close(lockfd)
 
@@ -675,7 +679,8 @@ def restore(day, *, allow_incomplete=False):
 
 if __name__ == '__main__':
     try:
-        retention = {'--retention-plan':'retention-plan','--retention-apply':'retention-apply'}
+        retention = {'--retention-plan':'retention-plan','--retention-apply':'retention-apply',
+            '--daily-preserve':'daily-preserve'}
         require(len(sys.argv) == 1 or len(sys.argv) == 2 and sys.argv[1] in retention
             or len(sys.argv) in (3,4) and sys.argv[1] == '--restore-day' and (len(sys.argv) == 3 or sys.argv[3] == '--allow-incomplete'), 'backup_fixed_invocation_required')
         print(json.dumps(run() if len(sys.argv) == 1 else run(retention[sys.argv[1]]) if len(sys.argv) == 2

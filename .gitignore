@@ -851,3 +851,5 @@ inventory.json
 !docs/CREATOR-CONTROLS.md
 !tests/test_backup_observation.py
 !docs/BACKUP-RECOVERY-655.md
+!deploy/platform/business_backup_recovery.py
+!tests/test_business_backup_recovery.py
