@@ -14,9 +14,7 @@ import {
   cloudSystemMessage,
   executionPresetControls,
   controlsForRecipe,
-  selectedRecipe,
   selectedProfileRecipe,
-  jobLabels,
   jobStatusLabel,
   jobMessage,
   activeJobStatuses,
@@ -31,7 +29,6 @@ import RecipeExecutionNotice from './RecipeExecutionNotice.jsx';
 import GenerationAvailability from './GenerationAvailability.jsx';
 import { modeAvailability } from './generation-availability.js';
 import ApiKeys from './ApiKeys.jsx';
-import AccountPassword from './AccountPassword.jsx';
 import GenerationControl from './GenerationControl.jsx';
 import { DeploymentProfileSelect } from './DeploymentProfile.jsx';
 import GenerationFailure from './GenerationFailure.jsx';
@@ -122,7 +119,7 @@ export function CloudAssetStatus() {
   );
 }
 export function CloudButton({ onOpen }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const c = useCloud(),
     workspace = useSyncExternalStore(store.subscribe, store.getState, store.getState).workspace;
   useEffect(() => {
@@ -234,7 +231,7 @@ export function CloudWorkspaceBar({ onOpenCloud }) {
   );
 }
 export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const c = useCloud(),
     [username, setUsername] = useState(''),
     [password, setPassword] = useState(''),
@@ -564,7 +561,7 @@ function Control(props) {
   return <GenerationControl {...props} className="cloud-control" />;
 }
 function DeploymentPreset({ recipe, values, onApply }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const automatic = executionPresetControls(recipe);
   if (Object.keys(automatic).length)
     return (
@@ -1223,6 +1220,6 @@ export function JobList({ jobs, project, onInspect, onReview }) {
   );
 }
 export function CloudProduction(props) {
-  const { t, locale } = useI18n();
+  const { locale } = useI18n();
   return <ProductionQueue locale={locale} key={props.project.id} {...props} />;
 }

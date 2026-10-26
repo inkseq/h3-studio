@@ -3,7 +3,6 @@ import { Segmented } from './ui/Segmented.jsx';
 import { Button } from './ui/Button.jsx';
 import { DialogActions } from './ui/Dialog.jsx';
 import { Field } from './ui/Field.jsx';
-import { FloatingMessage } from './floating-notice.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import CreationHistory from './CreationHistory.jsx';
 import { createQuickChatClient } from './quick-chat-client.js';

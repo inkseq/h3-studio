@@ -1,5 +1,4 @@
 import { useQuery } from '@tanstack/react-query';
-import { FloatingMessage } from './floating-notice.js';
 import { Columns2, MoreHorizontal, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-react';
 import { profileLabel } from './model-visibility.js';
 import { isActiveTrashItem } from './trash-commands.js';

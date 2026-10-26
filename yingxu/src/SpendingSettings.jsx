@@ -1,7 +1,6 @@
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
-import { FloatingMessage } from './floating-notice.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
 import TakePreferencesSettings from './TakePreferencesSettings.jsx';
 import SpendingBreakdown from './SpendingBreakdown.jsx';
@@ -16,18 +15,7 @@ import AccountPassword from './AccountPassword.jsx';
 import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import SkinPicker from './SkinPicker.jsx';
-import {
-  UserRound,
-  SlidersHorizontal,
-  Bot,
-  Wallet,
-  Coins,
-  ShieldCheck,
-  LogOut,
-  RefreshCw,
-  BookOpen,
-  ArrowUpRight,
-} from 'lucide-react';
+import { UserRound, SlidersHorizontal, Bot, Wallet, Coins, LogOut, RefreshCw } from 'lucide-react';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';

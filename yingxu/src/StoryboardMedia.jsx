@@ -1,5 +1,4 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { FloatingMessage } from './floating-notice.js';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Image as ImageIcon, Play, Pause, Download } from 'lucide-react';
 import { getFile, nativeMediaSource } from './media.js';

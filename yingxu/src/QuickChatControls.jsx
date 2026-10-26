@@ -1,8 +1,6 @@
-import { usePageActive } from './AppRouteCache.jsx';
-import { useI18n, LanguageSwitcher } from './i18n/I18nProvider.jsx';
+import { useI18n } from './i18n/I18nProvider.jsx';
 import './i18n/workspace-language.css';
-import React, { useEffect, useRef, useState } from 'react';
-import { X, Settings2 } from 'lucide-react';
+import React, { useState } from 'react';
 import { DeploymentProfileSelect } from './DeploymentProfile.jsx';
 import GenerationAvailability from './GenerationAvailability.jsx';
 import { modeAvailability, requireModeAvailable } from './generation-availability.js';
@@ -23,7 +21,7 @@ export function ChatDialog(props) {
   return <Dialog {...props} />;
 }
 function ProfileInputBoundary({ support }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const roles = {
     first_frame: t('chatControls.copy1'),
     last_frame: t('chatControls.copy2'),

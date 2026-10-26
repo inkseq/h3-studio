@@ -5,7 +5,6 @@ import {
   createStore,
   migrateLegacy,
   validateProject,
-  validateLink,
   readiness,
   children,
   ancestors,

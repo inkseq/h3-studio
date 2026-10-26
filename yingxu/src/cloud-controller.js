@@ -9,7 +9,6 @@ import { translateForAccount } from './i18n/locale.js';
 import { getFile, setCloudMediaHandlers } from './media.js';
 import {
   executionPresetControls,
-  selectedRecipe,
   selectedProfileRecipe,
   blankCloudProject,
   freestyleProject,
