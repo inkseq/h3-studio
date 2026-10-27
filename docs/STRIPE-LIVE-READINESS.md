@@ -60,8 +60,8 @@ AWS write. Any mismatch preserves the available source/history for review.
    production or infer account identity from a price ID.
 3. Separately prepare and review guarded revision `20261021_0006` adoption under
    the existing schema/release lock, fingerprint and verified-backup procedure.
-   This slice provides the frozen definition and readers, **not an executed
-   adoption or an adoption CLI**. Frozen 005 stays unchanged. 006 changes only
+   The frozen definition and guarded adoption/rehearsal source shipped in #412;
+   source availability is **not proof of adoption**. Frozen 005 stays unchanged. 006 changes only
    the two named `livemode = 0` checks to integer `livemode IN (0, 1)` checks;
    original payment/event columns, identities and refund bounds are preserved.
    Unmarked, mixed or altered 006 families do not authorize LIVE writes.
@@ -86,3 +86,32 @@ it does not claim a fresh provider-side registration check. The last signed
 event time is filtered by the exact configured account and mode. An imported
 but unmounted credential is not runtime readiness; 005 cannot authorize LIVE
 writes. OFF/readiness is not proof that a real-card loop has passed.
+
+## Inkseq-owned customer receipts (#307)
+
+`GET /v1/billing/payments` always returns `receipt_url: null`. For confirmed paid,
+refunded or disputed payments with a `paid_at`, it also returns `receipt`:
+`{payment_id, pack_id, amount_cents, currency, credits, paid_at, status,
+refunded_cents, issuer: {name, abn, support_email}}`. The issuer is Inkseq,
+ABN 68 442 632 833, support@inkseq.com. `paid_at` is ISO UTC; amounts are integer
+cents in the original currency, and refunded cents are reported separately.
+The immutable purchase determines pack, price and credits, not today's catalog.
+No GST line, provider URL, support phone or street address is included.
+
+`GET /v1/billing/payments/{payment_id}/receipt` returns `{receipt: ...}` for the
+same active, signed-in human owner and tenant, with `Cache-Control: no-store`.
+Unknown, foreign and unpaid payments all return 404 `billing_receipt_not_found`.
+An admin cannot use this route to read another account's receipt. The credit
+history API also omits provider receipt URLs. Original provider receipt values,
+payment events and ledger rows are retained unchanged for reconciliation.
+
+Claude's frontend renders the structured receipt. No email is sent by either
+read route, and this source slice does not implement email delivery or claim
+browser acceptance. Do not use the retained Stripe receipt URL as a fallback.
+These reads make no Stripe call and work with Checkout/charging OFF.
+
+CR-20261027-73 supersedes older activation wording above: the owner pre-approved
+tonight's ordered LIVE preparation and waived the pre-launch real-card loop.
+Activation still requires all recorded schema/catalog/webhook read-backs,
+Inkseq receipts, Claude's staging TEST end-to-end acceptance and the production
+zero-work gate. No receipt endpoint or code merge satisfies those gates by itself.

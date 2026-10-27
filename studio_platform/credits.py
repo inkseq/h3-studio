@@ -775,7 +775,6 @@ def entries(connection, tenant, owner, *, cursor=None, limit=50):
                 "created_at": datetime.fromtimestamp(
                     row["created_at"], timezone.utc
                 ).isoformat(),
-                **({"receipt_url": row["receipt_url"]} if row["receipt_url"] else {}),
             }
             for row in selected
         ],
