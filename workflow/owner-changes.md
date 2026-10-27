@@ -707,3 +707,19 @@ Owner approvals dated 2026-10-27, and only these:
 - the #374 Stripe LIVE preparation steps above, each external write with owner OK. Checkout and charging stay OFF until the final gate.
 
 All other no-new-credential, no-budget-increase and no-paid-infrastructure limits remain. Codex's watcher must match the real `→` (U+2192) or `->`, and comments whose first line is a heading, bold or plain text.
+
+## CR-20261027-73 — overnight launch authority (owner 2026-10-27, before sleeping)
+
+Owner, in the Claude session: "Spend money to test the queue's automatic GPU rental. Stripe can be turned on. When everything is ready, switch it on directly, then test the automatic machine start. Get it working as soon as possible so users can start using it."
+
+- **Auto-capacity testing budget:** up to **USD 50 in total tonight** for staging tests of demand-start, lookahead, floor and the Modal worker host. This replaces the USD 20 per-task line for these tests only. max_price, idle stop and stop-after-test still apply. Reconcile unknown reservations against original billing; never replay.
+- **Stripe LIVE prep (#374 steps 1–3) is pre-approved:** 006 livemode schema, the four LIVE pack prices ($5/$20/$50/$100), and the LIVE webhook with its secret into `/sixnine/platform/stripe`. No further per-step owner OK is needed tonight. Tier2 Claude review still applies to code and schema.
+- **Turn on payments and credit charging in production** as soon as all of these hold:
+  1. steps 1–3 are adopted with read-back;
+  2. our own Inkseq receipts are live (no Stripe `receipt_url`; public identity Inkseq, ABN 68 442 632 833, no GST);
+  3. Claude accepts an end-to-end TEST-mode loop on staging: checkout → webhook → credits granted → a generation deducts credits → refund path;
+  4. production has zero running jobs at the switch.
+
+  The owner waives the pre-launch real-card loop and will do one real purchase as a post-launch check.
+- **Then production auto-start ON** after Claude's staging acceptance of the capacity rule. Verify on production with one real queued job: a machine (or Modal) starts by itself and the job completes.
+- Still forbidden: other new credentials, deleting user data, changing pack prices or welcome credits, and any budget beyond the USD 50 above. Rollback must stay one switch away: Stripe mode off and charging off.
