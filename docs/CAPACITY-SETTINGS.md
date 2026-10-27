@@ -19,7 +19,7 @@ on legacy reads. Legacy unchanged PUT echoes do not adopt the new policy.
    `{expected_version, changes}` (or the compatible `value` object).
 2. Show the returned finite `consequences` codes and numeric parameters.
 3. PUT the same route without `/preview`, retaining the original request and
-   adding a nonblank `reason` (1â€“500 characters), `confirmation_digest` and exact
+   adding a nonblank `reason` (1–500 characters), `confirmation_digest` and exact
    `profile_snapshots` returned by preview.
 
 The original capacity fence serializes settings, price updates and paid
@@ -43,8 +43,8 @@ not a promise that a mixed fleet or the corresponding stock is available.
 ## Effective limits and boundaries
 
 Defaults and bounds live in `studio_platform/capacity_settings.py`. The daily
-supplier admission ceiling defaults to USD100, warning fraction0.8 (range0.5â€“0.95),
-fleet ceiling USD15/hour and maximum machines10 (configurable1â€“10). Mode ceilings
+supplier admission ceiling defaults to USD100, warning fraction0.8 (range0.5–0.95),
+fleet ceiling USD15/hour and maximum machines10 (configurable1–10). Mode ceilings
 default to REF USD3/hour and FL/other USD0.85/hour; other cannot exceed either
 FL or REF. Each offer must satisfy the profile ceiling, mode ceiling, admin
 per-machine ceiling, fleet ceiling and original account/budget guards. No silent
@@ -104,7 +104,8 @@ read-only classification of unresolved historical references is not a gate.
 Snapshot settings and profile versions before every adoption and retain the
 original audited result. Neither a passing local test nor a merged PR is
 production activation.
-# CR-73 staging acceptance ceiling (#659)
+
+## CR-73 staging acceptance ceiling (#659)
 
 The explicit admin test-task ceiling accepts up to USD 50; the default remains
 USD 20. This is an API validation bound, not automatic adoption or spending
