@@ -28,7 +28,6 @@ export async function mockCreditsFetch(url) {
           kind: 'purchase',
           amount: 2100,
           created_at: Date.now() - 2 * day,
-          receipt_url: 'https://example.com/receipt',
         },
         {
           id: 'e1',
@@ -36,6 +35,27 @@ export async function mockCreditsFetch(url) {
           amount: 200,
           reason: 'Welcome credits',
           created_at: Date.now() - 3 * day,
+        },
+      ],
+      next_cursor: null,
+    });
+  if (path === '/v1/billing/payments')
+    return json({
+      payments: [
+        {
+          id: 'pay-mock-1',
+          receipt_url: null,
+          receipt: {
+            payment_id: 'pay-mock-1',
+            pack_id: 'creator',
+            amount_cents: 2000,
+            currency: 'usd',
+            credits: 2100,
+            status: 'paid',
+            refunded_cents: 0,
+            paid_at: new Date(Date.now() - 2 * day).toISOString(),
+            issuer: { name: 'Inkseq', abn: '68 442 632 833', support_email: 'support@inkseq.com' },
+          },
         },
       ],
       next_cursor: null,
