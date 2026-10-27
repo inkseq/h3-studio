@@ -98,6 +98,16 @@ class StoryRiskHttpTests(unittest.TestCase):
     actions = fixture.StoryChatTests.actions
 
     def prepare(self):
+        from unittest.mock import patch
+        from test_story_chat_images import set_pictures
+
+        # This suite isolates risk freshness/replay from input readiness (#699).
+        readiness = patch(
+            "studio_platform.story_chat_advice.read_draft", return_value=({}, [])
+        )
+        readiness.start()
+        self.addCleanup(readiness.stop)
+        set_pictures(self.app, True)
         self.chat = self.start()
         self.built = self.turn(self.chat, "Make a story").json()
         self.shot = self.built["cards"]["shots"][0]["id"]

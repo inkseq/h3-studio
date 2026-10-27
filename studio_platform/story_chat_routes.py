@@ -8,7 +8,7 @@ import uuid
 from fastapi import HTTPException, Request
 
 from .google_chat import ChatError, GoogleChatClient
-from . import story_chat_undo
+from . import story_chat_advice, story_chat_undo
 from .repository import Conflict
 from .story_chat import (
     INSTRUCTION,
@@ -427,11 +427,12 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             limit = settings.story_chat_connection_daily_turns
             if connection_turns_today(principal) >= limit:
                 _fail("story_chat_connection_daily_limit", 429, limit=limit)
+        chat = story_chat_advice.turn_chat(chat, text)
         try:
             result = model_client().generate(
                 MODEL,
                 prompt_messages(row["payload"], chat, text),
-                INSTRUCTION,
+                story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
                 max_tokens=4096,
                 json_mode=True,
             )
@@ -445,7 +446,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         # on the new version, or refuse if a card it names is gone.
         for _attempt in range(2):
             project, version = row["payload"], row["version"]
-            chat = chat_of(project)
+            chat = story_chat_advice.turn_chat(chat_of(project), text)
             prior = stored_turn(chat, turn_id)
             if prior:
                 return answer(row, prior)
@@ -467,11 +468,29 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                         nothing_written=True,
                         cards=changed,
                     )
+            try:
+                advice, proposal = story_chat_advice.guard(
+                    app.state.guided,
+                    settings,
+                    project,
+                    actions,
+                    plan,
+                    proposal,
+                    enabled=pictures_enabled(),
+                    lang=chat["language"],
+                )
+            except ValueError as error:
+                _fail(
+                    "story_chat_plan_rejected",
+                    502,
+                    nothing_written=True,
+                    reason=str(error)[:300],
+                )
             value = append_turn(
                 chat,
                 turn_id,
                 text,
-                plan,
+                advice,
                 changes,
                 proposal,
                 actor=principal.actor_id if principal.machine else None,
