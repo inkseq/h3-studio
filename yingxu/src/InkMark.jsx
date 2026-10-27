@@ -6,7 +6,8 @@
 // sets --ink-mark-body / --ink-mark-feat); animals keep their own colours.
 import React from 'react';
 
-const DROP = 'M50 12 C47 27 28 46 28 70 A22 22 0 0 0 72 70 C72 46 53 27 50 12Z';
+export const INK_DROP = 'M50 12 C47 27 28 46 28 70 A22 22 0 0 0 72 70 C72 46 53 27 50 12Z';
+const DROP = INK_DROP;
 const BODY_COLOR = 'var(--ink-mark-body, var(--accent))';
 const FEAT_COLOR = 'var(--ink-mark-feat, var(--bg))';
 const BODY = { fill: BODY_COLOR };

@@ -27,6 +27,7 @@ import {
   apiDate,
   packList,
   priceRates,
+  receiptList,
   waitForPurchase,
 } from './credits.js';
 import { mockCreditsFetch } from './credits-mock.js';
@@ -110,6 +111,8 @@ export function CreditsPanel({ account, active }) {
     [log, setLog] = useState({ entries: [], next: null }),
     [buying, setBuying] = useState(null),
     [paid, setPaid] = useState(''),
+    [receipts, setReceipts] = useState([]),
+    [openReceipt, setOpenReceipt] = useState(null),
     [error, setError] = useState('');
   const n = (value) => formatCredits(value, locale);
   useEffect(() => {
@@ -120,6 +123,7 @@ export function CreditsPanel({ account, active }) {
     settle(api.request('/v1/billing/packs'), (body) => setPacks(packList(body)));
     settle(api.request('/v1/credits/prices'), (body) => setRates(priceRates(body)));
     settle(api.request('/v1/credits/entries'), (body) => setLog(entryList(body)));
+    settle(api.request('/v1/billing/payments'), (body) => setReceipts(receiptList(body)));
     return () => {
       live = false;
     };
@@ -135,6 +139,10 @@ export function CreditsPanel({ account, active }) {
         setCredits(now);
         window.dispatchEvent(new Event(CREDITS_CHANGED));
         api.request('/v1/credits/entries').then((body) => isLive() && setLog(entryList(body)));
+        api
+          .request('/v1/billing/payments')
+          .then((body) => isLive() && setReceipts(receiptList(body)))
+          .catch(() => {});
       }
       params.delete('paid');
       navigateApp('/settings?' + params, { replace: true, scroll: false });
@@ -299,14 +307,6 @@ export function CreditsPanel({ account, active }) {
                   <small className="muted">
                     {entry.reason || entry.label ? t('credits.kind.' + entry.kind) + ' · ' : ''}
                     {apiDate(entry.created_at)?.toLocaleDateString(locale) || ''}
-                    {entry.receipt_url && (
-                      <>
-                        {' · '}
-                        <a href={entry.receipt_url} target="_blank" rel="noreferrer">
-                          {t('credits.receipt')}
-                        </a>
-                      </>
-                    )}
                   </small>
                   <b className={entry.onHold ? 'muted' : entry.shown > 0 ? 'good' : ''}>
                     {entry.shown > 0 ? '+' : '−'}
@@ -326,7 +326,75 @@ export function CreditsPanel({ account, active }) {
         )}
         <small className="muted">{t('credits.support')}</small>
       </div>
+
+      {receipts.length > 0 && (
+        <div className="card-box">
+          <h4>
+            <CreditCard size={14} aria-hidden="true" /> {t('credits.purchases')}
+          </h4>
+          <div className="credit-log">
+            {receipts.map((receipt) => (
+              <div key={receipt.payment_id}>
+                <Coins size={14} aria-hidden="true" />
+                <span className="clip">
+                  {t('credits.receiptItem', { credits: n(receipt.credits) })}
+                </span>
+                <small className="muted">
+                  {apiDate(receipt.paid_at)?.toLocaleDateString(locale) || ''}
+                  {receipt.status !== 'paid' && ' · ' + t('credits.status.' + receipt.status)}
+                </small>
+                <Button variant="ghost" size="sm" onClick={() => setOpenReceipt(receipt)}>
+                  {t('credits.receipt')}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {openReceipt && <ReceiptDialog receipt={openReceipt} onClose={() => setOpenReceipt(null)} />}
     </div>
+  );
+}
+
+// An Inkseq receipt built from the original purchase; the browser prints it or saves a PDF.
+function ReceiptDialog({ receipt, onClose }) {
+  const { t, locale } = useI18n();
+  const issuer = receipt.issuer || {};
+  const rows = [
+    [t('credits.receiptNo'), receipt.payment_id],
+    [t('credits.receiptDate'), apiDate(receipt.paid_at)?.toLocaleDateString(locale) || ''],
+    [
+      t('credits.receiptFor'),
+      t('credits.receiptItem', { credits: formatCredits(receipt.credits, locale) }),
+    ],
+    [t('credits.receiptAmount'), formatPrice(receipt.amount_cents, receipt.currency)],
+    ...(receipt.refunded_cents > 0
+      ? [[t('credits.status.refunded'), formatPrice(receipt.refunded_cents, receipt.currency)]]
+      : []),
+  ];
+  return (
+    <Dialog title={t('credits.receiptTitle')} onClose={onClose} className="receipt-sheet">
+      <p>
+        <b>{issuer.name || 'Inkseq'}</b>
+        {issuer.abn && ' · ABN ' + issuer.abn}
+        {issuer.support_email && ' · ' + issuer.support_email}
+      </p>
+      <dl className="receipt-rows">
+        {rows.map(([label, value]) => (
+          <React.Fragment key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </React.Fragment>
+        ))}
+      </dl>
+      <small className="muted">{t('credits.receiptGst')}</small>
+      <DialogActions>
+        <Button onClick={onClose}>{t('credits.close')}</Button>
+        <Button variant="primary" onClick={() => window.print()}>
+          {t('credits.print')}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 

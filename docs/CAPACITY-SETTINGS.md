@@ -104,3 +104,26 @@ read-only classification of unresolved historical references is not a gate.
 Snapshot settings and profile versions before every adoption and retain the
 original audited result. Neither a passing local test nor a merged PR is
 production activation.
+
+## CR-73 staging acceptance ceiling (#659)
+
+The explicit admin test-task ceiling accepts up to USD 50; the default remains
+USD 20. This is an API validation bound, not automatic adoption or spending
+authority. Preview, confirmation digest, reason and settings-version CAS remain
+required. Frozen accepted rental snapshots and original task attribution are
+unchanged. No reservation is released by a settings update.
+
+For the 2026-10-27 overnight authority, USD 50 is the **combined** staging
+demand-start/lookahead/floor/Modal limit, not USD 50 per task or per provider.
+Before adoption, reconcile all original costs and uncertain commitments; keep
+the current task ID and existing holds. Establish an aggregate reservation
+ceiling across these tests before increasing the per-task setting. Existing
+shared-account audited budget CAS can constrain the dstack lane, but does not
+by itself cover a separately billed Modal lane: allocate disjoint amounts whose
+sum is at most USD 50, or keep Modal disabled. Do not reset a ledger, use a new
+task ID, or treat midnight as renewed overnight authorization.
+
+This source change installs no host helpers, updates no runtime setting and
+starts no worker. Adoption still needs the reviewed deployment/helper procedure,
+fresh staging state and the existing gates. Record before/after settings and
+aggregate headroom on #659, then hand the preserved jobs to Claude for acceptance.

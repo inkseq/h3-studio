@@ -134,7 +134,7 @@ class CapacityPolicyTests(unittest.TestCase):
             ("tenant_daily_limit_microusd", 0),
             ("tenant_daily_limit_microusd", 10**1000),
             ("max_runtime_seconds", 60),
-            ("test_task_limit_microusd", 20_000_001),
+            ("test_task_limit_microusd", 50_000_001),
             ("capacity_policy_version", True),
             ("unknown", 1),
         ):
@@ -302,6 +302,35 @@ class CapacityRouteTests(unittest.TestCase):
                 c.scalar(select(func.count()).select_from(t))
                 for t in (budget_accounts, budget_reservations)
             )
+
+    def test_explicit_test_cap_increase_requires_confirmation_and_preserves_snapshot(
+        self,
+    ):
+        self.assertEqual(capacity.DEFAULTS["test_task_limit_microusd"], 20_000_000)
+        adopted = self.commit(self.preview())
+        self.assertEqual(adopted.status_code, 200, adopted.text)
+        snapshot = capacity.admission_snapshot(adopted.json())
+        original = copy.deepcopy(snapshot)
+        counts = self.money_counts()
+        changes = {"test_task_limit_microusd": 50_000_000}
+        preview = self.preview(changes)
+        self.assertTrue(preview["confirmation_required"])
+        self.assertEqual(
+            self.commit(preview, changes, confirmation_digest="").status_code, 409
+        )
+        self.assertEqual(
+            self.client.get(PATH).json()["value"]["test_task_limit_microusd"],
+            20_000_000,
+        )
+        response = self.commit(preview, changes)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json()["value"]["test_task_limit_microusd"], 50_000_000
+        )
+        self.assertEqual(self.commit(preview, changes).status_code, 409)
+        self.assertEqual(capacity.validate_snapshot(snapshot), original["value"])
+        self.assertEqual(snapshot, original)
+        self.assertEqual(self.money_counts(), counts)
 
     def test_get_preview_are_read_only_and_explicit_commit_adopts_once(self):
         before = self.money_counts()

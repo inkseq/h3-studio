@@ -1,0 +1,23 @@
+/* 小墨 "去修改" (h3-studio#679): one coral pulse around the field the person was sent to. */
+.guide-highlight {
+  border-radius: 10px;
+  animation: guide-pulse 1.6s ease-out;
+}
+@keyframes guide-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  25% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 10px transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .guide-highlight {
+    animation: none;
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+}
