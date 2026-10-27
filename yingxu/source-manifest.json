@@ -331,7 +331,7 @@
     "src/storyboard-commands.js": "a66ad90f76788cea43e4e634860897bd4cf0bf386b379c2d9ecb7216e78e386e",
     "src/storyboard-commands.test.js": "37a0ea31fa938539ea9869b5e23307986dc40119e54e9d788f6abc3ff9fd4056",
     "src/storyboard-dialog.test.js": "26aebd0d7f3f6fb037c945d647b4519739074e22f892b28c07e7d8d30f812c01",
-    "src/storyboard-domain.js": "df4fb7763f602ca22892a6b578ac1163e777271cac35857dab36abf2cc557c1c",
+    "src/storyboard-domain.js": "7412bef6599d288cfc9d6c68c6be4d9ea8706ae39d43793efe0719298eb6a7e0",
     "src/storyboard-domain.test.js": "edb1c14eb4622191f9cc608b1c1ed019bdc872e603d821ef7c28013d17b06250",
     "src/storyboard-playback.js": "267c67f2dc8afa8237c71b702675baea1431375a3713328be866909d50eb9999",
     "src/storyboard-playback.test.js": "e374bfd2aef2aa78f12a40b434b6abfebd78242c828faf45c8cff5deffe24ccf",

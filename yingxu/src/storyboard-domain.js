@@ -323,7 +323,7 @@ function describeShot(shot, state, ctx) {
     if (shot.place.variant && !pv) warnings.push('保存的场景版本不存在，请重新选择。');
     parts.push({
       label: '场景',
-      text: `${place.name}：${place.desc}${pv ? '；' + pv.name + '：' + (pv.desc || '') : ''}`,
+      text: `${place.name}：${place.desc}${pv?.desc?.trim() ? '；' + pv.name + '：' + pv.desc : ''}`,
     });
   }
   const cast = shot.cast.map((c) => ({
@@ -339,7 +339,7 @@ function describeShot(shot, state, ctx) {
     if (binding.variant && !v) warnings.push(t('projection.missingLook', { name: p.name }));
     parts.push({
       label: '人物',
-      text: `${p.name}：${p.desc}${v ? '；' + v.name + '：' + (v.desc || '') : ''}`,
+      text: `${p.name}：${p.desc}${v?.desc?.trim() ? '；' + v.name + '：' + v.desc : ''}`,
     });
   });
   const props = shot.props.map(profile).filter(Boolean);
