@@ -49,7 +49,7 @@ SLOW_MODULE_PATHS["test_platform_backup_postgres"] = frozenset({
 # Retired runtime tests leave with their code; current invariants are retained
 # explicitly, independently of path selection and shard balancing.
 POSTGRES_MODULES = tuple("""
-test_inky_budget test_inky_store
+test_inky_budget test_inky_store test_inky_worker
 test_platform_repository test_schema_version test_schema_baseline test_workflow_state test_dbos_postgres
 test_platform_queue test_result_collection test_platform_autoscale test_platform_control test_platform_worker test_platform_drain_safe_runner
 test_platform_fleet test_platform_api test_platform_execution_policy test_platform_batches test_platform_storage_multipart

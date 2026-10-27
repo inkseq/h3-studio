@@ -10,6 +10,7 @@ from .repository import Conflict, NotFound, Scope, documents, request_hash
 CACHE = "inky_cache"
 CLAIM = "inky_evaluation"
 IGNORE = "inky_ignore"
+SETTINGS = "inky_settings"
 
 
 class InkyStore:
@@ -99,6 +100,9 @@ class InkyStore:
         """Pure reads: no locks, cache writes, evaluations or provider callbacks."""
         with self.repo.engine.connect() as conn:
             current = sources(self.project(conn, principal, project_id))
+            settings = self.row(conn, principal, project_id, SETTINGS, "settings")
+            if settings and settings["payload"].get("muted"):
+                return {"items": []}
             ignored = set(
                 conn.execute(
                     select(documents.c.document_id).where(
@@ -127,6 +131,9 @@ class InkyStore:
         with self.repo.transaction() as conn:
             current = sources(self.project(conn, principal, project_id, write=True))
             source = current.get(shot_id)
+            settings = self.row(conn, principal, project_id, SETTINGS, "settings")
+            if settings and settings["payload"].get("muted"):
+                return None
             if not source or not source["context"]["shot_action"].strip():
                 return None
             ident = source["source_id"]
@@ -198,6 +205,22 @@ class InkyStore:
             )
             return True
 
+    def eligible(self, principal, project_id, source, kind=None):
+        """Recheck source/preference fences before optional background work."""
+        with self.repo.engine.connect() as conn:
+            current = sources(self.project(conn, principal, project_id)).get(
+                source["shot_id"]
+            )
+            if not current or current["source_id"] != source["source_id"]:
+                return False
+            setting = self.row(conn, principal, project_id, SETTINGS, "settings")
+            return not (setting and setting["payload"].get("muted")) and (
+                kind is None
+                or not self.ignored(
+                    conn, principal, project_id, source["shot_id"], kind
+                )
+            )
+
     def ignore(self, principal, project_id, ident):
         with self.repo.transaction() as conn:
             current = sources(self.project(conn, principal, project_id, write=True))
@@ -233,3 +256,40 @@ class InkyStore:
             )
             self.put(conn, principal, project_id, IGNORE, "id-" + ident, value)
             return {"id": ident, "ignored": True}
+
+    def settings(self, principal, project_id, change=None):
+        write = change is not None
+        manager = self.repo.transaction if write else self.repo.engine.connect
+        with manager() as conn:
+            self.project(conn, principal, project_id, write=write)
+            row = self.row(conn, principal, project_id, SETTINGS, "settings")
+            version = row["version"] if row else 0
+            muted = row["payload"].get("muted", False) if row else False
+            if write:
+                if change["expected_revision"] != version:
+                    raise Conflict("inky_settings_version_conflict")
+                muted = change["muted"]
+                self.put(
+                    conn, principal, project_id, SETTINGS, "settings", {"muted": muted}
+                )
+                version += 1
+            return {"revision": version, "muted": muted}
+
+
+def redact_cache(conn, tenant, owner, project_ids, now):
+    """Part of the existing project purge transaction; retain text-free claims."""
+    if project_ids:
+        conn.execute(
+            update(documents)
+            .where(
+                documents.c.tenant_id == tenant,
+                documents.c.owner_id == owner,
+                documents.c.project_id.in_(project_ids),
+                documents.c.kind == CACHE,
+            )
+            .values(
+                payload={"content_deleted": True, "items": []},
+                version=documents.c.version + 1,
+                updated_at=now,
+            )
+        )

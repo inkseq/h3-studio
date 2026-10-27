@@ -3,12 +3,18 @@
 import copy
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from types import SimpleNamespace
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from fastapi.testclient import TestClient
 
 from sqlalchemy import select
 
 from studio_platform.auth import Principal
 from studio_platform.inky_source import sources
 from studio_platform.inky_store import InkyStore
+from studio_platform.inky_routes import register_routes
 from studio_platform.repository import Conflict, NotFound, Scope, documents
 from test_platform_repository import LedgerCase
 
@@ -176,3 +182,107 @@ class InkyStoreTests(LedgerCase):
     def test_invalid_context_is_not_fabricated(self):
         self.project["entities"][-1]["data"]["cast"] = ["missing"]
         self.assertEqual(sources(self.project), {})
+
+    def client(self, principal=None):
+        app = FastAPI()
+        app.state.repository = self.repo
+        app.state.settings = SimpleNamespace(tenant_id=self.scope.tenant_id)
+
+        @app.middleware("http")
+        async def auth(request: Request, call_next):
+            request.state.principal = principal or self.principal
+            return await call_next(request)
+
+        @app.exception_handler(NotFound)
+        async def missing(request, error):
+            return JSONResponse({"detail": str(error)}, status_code=404)
+
+        @app.exception_handler(Conflict)
+        async def conflict(request, error):
+            return JSONResponse({"detail": str(error)}, status_code=409)
+
+        register_routes(app)
+        return TestClient(app)
+
+    def test_http_reader_ignore_and_read_only_principal(self):
+        self.publish()
+        before = self.snapshot()
+        url = "/v1/inky/suggestions?project_id=" + self.scope.project_id
+        with self.client() as client:
+            result = client.get(url)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.headers["cache-control"], "no-store")
+            self.assertEqual(before, self.snapshot())
+            ident = result.json()["items"][0]["id"]
+            path = f"/v1/inky/suggestions/{ident}/ignore?project_id={self.scope.project_id}"
+            self.assertEqual(client.post(path).status_code, 200)
+            self.assertEqual(client.post(path).status_code, 200)
+            self.assertEqual(client.get(url).json(), {"items": []})
+            self.assertEqual(client.get("/v1/inky/suggestions").status_code, 422)
+        reader = replace(
+            self.principal,
+            machine=True,
+            project_ids=(self.scope.project_id,),
+            scopes=("projects:read",),
+        )
+        with self.client(reader) as client:
+            self.assertEqual(client.get(url).status_code, 200)
+            self.assertEqual(client.post(path).status_code, 404)
+
+    def test_mute_cas_suppresses_views_and_evaluation_without_story_changes(self):
+        self.publish()
+        before = self.repo.get_document(
+            self.project_scope, "project", self.scope.project_id
+        )
+        url = "/v1/inky/settings?project_id=" + self.scope.project_id
+        with self.client() as client:
+            self.assertEqual(client.get(url).json(), {"revision": 0, "muted": False})
+            self.assertEqual(
+                client.patch(
+                    url, json={"expected_revision": 0, "muted": "true"}
+                ).status_code,
+                422,
+            )
+            self.assertEqual(
+                client.patch(url, json={"expected_revision": 0, "muted": True}).json(),
+                {"revision": 1, "muted": True},
+            )
+            self.assertEqual(
+                client.patch(
+                    url, json={"expected_revision": 0, "muted": False}
+                ).status_code,
+                409,
+            )
+        self.assertEqual(self.read(), {"items": []})
+        self.assertEqual(
+            before,
+            self.repo.get_document(
+                self.project_scope, "project", self.scope.project_id
+            ),
+        )
+        self.project["entities"][-1]["data"]["prompt"] = "New action."
+        self.save()
+        self.assertIsNone(self.claim())
+
+    def test_purge_redacts_example_but_preserves_text_free_receipts(self):
+        from studio_platform.inky_store import redact_cache
+
+        source = self.claim()
+        self.store.publish(
+            self.principal,
+            self.scope.project_id,
+            source,
+            [{"kind": "vague_action", "example": "Rain wets the ticket."}],
+        )
+        with self.repo.transaction() as conn:
+            redact_cache(
+                conn,
+                self.scope.tenant_id,
+                self.scope.owner_id,
+                (self.scope.project_id,),
+                self.now,
+            )
+        self.assertEqual(self.read(), {"items": []})
+        self.assertIsNone(self.claim())
+        cache = [r for r in self.snapshot() if r["kind"] == "inky_cache"]
+        self.assertEqual(cache[0]["payload"], {"content_deleted": True, "items": []})

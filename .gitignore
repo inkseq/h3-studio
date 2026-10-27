@@ -882,3 +882,6 @@ inventory.json
 !studio_platform/inky_source.py
 !studio_platform/inky_store.py
 !tests/test_inky_store.py
+!studio_platform/inky_routes.py
+!studio_platform/inky_worker.py
+!tests/test_inky_worker.py
