@@ -8,6 +8,7 @@ import {
   insufficientCredits,
   packList,
   priceRates,
+  receiptList,
   waitForPurchase,
 } from './credits.js';
 
@@ -98,4 +99,23 @@ test('API dates accept Unix seconds, milliseconds and ISO strings', () => {
   assert.equal(apiDate(iso).toISOString(), iso);
   assert.equal(apiDate('nope'), null);
   assert.equal(apiDate(null), null);
+});
+
+test('receipts come only from Inkseq receipt objects, never a provider receipt link', () => {
+  const list = receiptList({
+    payments: [
+      { id: 'a', receipt_url: 'https://pay.stripe.com/receipts/x', receipt: null },
+      {
+        id: 'b',
+        receipt_url: 'https://pay.stripe.com/receipts/y',
+        receipt: { payment_id: 'b', amount_cents: 2000, credits: 2100, currency: 'usd' },
+      },
+      { id: 'c', receipt: { payment_id: 'c', amount_cents: '2000', credits: 1 } },
+    ],
+  });
+  assert.deepEqual(list, [
+    { payment_id: 'b', amount_cents: 2000, credits: 2100, currency: 'USD', refunded_cents: 0 },
+  ]);
+  assert.equal(JSON.stringify(list).includes('stripe'), false);
+  assert.deepEqual(receiptList(null), []);
 });

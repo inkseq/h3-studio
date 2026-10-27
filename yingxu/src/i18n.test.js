@@ -4,6 +4,7 @@ import { catalogs } from './i18n/catalogs.js';
 import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
+  firstVisitLocale,
   readLocale,
   rememberLocale,
   translate,
@@ -45,6 +46,16 @@ test('English is the first-visit default; browser and individual accounts rememb
   assert.throws(() => rememberLocale(storage, 'fr'), /unsupported_locale/);
   records.set(LOCALE_STORAGE_KEY, 'invalid');
   assert.equal(readLocale(storage), 'en');
+});
+
+test('a first visit from a Chinese-first browser opens in Chinese; everyone else gets English', () => {
+  assert.equal(firstVisitLocale(['zh-CN', 'en']), 'zh');
+  assert.equal(firstVisitLocale(['zh']), 'zh');
+  assert.equal(firstVisitLocale(['zh-Hant-TW']), 'zh');
+  assert.equal(firstVisitLocale(['en-AU', 'zh-CN']), 'en');
+  assert.equal(firstVisitLocale(['zu']), 'en');
+  assert.equal(firstVisitLocale([]), 'en');
+  assert.equal(firstVisitLocale(undefined), 'en');
 });
 
 test('Both catalogs contain the same keys and named values; user input is interpolated only once', () => {
