@@ -650,19 +650,25 @@ def _profile_memory_admission(torch, profile):
             'free_vram_bytes': free,
         }
         ram_insufficient = capacity < minimum
+        ram_reason = 'ram_total'
         if metric == 'effective-total-and-available-v1':
             headroom = runtime['minimum_available_ram_bytes']
             if type(headroom) is not int or headroom <= 0:
                 raise ValueError('wangp_profile_available_ram_unconfirmed')
             observation['minimum_available_ram_bytes'] = headroom
-            ram_insufficient = ram_insufficient or available < headroom
+            if not ram_insufficient:
+                ram_insufficient = available < headroom
+                ram_reason = 'ram_available'
         print(json.dumps(observation), flush=True)
     elif metric == 'available-headroom-v1':
         ram_insufficient = available < runtime['minimum_available_ram_bytes']
+        ram_reason = 'ram_available'
     else:
         raise ValueError('wangp_profile_memory_admission_metric_invalid')
-    if ram_insufficient or free < profile['minimum_free_vram_bytes']:
-        raise ValueError('wangp_profile_memory_headroom_insufficient')
+    if ram_insufficient:
+        raise ValueError('wangp_profile_memory_headroom_insufficient_' + ram_reason)
+    if free < profile['minimum_free_vram_bytes']:
+        raise ValueError('wangp_profile_memory_headroom_insufficient_vram_free')
 
 
 def _audit_profile_runtime(session, manifest, requested, *, loaded=False):
