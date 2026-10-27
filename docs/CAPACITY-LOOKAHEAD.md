@@ -1,9 +1,9 @@
 # #688 planning contract (not activated)
 
-`studio_platform.capacity_lookahead` is a pure decision model. It has no callers
-in demand-start, controller or worker execution. Existing live behaviour, rent
-permissions, idle timers, settings and credentials are unchanged. This slice is
-preparation while #685 awaits review and #659 runs its preserved acceptance cases.
+`studio_platform.capacity_lookahead` is a pure decision model. The separate
+`capacity_lookahead_runtime` integration is OFF unless the protected operator
+configuration explicitly sets `policy.demand_start.lookahead_version: 1`.
+Code deployment and saving prepared rules do not enable that rollout flag.
 
 ## Inputs and decisions
 
@@ -49,7 +49,8 @@ This module does not select a provider or assume Modal ETA/price/credentials.
 Claude's committed worker reference, scoped worker identity, verified provider
 hard cap and existing reservation/settlement integration are prerequisites.
 Modal's proposed 60-second idle timeout is not applied to dedicated machines.
-No production auto-start or new provider is authorized by this planning code.
+Code does not grant production auto-start or provider authority. See the latest
+owner change record, accepted staging evidence and the separate adoption gate.
 
 ## Open-source comparison and verification
 
@@ -71,7 +72,8 @@ All routes use the existing human-administrator boundary and no-store responses.
 Prefix: `/v1/operator/dstack/admin/start-rules`.
 
 - `GET ?profile_id=<operator-profile-id>` returns `binding`, `value`, `version`,
-  `revision`, `keep_alive_seconds`, `execution_connected:false`, `applied:false`.
+  `revision`, `keep_alive_seconds`, `execution_connected`, and `applied`. The last
+  two are false until the explicit protected rollout flag connects execution.
 - `POST /preview` takes `{profile_id, expected_revision, value}`; value is the
   complete `{job_seconds, boot_seconds, minimum_jobs}` object. It returns the
   before state, proposed value, derived keep-alive and `confirmation_digest`.
@@ -88,8 +90,8 @@ Prefix: `/v1/operator/dstack/admin/start-rules`.
 Absent rows read the 30/600/20 defaults without creating anything. Durations are
 integer seconds 1–86400; minimum jobs is an integer 1–10000. Keep-alive is derived
 from boot seconds. These are validated configuration ranges, not additional
-spending authority. The current demand loop and idle stop do not consume them.
-The UI must describe these as prepared settings and must not display “active”.
+spending authority. Without the rollout flag, the demand loop and idle stop do
+not consume them. The UI must describe disconnected rules as prepared settings.
 Measured p50/p90 telemetry and execution integration remain separate G2 work;
 these routes neither invent measurements nor overwrite accepted jobs/rentals.
 
@@ -106,3 +108,43 @@ authorization/idempotency errors. Stored identity corruption refuses reads.
 This configuration slice requires one Tier2 PR review. It does not qualify or
 enable the later runtime integration; that integration must receive its own
 review of the changed execution behaviour before adoption.
+
+## Opt-in execution and rollout
+
+The runtime integration is a separate Tier2 change. After review, use a fresh
+staging zero-work window to adopt `lookahead_version: 1` in the existing protected
+`demand_start` object. This changes the existing demand profile hash: do not edit
+the flag while old demand journals/reproductions are in flight, and do not reset
+their hashes or uncertain commands. Malformed versions refuse demand authority.
+Removing the flag returns future decisions to the existing path; disable the
+ordinary demand switch first when stopping new allocations. Existing attempts,
+invoices, collections, leases and frozen rental idle timers remain original.
+
+Each tick first reconciles original commands/backoff, then reads the existing
+fresh native capacity witness. Per exact owner/pool/configuration/model/manifest,
+eligible queued jobs supply backlog. Compatible live registered workers supply
+ready throughput; a busy slot adds its remaining configured job-time estimate.
+Known allocations without usable registration count as starting. Their ETA is
+boot minus age when no registration exists; stale registrations supply no ETA
+or throughput. Unknown/duplicate/stopping matching capacity cannot authorize a
+new allocation. Different pools/owners/configurations never supply throughput.
+
+The planner can propose at most one start per tick. It never claims affordable
+headroom: unchanged registration, fleet, supplier, test-task and owner budgets
+still gate the original reservation transaction. That transaction recomputes
+lookahead from fresh queue/capacity state, compares the prepared rules revision
+and frozen requested idle interval, and refuses obsolete previews before any
+intent/provider creation. Manual starts retain their existing path.
+
+New demand previews freeze the configured boot seconds as their requested idle
+interval. Existing max-runtime and test idle ceilings remain stronger guards;
+queue/lease/unsafe-attempt checks in the current controller still govern stops.
+No existing rental's timer is rewritten. Planning snapshots live in the original
+demand journal; changed decisions and committed admission snapshots are recorded
+as `capacity.lookahead_decision` in the existing outbox, without content/prompts.
+Identical planning snapshots do not append duplicate audit events.
+
+Read-back must verify both the source revision and the explicit rollout flag.
+GPU acceptance still requires the 1/0 floor, 30/1 covered, 45/1 extra, and guarded
+idle cases; CPU tests are not a provider/spend acceptance receipt. Modal routing
+and measured p50/p90 remain independent work, not enabled by this integration.

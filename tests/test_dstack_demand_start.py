@@ -688,6 +688,45 @@ class DemandStartTests(LedgerCase):
         self.assertEqual(self.old_holds(old), holds)
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
 
+    def test_opt_in_lookahead_floor_uses_original_start_and_does_not_duplicate_cold_slot(
+        self,
+    ):
+        self.service.policy['demand_start']['lookahead_version'] = 1
+        self.enabled()
+        profile = self.service.profiles['5090-fl']
+        originals = [self.accepted(), self.accepted()]
+        with self.repo.transaction() as connection:
+            for job in originals:
+                execution = dict(
+                    job['execution_plan'],
+                    enabled=True,
+                    backend='wangp-worker',
+                    dispatch_backend='hatchet-v1',
+                    configuration_id=profile['configuration_id'],
+                    model_id=profile['model_id'],
+                    engine_manifest_digest=profile['manifest_digest'],
+                )
+                stored = {
+                    'deployment_profile_id': profile['runtime_profile_id'],
+                    'request': {'model': profile['model_id'], 'mode': 'fl'},
+                }
+                connection.execute(
+                    update(jobs)
+                    .where(jobs.c.id == job['id'])
+                    .values(execution_plan=execution, request=stored)
+                )
+        result = start_once(self.service)
+        self.assertEqual(result['state'], 'accepted', result)
+        self.assertEqual(len(self.client.applied), 1)
+        with self.repo.engine.connect() as connection:
+            node = connection.execute(select(operator_nodes)).mappings().one()
+            self.assertEqual(node['payload']['lifecycle']['idle_shutdown_seconds'], 600)
+        # The next queued job may not allocate another floor while this exact
+        # owned cold allocation already exists. The original call is not replayed.
+        result = start_once(self.service)
+        self.assertIn(result['state'], {'observing', 'blocked'})
+        self.assertEqual(len(self.client.applied), 1)
+
     def test_off_is_creation_free_and_manual_start_retains_its_path(self):
         self.accepted()
         self.assertEqual(start_once(self.service), {'state': 'disabled'})
