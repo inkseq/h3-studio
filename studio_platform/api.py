@@ -1513,8 +1513,8 @@ def create_app(
     from .library import register_routes as register_library_routes
 
     register_library_routes(app)
-    from .quality_http import install as install_quality_views
+    from .http_boundaries import install as install_http_boundaries
 
-    install_quality_views(app)
+    install_http_boundaries(app)
     app.add_middleware(GrantPreviewPrivacyMiddleware)
     return app

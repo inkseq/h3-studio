@@ -238,6 +238,7 @@ def public_guide():
     from .take_redo import contract as take_redo_contract
 
     from .product_feedback import contract as feedback_contract
+    from .inky_routes import contract as inky_contract
     from .caption_server import MAX_LINE_CHARACTERS
     from .story_risk import contract as story_risk_contract
 
@@ -255,6 +256,7 @@ def public_guide():
         "take_reviews": take_reviews_contract(),
         "take_redo": take_redo_contract(),
         "feedback": feedback_contract(),
+        "inky": inky_contract(),
         "story_film": {
             "capability": "GET /v1/capabilities → story_film.enabled",
             "preflight": "POST /v1/projects/{project_id}/films/preflights; Idempotency-Key; {expected_version,resolution,aspect?,burn_subtitles}",

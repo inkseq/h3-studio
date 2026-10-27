@@ -167,7 +167,7 @@ PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAF
 OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_POSTGRES_VOLUME",
     "SIXNINE_HATCHET_CONFIG_VOLUME", "SIXNINE_MIGRATION_GENERATION_ENABLED",
     "SIXNINE_MIGRATION_EXECUTION_BACKEND", "SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"})
-OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE", "INKSEQ_STRIPE_CONFIG_FILE"})
+OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE", "INKSEQ_STRIPE_CONFIG_FILE", "INKSEQ_INKY_CONFIG_FILE"})
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
@@ -513,8 +513,8 @@ def settings_document(value):
         'migration_api_error_monitoring_destination_invalid')
     release.require(not env.get('INKSEQ_SENTRY_DSN') or env.get('INKSEQ_DEPLOYMENT_TARGET') in {'staging', 'production'},
         'migration_api_error_monitoring_target_required')
-    release.require(env.get('INKSEQ_WORKOS_CONFIG_FILE', '') in {'', '/run/sixnine-secrets/workos'},
-        'migration_workos_configuration_path_invalid')
+    for name in ('workos', 'inky'):
+        release.require(env.get('INKSEQ_'+name.upper()+'_CONFIG_FILE', '') in {'', '/run/sixnine-secrets/'+name}, 'migration_'+name+'_configuration_path_invalid')
     stripe_file = env.get('INKSEQ_STRIPE_CONFIG_FILE', '')
     stripe_mode = env.get('INKSEQ_STRIPE_MODE', 'off')
     release.require(
