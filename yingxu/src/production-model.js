@@ -44,6 +44,85 @@ export function reviewProgress(project, shots, currentId, options) {
     next: ordered.find((s) => remaining.some((r) => r.id === s.id))?.id || null,
   };
 }
+// The one queue state a shot shows, most urgent first.
+function rowPhase({
+  held,
+  pending,
+  waiting,
+  active,
+  error,
+  plan,
+  current,
+  expires,
+  now,
+  submitted,
+  latest,
+}) {
+  if (held) return 'recovery_hold';
+  if (pending) return 'unknown';
+  if (waiting) return 'waiting_capacity';
+  if (active) return 'active';
+  if (error) return 'error';
+  if (plan && !current) return 'stale';
+  if (plan && expires && expires <= now) return 'expired';
+  if (plan?.status === 'blocked') return 'blocked';
+  if (plan?.status === 'ready' && !submitted) return 'ready';
+  if (['failed', 'blocked', 'cancelled'].includes(latest?.status)) return latest.status;
+  return submitted || latest?.status === 'succeeded' ? 'submitted' : 'unplanned';
+}
+
+// One shot's queue row: its plan, jobs and phase.
+function productionRow(project, cloud, { chapter, scene, shot, now, locale }) {
+  const plan = cloud.plans?.[shot.id],
+    jobs = (cloud.jobs || [])
+      .filter((j) => j.client_ref?.project_id === project.id && j.client_ref?.shot_id === shot.id)
+      .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0)),
+    latest = jobs[0];
+  const current = !!plan && plan.sourceSnapshot === stableJSON(shotSnapshot(project, shot.id));
+  const expires =
+    plan?.expires_at &&
+    (typeof plan.expires_at === 'number' ? plan.expires_at * 1000 : Date.parse(plan.expires_at));
+  const held = jobs.some((j) => j.status === 'recovery_hold');
+  const pending =
+    !!cloud.unknown?.[shot.id] ||
+    !!cloud.batchPending?.shotIds.includes(shot.id) ||
+    jobs.some((j) => j.status === 'submission_unknown');
+  const active = jobs.some((j) => activeJobStatuses.has(j.status) || j.status === 'planned');
+  const submitted = !!plan && jobs.some((j) => j.plan_id === plan.plan_id),
+    error = cloud.preflightErrors?.[shot.id];
+  const waiting = jobs.some((j) => j.status === 'waiting_capacity');
+  const phase = rowPhase({
+    held,
+    pending,
+    waiting,
+    active,
+    error,
+    plan,
+    current,
+    expires,
+    now,
+    submitted,
+    latest,
+  });
+  return {
+    id: shot.id,
+    shot,
+    chapter,
+    scene,
+    plan,
+    jobs,
+    latest,
+    current,
+    phase,
+    label: translate(locale, 'queue.phase.' + phase),
+    review: shotReviewState(project, shot),
+    error,
+    canSelect: !held && !pending && !active,
+    canSubmit: phase === 'ready',
+    path: `${chapter.title} / ${scene.title}`,
+  };
+}
+
 export function productionRows(project, cloud, now = Date.now(), locale = 'zh') {
   return children(project, null)
     .filter((e) => e.type === 'chapter')
@@ -53,78 +132,7 @@ export function productionRows(project, cloud, now = Date.now(), locale = 'zh') 
         .flatMap((scene) =>
           children(project, scene.id)
             .filter((e) => e.type === 'shot')
-            .map((shot) => {
-              const plan = cloud.plans?.[shot.id],
-                jobs = (cloud.jobs || [])
-                  .filter(
-                    (j) =>
-                      j.client_ref?.project_id === project.id && j.client_ref?.shot_id === shot.id,
-                  )
-                  .sort((a, b) => (Number(b.created_at) || 0) - (Number(a.created_at) || 0)),
-                latest = jobs[0];
-              const current =
-                !!plan && plan.sourceSnapshot === stableJSON(shotSnapshot(project, shot.id));
-              const expires =
-                plan?.expires_at &&
-                (typeof plan.expires_at === 'number'
-                  ? plan.expires_at * 1000
-                  : Date.parse(plan.expires_at));
-              const held = jobs.some((j) => j.status === 'recovery_hold');
-              const pending =
-                !!cloud.unknown?.[shot.id] ||
-                !!cloud.batchPending?.shotIds.includes(shot.id) ||
-                jobs.some((j) => j.status === 'submission_unknown');
-              const active = jobs.some(
-                (j) => activeJobStatuses.has(j.status) || j.status === 'planned',
-              );
-              const submitted = !!plan && jobs.some((j) => j.plan_id === plan.plan_id),
-                error = cloud.preflightErrors?.[shot.id];
-              const waiting = jobs.some((j) => j.status === 'waiting_capacity');
-              const phase = held
-                ? 'recovery_hold'
-                : pending
-                  ? 'unknown'
-                  : waiting
-                    ? 'waiting_capacity'
-                    : active
-                      ? 'active'
-                      : error
-                        ? 'error'
-                        : plan && !current
-                          ? 'stale'
-                          : plan && expires && expires <= now
-                            ? 'expired'
-                            : plan?.status === 'blocked'
-                              ? 'blocked'
-                              : plan?.status === 'ready' && !submitted
-                                ? 'ready'
-                                : latest?.status === 'failed'
-                                  ? 'failed'
-                                  : latest?.status === 'blocked'
-                                    ? 'blocked'
-                                    : latest?.status === 'cancelled'
-                                      ? 'cancelled'
-                                      : submitted || latest?.status === 'succeeded'
-                                        ? 'submitted'
-                                        : 'unplanned';
-              return {
-                id: shot.id,
-                shot,
-                chapter,
-                scene,
-                plan,
-                jobs,
-                latest,
-                current,
-                phase,
-                label: translate(locale, 'queue.phase.' + phase),
-                review: shotReviewState(project, shot),
-                error,
-                canSelect: !held && !pending && !active,
-                canSubmit: phase === 'ready',
-                path: `${chapter.title} / ${scene.title}`,
-              };
-            }),
+            .map((shot) => productionRow(project, cloud, { chapter, scene, shot, now, locale })),
         ),
     );
 }

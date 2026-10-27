@@ -564,35 +564,23 @@ export function createQuickChatController({
         emit({ textHistoryLoading: false });
     }
   }
-  async function loadResources(id, { initial = false } = {}) {
-    const ctx = { ...context(), readGeneration };
-    const [sessionData, materialsData, firstPage] = await Promise.all([
-      client.session(id),
-      client.materials(id),
-      client.timeline(id, { ...(initial ? {} : { after_cursor: state.forwardCursor }) }),
-    ]);
-    guard(ctx);
-    const session = record(sessionData, 'session');
-    if (Number.isInteger(state.session?.version) && session.version < state.session.version)
-      throw Error('旧版本读取已丢弃，请刷新最新内容。');
-    if (session.id !== id) throw Error('会话响应不匹配。');
-    if (session.trash_state && session.trash_state !== 'active') {
-      closeArchivedSession([session]);
-      throw Error('这条创作已在回收站或删除处理中，请先核对或恢复原记录。');
-    }
+  // Drain forward pages without jumping to latest_seq: a busy Agent can
+  // write more than one page between polls. Older history is user-paged.
+  async function readForward(id, firstPage, initial, ctx) {
     let timelineData = firstPage,
       events = [...(firstPage.events || [])];
-    // Drain forward pages without jumping to latest_seq: a busy Agent can
-    // write more than one page between polls. Older history is user-paged.
     if (!initial)
       for (let page = 0; page < 5 && timelineData.has_more && timelineData.next_cursor; page++) {
         timelineData = await client.timeline(id, { after_cursor: timelineData.next_cursor });
         guard(ctx);
         events = merge(events, timelineData.events || []);
       }
-    // Automatic naming may finish without an authoring-version change. Merge
-    // the current summary rather than reloading or discarding paged history.
-    const sessions = state.sessions.map((item) =>
+    return { timelineData, events };
+  }
+  // Automatic naming may finish without an authoring-version change. Merge
+  // the current summary rather than reloading or discarding paged history.
+  function mergedSessions(session) {
+    return state.sessions.map((item) =>
       item.id === session.id
         ? {
             ...item,
@@ -614,34 +602,8 @@ export function createQuickChatController({
           }
         : item,
     );
-    const clearedDraft = clearAcceptedDraft(storage, state.account, id, session.composer_reset);
-    emit({
-      session,
-      sessions,
-      ...(clearedDraft
-        ? {
-            draftReset: {
-              account: state.account,
-              sessionId: id,
-              submissionId: session.composer_reset.submission_id,
-            },
-          }
-        : {}),
-      materials: materialsData.materials || materialsData.bindings || [],
-      timeline: initial ? events : merge(state.timeline, events),
-      historyCursor: initial
-        ? timelineData.before_cursor || timelineData.next_cursor || null
-        : state.historyCursor,
-      forwardCursor: timelineData.after_cursor || timelineData.latest_cursor || state.forwardCursor,
-      lastUpdated: Date.now(),
-      error: '',
-    });
-    if (initial && typeof client.cards === 'function')
-      try {
-        await loadCardHistory();
-      } catch {
-        guard(ctx); /* A scoped history error stays visible with retry; session reads continue. */
-      }
+  }
+  async function refreshCards(id, events, initial, ctx) {
     // Timeline holds durable creation references; current job state is read
     // separately even when its sequence has not changed.
     const newCardIds = initial
@@ -696,6 +658,8 @@ export function createQuickChatController({
     for (const cardId of cardIds) {
       await loadCard(cardId, ctx);
     }
+  }
+  async function refreshTurns(id, ctx) {
     const pendingTurns = new Map(
       [...Object.values(state.cardTurns), ...state.timeline.map((event) => event.record)]
         .filter((turn) => turn?.text !== undefined && ['pending', 'running'].includes(turn.status))
@@ -711,6 +675,8 @@ export function createQuickChatController({
         ...(state.cardTurns[turnId] ? { cardTurns: { ...state.cardTurns, [turnId]: turn } } : {}),
       });
     }
+  }
+  async function refreshSubmissions(id, events, ctx) {
     const submissionRefs = (values) =>
       values
         .filter(
@@ -742,6 +708,8 @@ export function createQuickChatController({
           : {}),
       });
     }
+  }
+  async function refreshImports(id, events, ctx) {
     const importIds = new Set([
       ...Object.keys(state.imports),
       ...events
@@ -754,6 +722,57 @@ export function createQuickChatController({
       guard(ctx);
       emit({ imports: { ...state.imports, [value.id]: value } });
     }
+  }
+  async function loadResources(id, { initial = false } = {}) {
+    const ctx = { ...context(), readGeneration };
+    const [sessionData, materialsData, firstPage] = await Promise.all([
+      client.session(id),
+      client.materials(id),
+      client.timeline(id, { ...(initial ? {} : { after_cursor: state.forwardCursor }) }),
+    ]);
+    guard(ctx);
+    const session = record(sessionData, 'session');
+    if (Number.isInteger(state.session?.version) && session.version < state.session.version)
+      throw Error('旧版本读取已丢弃，请刷新最新内容。');
+    if (session.id !== id) throw Error('会话响应不匹配。');
+    if (session.trash_state && session.trash_state !== 'active') {
+      closeArchivedSession([session]);
+      throw Error('这条创作已在回收站或删除处理中，请先核对或恢复原记录。');
+    }
+    const { timelineData, events } = await readForward(id, firstPage, initial, ctx);
+    const sessions = mergedSessions(session);
+    const clearedDraft = clearAcceptedDraft(storage, state.account, id, session.composer_reset);
+    emit({
+      session,
+      sessions,
+      ...(clearedDraft
+        ? {
+            draftReset: {
+              account: state.account,
+              sessionId: id,
+              submissionId: session.composer_reset.submission_id,
+            },
+          }
+        : {}),
+      materials: materialsData.materials || materialsData.bindings || [],
+      timeline: initial ? events : merge(state.timeline, events),
+      historyCursor: initial
+        ? timelineData.before_cursor || timelineData.next_cursor || null
+        : state.historyCursor,
+      forwardCursor: timelineData.after_cursor || timelineData.latest_cursor || state.forwardCursor,
+      lastUpdated: Date.now(),
+      error: '',
+    });
+    if (initial && typeof client.cards === 'function')
+      try {
+        await loadCardHistory();
+      } catch {
+        guard(ctx); /* A scoped history error stays visible with retry; session reads continue. */
+      }
+    await refreshCards(id, events, initial, ctx);
+    await refreshTurns(id, ctx);
+    await refreshSubmissions(id, events, ctx);
+    await refreshImports(id, events, ctx);
     return session;
   }
   async function loadCard(cardId, ctx = context()) {
