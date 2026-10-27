@@ -1105,6 +1105,34 @@ function StoryboardShell({ onNewScene, filmControl }) {
           : null,
     );
   };
+  // A library file dropped on a profile: a voice or ambient sound, or a picture for a look.
+  const dropOnProfile = (assetId, target) => {
+    const asset = db.asset(assetId),
+      [kind, pid, vid] = target.split(':'),
+      profile = db.profile(pid);
+    if (!asset || !profile) return;
+    if (asset.kind === 'audio') {
+      if (profile.type === 'character') return dispatch({ type: 'addVoice', pid, asset: asset.id });
+      if (profile.type === 'location')
+        return dispatch({ type: 'profile', id: pid, patch: { ambient: asset.id } });
+      setToast(t('storyboard.copy26'));
+      return;
+    }
+    if (asset.kind !== 'image') {
+      setToast(t('storyboard.copy27'));
+      return;
+    }
+    if (kind === 'voicedrop') {
+      setToast(t('storyboard.copy28'));
+      return;
+    }
+    const variant = variantOf(profile, vid || profile.def);
+    if (!variant) {
+      setToast(t('storyboard.copy29'));
+      return;
+    }
+    return dispatch({ type: 'fileImage', asset: assetId, pid, vid: variant.id });
+  };
   const onDragEnd = async ({ active, over }) => {
     setDragging(null);
     if (!over) return;
@@ -1130,34 +1158,7 @@ function StoryboardShell({ onNewScene, filmControl }) {
       const [, slot, shot] = o.split(':');
       return dropOnShot(item, shot, slot === 'cast' ? 'smart' : slot);
     }
-    if (item.asset && /^(pdrop|vdrop|voicedrop):/.test(o)) {
-      const asset = db.asset(item.asset),
-        [kind, pid, vid] = o.split(':'),
-        profile = db.profile(pid);
-      if (!asset || !profile) return;
-      if (asset.kind === 'audio') {
-        if (profile.type === 'character')
-          return dispatch({ type: 'addVoice', pid, asset: asset.id });
-        if (profile.type === 'location')
-          return dispatch({ type: 'profile', id: pid, patch: { ambient: asset.id } });
-        setToast(t('storyboard.copy26'));
-        return;
-      }
-      if (asset.kind !== 'image') {
-        setToast(t('storyboard.copy27'));
-        return;
-      }
-      if (kind === 'voicedrop') {
-        setToast(t('storyboard.copy28'));
-        return;
-      }
-      const variant = variantOf(profile, vid || profile.def);
-      if (!variant) {
-        setToast(t('storyboard.copy29'));
-        return;
-      }
-      return dispatch({ type: 'fileImage', asset: item.asset, pid, vid: variant.id });
-    }
+    if (item.asset && /^(pdrop|vdrop|voicedrop):/.test(o)) return dropOnProfile(item.asset, o);
   };
   const dragged =
       dragging && (dragging.asset ? db.asset(dragging.asset) : db.profile(dragging.profile)),

@@ -20,76 +20,78 @@ const upsert = (cards, card) => {
   return next;
 };
 
+function addMessage(state, event) {
+  if (state.messages.some((item) => item.id === event.id)) return state;
+  const role = event.type === 'user.message' ? 'user' : 'assistant';
+  return {
+    ...state,
+    messages: [
+      ...state.messages,
+      {
+        id: event.id,
+        role,
+        text: event.text || '',
+        attachments: event.attachments || [],
+        chips: event.chips || [],
+      },
+    ],
+  };
+}
+
+function projectChanged(state, event) {
+  // A stale version means the user's own edit already superseded this change.
+  if (event.version <= state.version) return state;
+  let cards = state.cards;
+  for (const change of event.changes || []) {
+    if (change.op === 'upsert') cards = upsert(cards, change.card);
+    if (change.op === 'remove') cards = cards.filter((card) => card.id !== change.id);
+  }
+  const next = { ...state, version: event.version, cards };
+  if (event.title) next.title = event.title;
+  if (!event.summary || state.messages.some((item) => item.id === event.id)) return next;
+  return {
+    ...next,
+    messages: [...next.messages, { id: event.id, role: 'change', summary: event.summary }],
+  };
+}
+
+const EVENTS = {
+  'turn.started': (state) => ({ ...state, busy: true }),
+  'turn.finished': (state) => ({ ...state, busy: false }),
+  'user.message': addMessage,
+  'assistant.message': addMessage,
+  'project.changed': projectChanged,
+  'card.status': (state, event) => ({
+    ...state,
+    cards: state.cards.map((card) =>
+      card.id === event.id ? { ...card, status: event.status } : card,
+    ),
+  }),
+  // The live server's whole view replaces local state (#422).
+  'chat.loaded': (state, event) => ({ ...state, ...event.state, quotes: event.state.quotes || {} }),
+  'quote.proposed': (state, event) =>
+    state.quotes[event.id]
+      ? state
+      : {
+          ...state,
+          quotes: { ...state.quotes, [event.id]: { ...event, status: 'open' } },
+          messages: [...state.messages, { id: event.id, role: 'quote', quoteId: event.id }],
+        },
+  'quote.settled': (state, event) =>
+    state.quotes[event.id]
+      ? {
+          ...state,
+          quotes: {
+            ...state.quotes,
+            [event.id]: { ...state.quotes[event.id], status: event.status },
+          },
+        }
+      : state,
+};
+
 // Every event is idempotent per id, so a replayed stream after reconnecting changes nothing.
 export function applyEvent(state, event) {
-  switch (event.type) {
-    case 'turn.started':
-      return { ...state, busy: true };
-    case 'turn.finished':
-      return { ...state, busy: false };
-    case 'user.message':
-    case 'assistant.message': {
-      if (state.messages.some((item) => item.id === event.id)) return state;
-      const role = event.type === 'user.message' ? 'user' : 'assistant';
-      return {
-        ...state,
-        messages: [
-          ...state.messages,
-          {
-            id: event.id,
-            role,
-            text: event.text || '',
-            attachments: event.attachments || [],
-            chips: event.chips || [],
-          },
-        ],
-      };
-    }
-    case 'project.changed': {
-      // A stale version means the user's own edit already superseded this change.
-      if (event.version <= state.version) return state;
-      let cards = state.cards;
-      for (const change of event.changes || []) {
-        if (change.op === 'upsert') cards = upsert(cards, change.card);
-        if (change.op === 'remove') cards = cards.filter((card) => card.id !== change.id);
-      }
-      const next = { ...state, version: event.version, cards };
-      if (event.title) next.title = event.title;
-      if (!event.summary || state.messages.some((item) => item.id === event.id)) return next;
-      return {
-        ...next,
-        messages: [...next.messages, { id: event.id, role: 'change', summary: event.summary }],
-      };
-    }
-    case 'card.status':
-      return {
-        ...state,
-        cards: state.cards.map((card) =>
-          card.id === event.id ? { ...card, status: event.status } : card,
-        ),
-      };
-    case 'chat.loaded':
-      // The live server's whole view replaces local state (#422).
-      return { ...state, ...event.state, quotes: event.state.quotes || {} };
-    case 'quote.proposed':
-      if (state.quotes[event.id]) return state;
-      return {
-        ...state,
-        quotes: { ...state.quotes, [event.id]: { ...event, status: 'open' } },
-        messages: [...state.messages, { id: event.id, role: 'quote', quoteId: event.id }],
-      };
-    case 'quote.settled':
-      if (!state.quotes[event.id]) return state;
-      return {
-        ...state,
-        quotes: {
-          ...state.quotes,
-          [event.id]: { ...state.quotes[event.id], status: event.status },
-        },
-      };
-    default:
-      return state;
-  }
+  return Object.hasOwn(EVENTS, event.type) ? EVENTS[event.type](state, event) : state;
 }
 
 // The user's own card edit wins: it bumps the version so an older assistant change is ignored.
