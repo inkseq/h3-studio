@@ -874,3 +874,5 @@ inventory.json
 !studio_platform/workflow_backup_stream.py
 !tests/test_workflow_backup_stream.py
 !docs/PRODUCTION-OPERATION-GUARDS.md
+!deploy/platform/operation_qualification.py
+!tests/test_operation_qualification.py
