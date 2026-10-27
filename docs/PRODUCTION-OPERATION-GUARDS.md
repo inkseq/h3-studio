@@ -77,6 +77,10 @@ are Docker inventory/inspect, a read-only SQL count inside the pinned app, and
 the root-installed archive identity validator in an isolated Python subprocess.
 OCI manifest digests and Docker config IDs are checked against the same approved
 archive, rather than incorrectly requiring the two digest formats to be equal.
+Archive hashing happens inside the release lock on both qualification passes,
+with a 120-second timeout per validation (up to 240 seconds for hashing alone).
+Allow for that lock hold plus the other checks and the caller's operation;
+this qualifier is not intended as a frequent polling probe.
 No intents, configs, bytecode files, containers or artifacts are created.
 Diagnostics contain fixed error codes, never config contents or raw stderr.
 

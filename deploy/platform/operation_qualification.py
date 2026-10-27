@@ -233,7 +233,7 @@ def locked_qualification(binding):
     need(os.geteuid() == 0, 'qualification_root_required')
     lock = ROOT / 'release.lock'
     before = protected(lock)
-    fd = os.open(lock, os.O_RDWR | os.O_NOFOLLOW)  # Never create a missing lock.
+    fd = os.open(lock, os.O_RDONLY | os.O_NOFOLLOW)  # Never create a missing lock.
     try:
         need(identity(before) == identity(os.fstat(fd)), 'qualification_lock_changed')
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
