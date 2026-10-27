@@ -8,6 +8,7 @@ never exported. Recovery is an isolated, disabled copy, not automatic failover.
 from __future__ import annotations
 
 from .asset_objects import ASSET_OBJECT_ROLES
+from .backup_missing import missing_object
 from .schema_version import (
     PAYMENT_REVISION,
     LIVE_PAYMENT_REVISION,
@@ -681,22 +682,13 @@ def _publish_media_backup(
         try:
             info = store.stat(key)
         except ObjectNotFound:
-            if not allow_missing_media or provider != "r2":
+            if not allow_missing_media:
                 raise
-            absent = dict(
-                item,
-                reason="source_object_not_found",
-                observation="head",
-                observed_at=time.time(),
-            )
-            if classify_expected_deletions:
-                absent.update(
-                    classification="expected_deleted"
-                    if key in evidence
-                    else "unexpected_missing",
-                    deletion_evidence=evidence.get(key, []),
+            missing.append(
+                missing_object(
+                    item, store, evidence if classify_expected_deletions else None
                 )
-            missing.append(absent)
+            )
             continue
         # Presigned GPU PUTs lack optional HEAD SHA metadata. Every body still
         # must match the original DB/receipt SHA and size before publication.
@@ -1346,9 +1338,11 @@ def verify_local(directory, *, allow_incomplete=False):
                         if manifest["version"] == 3
                         else set()
                     )
-                    or item.get("provider") != "r2"
                     or item["reason"] != "source_object_not_found"
-                    or item["observation"] != "head"
+                    or item["observation"]
+                    != {'r2': 'head', 'local': 'local_absent'}.get(
+                        item.get('provider', 'local')
+                    )
                     or type(item["observed_at"]) not in (int, float)
                     or not math.isfinite(item["observed_at"])
                     or item["observed_at"] <= 0
