@@ -64,3 +64,45 @@ partially booted capacity, missing ETA, fractional running work, hard caps,
 forecast-only demand, idle/no-work conditions, duplicate identities, invalid
 numbers and deterministic immutable results. These are planning tests, not GPU
 acceptance or spend evidence. Provider integration remains Tier2 with one review.
+
+## Prospective administrator start rules
+
+All routes use the existing human-administrator boundary and no-store responses.
+Prefix: `/v1/operator/dstack/admin/start-rules`.
+
+- `GET ?profile_id=<operator-profile-id>` returns `binding`, `value`, `version`,
+  `revision`, `keep_alive_seconds`, `execution_connected:false`, `applied:false`.
+- `POST /preview` takes `{profile_id, expected_revision, value}`; value is the
+  complete `{job_seconds, boot_seconds, minimum_jobs}` object. It returns the
+  before state, proposed value, derived keep-alive and `confirmation_digest`.
+  This is a configuration comparison, not a live capacity quote or start permit.
+- `PUT` takes the same fields plus `confirmation_digest` and a nonempty `reason`,
+  with `Idempotency-Key`. Preview binds the actor, tenant, current operator config,
+  exact pool/configuration/mode, old revision and candidate. A changed binding or
+  revision requires a new preview. No fleet, price, budget, demand-enable or
+  provider field can be written through these routes.
+- `GET /history?profile_id=...` returns at most 50 newest existing outbox audit
+  records for that tenant and exact binding, with actor, reason, command and
+  before/after states. Existing outbox retention applies; no second audit store.
+
+Absent rows read the 30/600/20 defaults without creating anything. Durations are
+integer seconds 1–86400; minimum jobs is an integer 1–10000. Keep-alive is derived
+from boot seconds. These are validated configuration ranges, not additional
+spending authority. The current demand loop and idle stop do not consume them.
+The UI must describe these as prepared settings and must not display “active”.
+Measured p50/p90 telemetry and execution integration remain separate G2 work;
+these routes neither invent measurements nor overwrite accepted jobs/rentals.
+
+Configuration reuses `platform_operator_capacity_policy`; commands reuse the
+existing idempotency journal, and history reuses the transactional outbox. No
+new tables or credentials. Writes take the account and capacity locks, recheck
+canonical admin status before replay, compare the original revision, and commit
+policy, command and audit together. Replaying an original command returns its
+original response. A failed transaction cannot leave an unaudited policy.
+
+Errors include `start_rules_invalid` / `start_rules_profile_invalid` (422),
+`start_rules_conflict` / `start_rules_confirmation_changed` (409), and existing
+authorization/idempotency errors. Stored identity corruption refuses reads.
+This configuration slice requires one Tier2 PR review. It does not qualify or
+enable the later runtime integration; that integration must receive its own
+review of the changed execution behaviour before adoption.
