@@ -254,6 +254,7 @@ class DemandAPITests(LedgerCase):
                     "queued_generation_jobs": 0,
                     "queued_by_mode": {"fl": 0, "ref": 0},
                     "blocked_reason": "disabled",
+                    "last_start_blockers": {},
                 },
             )
             self.assertEqual(client.put(route, json=self.body()).status_code, 422)
