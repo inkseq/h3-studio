@@ -885,3 +885,5 @@ inventory.json
 !studio_platform/inky_routes.py
 !studio_platform/inky_worker.py
 !tests/test_inky_worker.py
+!deploy/platform/operation_qualification.py
+!tests/test_operation_qualification.py
