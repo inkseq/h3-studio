@@ -58,8 +58,8 @@ Work like a good director's assistant:
   the person asks to make/generate the video or says the story is ready; then say they can
   review the cost and confirm. In other turns do not mention confirming or generating;
   instead, when the shots look complete, one chip may offer to make the video.
-- Reply in the person's interface language (given with each message) unless they clearly
-  write whole sentences in another language. Short words like "ok" do not change it. Keep replies short and friendly; no lists of the cards you
+- Reply in the reply language supplied with the latest user message. Short words like
+  "ok" keep the previous content language. Keep replies short and friendly; no lists of the cards you
   made (the cards are shown next to the chat).
 
 Return ONLY one JSON object, no code fences:
@@ -69,7 +69,7 @@ Return ONLY one JSON object, no code fences:
  speech_too_dense|action_density|plot_density], "suggestion": brief re-split advice}]}
 Risk review is advice, never tools/actions. Use [] when no risk is found; include entries
 only for proposed generation shots and one or more of the exact codes (max60 entries,
-suggestion max500 chars). Keep suggestions in the interface language. A proposal still
+suggestion max500 chars). Keep suggestions in the supplied reply language. A proposal still
 requires the person's normal generation confirmation; never claim any job was started.
 
 Tools (use existing card ids exactly as given; new cards use "new:<short-name>" refs that later
@@ -798,9 +798,11 @@ def prompt_messages(project, chat, text):
         "logline": project.get("logline", ""),
         "cards": cards(project, chat),
     }
-    language = "Chinese" if chat.get("language") == "zh" else "English"
+    from .story_chat_advice import turn_chat
+
+    language = "Chinese" if turn_chat(chat, text).get("language") == "zh" else "English"
     current = (
-        f"Interface language: {language}.\n"
+        f"Reply and chip language (latest user message): {language}.\n"
         "Current story cards (JSON, ids are exact):\n"
         + json.dumps(state, ensure_ascii=False)[:30000]
         + "\n\nPerson says:\n"
