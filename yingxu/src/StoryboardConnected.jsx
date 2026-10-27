@@ -3,6 +3,8 @@ import { Button } from './ui/Button.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
 import StoryFilmControl from './StoryFilmControl.jsx';
 import { formatMoneyMicros } from './money.js';
+import { useCredits } from './CreditsUI.jsx';
+import { storyboardPresentation } from './i18n/legacyPresentation.js';
 import { createQuickChatClient } from './quick-chat-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import React, {
@@ -66,7 +68,34 @@ function planRecipe(plan, capabilities) {
     inputs,
   };
 }
-function WorkbenchConfirmation({ receipt, onClose }) {
+// What the user pays: credits when the server quotes credits, dollars only on the USD path
+// (staging and operators). Machine-time limits are an internal guard, not shown here.
+function receiptCost(receipt) {
+  const plans = (receipt.items || []).map((item) => item.plan || {});
+  if (plans.length && plans.every((plan) => plan.admission === 'credits'))
+    return plans.every((plan) => Number.isSafeInteger(plan.credits))
+      ? { credits: plans.reduce((sum, plan) => sum + plan.credits, 0) }
+      : {};
+  const micros = receipt.estimate?.cost_microusd;
+  return Number.isSafeInteger(micros) && micros >= 0 && micros <= 9000000000000000
+    ? { money: formatMoneyMicros(micros) }
+    : {};
+}
+// Name the shot an estimate refused and say why, instead of a generic "fix something".
+function shotRefusal(problem, live, t, locale) {
+  if (problem?.message !== 'workbench.inputsInvalid' || !problem.shotId) return problem;
+  const index = live.shots.findIndex((shot) => shot.id === problem.shotId);
+  if (index < 0) return problem;
+  const shot = live.shots[index],
+    why = storyboardPresentation(expandStoryboard(shot, live, { locale }), locale).warnings[0];
+  return Error(
+    t('workbench.shotInvalid', {
+      shot: shot.title || t('workbench.shotN', { number: index + 1 }),
+      why: why || t('workbench.inputsInvalid'),
+    }),
+  );
+}
+function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
   const { t } = useI18n(),
     c = useCloud(),
     [busy, setBusy] = useState(false),
@@ -78,12 +107,9 @@ function WorkbenchConfirmation({ receipt, onClose }) {
     scope.current.project === s.project.id &&
     receipt.project_version === s.workspace.serverVersion &&
     !s.workspace.dirty;
-  const money =
-    Number.isSafeInteger(receipt.estimate?.cost_microusd) &&
-    receipt.estimate.cost_microusd >= 0 &&
-    receipt.estimate.cost_microusd <= 9000000000000000
-      ? formatMoneyMicros(receipt.estimate.cost_microusd)
-      : t('workbench.unknown');
+  const cost = receiptCost(receipt),
+    balance = useCredits(c.account)?.available,
+    takes = (receipt.items || []).some((item) => item.index > 0);
   return (
     <Dialog
       title={t('workbench.confirm')}
@@ -92,18 +118,28 @@ function WorkbenchConfirmation({ receipt, onClose }) {
       wide
       className="sb-confirm"
     >
-      <p>{t('workbench.estimate', { amount: money })}</p>
-      <p>
-        {Number.isFinite(receipt.estimate?.machine_seconds)
-          ? t('workbench.machine', { seconds: receipt.estimate.machine_seconds })
-          : t('workbench.machineUnknown')}
+      <p className="sb-confirm-cost">
+        {cost.credits != null
+          ? t('workbench.costCredits', { credits: cost.credits.toLocaleString() })
+          : cost.money
+            ? t('workbench.estimate', { amount: cost.money })
+            : t('workbench.costUnknown')}
+        {cost.credits != null && Number.isFinite(balance) && (
+          <small>{t('workbench.balance', { credits: balance.toLocaleString() })}</small>
+        )}
       </p>
-      <p>{t('workbench.notEta')}</p>
+      <p className="sb-confirm-note">{t('workbench.timing')}</p>
       {(receipt.items || []).map((item, i) => (
         <section key={item.plan_id || i}>
           <h3>
-            {s.project.entities.find((e) => e.id === item.shot_id)?.title} ·{' '}
-            {t('workbench.take', { number: item.index + 1 })}
+            {shotLabels?.[item.shot_id] ||
+              s.project.entities.find((e) => e.id === item.shot_id)?.title}
+            {Number.isFinite(item.plan?.output_spec?.actual_duration) &&
+              ' · ' +
+                t('workbench.seconds', {
+                  seconds: Math.round(item.plan.output_spec.actual_duration),
+                })}
+            {takes && ' · ' + t('workbench.take', { number: item.index + 1 })}
           </h3>
           <TakeRecipe
             take={{ seed: item.seed, recipe: planRecipe(item.plan, c.capabilities) }}
@@ -168,7 +204,7 @@ function WorkbenchConfirmation({ receipt, onClose }) {
 }
 
 export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScene }) {
-  const { t: at } = useI18n();
+  const { t: at, locale } = useI18n();
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     c = useCloud(),
     [queue, setQueue] = useState(null),
@@ -405,11 +441,16 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     }
     if (action.type === 'workbenchGenerate') {
       const context = captureWorkspace(store);
-      const result = await cloud.workbenchCommand('preflight', {
-        shot_ids: [...new Set(action.ids)],
-        copies: action.copies,
-        capabilities_version: c.capabilities?.capabilities_version,
-      });
+      let result;
+      try {
+        result = await cloud.workbenchCommand('preflight', {
+          shot_ids: [...new Set(action.ids)],
+          copies: action.copies,
+          capabilities_version: c.capabilities?.capabilities_version,
+        });
+      } catch (problem) {
+        throw shotRefusal(problem, currentView(), at, locale);
+      }
       assertWorkspace(store, context);
       setWorkbenchReceipt(result);
       return { ok: true };
@@ -669,6 +710,12 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       {workbenchReceipt && (
         <WorkbenchConfirmation
           receipt={workbenchReceipt}
+          shotLabels={Object.fromEntries(
+            view.shots.map((shot, i) => [
+              shot.id,
+              shot.title || at('workbench.shotN', { number: i + 1 }),
+            ]),
+          )}
           onClose={() => setWorkbenchReceipt(null)}
         />
       )}

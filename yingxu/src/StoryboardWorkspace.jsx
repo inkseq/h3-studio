@@ -27,6 +27,7 @@ import { MenuItem } from './ui/Menu.jsx';
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
 import { guideField, highlightGuideField } from './guide.js';
+import { readAgentLink } from './agent-navigation.js';
 import './guide.css';
 import { InkyForStory } from './inky/InkyForStory.jsx';
 import { store } from './store.js';
@@ -135,20 +136,21 @@ function QueueSummary() {
     })
     .filter((row) => row.waiting > 0 || row.running > 0);
   if (!rows.length) return null;
+  // One quiet line under the story title; which pipeline a shot uses is not the user's concern.
+  const waiting = rows.reduce((sum, row) => sum + row.waiting, 0),
+    running = rows.reduce((sum, row) => sum + row.running, 0),
+    seconds = Math.max(
+      0,
+      ...rows
+        .filter((row) => row.waiting > 0)
+        .map((row) => (Number.isFinite(row.row?.roughWaitSeconds) ? row.row.roughWaitSeconds : 0)),
+    );
   return (
-    <div className="sb-queue" aria-label={t('storyboard.copy14')}>
-      {rows.map(({ mode, row, waiting, running }) => (
-        <span key={mode}>
-          {mode === 'FL' ? t('storyboard.copy15') : t('storyboard.copy16')}：
-          {t('storyboard.copy34', { count: waiting })}
-          {running > 0 && t('storyboard.copy32', { count: running })}
-          {waiting > 0 &&
-            Number.isFinite(row?.roughWaitSeconds) &&
-            row.roughWaitSeconds > 0 &&
-            t('storyboard.copy33', { minutes: Math.ceil(row.roughWaitSeconds / 60) })}
-        </span>
-      ))}
-    </div>
+    <span className="sb-queue" aria-label={t('storyboard.copy14')}>
+      {waiting > 0 && ' · ' + t('storyboard.copy34', { count: waiting })}
+      {running > 0 && t('storyboard.copy32', { count: running })}
+      {seconds > 0 && t('storyboard.copy33', { minutes: Math.ceil(seconds / 60) })}
+    </span>
   );
 }
 const FilmEditor = React.lazy(() => import('./FilmEditor.jsx'));
@@ -583,11 +585,11 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   duration: fmt(totalDuration(state.shots)),
                   chosen: count,
                 })}
+                <QueueSummary />
               </small>
             </div>
             <div className="row tight chapter-actions" data-icon-only={headCompact || undefined}>
               <InkyForStory />
-              <QueueSummary />
               {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && (
                 <Button
@@ -970,6 +972,28 @@ function useGuideField(pageActive, search, selected) {
     return () => cancelAnimationFrame(frame);
   }, [pageActive, guide, selected]);
 }
+// The story chat's "Make video" lands here: open the generate confirmation for the shots
+// without video once the story and its limits are loaded, then drop the request from the URL
+// so a reload never asks again. Nothing is charged until the user confirms.
+function useGenerateLink(pageActive, search, state, dispatch) {
+  const link = readAgentLink(search),
+    asked = useRef(false);
+  const ready =
+    pageActive &&
+    link?.generate &&
+    link.projectId === state.project.id &&
+    !state.busy &&
+    !!state.copiesMax;
+  useEffect(() => {
+    if (!ready || asked.current) return;
+    asked.current = true;
+    const url = new URL(window.location.href);
+    url.searchParams.delete('panel');
+    navigateApp(url.pathname + url.search, { replace: true, restore: false });
+    const ids = state.shots.filter((shot) => !shot.versions.length).map((shot) => shot.id);
+    if (ids.length) void dispatch({ type: 'workbenchGenerate', ids, copies: 1 });
+  }, [ready, state.shots, dispatch]);
+}
 function StoryboardShell({ onNewScene, filmControl }) {
   const { t } = useI18n();
   const { state, dispatch, db, clearError } = useStoryboardUI(),
@@ -999,6 +1023,7 @@ function StoryboardShell({ onNewScene, filmControl }) {
     else if (!id) setSelected(null);
   }, [pageActive, location.path, location.search, state.project.id, shotIdsKey]);
   useGuideField(pageActive, location.search, selected);
+  useGenerateLink(pageActive, location.search, state, dispatch);
   const container = useRef(),
     sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
