@@ -3,7 +3,9 @@
 This branch mounts scoped readers and explicit preference writes in `create_app`.
 The evaluator is off by default. An explicit protected `INKSEQ_INKY_CONFIG_FILE`
 can construct it without a network call; no deployment configuration supplies
-that file yet. No rollout or model-quality acceptance is claimed.
+that file yet. Compose and the protected host allowlist now carry an app-only
+opt-in; absent opt-in preserves the existing recipe-file alias without reading
+it. No rollout or model-quality acceptance is claimed.
 
 ## Contract
 
@@ -57,6 +59,12 @@ dead rig-root profile or an automatic profile fallback. Central credentials
 are loaded lazily through the existing loader. No loader/import network calls.
 AWS provisioning is not implemented; a local registry loader is not an AWS
 credential transport. Do not copy its vault or put secrets in the repository.
+The 2026-10-27 read-only managed-secret metadata census found no existing
+Inky/TypeSafe/OpenRouter server secret in either environment. Existing database,
+auth, payment and title secrets must not be repurposed. The app-only mount is
+prepared, but an approved durable hydration source remains a deployment
+dependency; this PR does not create secret containers, credentials or paid
+infrastructure. A helper install follows the existing zero-work host gate.
 The runtime file contract validates the exact profiles/origins, refuses duplicate
 JSON keys, symlinks, multiple hardlinks and unprotected Linux ownership/modes.
 Invalid/missing configuration disables the evaluator with a static diagnostic;
@@ -88,13 +96,26 @@ activation**; the observed ~$0.0006 average is not a worst-case bound. This draf
 does not claim a server-side ledger can control a provider that ignores its
 request limits. On response errors/timeouts, retain the original reservation.
 
+Public metadata read-back on 2026-10-27 (no authentication or inference):
+the [exact model endpoints](https://openrouter.ai/api/v1/models/openai/gpt-6.1-terra/endpoints)
+reported OpenAI regular/flex/fast routes with `max_tokens`, `reasoning` and
+`response_format` support. Regular rates were USD1/M input and USD5/M output;
+the highest listed long-context variant was USD4/M and USD15/M. Both remain
+below the request price filters. This confirms route/parameter availability,
+not a live billing test. Under the proposed byte/framing bound, the filtered
+token-price envelope is `(16384+4096)*5/1e6 + 1024*30/1e6 = USD0.13312`, below
+the USD0.25 reservation. Exact token accounting and the bounded live response
+still require staging qualification before general activation. Do not infer a
+hard cap from the historical average example cost.
+
 ## Remaining integration
 
-1. Qualified server credential transport and activation, with the reviewed
-   request-cost envelope; no new key or credential-file import.
-2. Qualify the post-response hooks under the actual server lifecycle and publish
-   the final Agent skill contract. Existing accepted job inputs stay unchanged.
-3. Preserve account/project erasure and discovery integration regressions.
-4. Upload/card candidate provenance, bounded assets, evaluated decoy fixtures.
-5. One Claude Tier2 review of the final PR, exact-head CI, then staging
+1. Qualified durable server credential hydration and activation, with the
+   reviewed request-cost envelope; no new key or obsolete-file import.
+2. Upload/card candidate provenance, bounded assets, evaluated decoy fixtures.
+   #684 comment6436424621 asks how an unattached upload maps to the required
+   `shot_id`; no synthetic shot assignment is permitted.
+3. One Claude Tier2 review of the final PR, exact-head CI, then staging
    qualification. No review request or activation for this draft milestone.
+   The post-response lifecycle and Agent contract are tested/documented locally;
+   account/project erasure and discovery regressions stay in PostgreSQL CI.

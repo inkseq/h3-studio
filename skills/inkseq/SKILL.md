@@ -105,3 +105,10 @@ Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-wi
 [Redo diff preview](reference/api.md#redo-from-marks).
 
 [Feedback](reference/api.md#feedback).
+
+## Inky advice
+
+Discover `inky` on the target origin before using [Inky suggestions](reference/api.md#inky-suggestions).
+Read current advice without evaluation or spend; an empty list is not a quality verdict.
+Suggestions never authorize edits, generation, or a human usable/redo verdict.
+Only ignore or mute on explicit user intent. Re-read the shot before acting on advice.

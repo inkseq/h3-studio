@@ -893,6 +893,7 @@ inventory.json
 !studio_platform/inky_config.py
 !studio_platform/inky_runtime.py
 !tests/test_inky_config.py
+!tests/test_inky_deployment.py
 !studio_platform/http_boundaries.py
 !studio_platform/review_privacy.py
 !deploy/platform/operation_qualification.py
