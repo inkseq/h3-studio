@@ -15,12 +15,129 @@ from studio_platform.operator_capacity import (
     operator_nodes,
     operator_policy,
 )
-from studio_platform.repository import budget_reservations, jobs, request_hash
+from studio_platform.repository import (
+    BudgetExceeded,
+    budget_reservations,
+    jobs,
+    request_hash,
+)
 from test_platform_repository import LedgerCase
 import test_dstack_operator as original
 
 
 class DemandStartTests(LedgerCase):
+    def summary_job(self):
+        job = self.accepted()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(jobs)
+                .where(jobs.c.id == job['id'])
+                .values(
+                    execution_plan=dict(
+                        job['execution_plan'],
+                        backend='wangp-worker',
+                        dispatch_backend='hatchet-v1',
+                    ),
+                    request=dict(job['request'], request={'mode': 'fl'}),
+                )
+            )
+        return self.repo.get_job(self.scope, job['id'])
+
+    def demand_summary(self):
+        from studio_platform.dstack_demand import summary
+
+        with self.repo.engine.connect() as connection:
+            # The existing live witness can prove no current occupancy without
+            # manufacturing the original allocator's missing zero-cost receipt.
+            witness = {
+                'observations': [
+                    {'intent_id': n, 'counted': False}
+                    for n in connection.execute(
+                        select(operator_nodes.c.intent_id)
+                    ).scalars()
+                ]
+            }
+            with patch.object(
+                self.service, '_live_capacity_usage', return_value=witness
+            ):
+                return summary(self.service, connection, self.now)
+
+    def test_summary_explains_unresolved_original_no_capacity_without_replay(self):
+        from test_dstack_capacity import no_capacity_run
+
+        self.enabled()
+        job = self.summary_job()
+        started = start_once(self.service)
+        binding = self.store.load(started['node_id'])
+        self.client.runs[binding['run_name']] = no_capacity_run(
+            self.client.runs[binding['run_name']]
+        )
+        self.capacity.observe(started['node_id'])
+        before = (
+            self.journal(),
+            self.old_holds(started['node_id']),
+            self.store.load(started['node_id']),
+        )
+        applied = copy.deepcopy(self.client.applied)
+        value = self.demand_summary()
+        self.assertEqual(value['running_machines'] + value['starting_machines'], 0)
+        self.assertEqual(value['blocked_reason'], 'allocation_uncertain')
+        self.assertEqual(value['last_start_blockers'], {'allocation_uncertain': 1})
+        self.assertEqual(self.client.applied, applied)
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+        self.assertEqual(
+            before,
+            (
+                self.journal(),
+                self.old_holds(started['node_id']),
+                self.store.load(started['node_id']),
+            ),
+        )
+
+    def test_summary_reports_budget_refusal_but_does_not_block_unattempted_work(self):
+        self.enabled()
+        self.summary_job()
+        with patch.object(
+            self.service,
+            '_preview_for_owner',
+            side_effect=BudgetExceeded('dstack_test_task_limit_reached'),
+        ):
+            self.assertEqual(start_once(self.service)['reason_code'], 'budget_limit')
+        original = self.journal()
+        value = self.demand_summary()
+        self.assertEqual(value['blocked_reason'], 'budget_limit')
+        self.assertEqual(value['last_start_blockers'], {'budget_limit': 1})
+        self.summary_job()
+        value = self.demand_summary()
+        self.assertIsNone(value['blocked_reason'])
+        self.assertEqual(value['last_start_blockers'], {'budget_limit': 1})
+        self.assertEqual(self.journal(), original)
+        self.assertEqual(self.client.applied, [])
+
+    def test_summary_clears_old_budget_reason_after_original_start_exists(self):
+        self.enabled()
+        self.summary_job()
+        with patch.object(
+            self.service,
+            '_preview_for_owner',
+            side_effect=BudgetExceeded('dstack_test_task_limit_reached'),
+        ):
+            start_once(self.service)
+        self.now += 80
+        started = start_once(self.service)
+        self.assertEqual(started['state'], 'accepted')
+        # Even a retained old diagnostic cannot override the original start.
+        row = self.journal()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_commands)
+                .where(operator_commands.c.id == row['id'])
+                .values(payload=dict(row['payload'], reason_code='budget_limit'))
+            )
+        value = self.demand_summary()
+        self.assertIsNone(value['blocked_reason'])
+        self.assertEqual(value['last_start_blockers'], {})
+
     def test_startup_replacement_advances_without_supplier_removal_proof(self):
         from studio_platform.capacity_watchdog import reclaim_node
         from studio_platform.repository import instance_intents
