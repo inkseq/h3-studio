@@ -557,6 +557,8 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     previewScriptWindows: (id, options) => cloud.previewScriptWindows(id, options),
     readTakeReview: (shot, artifact) => cloud.readTakeReview(shot, artifact),
     readTakeReviewSummaries: (shot) => cloud.readTakeReviewSummaries(shot),
+    readInkySuggestions: cloud.readInkySuggestions && (() => cloud.readInkySuggestions()),
+    ignoreInkySuggestion: (id) => cloud.ignoreInkySuggestion?.(id),
     saveTakeReview: (shot, artifact, body, key) => cloud.saveTakeReview(shot, artifact, body, key),
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),

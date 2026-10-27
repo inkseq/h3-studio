@@ -26,6 +26,9 @@ import ItemMenu from './ItemMenu.jsx';
 import { MenuItem } from './ui/Menu.jsx';
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
+import { guideField, highlightGuideField } from './guide.js';
+import './guide.css';
+import { InkyForStory } from './inky/InkyForStory.jsx';
 import { store } from './store.js';
 import {
   DndContext,
@@ -583,6 +586,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               </small>
             </div>
             <div className="row tight chapter-actions" data-icon-only={headCompact || undefined}>
+              <InkyForStory />
               <QueueSummary />
               {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && (
@@ -944,6 +948,28 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     </div>
   );
 }
+// 小墨's "去修改" link (h3-studio#679): once the shot editor shows, focus and pulse the field,
+// then drop it from the address so a refresh does not pulse again.
+function useGuideField(pageActive, search, selected) {
+  const guide = guideField(search);
+  useEffect(() => {
+    if (!pageActive || !guide || !selected) return;
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    let frame = 0,
+      tries = 0;
+    const attempt = () => {
+      if (!highlightGuideField(document, guide, { reducedMotion }) && ++tries < 30) {
+        frame = requestAnimationFrame(attempt);
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.delete('field');
+      navigateApp(url.pathname + url.search, { replace: true, restore: false });
+    };
+    frame = requestAnimationFrame(attempt);
+    return () => cancelAnimationFrame(frame);
+  }, [pageActive, guide, selected]);
+}
 function StoryboardShell({ onNewScene, filmControl }) {
   const { t } = useI18n();
   const { state, dispatch, db, clearError } = useStoryboardUI(),
@@ -972,6 +998,7 @@ function StoryboardShell({ onNewScene, filmControl }) {
     if (id && shotIdsKey.split('|').includes(id)) setSelected(id);
     else if (!id) setSelected(null);
   }, [pageActive, location.path, location.search, state.project.id, shotIdsKey]);
+  useGuideField(pageActive, location.search, selected);
   const container = useRef(),
     sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),

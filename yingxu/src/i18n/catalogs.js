@@ -12,6 +12,7 @@ import { trashCatalogs } from './trashCatalogs.js';
 import { workbenchCatalogs } from './workbenchCatalogs.js';
 import { assistantCatalogs } from './assistantCatalogs.js';
 import { takesCatalogs } from './takesCatalogs.js';
+import { inkyCatalogs } from '../inky/inkyCatalogs.js';
 import { adjunctCatalogs } from './adjunctCatalogs.js';
 import { accountDetailCatalogs } from './accountDetailCatalogs.js';
 import { operatorPanelCatalogs } from './operatorPanelCatalogs.js';
@@ -45,6 +46,7 @@ export const catalogs = {
     ...trashCatalogs.en,
     ...workbenchCatalogs.en,
     ...takesCatalogs.en,
+    ...inkyCatalogs.en,
     ...assistantCatalogs.en,
     'workspace.closeHistory': 'Close creation history',
     ...adjunctCatalogs.en,
@@ -100,6 +102,7 @@ export const catalogs = {
     ...trashCatalogs.zh,
     ...workbenchCatalogs.zh,
     ...takesCatalogs.zh,
+    ...inkyCatalogs.zh,
     ...assistantCatalogs.zh,
     'workspace.closeHistory': '关闭创作记录',
     ...adjunctCatalogs.zh,

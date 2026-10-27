@@ -1674,7 +1674,18 @@ export function HelpTip({ text }) {
   );
 }
 
-function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, className = '' }) {
+function Slot({
+  id,
+  label,
+  hint,
+  help,
+  children,
+  onClear,
+  onPick,
+  onFiles,
+  guide,
+  className = '',
+}) {
   const { t: tr } = useI18n();
   const { setNodeRef, isOver, active } = useDroppable({ id });
   const hot = isOver && /^(asset|profile):/.test(String(active?.id));
@@ -1687,6 +1698,7 @@ function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, class
       ref={setNodeRef}
       {...(onFiles ? nativeDrop(onFiles) : {})}
       className={'slot ' + className + (hot ? ' drop-hot' : '')}
+      data-guide-field={guide}
       onContextMenu={open}
       title={tr('storyboard.finish8')}
     >
@@ -2007,7 +2019,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         )}
       </div>
       <div className="ed-form">
-        <label className="field">
+        <label className="field" data-guide-field="action">
           <span>
             {tr(restoredExact ? 'workbench.restoredPrompt' : 'storyboard.copy85')}{' '}
             <HelpTip text={tr('help.action')} />
@@ -2032,6 +2044,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               })
             }
             id={'slot:cast:' + shot.id}
+            guide="cast"
             className="castslot"
             label={tr('storyboard.detail77')}
             hint={tr('storyboard.detail78')}
@@ -2200,7 +2213,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         <div className={'modepanel ' + info.mode.toLowerCase()}>
           {info.frameInputs && (
             <>
-              <div className="slots">
+              <div className="slots" data-guide-field="frames">
                 <Slot
                   onFiles={(files) =>
                     dispatch({
@@ -2310,6 +2323,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                   })
                 }
                 id={'slot:refs:' + shot.id}
+                guide="refs"
                 help={tr(info.mode === 'FL' ? 'help.refsFl' : 'help.refsRef')}
                 label={info.mode === 'FL' ? tr('storyboard.detail62') : tr('storyboard.detail63')}
                 hint={info.mode === 'FL' ? tr('storyboard.detail64') : tr('storyboard.detail65')}
