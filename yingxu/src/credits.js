@@ -74,6 +74,25 @@ export function insufficientCredits(status, detail) {
 }
 
 // API times arrive as Unix seconds (the platform default), milliseconds or ISO strings.
+// Inkseq receipts for paid top-ups (h3-studio#698). Provider receipt pages show personal
+// contact details, so their links are never shown to customers.
+export function receiptList(body) {
+  return (Array.isArray(body?.payments) ? body.payments : [])
+    .map((row) => row?.receipt)
+    .filter(
+      (receipt) =>
+        receipt &&
+        typeof receipt.payment_id === 'string' &&
+        Number.isSafeInteger(receipt.amount_cents) &&
+        Number.isSafeInteger(receipt.credits),
+    )
+    .map((receipt) => ({
+      ...receipt,
+      currency: String(receipt.currency || 'usd').toUpperCase(),
+      refunded_cents: Number.isSafeInteger(receipt.refunded_cents) ? receipt.refunded_cents : 0,
+    }));
+}
+
 export function apiDate(value) {
   if (typeof value === 'number' && Number.isFinite(value))
     return new Date(value < 1e11 ? value * 1000 : value);
