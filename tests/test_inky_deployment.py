@@ -8,7 +8,8 @@ import subprocess
 import tempfile
 import unittest
 
-from tools.check_migration_deploy import ROOT, check, validate_inky
+from tools.check_migration_deploy import ROOT, check
+from tools.inky_deploy_validation import validate_inky
 
 
 class InkyDeploymentTests(unittest.TestCase):
@@ -85,6 +86,7 @@ class InkyDeploymentTests(unittest.TestCase):
                 environment=environment,
                 runner=render,
             )
+            validate_inky(rendered)
             self.assertEqual(
                 rendered['services']['app']['environment']['INKSEQ_INKY_CONFIG_FILE'],
                 '/run/secrets/inky' if selected else '',
