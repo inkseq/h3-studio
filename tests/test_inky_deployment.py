@@ -2,7 +2,6 @@
 
 import copy
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -100,7 +99,6 @@ class InkyDeploymentTests(unittest.TestCase):
                         'INKSEQ_INKY_CONFIG_FILE', service.get('environment', {})
                     )
 
-    @unittest.skipIf(os.name == 'nt', 'Fixed runtime paths target Linux hosts')
     def test_host_activation_is_deferred_until_qualified_helper_install(self):
         from test_migration_release import maintenance
 
