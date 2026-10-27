@@ -153,6 +153,9 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
         </section>
       ))}
       {!same && <p role="alert">{t('workbench.changed')}</p>}
+      {/* The server refuses when no machine can take the work (none running and auto-start
+          off or out of budget). Say so plainly instead of a silently greyed-out button. */}
+      {same && !receipt.ready && <p role="alert">{t('workbench.notReady')}</p>}
       {error && <p role="alert">{error}</p>}
       <DialogActions>
         <Button disabled={busy} onClick={onClose}>
