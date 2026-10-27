@@ -11,6 +11,18 @@ from unittest.mock import patch
 from tools import reconcile_staging_intent as recovery
 
 
+class RootOwnedStat:
+    """Synthetic root ownership only; retain real inode/mode/link/race evidence."""
+
+    st_uid = 0
+
+    def __init__(self, original):
+        self.original = original
+
+    def __getattr__(self, name):
+        return getattr(self.original, name)
+
+
 @unittest.skipIf(
     os.name == 'nt', 'Host recovery requires Linux flock and root metadata'
 )
@@ -25,6 +37,12 @@ class StagingIntentRecoveryTests(unittest.TestCase):
         self.parents = patch.object(recovery, 'protected_dir')
         self.parents.start()
         self.addCleanup(self.parents.stop)
+        original_lstat = Path.lstat
+        self.owners = patch.object(
+            Path, 'lstat', lambda path: RootOwnedStat(original_lstat(path))
+        )
+        self.owners.start()
+        self.addCleanup(self.owners.stop)
         self.observe = lambda: [{'id': 'original', 'image': 'image', 'running': True}]
         self.proof = self.root / 'proof.json'
         self.put('proof.json', recovery.PROOF)
@@ -193,6 +211,14 @@ class StagingIntentRecoveryTests(unittest.TestCase):
     def test_changed_helper_refuses(self):
         (self.helpers / 'migration_check.py').write_bytes(b'other')
         with self.assertRaisesRegex(ValueError, 'trusted_helpers_changed'):
+            self.run_recovery()
+
+    @unittest.skipIf(
+        hasattr(os, 'geteuid') and os.geteuid() == 0, 'Needs a non-root fixture owner'
+    )
+    def test_real_non_root_file_owner_is_rejected(self):
+        self.owners.stop()
+        with self.assertRaisesRegex(ValueError, 'unprotected_file'):
             self.run_recovery()
 
     def test_failure_after_archive_keeps_pin_and_never_fabricates_completion(self):
