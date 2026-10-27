@@ -227,6 +227,7 @@ def _claim(service):
             return _result('blocked', 'backoff'), None
         by_key = {row['idempotency_key']: dict(row) for row in journals}
         observing = None
+        covered_groups = set()
         for job, profile in work:
             key = 'demand-job-' + job['id']
             identity = request_hash(
@@ -318,6 +319,14 @@ def _claim(service):
             if payload['next_decision_at'] > now:
                 observing = _result('blocked', 'backoff')
                 continue
+            group = (
+                profile['owner_id'],
+                profile['pool'],
+                profile['configuration_id'],
+                profile['mode'],
+            )
+            if group in covered_groups:
+                continue
             # Original commands and durable backoff are read before any live
             # provider GET. Only a genuinely new allocation needs capacity.
             usage = service.prelaunch_capacity_usage(connection)
@@ -368,6 +377,29 @@ def _claim(service):
                 )
             except BudgetExceeded:
                 return _result('blocked', 'capacity_limit'), None
+            from .capacity_lookahead_runtime import enabled, evaluate, record_decision
+
+            if enabled(service):
+                snapshot = evaluate(service, connection, job, profile, work, usage, now)
+                record_decision(
+                    connection,
+                    tenant,
+                    job['id'],
+                    snapshot,
+                    now,
+                    prior=payload.get('lookahead'),
+                )
+                payload['lookahead'] = snapshot
+                if snapshot['decision']['start_count'] == 0:
+                    covered_groups.add(group)
+                    payload.update(
+                        phase='backoff',
+                        next_decision_at=now + _delay(job['id']),
+                        reason_code='lookahead_covered',
+                    )
+                    _write(connection, row, payload, now)
+                    observing = _result('blocked', 'lookahead_covered')
+                    continue
             action = 'start' if payload.get('preview_id') else 'plan'
             payload.update(
                 phase='starting' if action == 'start' else 'planning',
@@ -434,10 +466,14 @@ def start_once(service):
     profile, job_id = claim['profile'], claim['job_id']
     try:
         if claim['action'] == 'plan':
+            from .capacity_lookahead_runtime import idle_seconds
+
+            with service.repo.engine.connect() as connection:
+                idle = idle_seconds(service, connection, profile)
             body = dict(
                 profile_id=profile['id'],
                 keep_on='idle',
-                idle_shutdown_seconds=service.policy['idle_shutdown_seconds'],
+                idle_shutdown_seconds=idle,
             )
             task = service.policy['demand_start'].get('test_task_id')
             if task is not None:
