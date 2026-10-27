@@ -1496,6 +1496,12 @@ export function ShotThumb({ shot }) {
   );
 }
 
+// Stories made by the assistant or older versions name the first look in Chinese ("默认造型");
+// show it in the reader's language. Names the user typed stay as they are.
+const DEFAULT_LOOK_NAMES = new Set(['默认造型', '默认', '主图', 'Default look', 'Default']);
+const lookName = (look, tr) =>
+  look && DEFAULT_LOOK_NAMES.has(look.name) ? tr('storyboard.defaultLook') : look?.name;
+
 export function WhoChips({ shot, small }) {
   const { t: tr } = useI18n();
   const { db } = useStore();
@@ -1507,7 +1513,7 @@ export function WhoChips({ shot, small }) {
           p && (
             <Chip key={c.id} kind="character">
               {p.name}
-              <i>{variantOf(p, c.variant)?.name || tr('storyboard.detail41')}</i>
+              <i>{lookName(variantOf(p, c.variant), tr) || tr('storyboard.detail41')}</i>
             </Chip>
           )
         );
@@ -1674,7 +1680,18 @@ export function HelpTip({ text }) {
   );
 }
 
-function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, className = '' }) {
+function Slot({
+  id,
+  label,
+  hint,
+  help,
+  children,
+  onClear,
+  onPick,
+  onFiles,
+  guide,
+  className = '',
+}) {
   const { t: tr } = useI18n();
   const { setNodeRef, isOver, active } = useDroppable({ id });
   const hot = isOver && /^(asset|profile):/.test(String(active?.id));
@@ -1687,6 +1704,7 @@ function Slot({ id, label, hint, help, children, onClear, onPick, onFiles, class
       ref={setNodeRef}
       {...(onFiles ? nativeDrop(onFiles) : {})}
       className={'slot ' + className + (hot ? ' drop-hot' : '')}
+      data-guide-field={guide}
       onContextMenu={open}
       title={tr('storyboard.finish8')}
     >
@@ -1858,6 +1876,17 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         'checking',
       ].includes(v.status),
     );
+  // A queued take has not started; say so instead of "Generating…" (cold starts take minutes).
+  const queued =
+      !state.busy &&
+      shot.versions.some((v) =>
+        ['queued', 'waiting_capacity', 'claimed', 'submitting'].includes(v.status),
+      ) &&
+      !shot.versions.some((v) =>
+        ['generating', 'running', 'collecting', 'checking'].includes(v.status),
+      ),
+    // "Another version" and "Regenerate" only once a take exists, not while the first one waits.
+    made = shot.versions.some((v) => ['done', 'succeeded'].includes(v.status));
   const restoredExact = !!shot.entity?.data.h3?.explicitReferences && !shot.entity?.data.storyboard;
   const chosen = chosenVersion(shot),
     qualityLabel = QUALITY_LABEL[shot.quality] || tr('storyboard.detail48'),
@@ -1923,7 +1952,11 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             <StoryboardVideo key={viewing.id} asset={viewing.asset || viewing} controls />
           ) : (
             <div className="ed-preview-empty">
-              {busy ? tr('storyboard.detail49') : tr('storyboard.detail50')}
+              {queued
+                ? tr('storyboard.queuedPreview')
+                : busy
+                  ? tr('storyboard.detail49')
+                  : tr('storyboard.detail50')}
             </div>
           )}
           {viewing &&
@@ -2007,7 +2040,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         )}
       </div>
       <div className="ed-form">
-        <label className="field">
+        <label className="field" data-guide-field="action">
           <span>
             {tr(restoredExact ? 'workbench.restoredPrompt' : 'storyboard.copy85')}{' '}
             <HelpTip text={tr('help.action')} />
@@ -2032,6 +2065,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               })
             }
             id={'slot:cast:' + shot.id}
+            guide="cast"
             className="castslot"
             label={tr('storyboard.detail77')}
             hint={tr('storyboard.detail78')}
@@ -2073,7 +2107,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                           )}
                           {p.variants.map((v) => (
                             <option key={v.id} value={v.id}>
-                              {v.name}
+                              {lookName(v, tr)}
                               {v.images.length ? '' : tr('storyboard.detail58')}
                             </option>
                           ))}
@@ -2200,7 +2234,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         <div className={'modepanel ' + info.mode.toLowerCase()}>
           {info.frameInputs && (
             <>
-              <div className="slots">
+              <div className="slots" data-guide-field="frames">
                 <Slot
                   onFiles={(files) =>
                     dispatch({
@@ -2310,6 +2344,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                   })
                 }
                 id={'slot:refs:' + shot.id}
+                guide="refs"
                 help={tr(info.mode === 'FL' ? 'help.refsFl' : 'help.refsRef')}
                 label={info.mode === 'FL' ? tr('storyboard.detail62') : tr('storyboard.detail63')}
                 hint={info.mode === 'FL' ? tr('storyboard.detail64') : tr('storyboard.detail65')}
@@ -2443,14 +2478,14 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           </div>
           <div className="ed-actions">
             {/* After a take: another version (new seed, same settings) or the same in HD. */}
-            {shot.versions.length > 0 && (
+            {made && (
               <Tooltip content={tr('storyboard.help.anotherVersion')}>
                 <Button disabled={regenerating} onClick={() => regenerate({ newSeed: true })}>
                   {tr('storyboard.anotherVersion')}
                 </Button>
               </Tooltip>
             )}
-            {shot.versions.length > 0 && shot.quality !== 'final' && (
+            {made && shot.quality !== 'final' && (
               <Tooltip content={tr('storyboard.help.remakeSharp')}>
                 <Button disabled={regenerating} onClick={() => regenerate({ quality: 'final' })}>
                   {tr('storyboard.regenerateHd')}
@@ -2469,8 +2504,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                 dispatch({ type: 'workbenchGenerate', ids: [shot.id], copies: Number(copies) })
               }
             >
-              {shot.versions.length ? tr('storyboard.detail67') : tr('storyboard.detail68')} ·{' '}
-              {qualityLabel}
+              {made ? tr('storyboard.detail67') : tr('storyboard.detail68')} · {qualityLabel}
             </Button>
           </div>
         </div>

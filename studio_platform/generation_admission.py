@@ -9,6 +9,7 @@ from .generation_draft import plan_body, read_draft
 from .repository import Scope, Conflict, BudgetExceeded
 from .render_plans import RECIPE as RENDER_RECIPE
 from .source_snapshot import source_snapshot
+from .inky_hooks import queue_refresh
 
 
 def managed_project(project):
@@ -64,6 +65,7 @@ class GenerationAdmission:
         )
         project = self.access.project(principal, project_id, "jobs:write")["payload"]
         reject_managed(project)
+        queue_refresh(principal, project_id)
         return self.planning.create(principal, body, project)
 
     def preflight(
@@ -86,6 +88,7 @@ class GenerationAdmission:
             record["payload"], shot_id
         ):
             raise Conflict("shot_version_conflict")
+        queue_refresh(principal, project_id)
         current_capabilities = self.capabilities_provider()
         render_project, defaults_version = project, None
         if not managed_project(project):

@@ -247,3 +247,31 @@
 .hosted-sign-in:not(.legacy-open) ~ :not([role='alert']) {
   display: none;
 }
+
+.receipt-rows {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 12px 0;
+}
+.receipt-rows dt {
+  color: var(--muted);
+}
+.receipt-rows dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* Print only the open receipt. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .receipt-sheet,
+  .receipt-sheet * {
+    visibility: visible;
+  }
+  .receipt-sheet {
+    position: absolute;
+    inset: 0;
+  }
+}

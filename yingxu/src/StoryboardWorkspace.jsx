@@ -18,14 +18,18 @@ import {
   ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
-  AlertTriangle,
   CheckCheck,
+  Clapperboard,
 } from 'lucide-react';
 import { RenameDialog, useTrash } from './UniversalTrash.jsx';
 import ItemMenu from './ItemMenu.jsx';
 import { MenuItem } from './ui/Menu.jsx';
 import { usePageActive, useAppLocation } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
+import { guideField, highlightGuideField } from './guide.js';
+import { readAgentLink } from './agent-navigation.js';
+import './guide.css';
+import { InkyForStory } from './inky/InkyForStory.jsx';
 import { store } from './store.js';
 import {
   DndContext,
@@ -132,20 +136,21 @@ function QueueSummary() {
     })
     .filter((row) => row.waiting > 0 || row.running > 0);
   if (!rows.length) return null;
+  // One quiet line under the story title; which pipeline a shot uses is not the user's concern.
+  const waiting = rows.reduce((sum, row) => sum + row.waiting, 0),
+    running = rows.reduce((sum, row) => sum + row.running, 0),
+    seconds = Math.max(
+      0,
+      ...rows
+        .filter((row) => row.waiting > 0)
+        .map((row) => (Number.isFinite(row.row?.roughWaitSeconds) ? row.row.roughWaitSeconds : 0)),
+    );
   return (
-    <div className="sb-queue" aria-label={t('storyboard.copy14')}>
-      {rows.map(({ mode, row, waiting, running }) => (
-        <span key={mode}>
-          {mode === 'FL' ? t('storyboard.copy15') : t('storyboard.copy16')}：
-          {t('storyboard.copy34', { count: waiting })}
-          {running > 0 && t('storyboard.copy32', { count: running })}
-          {waiting > 0 &&
-            Number.isFinite(row?.roughWaitSeconds) &&
-            row.roughWaitSeconds > 0 &&
-            t('storyboard.copy33', { minutes: Math.ceil(row.roughWaitSeconds / 60) })}
-        </span>
-      ))}
-    </div>
+    <span className="sb-queue" aria-label={t('storyboard.copy14')}>
+      {waiting > 0 && ' · ' + t('storyboard.copy34', { count: waiting })}
+      {running > 0 && t('storyboard.copy32', { count: running })}
+      {seconds > 0 && t('storyboard.copy33', { minutes: Math.ceil(seconds / 60) })}
+    </span>
   );
 }
 const FilmEditor = React.lazy(() => import('./FilmEditor.jsx'));
@@ -573,17 +578,18 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   <PanelLeftClose size={16} />
                 )}
               </Button>
-              <h1>{multi ? state.project.title : state.project.chapter}</h1>
+              <h1>{chapterHeading(state, multi)}</h1>
               <small className="muted">
                 {t('storyboard.summary', {
                   shots: state.shots.length,
                   duration: fmt(totalDuration(state.shots)),
                   chosen: count,
                 })}
+                <QueueSummary />
               </small>
             </div>
             <div className="row tight chapter-actions" data-icon-only={headCompact || undefined}>
-              <QueueSummary />
+              <InkyForStory />
               {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && (
                 <Button
@@ -606,9 +612,11 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   <span className="label">{t('v2.newScene')}</span>
                 </Button>
               )}
+              {/* Making the missing shots is the next step, not a warning; it leads until the
+                  first video exists, then Export film takes over (owner, 2026-10-28). */}
               {pending.length > 0 && (
                 <Button
-                  className="sb-pending-chip"
+                  variant={count === 0 ? 'primary' : undefined}
                   disabled={state.busy || !state.copiesMax}
                   title={t('storyboard.pendingHint')}
                   onClick={() =>
@@ -619,8 +627,17 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                     })
                   }
                 >
-                  <AlertTriangle size={14} />
-                  <span className="label">{t('storyboard.copy35', { count: pending.length })}</span>
+                  <Clapperboard size={14} />
+                  <span className="label">
+                    {t(
+                      pending.length === 1
+                        ? 'storyboard.makePending.one'
+                        : 'storyboard.makePending',
+                      {
+                        count: pending.length,
+                      },
+                    )}
+                  </span>
                 </Button>
               )}
               {unpicked.length > 0 && (
@@ -637,7 +654,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   </span>
                 </Button>
               )}
-              <span className="sb-film-primary">{filmControl}</span>
+              <span className="sb-film-primary">
+                {filmControl && React.cloneElement(filmControl, { primary: count > 0 })}
+              </span>
               <Button
                 variant="ghost"
                 className="sb-head-toggle"
@@ -690,7 +709,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   return (
                     <section className="scene" key={group.id || 'unparented'}>
                       <div className="scene-head">
-                        <b>{group.title}</b>
+                        <b>{sceneHeading(group.title, t)}</b>
                         <small>
                           {t(
                             group.shots.length === 1
@@ -944,6 +963,70 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     </div>
   );
 }
+// 小墨's "去修改" link (h3-studio#679): once the shot editor shows, focus and pulse the field,
+// then drop it from the address so a refresh does not pulse again.
+function useGuideField(pageActive, search, selected) {
+  const guide = guideField(search);
+  useEffect(() => {
+    if (!pageActive || !guide || !selected) return;
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    let frame = 0,
+      tries = 0;
+    const attempt = () => {
+      if (!highlightGuideField(document, guide, { reducedMotion }) && ++tries < 30) {
+        frame = requestAnimationFrame(attempt);
+        return;
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.delete('field');
+      navigateApp(url.pathname + url.search, { replace: true, restore: false });
+    };
+    frame = requestAnimationFrame(attempt);
+    return () => cancelAnimationFrame(frame);
+  }, [pageActive, guide, selected]);
+}
+// The story chat's "Make video" lands here: open the generate confirmation for the shots
+// without video once the story and its limits are loaded, then drop the request from the URL
+// so a reload never asks again. Nothing is charged until the user confirms.
+// Default chapter and scene names come from whoever made the story (assistant, server or an
+// older build), often in the other language. Show the story title for a lone default chapter
+// and "Scene N" in the reader's language; names the user typed stay as they are.
+const DEFAULT_CHAPTER_NAMES = new Set(['Story', '故事', '第一章', 'Chapter 1']);
+const chapterHeading = (state, multi) =>
+  multi || DEFAULT_CHAPTER_NAMES.has(state.project.chapter)
+    ? state.project.title || state.project.chapter
+    : state.project.chapter;
+const sceneHeading = (title, t) => {
+  const n = /^(?:Scene |场景 ?)(\d+)$/.exec(title || '')?.[1];
+  return n ? t('storyboard.sceneN', { number: n }) : title;
+};
+function useGenerateLink(pageActive, search, state, dispatch) {
+  const link = readAgentLink(search),
+    asked = link?.generate ? link.projectId : null;
+  // Remember the request: opening the story rewrites the URL before the story has loaded.
+  const [wanted, setWanted] = useState(null),
+    [pricing, setPricing] = useState(false);
+  useEffect(() => {
+    if (asked) setWanted(asked);
+  }, [asked]);
+  const ready =
+    pageActive && wanted && wanted === state.project.id && !state.busy && !!state.copiesMax;
+  useEffect(() => {
+    if (!ready) return;
+    setWanted(null);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get('panel') === 'generate') {
+      url.searchParams.delete('panel');
+      navigateApp(url.pathname + url.search, { replace: true, restore: false });
+    }
+    const ids = state.shots.filter((shot) => !shot.versions.length).map((shot) => shot.id);
+    if (!ids.length) return;
+    setPricing(true);
+    dispatch({ type: 'workbenchGenerate', ids, copies: 1 }).finally(() => setPricing(false));
+  }, [ready, state.shots, dispatch]);
+  // Loading the story and pricing every shot takes several seconds; say what is happening.
+  return !!wanted || pricing;
+}
 function StoryboardShell({ onNewScene, filmControl }) {
   const { t } = useI18n();
   const { state, dispatch, db, clearError } = useStoryboardUI(),
@@ -972,6 +1055,8 @@ function StoryboardShell({ onNewScene, filmControl }) {
     if (id && shotIdsKey.split('|').includes(id)) setSelected(id);
     else if (!id) setSelected(null);
   }, [pageActive, location.path, location.search, state.project.id, shotIdsKey]);
+  useGuideField(pageActive, location.search, selected);
+  const pricing = useGenerateLink(pageActive, location.search, state, dispatch);
   const container = useRef(),
     sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1104,6 +1189,7 @@ function StoryboardShell({ onNewScene, filmControl }) {
           }
           onDismiss={clearError}
         />
+        <FloatingMessage tone="info" text={pricing ? t('storyboard.pricing') : null} />
         <FloatingMessage
           tone="warn"
           text={state.workbenchPending ? t('workbench.pending') : null}
