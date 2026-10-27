@@ -404,6 +404,56 @@ class DstackOperatorTests(LedgerCase):
         self.assertFalse(node["review_required"])
         self.assertEqual(node["state"], "creation_unknown")
 
+    def test_taomate_plans_headroom_but_retained_requests_stay_immutable(self):
+        from dataclasses import asdict
+        from studio_platform.creator_controls import TAOMATE
+        from studio_platform.dstack_capacity import request_from_document
+        from studio_platform.dstack_operator import plan_offers
+
+        config = copy.deepcopy(self.config)
+        config['profiles'][0].update(runtime_profile_id=TAOMATE, memory_gib=32)
+        service = DstackOperator(self.repo, self.settings, self.capacity, config)
+        profile = service.profiles['5090-fl']
+        request = service._capacity_request(profile, str(uuid.uuid4()), 1.0, 121.0, 120)
+        self.assertEqual(request.memory_gib, 41)
+        self.assertEqual(
+            request.run_spec(PUB)['configuration']['resources']['memory'], '41GB..'
+        )
+        plan = self.client.plan(request.run_spec(PUB))
+        resources = plan['job_plans'][0]['offers'][0]['instance']['resources']
+        for mib, acceptable in (
+            (32502, False),
+            (41 * 1024 - 1, False),
+            (41 * 1024, True),
+            (48 * 1024, True),
+        ):
+            resources['memory_mib'] = mib
+            self.assertEqual(bool(plan_offers(plan, request)), acceptable)
+        original = asdict(replace(request, memory_gib=32))
+        before = copy.deepcopy(original)
+        self.assertEqual(request_from_document(original).memory_gib, 32)
+        self.assertEqual(original, before)
+        with (
+            patch.object(
+                service,
+                '_validate_start_preview',
+                return_value=({'request': original}, None, profile),
+            ),
+            patch.object(
+                service,
+                '_admit_start_capacity',
+                return_value=(self.repo.clock(), None, {}),
+            ),
+            patch.object(service, '_reserve_start_intent') as reserve,
+        ):
+            with self.assertRaisesRegex(OperatorError, 'preview_memory_headroom_stale'):
+                service.start(
+                    self.owner, {'preview_id': str(uuid.uuid4())}, 'stale-taomate'
+                )
+            reserve.assert_not_called()
+        self.assertEqual(self.counts(), (0, 0, 0, 0))
+        self.assertEqual(self.client.applied, [])
+
     def test_29gib_profile_admission_binds_each_mode_and_preserves_legacy_floor(self):
         from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
 
