@@ -16,10 +16,6 @@
   min-height: 36px;
   box-sizing: border-box;
 }
-.works-page .v2-home-search input {
-  height: 100%;
-  padding-block: 0;
-}
 .works-page .story-card {
   min-width: 0;
   overflow: visible;
@@ -64,28 +60,8 @@
   font-size: 13px;
   color: var(--ink-2);
 }
-.story-library-create-form :is(input, select) {
-  height: 36px;
-  min-height: 36px;
-  margin: 0;
-  padding: 0 10px;
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-sm);
-  background: var(--surface);
-  color: var(--ink);
-}
-.story-library-create-form > button.primary {
-  height: 36px;
-  min-height: 36px;
+.story-library-create-form > button {
   align-self: flex-end;
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: transparent;
-  font-weight: 600;
-  padding: 0 18px;
-}
-.story-library-create-form > button.primary:disabled {
-  opacity: 0.45;
 }
 @media (max-width: 760px) {
   .works-page .home-head {
@@ -116,15 +92,7 @@
   color: var(--muted);
 }
 .works-page .v2-home-sort select {
-  height: 100%;
   width: auto;
-  padding: 0 4px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
 }
 /* The search row sizes to its controls (search, sort, refresh) instead of a fixed 320px,
    so nothing overlaps Quick Create (owner review, 2026-10-26). */

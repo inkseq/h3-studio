@@ -804,6 +804,8 @@ inventory.json
 !tests/test_quick_chat_production_migration.py
 !docs/QUICK-CHAT-PRODUCTION-ADOPTION.md
 
+!deploy/dstack/test_native_runpod_safety.py
+!tests/test_dstack_native_runpod.py
 # Fenced recovery of original generation jobs; no runtime receipts.
 !studio_platform/capacity_reclaim.py
 !studio_platform/capacity_watchdog.py
@@ -868,3 +870,7 @@ inventory.json
 !docs/BACKUP-RECOVERY-655.md
 !deploy/platform/business_backup_recovery.py
 !tests/test_business_backup_recovery.py
+
+!studio_platform/workflow_backup_stream.py
+!tests/test_workflow_backup_stream.py
+!docs/PRODUCTION-OPERATION-GUARDS.md

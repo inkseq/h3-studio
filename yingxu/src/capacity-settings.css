@@ -230,14 +230,7 @@
   font-weight: 500;
 }
 .cap-reason textarea {
-  padding: 8px 10px;
-  border: 1px solid var(--line-2, var(--line));
-  border-radius: var(--r-sm, 6px);
-  background: var(--bg, transparent);
-  color: var(--ink);
-  font: inherit;
   font-weight: 400;
-  resize: vertical;
 }
 .cap-reason small {
   font-weight: 400;

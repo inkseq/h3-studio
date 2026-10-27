@@ -1,5 +1,6 @@
 import { setPreviewAsUser } from './preview-as-user.js';
 import { Button } from './ui/Button.jsx';
+import { AppNav } from './ui/AppNav.jsx';
 import React, { useEffect, useState } from 'react';
 import {
   Cpu,
@@ -100,7 +101,7 @@ export default function StudioHeader({
             name: supportView.display_name || supportView.owner,
             minutes: Math.max(1, Math.round((supportView.expires_at - Date.now() / 1000) / 60)),
           })}
-          <Button size="sm" onClick={() => void endSupportView()}>
+          <Button size="sm" variant="on-color" onClick={() => void endSupportView()}>
             {t('menu.supportViewEnd')}
           </Button>
         </div>
@@ -108,7 +109,7 @@ export default function StudioHeader({
       {access?.previewing && (
         <div className="preview-as-user-bar" role="status">
           {t('menu.previewing')}
-          <Button size="sm" onClick={() => setPreviewAsUser(false)}>
+          <Button size="sm" variant="on-color" onClick={() => setPreviewAsUser(false)}>
             {t('menu.previewExit')}
           </Button>
         </div>
@@ -118,19 +119,12 @@ export default function StudioHeader({
           <InkMark size={26} variant={dailyInkMark()} />
           <span>{t('app.name')}</span>
         </a>
-        <nav aria-label={t('nav.mobile')}>
-          {links.map(([id, href, label, Icon]) => (
-            <Button
-              key={id}
-              className={active === id ? 'on' : ''}
-              aria-current={active === id ? 'page' : undefined}
-              onClick={() => navigateApp(href)}
-            >
-              <Icon className="nav-ico" size={20} aria-hidden="true" />
-              <span>{t(label)}</span>
-            </Button>
-          ))}
-        </nav>
+        <AppNav
+          label={t('nav.mobile')}
+          items={links.map(([id, href, label, icon]) => ({ id, href, label: t(label), icon }))}
+          active={active}
+          onNavigate={navigateApp}
+        />
         <div className="spacer" />
         <CreditsChip account={account} />
         <ThemeToggle />

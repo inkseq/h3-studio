@@ -132,7 +132,6 @@
 /* Keep filters, counts and file cards readable without shrinking the file previews. */
 .lib-shell .libp-group small,
 .lib-shell .libp-meta,
-.lib-shell .libp-side small,
 .lib-shell .tagchip small {
   font-size: 11px;
 }
@@ -143,13 +142,6 @@
   min-height: 28px;
   border-radius: var(--r-sm);
 }
-.lib-shell button:not([data-ui-surface]):not(.hbar *) {
-  height: 32px;
-  min-height: 32px;
-  padding-block: 0;
-  box-sizing: border-box;
-  border-radius: var(--r-sm);
-}
 .lib-shell .libp-check {
   height: 28px;
   min-height: 28px;
@@ -157,28 +149,6 @@
 }
 .lib-shell .libp-pcard {
   height: auto;
-}
-.lib-shell .libp-head > button.primary {
-  height: 36px;
-  min-height: 36px;
-}
-.lib-shell .libp-side > button {
-  height: 32px;
-  min-height: 32px;
-}
-.lib-shell :is(input:not([type='checkbox']):not([type='radio']), select) {
-  height: 36px;
-  min-height: 36px;
-  padding-block: 0;
-  box-sizing: border-box;
-}
-.lib-shell .libp-head .pill > .x {
-  width: 28px;
-  min-width: 28px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0;
-  justify-content: center;
 }
 
 .lib-shell .libp-tile {
@@ -190,10 +160,6 @@
   line-height: 1.5;
 }
 @media (max-width: 760px) {
-  .lib-shell .libp-side > button {
-    height: 36px;
-    min-height: 36px;
-  }
   .lib-shell .libp-head {
     gap: 8px;
   }
@@ -217,14 +183,6 @@
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
-}
-.lib-shell .libp-side > button > span {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: left;
 }
 .lib-shell .library-source-tools > div,
 .lib-shell .library-source-tools select {
@@ -283,58 +241,14 @@ body.libp-resizing {
 
 /* Asset library redesign (owner, 2026-10-22): menus under their buttons, edits in place,
    a details panel beside the clicked card. */
-.lib-pop {
-  position: relative;
-}
-.lib-pop > summary {
-  list-style: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-  white-space: nowrap;
-  padding: 7px 14px;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  background: var(--surface-2);
-  font-weight: 600;
-}
-.lib-pop > summary::-webkit-details-marker {
-  display: none;
-}
-.lib-pop > summary.small {
-  padding: 4px 10px;
-  font-size: 12px;
-}
-.lib-pop > summary.primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: transparent;
-}
-.lib-pop > summary.disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 .lib-pop-panel {
-  position: absolute;
-  z-index: 40;
-  top: calc(100% + 6px);
-  left: 0;
   width: 280px;
-  max-width: calc(100vw - 32px);
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  box-shadow: 0 12px 32px rgb(0 0 0 / 0.35);
-  font-weight: 400;
 }
-.lib-upload .lib-pop-panel {
-  left: auto;
-  right: 0;
+.lib-pop-panel.lib-upload {
   width: 320px;
 }
 .lib-pop-panel .field,
@@ -356,18 +270,6 @@ body.libp-resizing {
   gap: 2px;
   max-height: 240px;
   overflow: auto;
-}
-.lib-pop-list > button {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: flex-start;
-  background: transparent;
-  border-color: transparent;
-  text-align: left;
-}
-.lib-pop-list > button:hover {
-  background: var(--surface-3);
 }
 .lib-pop-new {
   display: flex;
@@ -398,15 +300,6 @@ body.libp-resizing {
 }
 .lib-drop small {
   font-size: 11px;
-}
-.linkish {
-  background: none;
-  border: 0;
-  padding: 0;
-  color: var(--accent);
-  font-weight: 600;
-  text-decoration: underline;
-  cursor: pointer;
 }
 .libp-main.is-dropping {
   position: relative;
@@ -490,18 +383,9 @@ body.libp-resizing {
   align-items: center;
   gap: 4px;
 }
-.lib-tag-editor .tagchip .x {
-  padding: 0;
-  background: none;
-  border: 0;
-  color: inherit;
-  cursor: pointer;
-}
 .lib-tag-editor input {
   flex: 1 1 90px;
   min-width: 90px;
-  padding: 4px 8px;
-  font-size: 12px;
 }
 
 /* Details beside the clicked card. */
@@ -551,16 +435,6 @@ body.libp-resizing {
   font-size: 12px;
   color: var(--muted);
 }
-.lib-float .lib-pop > summary {
-  width: 100%;
-  justify-content: center;
-}
-.lib-float .lib-pop-panel {
-  position: static;
-  width: 100%;
-  margin-top: 6px;
-  box-shadow: none;
-}
 .lib-float .libp-actions {
   display: flex;
   flex-wrap: wrap;
@@ -575,4 +449,10 @@ body.libp-resizing {
   flex: 0 1 320px;
   min-width: 160px;
   margin-left: 12px;
+}
+.lib-pop-list > .lib-pop-item {
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: 8px;
+  text-align: left;
 }

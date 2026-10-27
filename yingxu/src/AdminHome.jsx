@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState, useSyncExternalStore, useEffectEvent } from 'react';
+import { Disclosure } from './ui/Disclosure.jsx';
 import {
   Activity,
   BarChart3,
@@ -25,6 +26,7 @@ import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { readAccessFor } from './account-access.js';
 import { Badge, EmptyState, Note } from './ui/Note.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
+import { SideNav, SideNavItem } from './ui/SideNav.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { FloatingMessage } from './floating-notice.js';
@@ -377,8 +379,10 @@ function Overview({ data, api }) {
         </header>
         {machinesState || <Machines rows={machines} />}
         {review.length > 0 && (
-          <details className="ah-review">
-            <summary>{t('adminHome.reviewRecords', { count: review.length })}</summary>
+          <Disclosure
+            className="ah-review"
+            summary={t('adminHome.reviewRecords', { count: review.length })}
+          >
             <p className="muted">{t('adminHome.reviewHelp')}</p>
             <ul>
               {review.map((row) => (
@@ -389,7 +393,7 @@ function Overview({ data, api }) {
                 </li>
               ))}
             </ul>
-          </details>
+          </Disclosure>
         )}
       </section>
       <section className="ah-card">
@@ -598,10 +602,9 @@ function Limits({ api, active, account }) {
       ) : (
         <Note tone="warn">{t('adminHome.noPolicy')}</Note>
       )}
-      <details className="admin-fold">
-        <summary>{t('admin.legacyBudgets')}</summary>
+      <Disclosure className="admin-fold" summary={t('admin.legacyBudgets')}>
         <BudgetAdministration account={account} />
-      </details>
+      </Disclosure>
     </>
   );
 }
@@ -631,20 +634,20 @@ export default function AdminHome({ account }) {
         </main>
       ) : (
         <div className="ah-shell">
-          <nav className="ah-nav" aria-label={t('adminHome.title')}>
+          <SideNav className="ah-nav" aria-label={t('adminHome.title')}>
             <h1>{t('adminHome.title')}</h1>
             {SECTIONS.map(([id, label, Icon]) => (
-              <Button
+              <SideNavItem
                 key={id}
-                className={section === id ? 'on' : ''}
+                active={section === id}
+                icon={Icon}
                 aria-current={section === id ? 'page' : undefined}
                 onClick={() => go(id)}
               >
-                <Icon size={16} aria-hidden="true" />
                 {t(label)}
-              </Button>
+              </SideNavItem>
             ))}
-          </nav>
+          </SideNav>
           <main className="ah-main">
             <header className="ah-head">
               <div>

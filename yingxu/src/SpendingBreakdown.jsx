@@ -1,4 +1,5 @@
 import { Note } from './ui/Note.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import React from 'react';
 import { formatMoneyMicros as money } from './money.js';
 import {
@@ -91,8 +92,7 @@ export default function SpendingBreakdown({ usage, scope }) {
           })}
         </Note>
       )}
-      <details className="spend-breakdown-details">
-        <summary>{t('settings.costDetails')}</summary>
+      <Disclosure className="spend-breakdown-details" summary={t('settings.costDetails')}>
         {hasCharge && (
           <>
             <Note>{t('settings.chargeRetainedCosts')}</Note>
@@ -177,7 +177,7 @@ export default function SpendingBreakdown({ usage, scope }) {
             )}
           </div>
         )}
-      </details>
+      </Disclosure>
     </div>
   );
 }

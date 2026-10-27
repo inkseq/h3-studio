@@ -699,7 +699,7 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
   }
   if (!state.project && protectedRaw) state = { ...state, project: blank('待恢复的项目') };
   if (!state.project) {
-    let oldRaw = null;
+    let oldRaw;
     try {
       oldRaw = storage?.getItem(LEGACY_KEY);
       state = {

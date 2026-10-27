@@ -29,7 +29,6 @@
   gap: 12px;
 }
 .film-dialog select {
-  height: 32px;
   min-width: 100px;
 }
 .film-dialog .film-check {
@@ -37,13 +36,6 @@
   align-items: flex-start;
   gap: 8px;
   line-height: 1.5;
-}
-.film-dialog .film-check input {
-  flex: none;
-  min-height: 0;
-  width: 16px;
-  height: 16px;
-  margin: 2px 0 0;
 }
 .film-dialog .film-save,
 .film-dialog .film-actions {
@@ -54,19 +46,13 @@
   gap: 8px;
 }
 .film-dialog button {
-  display: inline-flex;
-  align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 32px;
-  height: 32px;
   max-width: 100%;
   white-space: normal;
 }
 .film-dialog .film-options > button,
 .film-dialog .film-run > .primary {
   width: 100%;
-  height: 36px;
 }
 .film-dialog .film-run {
   display: grid;
@@ -146,11 +132,8 @@
 @media (max-width: 600px) {
   .film-dialog .film-actions > button {
     flex: 1 1 45%;
-    min-height: 36px;
-    height: 36px;
   }
   .film-dialog .film-save > button {
     width: 100%;
-    height: 36px;
   }
 }

@@ -64,13 +64,10 @@
   font-size: 13px;
 }
 .film-inspector-head button,
-.film-excluded button {
+.film-excluded .excluded-clip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-}
-.film-inspector-head button.on {
-  color: var(--fl);
 }
 .film-inspector-body {
   display: grid;
@@ -115,7 +112,6 @@
 }
 .film-zoom input[type='range'] {
   width: 140px;
-  accent-color: var(--accent);
 }
 .film-timeline {
   overflow-x: auto;
@@ -228,28 +224,11 @@
   pointer-events: none;
   z-index: 4;
 }
-.film-excluded {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.film-excluded button.on {
-  outline: 2px solid var(--accent);
-}
 .film-editor-foot {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
   font-size: 12px;
-}
-.film-audio-whole {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  border-bottom: 1px solid var(--line);
 }
 .spin {
   animation: spin 1s linear infinite;
@@ -370,43 +349,11 @@ button.autosave-status {
   margin-top: 8px;
   font-size: 12px;
 }
-.film-audio-add {
-  position: relative;
-}
 .film-audio-add > button,
 .film-audio-controls button {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-}
-.film-audio-menu {
-  position: absolute;
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 5;
-  min-width: 200px;
-  max-height: 260px;
-  overflow: auto;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
-  border: 1px solid var(--line-2, var(--line));
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
-}
-.film-audio-menu button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: flex-start;
-  border: 0;
-  background: none;
-  text-align: left;
-  padding: 7px 10px;
-}
-.film-audio-menu button:hover {
-  background: var(--surface-3, var(--surface-2));
 }
 .film-audio-controls {
   display: flex;
@@ -421,7 +368,6 @@ button.autosave-status {
 }
 .film-audio-controls input[type='range'] {
   width: 120px;
-  accent-color: var(--accent);
 }
 @media (pointer: coarse) {
   .film-audio-trim {
@@ -442,10 +388,6 @@ button.autosave-status {
   margin-right: 4px;
   font-size: 12px;
   color: var(--ink-2);
-}
-.film-speed button.on {
-  border-color: var(--accent);
-  color: var(--ink);
 }
 .film-speed small {
   flex-basis: 100%;
@@ -495,7 +437,6 @@ button.autosave-status {
 .film-speed select {
   width: auto;
   min-width: 72px;
-  padding: 2px 8px;
 }
 /* #232 (#17): left-out clips read as removed — hatched, struck through — right under the track. */
 .film-excluded {
@@ -504,7 +445,7 @@ button.autosave-status {
   align-items: center;
   gap: 6px;
 }
-.film-excluded button {
+.film-excluded .excluded-clip {
   text-decoration: line-through;
   background: repeating-linear-gradient(
     135deg,
@@ -513,7 +454,7 @@ button.autosave-status {
   );
   opacity: 0.8;
 }
-.film-excluded button.on {
+.film-excluded .excluded-clip.on {
   opacity: 1;
   outline: 2px solid var(--accent);
 }

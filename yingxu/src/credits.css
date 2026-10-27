@@ -88,10 +88,7 @@
   color: var(--muted);
   font-weight: 500;
 }
-.pack .pack-name {
-  color: var(--ink-2);
-  font-size: 12px;
-}
+
 .pack .pack-price {
   margin-top: 6px;
   font-weight: 600;
@@ -154,9 +151,7 @@
   min-width: 64px;
   text-align: right;
 }
-.checkout {
-  width: min(460px, 94vw);
-}
+
 .checkout-sum {
   display: flex;
   justify-content: space-between;
@@ -190,12 +185,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.choose.low-credits {
-  width: min(440px, 92vw);
-}
-.low-credits-actions {
-  justify-content: flex-end;
 }
 
 @media (max-width: 760px) {

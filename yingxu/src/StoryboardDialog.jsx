@@ -14,7 +14,7 @@ function StoryboardDialog({ title, children, onClose, busy = false }) {
       busy={busy}
       closeOnBackdrop
       portal
-      className="sb-portal sb-dialog"
+      className="sb-portal density-compact sb-dialog"
     >
       {children}
     </Dialog>

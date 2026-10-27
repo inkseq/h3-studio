@@ -145,11 +145,6 @@ select {
 }
 
 /* Native dropdown lists: paint options from the skin so they never open as white lists. */
-select option,
-select optgroup {
-  background-color: var(--surface-2);
-  color: var(--ink);
-}
 
 /* Local projects: the backup/import actions sit on one tidy wrapping row. */
 :root dialog.qc-dialog .project-tools {
@@ -221,4 +216,11 @@ select optgroup {
   color: var(--bg);
   font-weight: 600;
   text-decoration: none;
+}
+
+/* Phones: dialog actions get full-size touch targets. */
+@media (max-width: 760px) {
+  dialog.qc-dialog button:not(.small, .xsmall) {
+    min-height: 44px;
+  }
 }

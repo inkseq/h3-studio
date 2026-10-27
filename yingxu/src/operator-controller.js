@@ -98,7 +98,9 @@ export function createOperatorController({
       pending(null);
       try {
         await refresh();
-      } catch {}
+      } catch {
+        // A failed refresh already shows in the controller state; the next poll retries.
+      }
       return result;
     } catch (error) {
       guard(account, current);
@@ -134,7 +136,7 @@ export function createOperatorController({
       scanEpoch++;
       client.setAccount(account);
       loading = false;
-      let saved = null;
+      let saved;
       try {
         saved = account
           ? JSON.parse(storage?.getItem(keyFor(account, pendingNamespace)) || 'null')
@@ -157,7 +159,9 @@ export function createOperatorController({
       if (account)
         try {
           await refresh();
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
     },
     refresh,
     poll: () => (state.busy ? Promise.resolve() : refresh()),

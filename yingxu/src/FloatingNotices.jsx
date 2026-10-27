@@ -1,5 +1,5 @@
 import React, { useSyncExternalStore } from 'react';
-import { Button } from './ui/Button.jsx';
+import { Button, IconButton } from './ui/Button.jsx';
 import { X } from 'lucide-react';
 import { currentNotices, dismissNotice, subscribeNotices } from './floating-notice.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -32,9 +32,13 @@ export default function FloatingNotices() {
               {item.action.label}
             </Button>
           )}
-          <Button aria-label={t('notice.dismiss')} onClick={() => dismissNotice(item.text)}>
+          <IconButton
+            size="xs"
+            label={t('notice.dismiss')}
+            onClick={() => dismissNotice(item.text)}
+          >
             <X size={14} />
-          </Button>
+          </IconButton>
         </div>
       ))}
     </div>

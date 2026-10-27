@@ -21,6 +21,49 @@ def replace_once(source, before, after):
 
 
 def transform(path, source):
+    if path.endswith("runpod/api_client.py"):
+        source = "from " + HELPER_MODULE + " import RunPodPreRequestRejected, runpod_create_once\n" + source
+        for before, code in (
+            ('raise ValueError("Exactly one of CPU or GPU type must be set")', "cpu_gpu_type"),
+            ('raise ValueError("cpu_count is not applicable for GPU pods")', "cpu_count_for_gpu"),
+            ('raise ValueError("cpu_count is required for CPU pods")', "cpu_count_required"),
+        ):
+            source = replace_once(source, before, 'raise RunPodPreRequestRejected("' + code + '")')
+        source = replace_once(source,
+            '        response = self._make_v2_request("POST", "pods", json=body)\n        return response.json()',
+            '        return runpod_create_once(self._session, API_V2_URL + "/pods", body, timeout=REQUEST_TIMEOUT)')
+        start = source.index("        resp = self._make_graphql_request(", source.index("    def create_gpu_pod_graphql("))
+        end = source.index("    def get_pod(", start)
+        original = source[start:end]
+        changed = replace_once(original, "        resp = self._make_graphql_request(\n", "        payload = (\n")
+        changed = replace_once(changed,
+            '        data = resp.json()["data"]\n        return data["podRentInterruptable"] if bid_per_gpu else data["podFindAndDeployOnDemand"]',
+            '        if bid_per_gpu is not None or network_volume_id is not None or container_registry_auth_id is not None:\n            raise RunPodPreRequestRejected("network_volume_unsupported")\n        return runpod_create_once(self._session, API_GRAPHQL_URL, payload, timeout=REQUEST_TIMEOUT, graphql=True)')
+        source = source[:start] + changed + source[end:]
+        return source
+    if path.endswith("runpod/compute.py"):
+        source = "from " + HELPER_MODULE + " import RunPodPreRequestRejected, RunPodAllocationUnknown\n" + source
+        start, end = source.index("    def run_job("), source.index("    def run_jobs(")
+        prefix, tail, source = source[:start], source[end:], source[start:end]
+        for before, code in (
+            ('raise ComputeError("Mounting more than one network volume is not supported in runpod")', "multiple_volumes"),
+            ('raise ComputeError("Runpod spot offers are not supported")', "spot_unsupported"),
+            ('raise ComputeError("Runpod CPU offers are only supported in secure cloud regions")', "community_cpu"),
+        ):
+            source = replace_once(source, before, 'raise RunPodPreRequestRejected("' + code + '")')
+        source = replace_once(source,
+            '        container_registry_credentials_id = self._generate_container_registry_credentials_id(\n            job.job_spec.registry_auth\n        )',
+            '        if job.job_spec.registry_auth is not None:\n            raise RunPodPreRequestRejected("private_registry")\n        if network_volume_id is not None:\n            raise RunPodPreRequestRejected("network_volume_unsupported")\n        container_registry_credentials_id = None')
+        start = source.index('        if (\n            self._last_cleanup_time is None')
+        end = source.index('        return JobProvisioningData(', start)
+        source = source[:start] + '        # Public-image slice never lists, creates or deletes registry credentials.\n\n' + source[end:]
+        # Preserve the known allocation if local provisioning validation fails.
+        start = source.index("        return JobProvisioningData(")
+        original = source[start:].rstrip()
+        source = source[:start] + "        try:\n" + "\n".join("    " + line for line in original.splitlines()) + "\n        except Exception:\n            raise RunPodAllocationUnknown(pod_id=instance_id) from None\n\n"
+        tail = replace_once(tail, '        master_job_configuration = job_configurations[0]',
+            '        raise RunPodPreRequestRejected("cluster_unsupported")\n        master_job_configuration = job_configurations[0]')
+        return prefix + source + tail
     if path.endswith("vastai/api_client.py"):
         source = "from " + HELPER_MODULE + " import create_instance_once, read_request, VastReadRateLimited\n" + source
         before = '''        resp = self.s.put(f"/v0/asks/{bundle_id}/", json=payload)
@@ -62,7 +105,7 @@ def transform(path, source):
             raise HTTPException(status_code=429, detail="sixnine_vast_read_rate_limited", headers={"Retry-After": str(result.retry_after)})
         if isinstance(result, BackendError):''')
     if path.endswith("pipeline_tasks/jobs_submitted.py"):
-        source = "from " + HELPER_MODULE + " import closed_error, failure_message, safe_for_fallback, order_offers\n" + source
+        source = "from " + HELPER_MODULE + " import closed_error, failure_message, safe_for_fallback, order_offers, runpod_closed_error, runpod_safe_for_fallback\n" + source
         source = replace_once(source, "    offers_iter = iter(offers)", "    offers = order_offers(offers, profile.instance_types)\n    offers_iter = iter(offers)")
         source = replace_once(source, '''    if attempts.total == 0:
 ''', '''    if attempts.errors and all(error.backend == "vastai" for error in attempts.errors):
@@ -74,6 +117,18 @@ def transform(path, source):
             raise ValueError("native_patch_offer_catch_mismatch")
         source = source.replace(before, before + '''            if offer.backend.value == "vastai" and (getattr(e, "sixnine_vast_stop_fallback", False) or not safe_for_fallback(offer_errors[-1].error)):
                 break  # Possible allocation: terminate this submission, never try another PUT.
+''')
+        source = source.replace(before, before + '''            if offer.backend.value == "runpod":
+                if runpod_safe_for_fallback(e):
+                    continue  # Typed local pre-request rejection only.
+                return _TerminateSubmittedJobResult(
+                    reason=JobTerminationReason.TERMINATED_BY_SERVER,
+                    message=runpod_closed_error(e))
+''')
+        source = replace_once(source, "    # Backend errors may be multiline and arbitrarily long since they often wrap cloud API errors.\n", '''    if offer.backend.value == "runpod":
+        return _OfferAttemptError(backend="runpod", region=offer.region,
+            instance=offer.instance.name, error=runpod_closed_error(error))
+    # Backend errors may be multiline and arbitrarily long since they often wrap cloud API errors.
 ''')
         return replace_once(source, "    # Backend errors may be multiline and arbitrarily long since they often wrap cloud API errors.\n", '''    if offer.backend.value == "vastai":
         return _OfferAttemptError(backend="vastai", region=offer.region,

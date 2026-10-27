@@ -69,6 +69,21 @@ export function MenuItem({
   );
 }
 
+// A toggle row that stays open, so the choice applies to the next item picked.
+export function MenuCheckboxItem({ checked, onCheckedChange, children }) {
+  return (
+    <Dropdown.CheckboxItem
+      className="ui-menu-item ui-menu-check"
+      checked={checked}
+      onCheckedChange={onCheckedChange}
+      onSelect={(event) => event.preventDefault()}
+    >
+      <input type="checkbox" checked={checked} readOnly tabIndex={-1} aria-hidden="true" />
+      <span>{children}</span>
+    </Dropdown.CheckboxItem>
+  );
+}
+
 export function MenuGroup({ children }) {
   return <Dropdown.Group className="ui-menu-group">{children}</Dropdown.Group>;
 }

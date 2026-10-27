@@ -37,46 +37,6 @@
 .sb-workspace .scene .card-title .card-meta:empty {
   display: none;
 }
-.sb-workspace .library .lib-tabs .sb-library-tab {
-  appearance: none;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  min-width: 0;
-  min-height: 30px;
-  padding: 5px 9px;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink-2);
-  box-shadow: none;
-  white-space: nowrap;
-}
-.sb-workspace .library .lib-tabs .sb-library-tab > svg {
-  flex: none;
-}
-.sb-workspace .library .lib-tabs .sb-library-tab > span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  text-align: left;
-}
-.sb-workspace .library .lib-tabs .sb-library-tab > small {
-  position: static;
-  flex: none;
-  margin-left: auto;
-  color: var(--muted);
-}
-.sb-workspace .library .lib-tabs .sb-library-tab.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.sb-workspace .library .lib-tabs .sb-library-tab.on > small {
-  color: inherit;
-}
 .sb-workspace .card .card-meta {
   flex-wrap: wrap;
   overflow: visible;
@@ -122,11 +82,6 @@
 }
 .sb-workspace .storyboard-takes .takes-head .spacer {
   flex: 1;
-}
-.sb-workspace .storyboard-takes .takes-head button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
 }
 .sb-workspace .storyboard-takes .versions {
   display: flex;
@@ -216,7 +171,6 @@
 }
 .sb-workspace .storyboard-takes .take-top > button {
   pointer-events: auto;
-  min-height: 28px;
 }
 .sb-workspace .storyboard-takes .take-info > b {
   overflow-wrap: anywhere;
@@ -265,9 +219,6 @@
   }
   .sb-workspace .storyboard-takes .takes-head {
     gap: 6px;
-  }
-  .sb-workspace .storyboard-takes .takes-head button {
-    min-height: 36px;
   }
   .sb-workspace .storyboard-takes .take-grid {
     max-height: none;
@@ -499,22 +450,16 @@
     .who.small .chip,
     .ruler,
     .ver em,
-    .ver i.x,
     .slot-empty small,
     .sent-prompt em,
     .sent-item small,
-    .lib-tabs button small,
     .tile-audio small,
     .tile-name,
     .tile-badge,
     .tile-used,
-    .tile-play .play,
-    .vtabs button em,
-    .vimg small,
     .take-top em
   ),
-.sb-portal
-  :is(.tile-name, .tile-badge, .tile-audio small, .tile-used, .vtabs button em, .vimg small) {
+.sb-portal :is(.tile-name, .tile-badge, .tile-audio small, .tile-used) {
   font-size: 11px;
 }
 .sb-workspace .tseg-title {
@@ -526,36 +471,6 @@
   padding: 8px 4px 3px;
   left: 0;
   right: 0;
-}
-.sb-workspace button:not(:is(.tile, .ver, .card, .sb-library-backdrop)),
-.sb-portal button:not(.tile) {
-  min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  border-radius: 7px;
-  padding: 5px 9px;
-  font-size: 12px;
-  line-height: 1.3;
-}
-.sb-workspace button.small,
-.sb-workspace button.x,
-.sb-portal button.small,
-.sb-portal button.x {
-  min-height: 28px;
-  height: 28px;
-  padding: 3px 7px;
-}
-.sb-workspace button.primary,
-.sb-portal button.primary {
-  min-height: 36px;
-}
-.sb-workspace .library .lib-tabs .sb-library-tab {
-  min-height: 32px;
-  height: 32px;
-  font-size: 11px;
-  flex-direction: row;
 }
 .sb-workspace .modetabs .mt {
   min-height: 36px;
@@ -589,18 +504,6 @@
   align-items: center;
   flex-wrap: wrap;
 }
-.sb-workspace .storyboard-download {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
-  min-height: 32px;
-  padding: 5px 9px;
-  color: var(--ink);
-  text-decoration: none;
-  font-size: 12px;
-}
 .sb-workspace details.sent {
   display: block;
   font-size: 12px;
@@ -622,12 +525,12 @@
   background: var(--muted);
   opacity: 0.65;
 }
-.sb-workspace .splitter.x > i {
+.sb-workspace .splitter.axis-x > i {
   width: 2px;
   height: 28px;
   margin: auto;
 }
-.sb-workspace .splitter.y > i {
+.sb-workspace .splitter.axis-y > i {
   height: 2px;
   width: 32px;
   margin: auto;
@@ -698,8 +601,8 @@
   max-height: calc(100dvh - 16px);
 }
 /* StoryboardPanels sets these body classes while a splitter is dragged. */
-body.sb-resizing .splitter.x i,
-body.sb-resizing-y .splitter.y i {
+body.sb-resizing .splitter.axis-x i,
+body.sb-resizing-y .splitter.axis-y i {
   background: var(--accent);
 }
 body.sb-resizing,
@@ -845,18 +748,6 @@ body.sb-resizing-y video {
 .sb-topbar .chapter-actions {
   align-items: center;
 }
-.sb-topbar .chapter-actions > button,
-.sb-topbar .sb-film-primary .story-film-control > button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-.sb-topbar .sb-film-primary .story-film-control > button {
-  background: var(--accent);
-  color: var(--accent-ink, var(--accent-ink));
-  border-color: transparent;
-  font-weight: 600;
-}
 .sb-topbar.compact {
   padding-top: 8px;
   padding-bottom: 6px;
@@ -867,18 +758,6 @@ body.sb-resizing-y video {
 .sb-topbar.compact .chapter-summary small,
 .sb-topbar.compact .chapter-actions .label {
   display: none;
-}
-.sb-topbar.compact .chapter-actions > button,
-.sb-topbar.compact .sb-film-primary .story-film-control > button {
-  font-size: 0;
-  gap: 0;
-  padding: 0 8px;
-  min-height: 30px;
-}
-.sb-topbar.compact .chapter-actions > button svg,
-.sb-topbar.compact .sb-film-primary .story-film-control > button svg {
-  width: 15px;
-  height: 15px;
 }
 .sb-head-toggle {
   padding: 0 6px;
@@ -1261,41 +1140,7 @@ body.sb-resizing-y video {
 .sb-workspace .card .card-meta:empty {
   display: none;
 }
-/* #232 (#22): take downloads / save frame in a ⋯ menu. */
-.take-more {
-  position: relative;
-}
-.take-more > summary {
-  list-style: none;
-  cursor: pointer;
-  padding: 2px 10px;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-  font-weight: 700;
-  letter-spacing: 1px;
-}
-.take-more > summary::-webkit-details-marker {
-  display: none;
-}
-.take-more-menu {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 4px);
-  left: 0;
-  display: grid;
-  gap: 4px;
-  min-width: 220px;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: 10px;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
-}
-.take-more-menu > *,
-.take-more-menu button {
-  justify-content: flex-start;
-  width: 100%;
-}
+
 .editor .ed-footer .ed-gen-options {
   display: flex;
   flex-wrap: wrap;
@@ -1383,17 +1228,6 @@ body.sb-resizing-y video {
   gap: 6px;
 }
 /* One size for every take tool, links and buttons alike. */
-.take-tools-inline button,
-.take-tools-inline a.btn {
-  min-height: var(--h-sm);
-  height: var(--h-sm);
-  padding: 0 10px;
-  font-size: var(--fs-sm);
-  background: var(--surface-3);
-  border: 1px solid var(--line-2);
-  border-radius: 7px;
-  box-shadow: none;
-}
 /* #232 (#47, #48): segmented choices size to their words in both languages; small numbers
    get small inputs. */
 .sb-workspace .quality-row .seg > button,
@@ -1453,60 +1287,7 @@ body.sb-resizing-y video {
   align-items: center;
   gap: 4px;
 }
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab {
-  position: relative;
-  width: 36px;
-  height: 36px;
-  min-height: 36px;
-  padding: 0;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--muted);
-  transition:
-    background 0.12s,
-    color 0.12s;
-}
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > svg {
-  width: 17px;
-  height: 17px;
-}
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab:hover {
-  background: color-mix(in srgb, var(--ink) 9%, transparent);
-  color: var(--ink);
-}
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab.on {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > span,
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > small.zero {
-  display: none;
-}
-.sb-workspace .library.collapsed .lib-tabs .sb-library-tab > small {
-  position: absolute;
-  top: 2px;
-  right: 1px;
-  min-width: 14px;
-  height: 14px;
-  margin: 0;
-  padding: 0 3px;
-  display: grid;
-  place-items: center;
-  border-radius: 7px;
-  background: var(--surface-3);
-  color: var(--ink-2);
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-}
 /* Unsorted items: a readable count on the warn pill, open or collapsed. */
-.sb-workspace .library .lib-tabs .sb-library-tab.alert > small {
-  background: var(--warn);
-  color: var(--accent-ink);
-}
 /* Shot panel header (owner, 2026-10-26): the actions centre on the title block, and the
    title field hugs its text so the pencil sits right after it. */
 .editor .ed-head {

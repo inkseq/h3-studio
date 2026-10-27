@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import test_business_backup_schedule as schedule
 
@@ -251,6 +251,174 @@ class RecoveryGateTests(unittest.TestCase):
         )
         self.assertGreaterEqual(limit, host.SNAPSHOT_TIMEOUT + 900 + 1800 + 600)
         self.assertLessEqual(limit, 5700)
+
+
+@unittest.skipUnless(sys.platform == 'linux', 'Linux release-lock semantics')
+class RecoveryEntryGuardTests(unittest.TestCase):
+    """Exercise the public qualifier/execute entry, not just its transfer helper."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        (self.root / 'release.lock').touch()
+        self.state = dict(current=recovery.TRANSPORT_COMMIT, status='app_ready')
+        self.identity = dict(
+            image=recovery.TRANSPORT_IMAGE,
+            running=True,
+            mounts=[
+                dict(
+                    Destination='/data',
+                    Source=str(self.root / 'platform-data'),
+                    Type='bind',
+                )
+            ],
+        )
+        self.release = Mock()
+        self.transfer = Mock(return_value={'state': 'synthetic_completed'})
+        self.quiet = Mock()
+        self.verify = Mock(return_value={'manifest_sha256': recovery.MANIFEST_SHA})
+        self.docker = Mock(side_effect=lambda *a, **k: json.dumps(self.identity))
+        self.approved_image = Mock()
+        self.record = Mock(side_effect=AssertionError('unexpected operation write'))
+        cfg = dict(version=3, environment='production')
+        for item in (
+            patch.object(host, 'ROOT', self.root),
+            patch.object(host, 'STATE', self.root / 'operations'),
+            patch.object(host, 'protected', side_effect=lambda p, *a: Path(p)),
+            patch.object(host.os, 'geteuid', return_value=0),
+            patch.object(
+                host,
+                'read',
+                side_effect=lambda p: (
+                    self.state if p.name == 'release-state.json' else cfg
+                ),
+            ),
+            patch.object(host, 'validate_config', return_value=cfg),
+            patch.object(Path, 'read_text', return_value='synthetic-host'),
+            patch.object(host, 'approved_image', self.approved_image),
+            patch.object(host, 'docker', self.docker),
+            patch.object(host, 'record', self.record),
+            patch.object(
+                host, 'retention_json', return_value={'sha256': recovery.MANIFEST_SHA}
+            ),
+            patch.object(
+                host.shutil, 'disk_usage', return_value=Mock(free=10 * 1024**3)
+            ),
+            patch.object(recovery, 'pristine'),
+            patch.object(recovery, 'quiet', self.quiet),
+            patch.object(recovery, 'verify', self.verify),
+            patch.object(recovery, 'transfer_original', self.transfer),
+            patch.dict(sys.modules, {'release': self.release}),
+            patch.object(sys, 'path', list(sys.path)),
+        ):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def assert_untouched(self):
+        self.transfer.assert_not_called()
+        self.record.assert_not_called()
+        self.assertEqual([p.name for p in self.root.iterdir()], ['release.lock'])
+
+    def test_release_status_or_pending_drift_refuses_both_modes_before_commands(self):
+        for state in (
+            dict(current='a' * 40, status='app_ready'),
+            dict(current=recovery.TRANSPORT_COMMIT, status='app_failed'),
+            dict(
+                current=recovery.TRANSPORT_COMMIT, status='app_ready', pending='b' * 40
+            ),
+            {},
+        ):
+            self.state = state
+            for execute in (False, True):
+                with self.subTest(state=state, execute=execute):
+                    with self.assertRaisesRegex(ValueError, 'release_changed'):
+                        recovery.run(execute=execute)
+                    self.docker.assert_not_called()
+                    self.assert_untouched()
+
+    def test_unapproved_manifest_or_image_refuses_before_app_or_operation(self):
+        for gate in (self.release.approved_manifest, self.approved_image):
+            gate.side_effect = ValueError('synthetic_approval_mismatch')
+            for execute in (False, True):
+                with self.assertRaisesRegex(ValueError, 'approval_mismatch'):
+                    recovery.run(execute=execute)
+                self.docker.assert_not_called()
+                self.assert_untouched()
+            gate.side_effect = None
+
+    def test_app_image_running_or_mount_drift_refuses_both_modes(self):
+        original = self.identity
+        for change in (
+            dict(image='sha256:' + 'a' * 64),
+            dict(running=False),
+            dict(mounts=[]),
+            dict(mounts=[dict(Destination='/data', Source='/other-data', Type='bind')]),
+        ):
+            self.identity = {**original, **change}
+            for execute in (False, True):
+                with self.subTest(change=change, execute=execute):
+                    with self.assertRaisesRegex(ValueError, 'app_image_mismatch'):
+                        recovery.run(execute=execute)
+                    self.quiet.assert_not_called()
+                    self.assert_untouched()
+
+    def test_zero_work_gate_failure_never_reaches_transfer(self):
+        self.quiet.side_effect = ValueError('backup_recovery_zero_work_required')
+        for execute in (False, True):
+            with self.assertRaisesRegex(ValueError, 'zero_work'):
+                recovery.run(execute=execute)
+            self.verify.assert_not_called()
+            self.assert_untouched()
+
+    def test_default_qualification_binds_approved_image_and_does_not_write(self):
+        result = recovery.run()
+        self.assertEqual(result['state'], 'offline_recovery_qualified')
+        self.assertEqual(result['writes'], 0)
+        self.assertEqual(result['cloud_operations'], 0)
+        self.assertEqual(
+            self.approved_image.call_args.kwargs['pinned_image'],
+            recovery.TRANSPORT_IMAGE,
+        )
+        self.release.approved_manifest.assert_called_once_with(
+            self.root,
+            self.root / 'releases' / recovery.TRANSPORT_COMMIT,
+            recovery.TRANSPORT_COMMIT,
+        )
+        self.quiet.assert_called_once()
+        self.verify.assert_called_once()
+        self.assert_untouched()
+
+    def test_prior_qualification_cannot_authorize_execution_after_promotion(self):
+        recovery.run()
+        self.state['current'] = 'a' * 40
+        with self.assertRaisesRegex(ValueError, 'release_changed'):
+            recovery.run(execute=True)
+        self.assert_untouched()
+
+    def test_lock_contention_refuses_and_execute_keeps_lock_through_write_boundary(
+        self,
+    ):
+        import fcntl
+
+        with (self.root / 'release.lock').open('r+') as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            for execute in (False, True):
+                with self.assertRaises(BlockingIOError):
+                    recovery.run(execute=execute)
+                self.assert_untouched()
+            fcntl.flock(lock, fcntl.LOCK_UN)
+
+            def transfer(*args):
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return {'state': 'synthetic_completed'}
+
+            self.transfer.side_effect = transfer
+            self.assertEqual(recovery.run(execute=True)['state'], 'synthetic_completed')
+            self.transfer.assert_called_once()
+            # The entry releases the lock even after returning from the writer.
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
 if __name__ == '__main__':

@@ -1,5 +1,7 @@
 import { EmptyState, Note } from './ui/Note.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
+import { Chip } from './ui/Chip.jsx';
 import StudioHeader from './StudioHeader.jsx';
 import { Dialog as SharedDialog } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
@@ -757,7 +759,7 @@ function StartDialog({
                     </label>
                     <div className="p4-field">
                       <span className="p4-field-label">{t('operator.copy72')}</span>
-                      <div className="p4-seg" role="group">
+                      <div className="seg p4-seg" role="group">
                         {['fl', 'ref'].map((mode) => {
                           const target = sameEngineInMode(choices, row.profile_id, mode);
                           return (
@@ -810,17 +812,17 @@ function StartDialog({
                   {/* Same model and GPU can exist as several engine builds; only the newest
                       usually has a current execution policy, so older ones fail at launch. */}
                   {engines.length > 1 && (
-                    <details className="p4-engine">
-                      <summary>
-                        {t('operator.more.engine', {
-                          version: engineVersion(selected) || '—',
-                        })}
-                      </summary>
+                    <Disclosure
+                      className="p4-engine"
+                      summary={t('operator.more.engine', {
+                        version: engineVersion(selected) || '—',
+                      })}
+                    >
                       <div className="p4-engine-list">
                         {engines.map((profile, position) => (
-                          <Button
+                          <Chip
                             key={profile.id}
-                            aria-pressed={profile.id === row.profile_id}
+                            pressed={profile.id === row.profile_id}
                             onClick={() => edit(row.id, { profile_id: profile.id })}
                           >
                             v{engineVersion(profile) || '?'}
@@ -829,11 +831,11 @@ function StartDialog({
                                 {t('operator.more.engineNewest')}
                               </small>
                             )}
-                          </Button>
+                          </Chip>
                         ))}
                       </div>
                       <small>{t('operator.more.engineHelp')}</small>
-                    </details>
+                    </Disclosure>
                   )}
                   <small>
                     {selected && (
@@ -1100,7 +1102,9 @@ function StopDialog({ target, kind, controller, busy, onClose }) {
       setImpact(null);
       try {
         setImpact(await controller.stopImpact(kind, target.id));
-      } catch {}
+      } catch {
+        // The impact summary is advisory; the dialog works without it.
+      }
     } finally {
       setWorking(false);
     }
@@ -1289,8 +1293,7 @@ export function MachineDetail({
           })}
         </p>
       )}
-      <details className="p4-method">
-        <summary>{t('operator.copy91')}</summary>
+      <Disclosure className="p4-method" summary={t('operator.copy91')}>
         <p>{t('operator.copy92')}</p>
         <p>
           {metrics.generation_basis || metrics.basis || t('operator.status42')} ·{' '}
@@ -1301,7 +1304,7 @@ export function MachineDetail({
               end: time(metrics.window_end, locale),
             })}
         </p>
-      </details>
+      </Disclosure>
       {terminal(node) && (
         <div className="p4-kv">
           <div>
@@ -1321,11 +1324,10 @@ export function MachineDetail({
         </div>
       )}
       {admin && node.reason_code && (
-        <details className="p4-method">
-          <summary>{t('operator.copy95')}</summary>
+        <Disclosure className="p4-method" summary={t('operator.copy95')}>
           <code>{node.reason_code}</code>
           <p>{t('operator.copy96')}</p>
-        </details>
+        </Disclosure>
       )}
       <footer>
         <Button disabled={terminal(node) || stopping(node)} onClick={() => onStop(node)}>
@@ -1670,8 +1672,7 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
           <div className="ui-empty ui-empty-compact">{t('operator.copy120')}</div>
         )}
       </div>
-      <details className="p4-method">
-        <summary>{t('operator.copy121')}</summary>
+      <Disclosure className="p4-method" summary={t('operator.copy121')}>
         <p>{t('operator.copy122')}</p>
         {snapshot.reviews?.map((row) => (
           <p key={row.node_id || row.id}>
@@ -1679,7 +1680,7 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
           </p>
         ))}
         <a href="/operator?legacy=1">{t('operator.copy123')}</a>
-      </details>
+      </Disclosure>
     </>
   );
 }
@@ -1698,7 +1699,7 @@ export default function P4OperatorConsole() {
     state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState),
     [view, setView] = useState('machines'),
     [dialog, setDialog] = useState(null),
-    [now, setNow] = useState(Date.now());
+    [, setNow] = useState(Date.now());
   const legacyView =
     state.snapshot?.operator?.admin === true &&
     new URLSearchParams(ownLocation.current.search).get('legacy') === '1';
@@ -1720,7 +1721,9 @@ export default function P4OperatorConsole() {
       if (document.visibilityState !== 'hidden')
         try {
           await controller.poll(view === 'admin');
-        } catch {}
+        } catch {
+          // A failed refresh already shows in the controller state; the next poll retries.
+        }
       // 15 s: each poll rebuilds every machine's projection on the small CPU host.
       if (!stopped) timer = setTimeout(tick, 15000);
     };
@@ -1783,7 +1786,9 @@ export default function P4OperatorConsole() {
     setView('admin');
     try {
       await controller.readAdmin();
-    } catch {}
+    } catch {
+      // A failed refresh already shows in the controller state; the next poll retries.
+    }
   }
   if (legacyView)
     return (
@@ -1949,7 +1954,8 @@ export default function P4OperatorConsole() {
                 <small>{t('operator.more.totalCost')}</small>
                 <b>{money(totalCost)}</b>
                 <Button
-                  className="linkish keep-label"
+                  variant="link"
+                  className="keep-label"
                   onClick={() => navigateApp('/settings?tab=budget')}
                 >
                   {t('settings.budget')}
@@ -1958,7 +1964,7 @@ export default function P4OperatorConsole() {
             </div>
             {admin && !adminNodes && (
               <p className="p4-fleet-note muted">
-                <Button className="linkish" onClick={showAdmin}>
+                <Button variant="link" onClick={showAdmin}>
                   {t('operator.fleet.load')}
                 </Button>
               </p>
@@ -1969,7 +1975,7 @@ export default function P4OperatorConsole() {
                   count: othersLive.length,
                   owners: otherOwners.join('、'),
                 })}{' '}
-                <Button className="linkish" onClick={showAdmin}>
+                <Button variant="link" onClick={showAdmin}>
                   {t('operator.fleet.view')}
                 </Button>
               </p>

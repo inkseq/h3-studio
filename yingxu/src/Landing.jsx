@@ -61,7 +61,9 @@ export default function Landing() {
     if (!hostedSignInEnabled(c.auth)) return setRetrying(false);
     try {
       sessionStorage.setItem(RETRY_KEY, String(Date.now()));
-    } catch {}
+    } catch {
+      // Browser storage is optional (private mode, blocked site data).
+    }
     window.location.replace(hostedSignInUrl('/quick-chat', 'sign-in'));
   }, [retrying, c.auth]);
   const signinError =
@@ -127,7 +129,7 @@ export default function Landing() {
             <small className="muted">
               {t('landing.noAccount')}{' '}
               <Button
-                className="linkish"
+                variant="link"
                 onClick={() => {
                   setPasswordFirst(true);
                   setLogin(true);

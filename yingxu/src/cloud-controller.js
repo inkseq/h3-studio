@@ -694,6 +694,7 @@ export function createCloudController({
         emit({ conflict: { id: project.id, draft: project, baseVersion: version } });
         throw Error(
           '另一处已更新这个项目。当前草稿已保留；请保存为云副本或下载后比较，未覆盖远端。',
+          { cause: error },
         );
       }
       throw error;
@@ -1413,7 +1414,9 @@ export function createCloudController({
         }
         throw error;
       }
-      throw Error(error.message + ' 提交结果未确认。先刷新任务，重试只会使用同一个提交标识。');
+      throw Error(error.message + ' 提交结果未确认。先刷新任务，重试只会使用同一个提交标识。', {
+        cause: error,
+      });
     }
   }
   async function submitBatch(shotIds, { recover = false } = {}) {
@@ -1599,7 +1602,9 @@ export function createCloudController({
         writeRenderPending(pending);
         throw error;
       }
-      throw Error(error.message + ' 粗剪提交结果未确认，请用原标识恢复；不会自动再排一次。');
+      throw Error(error.message + ' 粗剪提交结果未确认，请用原标识恢复；不会自动再排一次。', {
+        cause: error,
+      });
     }
   }
   async function checkRemoteVersion() {
@@ -1900,7 +1905,7 @@ export function createCloudController({
       ) {
         guard(ctx);
         journal.clear(op);
-        throw Error('workbench.closed');
+        throw Error('workbench.closed', { cause: error });
       }
       throw error;
     }
@@ -2244,7 +2249,9 @@ export function createCloudController({
           guard(ctx);
           try {
             await assetInventory();
-          } catch {}
+          } catch {
+            // The asset inventory is refreshed again on the next sync.
+          }
           throw error;
         }
       }),

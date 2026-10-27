@@ -42,7 +42,7 @@ export default function AccountGoogleLink({ api }) {
       {state.kind === 'error' && (
         <p className="muted" role="alert">
           {t('account.linkError')}{' '}
-          <Button className="linkish" onClick={load}>
+          <Button variant="link" onClick={load}>
             <RefreshCw size={13} aria-hidden="true" />
             {t('account.linkRetry')}
           </Button>

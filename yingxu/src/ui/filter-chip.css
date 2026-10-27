@@ -1,0 +1,104 @@
+/* Category filter chips (<FilterChip>). Pages lay out the row or grid. */
+.filter-chip {
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  height: 32px;
+  min-height: 32px;
+  padding: 5px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--ink-2);
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: none;
+}
+.filter-chip:hover {
+  background: transparent;
+  border-color: var(--line-2);
+}
+.filter-chip > svg {
+  flex: none;
+}
+.filter-chip > span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.filter-chip > small {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.filter-chip.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.filter-chip.on > small {
+  color: inherit;
+}
+.filter-chip.alert > small {
+  padding: 0 5px;
+  color: var(--accent-ink);
+  background: var(--warn);
+  border-radius: 8px;
+}
+
+/* Rail form: a plain icon, tinted on hover and when open; a count badge only when not zero. */
+.filter-chip.icon-only {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  color: var(--muted);
+  border: 0;
+  border-radius: 10px;
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.filter-chip.icon-only > svg {
+  width: 17px;
+  height: 17px;
+}
+.filter-chip.icon-only:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+}
+.filter-chip.icon-only.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+.filter-chip.icon-only > span,
+.filter-chip.icon-only > small.zero {
+  display: none;
+}
+.filter-chip.icon-only > small {
+  position: absolute;
+  top: 2px;
+  right: 1px;
+  display: grid;
+  place-items: center;
+  min-width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0 3px;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink-2);
+  background: var(--surface-3);
+  border-radius: 7px;
+}
+.filter-chip.icon-only.alert > small {
+  color: var(--accent-ink);
+  background: var(--warn);
+}

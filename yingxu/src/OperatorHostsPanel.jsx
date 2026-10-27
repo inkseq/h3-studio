@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { usePageActive } from './AppRouteCache.jsx';
@@ -253,12 +254,10 @@ export function HostRecord({ host, children }) {
           {t('operatorPanel.denyUntil', { time: time(host.policy.automatic_deny_until, locale) })}
         </p>
       )}
-      <details>
-        <summary>{t('operator.copy167')}</summary>
+      <Disclosure summary={t('operator.copy167')}>
         <SampleGroups groups={host.groups} />
-      </details>
-      <details>
-        <summary>{t('operator.copy168')}</summary>
+      </Disclosure>
+      <Disclosure summary={t('operator.copy168')}>
         {host.rentals.length ? (
           <div className="p4-host-rentals">
             {host.rentals.map((row, index) => (
@@ -287,7 +286,7 @@ export function HostRecord({ host, children }) {
         ) : (
           <p>{t('operator.copy169')}</p>
         )}
-      </details>
+      </Disclosure>
       {children}
     </section>
   );
@@ -301,14 +300,18 @@ export function OfferHostHistory({ members = [], profileId, now = Date.now() }) 
   );
   const known = histories.filter(validHostSummary);
   return (
-    <details className="p4-offer-hosts">
-      <summary>
-        {t('operatorPanel.history', {
-          detail: known.length
-            ? t('operatorPanel.mappings', { count: known.length })
-            : t('operator.status81'),
-        })}
-      </summary>
+    <Disclosure
+      className="p4-offer-hosts"
+      summary={
+        <>
+          {t('operatorPanel.history', {
+            detail: known.length
+              ? t('operatorPanel.mappings', { count: known.length })
+              : t('operator.status81'),
+          })}
+        </>
+      }
+    >
       {known.length ? (
         known.map((host, index) => {
           const fresh =
@@ -346,7 +349,7 @@ export function OfferHostHistory({ members = [], profileId, now = Date.now() }) 
         <p>{t('operator.copy170')}</p>
       )}
       <small>{t('operator.copy171')}</small>
-    </details>
+    </Disclosure>
   );
 }
 function PolicyReview({ host, selection, current, busy, onClose, onConfirm }) {
@@ -641,8 +644,7 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
         <p role="status">{loading ? t('operator.status93') : t('operator.status94')}</p>
       )}
       {admin && (
-        <details className="p4-host-audits">
-          <summary>{t('operator.copy183')}</summary>
+        <Disclosure className="p4-host-audits" summary={t('operator.copy183')}>
           {state.hostAudits?.events?.length ? (
             <ul>
               {state.hostAudits.events.map((event) => (
@@ -671,7 +673,7 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
               {t('operator.copy185')}
             </Button>
           )}
-        </details>
+        </Disclosure>
       )}
     </section>
   );

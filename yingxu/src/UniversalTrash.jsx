@@ -1,4 +1,5 @@
 import StudioHeader from './StudioHeader.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { Button } from './ui/Button.jsx';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
@@ -98,7 +99,7 @@ export function TrashProvider({ account, children }) {
     setBusy(false);
     setRevision((v) => v + 1);
   }, [account]);
-  let pending = null;
+  let pending;
   try {
     pending = controller.pending();
   } catch {
@@ -288,12 +289,20 @@ export function TrashProvider({ account, children }) {
     </Context.Provider>
   );
 }
-export function TrashMenu({ target, onRename, onEdit, onChat, onTrashSettled, disabled = false }) {
+export function TrashMenu({
+  target,
+  onRename,
+  onEdit,
+  onChat,
+  onTrashSettled,
+  disabled = false,
+  onMedia = false,
+}) {
   const ctx = useTrash(),
     { t } = useI18n();
   if (!ctx?.account) return null;
   return (
-    <ItemMenu disabled={disabled || ctx.busy || !!ctx.pending}>
+    <ItemMenu disabled={disabled || ctx.busy || !!ctx.pending} onMedia={onMedia}>
       {onRename && <MenuItem onSelect={onRename}>{t('trash.rename')}</MenuItem>}
       {onEdit && <MenuItem onSelect={onEdit}>{t('trash.edit')}</MenuItem>}
       {onChat && <MenuItem onSelect={onChat}>{t('trash.editInChat')}</MenuItem>}
@@ -543,11 +552,15 @@ export default function UniversalTrash() {
               </div>
             ) : (
               <>
-                <details className="ops-tools">
-                  <summary>
-                    <SlidersHorizontal size={14} />
-                    {t('trash.filters')}
-                  </summary>
+                <Disclosure
+                  className="ops-tools"
+                  summary={
+                    <>
+                      <SlidersHorizontal size={14} />
+                      {t('trash.filters')}
+                    </>
+                  }
+                >
                   <div className="row tight">
                     <select
                       aria-label={t('trash.all')}
@@ -595,7 +608,7 @@ export default function UniversalTrash() {
                       {t('trash.selectAll')}
                     </Button>
                   </div>
-                </details>
+                </Disclosure>
                 {error && <p role="alert">{error}</p>}
                 {items.length ? (
                   <div className="trash-list" aria-busy={loading}>

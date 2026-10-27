@@ -1,0 +1,25 @@
+/* Underlined tabs (<Tabs>). */
+.tabs-underline {
+  display: flex;
+  border-bottom: 1px solid var(--line-2);
+}
+.tabs-underline > .tab {
+  justify-content: center;
+  padding: 10px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+.tabs-underline > .tab:hover {
+  color: var(--ink);
+  background: none;
+}
+.tabs-underline > .tab[aria-selected='true'] {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+}
+.tabs-underline.fill > .tab {
+  flex: 1;
+}

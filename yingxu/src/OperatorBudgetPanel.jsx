@@ -1,4 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import { usePageActive } from './AppRouteCache.jsx';
 import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'react';
 import { createP4OperatorClient } from './p4-operator-client.js';
@@ -65,8 +66,7 @@ export function BudgetAccounts({ budgets = [], compact = false }) {
                 </div>
               ))}
             </dl>
-            <details className="budget-cost-details">
-              <summary>{t('settings.costDetails')}</summary>
+            <Disclosure className="budget-cost-details" summary={t('settings.costDetails')}>
               {retired && <p>{t('operatorPanel.retiredCap')}</p>}
               <small>{t('operator.copy1')}</small>
               {costs.length > 0 && (
@@ -113,7 +113,7 @@ export function BudgetAccounts({ budgets = [], compact = false }) {
                   <small>{t('operatorPanel.pendingInvoiceHelp')}</small>
                 </p>
               )}
-            </details>
+            </Disclosure>
             {usage && (
               <progress
                 max="100"
@@ -122,8 +122,7 @@ export function BudgetAccounts({ budgets = [], compact = false }) {
               />
             )}
             {!compact && (
-              <details>
-                <summary>{t('operator.copy2')}</summary>
+              <Disclosure summary={t('operator.copy2')}>
                 {budget.daily7.length ? (
                   <ul>
                     {budget.daily7.map((day) => (
@@ -145,7 +144,7 @@ export function BudgetAccounts({ budgets = [], compact = false }) {
                     })}
                   </p>
                 )}
-              </details>
+              </Disclosure>
             )}
           </section>
         );
@@ -285,10 +284,9 @@ function BudgetEditor({ row, busy, onSave }) {
   return (
     <section className="budget-admin-row">
       <h3>{budgetLabel(row, locale)}</h3>
-      <details>
-        <summary>{t('operatorPanel.accountIdentity')}</summary>
+      <Disclosure summary={t('operatorPanel.accountIdentity')}>
         <small>{row.id}</small>
-      </details>
+      </Disclosure>
       <BudgetAccounts budgets={[row]} compact />
       <form
         onSubmit={async (event) => {
@@ -446,6 +444,7 @@ export function AdminBudgetPanel({ controller, state, busy }) {
     try {
       await controller.readBudgetAdmin({ after_id });
     } catch {
+      // A failed refresh already shows in the controller state; the next poll retries.
     } finally {
       setReading(false);
     }
@@ -523,8 +522,7 @@ export function AdminBudgetPanel({ controller, state, busy }) {
       ) : (
         <p>{t('operator.copy21')}</p>
       )}
-      <details className="budget-audits">
-        <summary>{t('operator.copy22')}</summary>
+      <Disclosure className="budget-audits" summary={t('operator.copy22')}>
         {audits?.events?.length ? (
           <ul>
             {audits.events.map((event) => (
@@ -540,9 +538,8 @@ export function AdminBudgetPanel({ controller, state, busy }) {
           <p>{t('operator.copy23')}</p>
         )}
         {audits?.next_before && <p>{t('operator.copy24')}</p>}
-      </details>
-      <details className="budget-audits">
-        <summary>{t('operator.copy25')}</summary>
+      </Disclosure>
+      <Disclosure className="budget-audits" summary={t('operator.copy25')}>
         {prices?.audits?.length ? (
           <ul>
             {prices.audits.map((event) => (
@@ -562,7 +559,7 @@ export function AdminBudgetPanel({ controller, state, busy }) {
         ) : (
           <p>{t('operator.copy26')}</p>
         )}
-      </details>
+      </Disclosure>
     </section>
   );
 }
