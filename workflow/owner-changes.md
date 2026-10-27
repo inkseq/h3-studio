@@ -682,3 +682,28 @@ is implementation evidence, not a broader owner decision: it recommends fixed
 tips with cast/script-bound examples and an explicit language field after one
 English input received a Chinese example. Verify those constraints in the feature
 tests; the evaluation does not establish universal accuracy or production readiness.
+
+## CR-20261027-72 — single priority queue (owner 2026-10-27)
+
+Owner instruction in the Claude session: keep the big plan moving. After each slice is **done** (merged, deployed or adopted, and read-back posted), take the next highest item without waiting for a prompt. Stop only for a hard owner limit or a needed Tier2 review; while waiting, work the next independent item. This queue supersedes #580 section 2. Unfinished #580 items fall under P3.
+
+- **P0 (interrupts anything):** #655 daily backup with S3 proof; #193 production health (no idle paid nodes or stuck jobs).
+- **P1 auto capacity:**
+  - #686 adoption → staging serves the #659 jobs (Claude accepts and does the production TaoMate switch);
+  - #688/#689 lookahead rule with a one-machine floor and keep-alive = t_boot;
+  - #688 Modal worker host running the existing worker loop (reference #690; spend cap; max 2 on staging);
+  - admin settings API for the start rules (preview, confirm, reason, history, measured p90); Claude builds the panel;
+  - production auto-start ON.
+- **P1 paid launch #374, in order:**
+  - 006 livemode schema → LIVE prices for the four packs ($5/$20/$50/$100) → LIVE webhook;
+  - our own Inkseq receipts (never send Stripe `receipt_url`). Public identity is Inkseq only, ABN 68 442 632 833, not GST-registered, support@inkseq.com;
+  - Claude staging acceptance → owner real-card loop → Stripe mode and credit charging ON.
+- **P2 Inky #684/#685:** staging SSM hydration, evaluator ON in staging only, fixtures #687; Claude accepts. Production needs a separate owner OK.
+- **P3:** #592 zero-job window, dependabot, #580 leftovers.
+
+Owner approvals dated 2026-10-27, and only these:
+- Inky credentials from the existing central profiles into SSM SecureString on staging;
+- Modal as a capped worker host, staging first;
+- the #374 Stripe LIVE preparation steps above, each external write with owner OK. Checkout and charging stay OFF until the final gate.
+
+All other no-new-credential, no-budget-increase and no-paid-infrastructure limits remain. Codex's watcher must match the real `→` (U+2192) or `->`, and comments whose first line is a heading, bold or plain text.
