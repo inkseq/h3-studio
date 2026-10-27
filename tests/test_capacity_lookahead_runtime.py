@@ -10,6 +10,7 @@ from studio_platform.capacity_lookahead_runtime import (
     enforce,
     evaluate,
     record_decision,
+    same_work,
 )
 from studio_platform.capacity_start_rules import StartRules
 from studio_platform.dstack_workspace import DstackWorkspace
@@ -136,6 +137,57 @@ class LookaheadRuntimeTests(LedgerCase):
         second = self.calculate(45, [self.node])
         self.assertEqual(second["decision"]["left_at_ready"], 25)
         self.assertEqual(second["decision"]["start_count"], 1)
+
+    def test_shared_fleet_forecast_combines_users_not_duplicate_floors(self):
+        self.worker()
+        self.job["owner_id"] = "user-a"
+        work = self.work(30)
+        for index, (job, _) in enumerate(work):
+            job["owner_id"] = "user-a" if index % 2 else "user-b"
+        foreign_profile = {**self.profile, "id": "other-fleet"}
+        work.append(({**self.job, "id": "elsewhere"}, foreign_profile))
+        with (
+            self.repo.engine.connect() as connection,
+            patch("studio_platform.dstack_demand._nodes", return_value=[self.node]),
+        ):
+            for owner in ("user-a", "user-b"):
+                job = {**self.job, "owner_id": owner}
+                result = evaluate(
+                    self.service,
+                    connection,
+                    job,
+                    self.profile,
+                    work,
+                    self.usage,
+                    self.now,
+                )
+                self.assertEqual(result["queued"], 30)
+                self.assertEqual(len(result["machines"]), 1)
+                self.assertEqual(result["decision"]["start_count"], 0)
+            work += [
+                ({**self.job, "id": f"extra-{i}"}, self.profile) for i in range(15)
+            ]
+            result = evaluate(
+                self.service,
+                connection,
+                self.job,
+                self.profile,
+                work,
+                self.usage,
+                self.now,
+            )
+            self.assertEqual(result["queued"], 45)
+            self.assertEqual(result["decision"]["start_count"], 1)
+
+    def test_busy_work_matches_cross_owner_but_not_tenant_or_mode(self):
+        other = copy.deepcopy(self.job)
+        other["owner_id"] = "other-user"
+        self.assertTrue(same_work(other, self.job))
+        for field in ("tenant_id", "pool"):
+            changed = {**other, field: "foreign"}
+            self.assertFalse(same_work(changed, self.job))
+        other["request"]["request"]["mode"] = "ref"
+        self.assertFalse(same_work(other, self.job))
 
     def test_unregistered_or_stale_slots_do_not_supply_ready_throughput_or_duplicate_floor(
         self,

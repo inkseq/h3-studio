@@ -39,7 +39,7 @@ def idle_seconds(service, connection, profile):
 def same_work(left, right):
     a, b = left["execution_plan"], right["execution_plan"]
     return (
-        all(left[k] == right[k] for k in ("tenant_id", "owner_id", "pool"))
+        all(left[k] == right[k] for k in ("tenant_id", "pool"))
         and all(
             a.get(k) == b.get(k)
             for k in (
@@ -52,6 +52,8 @@ def same_work(left, right):
         )
         and left["request"].get("deployment_profile_id")
         == right["request"].get("deployment_profile_id")
+        and left["request"].get("request", {}).get("mode")
+        == right["request"].get("request", {}).get("mode")
     )
 
 
@@ -82,7 +84,7 @@ def evaluate(service, connection, job, profile, work, usage, now):
         ).mappings()
     }
     for node in _nodes(connection, service.settings.tenant_id):
-        if node["payload"].get("owner_id") != job["owner_id"] or not _matches(
+        if node["payload"].get("owner_id") != profile["owner_id"] or not _matches(
             node, job
         ):
             continue
@@ -156,7 +158,10 @@ def evaluate(service, connection, job, profile, work, usage, now):
             )
             if node["desired_state"] != "running":
                 blocked = True
-    queued = sum(same_work(other, job) for other, _ in work)
+    queued = sum(
+        selected["id"] == profile["id"] and same_work(other, job)
+        for other, selected in work
+    )
     decision = plan(
         policy,
         tuple(machines),
