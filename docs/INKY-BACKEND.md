@@ -24,8 +24,19 @@ it. No rollout or model-quality acceptance is claimed.
 
 Text kinds are `vague_action`, `needs_keyframe`, `emotion_not_shown`,
 `multiple_camera_moves`, `action_too_long`. Keyframe navigation uses `frames`;
-the other text kinds use `action`. `upload_card`/`refs` is reserved but its asset
-integration is not implemented. Do not show invented upload suggestions.
+the other text kinds use `action`. `upload_card` uses `cast` and `card_name`.
+Only saved shot-attached uploads (candidate/frame/reference/child) are eligible;
+unattached library media and generated results are excluded. One image per shot
+is compared with all project character/location/prop cards (at most16, otherwise
+skip); argmax expected score must be >=2 and untied. It is a suggestion only:
+no card assignment, shot change or Terra example. Missing preview skips advice.
+Owned ready receipts are rechecked, and bounded immutable preview bytes are
+hash-verified before CPU conversion to a metadata-free JPEG (long edge640,
+pad short edges to280). The original remains unchanged. Shared card edits stale
+the source, and deleted/trashed assets hide cached upload advice.
+The protocol follows [TypeSafe images](https://docs.typesafe.ai/images) and its
+[official SDK](https://github.com/typesafe-ai/typesafe-sdk-js/blob/main/src/assets.ts);
+only image calls send the experimental image header. Text omits assets.
 
 Source identity binds the shot, its version, minimal resolved scene/cast/place/
 props, incoming links and rubric revision. It changes when shared scene/card
@@ -57,14 +68,16 @@ Terra: `openai/gpt-6.1-terra`, low reasoning, JSON object, explicit code-derived
 origin to `https://openrouter.ai/api/v1`. Never use the obsolete secret-drop,
 dead rig-root profile or an automatic profile fallback. Central credentials
 are loaded lazily through the existing loader. No loader/import network calls.
-AWS provisioning is not implemented; a local registry loader is not an AWS
-credential transport. Do not copy its vault or put secrets in the repository.
+The explicit staging importer and host hydration adapter now transport the two
+existing keys through Standard-tier SSM SecureString with AWS-managed `aws/ssm`.
+No operator has executed them; source preparation is not credential adoption.
+Do not copy the vault or put secrets in the repository.
 The 2026-10-27 read-only managed-secret metadata census found no existing
 Inky/TypeSafe/OpenRouter server secret in either environment. Existing database,
 auth, payment and title secrets must not be repurposed. The app-only mount is
-prepared, but an approved durable hydration source remains a deployment
-dependency; this PR does not create secret containers, credentials or paid
-infrastructure. A helper install follows the existing zero-work host gate.
+prepared. Staging adoption requires the single final Tier2 review and owner
+credential authority; production adoption is explicitly refused by the helper.
+A helper install follows the existing zero-work host gate.
 The runtime file contract validates the exact profiles/origins, refuses duplicate
 JSON keys, symlinks, multiple hardlinks and unprotected Linux ownership/modes.
 Invalid/missing configuration disables the evaluator with a static diagnostic;
@@ -110,12 +123,46 @@ hard cap from the historical average example cost.
 
 ## Remaining integration
 
-1. Qualified durable server credential hydration and activation, with the
+1. Qualify durable server credential hydration and activation, with the
    reviewed request-cost envelope; no new key or obsolete-file import.
-2. Upload/card candidate provenance, bounded assets, evaluated decoy fixtures.
-   #684 comment6436424621 asks how an unattached upload maps to the required
-   `shot_id`; no synthetic shot assignment is permitted.
+2. Evaluate #687 labelled text/image/decoy fixtures on the bounded provider
+   adapters after source review. Offline regressions do not prove model quality.
 3. One Claude Tier2 review of the final PR, exact-head CI, then staging
    qualification. No review request or activation for this draft milestone.
    The post-response lifecycle and Agent contract are tested/documented locally;
    account/project erasure and discovery regressions stay in PostgreSQL CI.
+
+## Staging adoption (prepared, not executed)
+
+1. Verify the final reviewed SHA and green CI, original SSM parameter outcomes,
+   owner credential authority, and a fresh zero-nonterminal-job staging window.
+   Preserve the original protected host tuple and helper hashes under the
+   existing operation qualification/release lock before installing any bytes.
+2. The credential operator needs `ssm:GetParameters` and `ssm:PutParameter` on
+   exactly `arn:aws:ssm:ap-southeast-1:829135631045:parameter/sixnine/staging/inky/typesafe`
+   and the same ARN ending in `openrouter`. The staging instance role needs
+   `ssm:GetParameters` only on those two ARNs; it must not receive write access.
+   The helper never creates IAM grants, provider keys, KMS keys or production parameters.
+3. From the reviewed checkout on the existing central-registry host, run
+   `python tools/import_inky_credentials.py --apply-staging` once. No credential
+   argument or input file exists. Preserve its names/types/versions receipt.
+   A lost response is unknown: inspect original parameters, never overwrite.
+4. Through the qualified root helper installation lane, install the reviewed
+   `runtime_secrets_aws.py`, sibling `inky_credentials.py`, and dependency-free
+   `studio_platform/inky_config.py` alongside the existing host package. Preserve
+   their previous bytes and metadata for rollback; no hot patch of app code.
+   Add `INKSEQ_INKY_CONFIG_FILE=/run/sixnine-secrets/inky` only to the protected
+   staging `migration/paths.json` environment under its existing validation/CAS.
+5. Existing secret hydration reads the protected deployment target, verifies the
+   AWS account, fetches those exact parameters, validates both complete configs,
+   and writes through the existing inode-preserving secret writer. The file is
+   root:10001 `0440` (not `0600`: the app runs non-root), parent root:root `0700`.
+   Compose mounts this file read-only into the app alone as `/run/secrets/inky`.
+   Differing existing bytes refuse; there is no automatic rotation or fallback.
+6. Adopt the accepted staging tuple, read back names/versions/type, file
+   ownership/mode and app-only mount without printing the contents. Qualify the
+   request-price envelope and #687 text/image/decoy cases with bounded calls;
+   inspect actual usage and persistent holds. Over caps returns template only.
+7. Rollback removes the optional path from the protected rollout environment
+   and restores the original app tuple through existing gates. Keep original
+   SSM parameters and financial/evaluation receipts; do not rotate/delete/replay.

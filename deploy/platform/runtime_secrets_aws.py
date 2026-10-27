@@ -69,7 +69,7 @@ def value(api, name, initialize=False, *, target='production'):
 
 
 def write_runtime(name, content):
-    if name not in {"db_admin_password", "app_database_url", "google_titles", "workos", "stripe"}:
+    if name not in {"db_admin_password", "app_database_url", "google_titles", "workos", "stripe", "inky"}:
         raise RuntimeError("Unexpected runtime secret")
     ROOT.mkdir(mode=0o700, exist_ok=True)
     info = ROOT.lstat()
@@ -141,8 +141,10 @@ def hydrate_titles(api, *, target='production'):
         temporary.unlink(missing_ok=True)
 
 
-def workos_requested(*, target, root=Path('/srv/sixnine')):
+def workos_requested(*, target, root=Path('/srv/sixnine'), service='workos'):
     """Use the existing root-owned rollout config, not a new enablement store."""
+    if service not in {'workos', 'inky'}:
+        raise RuntimeError('Unknown optional runtime secret')
     path = root / 'migration' / 'paths.json'
     try:
         info = path.lstat()
@@ -173,8 +175,10 @@ def workos_requested(*, target, root=Path('/srv/sixnine')):
         if type(environment) is not dict:
             raise ValueError()
         selected = deployment_target.environment(environment)
-        requested = environment.get('INKSEQ_WORKOS_CONFIG_FILE', '')
-        if selected['name'] != target or requested not in {'', '/run/sixnine-secrets/workos'}:
+        requested = environment.get('INKSEQ_' + service.upper() + '_CONFIG_FILE', '')
+        if selected['name'] != target or requested not in {'', '/run/sixnine-secrets/' + service}:
+            raise ValueError()
+        if service == 'inky' and requested and target != 'staging':
             raise ValueError()
     except (KeyError, TypeError, ValueError, UnicodeError):
         raise RuntimeError('WorkOS rollout configuration is invalid') from None
@@ -294,6 +298,12 @@ def hydrate(initialize=False):
             hydrate_workos(api, target=target)
         if stripe_requested(target=target):
             hydrate_stripe(api, target=target)
+        if workos_requested(target=target, service='inky'):
+            try:
+                from . import inky_credentials
+            except ImportError:
+                import inky_credentials
+            inky_credentials.hydrate(inky_credentials.client(), write_runtime, target=target)
 
 
 if __name__ == "__main__":

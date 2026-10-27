@@ -35,7 +35,7 @@ class Client:
             raise InkyProviderError("inky_profile_invalid")
         self.service, self.loader, self.transport = service, loader, transport
 
-    def post(self, path, body):
+    def post(self, path, body, *, images=False):
         try:
             cfg = self.loader(self.service)
             origin = TYPE_ORIGIN if self.service == "typesafe" else OPEN_ORIGIN
@@ -59,7 +59,14 @@ class Client:
                     "POST",
                     origin + path,
                     json=body,
-                    headers={"Authorization": "Bearer " + cfg.api_key},
+                    headers={
+                        "Authorization": "Bearer " + cfg.api_key,
+                        **(
+                            {"TypeSafe-Danger-Zone-Images": "true"}
+                            if images and self.service == "typesafe"
+                            else {}
+                        ),
+                    },
                 ) as response:
                     if response.status_code != 200:
                         raise InkyProviderError("inky_provider_http")
@@ -85,6 +92,11 @@ class Jev:
 
     def __call__(self, source):
         return self.client.post("/systemone", judgement_payload(source))
+
+    def upload(self, upload, jpeg):
+        from .inky_uploads import upload_payload
+
+        return self.client.post("/systemone", upload_payload(upload, jpeg), images=True)
 
 
 def cost_micros(value):

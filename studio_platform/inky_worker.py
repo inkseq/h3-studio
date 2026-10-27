@@ -15,8 +15,9 @@ LOG = logging.getLogger(__name__)
 
 
 class InkyWorker:
-    def __init__(self, store, *, judge, examples=None):
+    def __init__(self, store, *, judge, examples=None, uploads=None):
         self.store, self.judge, self.examples = store, judge, examples
+        self.uploads = uploads
         self.budget = InkyBudget(store.repo)
 
     def refresh(self, principal, project_id):
@@ -49,10 +50,14 @@ class InkyWorker:
         if not self.store.eligible(principal, project_id, source):
             return [], 0
         try:
-            kinds = text_findings(self.judge(source["context"]))
+            kinds = (
+                text_findings(self.judge(source["context"]))
+                if source["context"]["shot_action"].strip()
+                else []
+            )
         except Exception:
             LOG.info("inky_judgement_unavailable")
-            return [], 0
+            kinds = []
         findings, attempted = [], 0
         for kind in kinds:
             if not self.store.eligible(principal, project_id, source, kind):
@@ -64,6 +69,17 @@ class InkyWorker:
                 if example is not None:
                     entry["example"] = example
             findings.append(entry)
+        if (
+            self.uploads is not None
+            and source.get("upload")
+            and self.store.eligible(principal, project_id, source, "upload_card")
+        ):
+            try:
+                entry = self.uploads(principal, project_id, source)
+                if entry is not None:
+                    findings.append(entry)
+            except Exception:
+                LOG.info("inky_upload_unavailable")
         return findings, attempted
 
     def example(self, principal, project_id, source, kind):

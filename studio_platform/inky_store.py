@@ -14,8 +14,22 @@ SETTINGS = "inky_settings"
 
 
 class InkyStore:
-    def __init__(self, repo, tenant):
+    def __init__(self, repo, tenant, assets=None):
         self.repo, self.tenant = repo, tenant
+        self.assets = assets
+
+    def upload_available(self, principal, project_id, source):
+        try:
+            if self.assets is None or not principal.allows(project_id, "assets:read"):
+                return False
+            value = self.assets.get(
+                principal.owner,
+                source["upload"]["image"]["asset_id"],
+                project_id=project_id,
+            )
+            return value.get("status") == "ready" and value.get("kind") == "image"
+        except Exception:
+            return False
 
     def where(self, principal, project_id, kind, ident=None):
         return (
@@ -121,6 +135,10 @@ class InkyStore:
                 if not source or source["source_id"] != value.get("source_id"):
                     continue
                 for entry in value.get("items", []):
+                    if entry["kind"] == "upload_card" and not self.upload_available(
+                        principal, project_id, source
+                    ):
+                        continue
                     if self.ignore_id(source["shot_id"], entry["kind"]) not in ignored:
                         visible.append(entry)
             visible.sort(key=lambda v: (v["shot_id"], KINDS.index(v["kind"])))
@@ -134,7 +152,9 @@ class InkyStore:
             settings = self.row(conn, principal, project_id, SETTINGS, "settings")
             if settings and settings["payload"].get("muted"):
                 return None
-            if not source or not source["context"]["shot_action"].strip():
+            if not source or not (
+                source["context"]["shot_action"].strip() or source.get("upload")
+            ):
                 return None
             ident = source["source_id"]
             if self.row(conn, principal, project_id, CLAIM, ident):
@@ -157,25 +177,40 @@ class InkyStore:
         output = []
         for entry in findings:
             kind = entry.get("kind")
-            if (
-                kind not in KINDS
-                or kind == "upload_card"
-                or any(v["kind"] == kind for v in output)
-            ):
+            if kind not in KINDS or any(v["kind"] == kind for v in output):
                 raise ValueError("inky_findings_invalid")
             example = entry.get("example")
+            card = None
+            if kind == "upload_card":
+                card = next(
+                    (
+                        c
+                        for c in (source.get("upload") or {}).get("cards", [])
+                        if c["id"] == entry.get("card_id")
+                    ),
+                    None,
+                )
+                if card is None or example is not None:
+                    raise ValueError("inky_findings_invalid")
             if example is not None:
                 import json
 
                 example = example_text(
                     json.dumps({"example": example}), source["context"]["lang"]
                 )
-            output.append(item(source, kind, example))
+            value = item(source, kind, example)
+            if card is not None:
+                value["card_name"] = card["name"]
+            output.append(value)
         with self.repo.transaction() as conn:
             current = sources(
                 self.project(conn, principal, project_id, write=True)
             ).get(source["shot_id"])
             if not current or current["source_id"] != source["source_id"]:
+                return False
+            if any(
+                v["kind"] == "upload_card" for v in output
+            ) and not self.upload_available(principal, project_id, current):
                 return False
             claim = self.row(conn, principal, project_id, CLAIM, source["source_id"])
             if not claim or claim["payload"].get("state") != "claimed":

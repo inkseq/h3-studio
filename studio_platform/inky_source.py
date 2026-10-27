@@ -1,10 +1,11 @@
 """Minimal creator context and provenance for advisory-only Inky evaluations."""
 
 from .inky_models import context, language
+from .inky_uploads import upload_context
 from .repository import request_hash
 
 REVISION = "inky-v3-20261027"
-FIELDS = {"needs_keyframe": "frames", "upload_card": "refs"}
+FIELDS = {"needs_keyframe": "frames", "upload_card": "cast"}
 
 
 def shot_source(project, shot):
@@ -61,11 +62,13 @@ def shot_source(project, shot):
     # Include all shot data in the local digest so a new keyframe/assignment
     # invalidates an old recommendation even if an importer omitted a version.
     # Only the minimal context above can cross the provider boundary.
+    upload = upload_context(project, shot)
     source_id = request_hash(
         {
             "revision": REVISION,
             "shot": shot,
             "context": value,
+            "upload": upload,
             "links": [
                 link
                 for link in project.get("links", [])
@@ -78,6 +81,7 @@ def shot_source(project, shot):
         "base_version": shot.get("version", 1),
         "source_id": source_id,
         "context": value,
+        "upload": upload,
     }
 
 

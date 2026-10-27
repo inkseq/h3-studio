@@ -645,8 +645,9 @@ are advice, not accepted shot text. No provider call or cache write occurs on GE
 
 Text kinds are `vague_action`, `needs_keyframe`, `emotion_not_shown`,
 `multiple_camera_moves`, and `action_too_long`. `needs_keyframe` targets `frames`;
-the other text kinds target `action`. Upload-card advice is not implemented in
-this slice. Do not invent an item or a shot assignment for an unattached upload.
+the other text kinds target `action`. `upload_card` targets `cast`, includes
+`card_name`, and only evaluates uploads already attached to that shot. It does
+not assign the image automatically. Do not invent a shot for a library upload.
 
 Re-read the target before an authorized edit. `base_version` is not the project
 CAS version: normal `/actions` still requires the actual current project version.

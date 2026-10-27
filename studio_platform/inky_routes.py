@@ -27,6 +27,7 @@ def contract():
             "tip_key",
             "lang",
             "example?",
+            "card_name?",
         ],
         "kinds": [
             "vague_action",
@@ -34,12 +35,17 @@ def contract():
             "emotion_not_shown",
             "multiple_camera_moves",
             "action_too_long",
+            "upload_card",
         ],
-        "navigation": {"needs_keyframe": "frames", "other_text_kinds": "action"},
+        "navigation": {
+            "needs_keyframe": "frames",
+            "other_text_kinds": "action",
+            "upload_card": "cast",
+        },
         "preferences": "Ignore persists per target/kind; mute uses expected_revision and muted. Neither edits shots.",
         "boundary": "Advice only. Reads never call providers, generate media or write caches. Ignore and mute are explicit preference writes. Never interpret a suggestion as authorization to edit or generate.",
         "freshness": "Only results matching current source context and shot version are visible. Re-read after saves; do not act on stale base_version.",
-        "runtime_state": "Static contract only; readers can be mounted while the evaluator is disabled. Empty items do not certify quality. Upload-card advice is not implemented.",
+        "runtime_state": "Readers can be mounted while the evaluator is disabled. Empty items do not certify quality. Upload-card advice only targets existing shot-attached uploads, never unattached library media.",
     }
 
 
@@ -50,7 +56,11 @@ class InkySettings(BaseModel):
 
 
 def register_routes(app):
-    store = InkyStore(app.state.repository, app.state.settings.tenant_id)
+    store = InkyStore(
+        app.state.repository,
+        app.state.settings.tenant_id,
+        getattr(app.state, "assets", None),
+    )
     app.state.inky_store = store
 
     def response(value):

@@ -110,6 +110,7 @@ class InkyConfigTests(unittest.TestCase):
             state=SimpleNamespace(
                 settings=SimpleNamespace(inky_config_file="/run/secrets/inky"),
                 inky_store=SimpleNamespace(repo=object()),
+                assets=object(),
             )
         )
         with (
