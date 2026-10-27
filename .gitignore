@@ -875,3 +875,5 @@ inventory.json
 !studio_platform/workflow_backup_stream.py
 !tests/test_workflow_backup_stream.py
 !docs/PRODUCTION-OPERATION-GUARDS.md
+!studio_platform/inky_models.py
+!tests/test_inky_models.py
