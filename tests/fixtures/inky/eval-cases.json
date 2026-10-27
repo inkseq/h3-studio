@@ -1,0 +1,525 @@
+{
+ "source": "Claude eval 2026-10-27, h3-studio#684 comments 6435133525 and 6435441076. Labels are human; jev-1.14.0 scored 40/40 (v1) and 26/26 (v1.1) on full-size images; images here are downscaled to 640 px.",
+ "story": {
+  "title": "雨夜车站",
+  "cards": [
+   {
+    "id": "lin",
+    "kind": "character",
+    "name": "林夏",
+    "desc": "25 岁女乘务员，短发，灰色制服外套，红格领结"
+   },
+   {
+    "id": "chen",
+    "kind": "character",
+    "name": "老陈",
+    "desc": "60 岁列车员，白胡子，深蓝制服，戴旧怀表"
+   },
+   {
+    "id": "boy",
+    "kind": "character",
+    "name": "小宇",
+    "desc": "8 岁男孩，黄雨衣，抱着一只橘猫"
+   },
+   {
+    "id": "platform",
+    "kind": "location",
+    "name": "雨夜站台",
+    "desc": "老式铁路站台，铁棚顶，昏黄路灯，雨水积在轨道边"
+   },
+   {
+    "id": "office",
+    "kind": "location",
+    "name": "站长室",
+    "desc": "狭小木质办公室，绿色台灯，墙上挂老时刻表"
+   },
+   {
+    "id": "ticket",
+    "kind": "prop",
+    "name": "旧车票",
+    "desc": "泛黄的硬纸车票，印着 1998"
+   },
+   {
+    "id": "watch",
+    "kind": "prop",
+    "name": "怀表",
+    "desc": "铜色怀表，表盖有划痕"
+   }
+  ],
+  "script": {
+   "s1": "深夜，大雨。林夏独自在站台巡查，远处传来最后一班车的汽笛声。",
+   "s2": "小宇抱着猫躲在长椅下。林夏发现了他，蹲下来把自己的伞撑在他头上。",
+   "s3": "老陈从站长室出来，掏出怀表看时间，把一张旧车票交给林夏：'这是他爸爸当年的票。'",
+   "s4": "火车进站。林夏牵着小宇上车，回头朝老陈挥手，车门关上。"
+  }
+ },
+ "thresholds": {
+  "vague_action": "E<1.5",
+  "emotion_not_shown": "E<1.5",
+  "multiple_camera_moves": "E>=1.5",
+  "action_too_long": "E>=1.5",
+  "needs_keyframe": "E>=1.5",
+  "upload_card": "argmax E over cards; right card ~2.9, closest decoy <=1.12"
+ },
+ "criteria": {
+  "vague_action": [
+   "too vague to draw: a painter would have to invent the action",
+   "somewhat vague",
+   "mostly specific",
+   "specific: who does what, where, is clear"
+  ],
+  "needs_keyframe": [
+   "simple: one subject or an empty scene, easy to frame",
+   "moderate",
+   "complex",
+   "very complex: several characters interacting or props placed in a specific arrangement"
+  ],
+  "emotion_not_shown": [
+   "states feelings only: no visible body behaviour shows them",
+   "mostly stated feelings",
+   "mostly shown through visible behaviour",
+   "fully shown through visible body behaviour"
+  ],
+  "multiple_camera_moves": [
+   "no camera move or exactly one main camera move",
+   "one move with a slight extra",
+   "two distinct camera moves",
+   "three or more distinct camera moves"
+  ],
+  "action_too_long": [
+   "easily completed within the shot length",
+   "probably fits",
+   "probably too much to fit",
+   "clearly impossible within the shot length"
+  ],
+  "upload_card": [
+   "not this card",
+   "loosely related",
+   "probably this card",
+   "certainly this card"
+  ]
+ },
+ "vague_action": [
+  {
+   "id": "a1",
+   "scene": "s1",
+   "cast": [
+    "lin"
+   ],
+   "place": "platform",
+   "text": "她在雨里。",
+   "flag": true
+  },
+  {
+   "id": "a2",
+   "scene": "s1",
+   "cast": [
+    "lin"
+   ],
+   "place": "platform",
+   "text": "林夏打着手电沿站台慢慢走，雨水顺着帽檐滴下，她停下来望向远处的汽笛声。",
+   "flag": false
+  },
+  {
+   "id": "a3",
+   "scene": "s2",
+   "cast": [
+    "boy"
+   ],
+   "place": "platform",
+   "text": "小孩。",
+   "flag": true
+  },
+  {
+   "id": "a4",
+   "scene": "s2",
+   "cast": [
+    "lin",
+    "boy"
+   ],
+   "place": "platform",
+   "text": "林夏蹲下，把伞举到长椅下的小宇头顶，小宇抱紧怀里的橘猫抬头看她。",
+   "flag": false
+  },
+  {
+   "id": "a5",
+   "scene": "s3",
+   "cast": [
+    "chen"
+   ],
+   "place": "office",
+   "text": "老陈出场。",
+   "flag": true
+  },
+  {
+   "id": "a6",
+   "scene": "s3",
+   "cast": [
+    "chen",
+    "lin"
+   ],
+   "place": "office",
+   "text": "老陈把旧车票递给林夏，两人对视。",
+   "flag": false
+  },
+  {
+   "id": "a7",
+   "scene": "s4",
+   "cast": [
+    "lin",
+    "boy"
+   ],
+   "place": "platform",
+   "text": "上车。",
+   "flag": true
+  },
+  {
+   "id": "a8",
+   "scene": "s4",
+   "cast": [
+    "lin",
+    "boy",
+    "chen"
+   ],
+   "place": "platform",
+   "text": "火车进站，林夏牵着小宇踏上车门台阶，回头朝站台上的老陈挥手，车门缓缓关上。",
+   "flag": false
+  },
+  {
+   "id": "a9",
+   "scene": "s1",
+   "cast": [],
+   "place": "platform",
+   "text": "气氛很好的画面。",
+   "flag": true
+  },
+  {
+   "id": "a10",
+   "scene": "s1",
+   "cast": [],
+   "place": "platform",
+   "text": "空荡的站台，昏黄路灯下雨丝斜落，一列火车的车灯从远处隧道口亮起。",
+   "flag": false
+  },
+  {
+   "id": "a11",
+   "scene": "s3",
+   "cast": [
+    "chen"
+   ],
+   "place": "office",
+   "text": "老陈很难过。",
+   "flag": true
+  },
+  {
+   "id": "a12",
+   "scene": "s3",
+   "cast": [
+    "chen"
+   ],
+   "place": "office",
+   "text": "老陈坐在绿色台灯下，用拇指摩挲怀表上的划痕，眼眶发红。",
+   "flag": false
+  },
+  {
+   "id": "a13",
+   "scene": "s2",
+   "cast": [
+    "boy"
+   ],
+   "place": "platform",
+   "text": "A kid hides.",
+   "flag": true
+  },
+  {
+   "id": "a14",
+   "scene": "s2",
+   "cast": [
+    "boy"
+   ],
+   "place": "platform",
+   "text": "Xiaoyu curls up under the wooden bench, hugging the orange cat inside his yellow raincoat as rain splashes nearby.",
+   "flag": false
+  }
+ ],
+ "needs_keyframe": [
+  {
+   "id": "b1",
+   "text": "林夏独自沿站台走。",
+   "cast": [
+    "lin"
+   ],
+   "props": [],
+   "flag": false
+  },
+  {
+   "id": "b2",
+   "text": "林夏蹲下给长椅下的小宇撑伞，小宇抱着猫。",
+   "cast": [
+    "lin",
+    "boy"
+   ],
+   "props": [],
+   "flag": true
+  },
+  {
+   "id": "b3",
+   "text": "老陈把旧车票递给林夏，背景是墙上的老时刻表。",
+   "cast": [
+    "chen",
+    "lin"
+   ],
+   "props": [
+    "ticket"
+   ],
+   "flag": true
+  },
+  {
+   "id": "b4",
+   "text": "空站台，雨丝落下。",
+   "cast": [],
+   "props": [],
+   "flag": false
+  },
+  {
+   "id": "b5",
+   "text": "林夏牵着小宇上车，回头朝老陈挥手。",
+   "cast": [
+    "lin",
+    "boy",
+    "chen"
+   ],
+   "props": [],
+   "flag": true
+  },
+  {
+   "id": "b6",
+   "text": "老陈看怀表的特写。",
+   "cast": [
+    "chen"
+   ],
+   "props": [
+    "watch"
+   ],
+   "flag": false
+  },
+  {
+   "id": "b7",
+   "text": "火车车灯从隧道口亮起。",
+   "cast": [],
+   "props": [],
+   "flag": false
+  },
+  {
+   "id": "b8",
+   "text": "小宇把橘猫举到林夏面前，林夏笑着摸猫头，老陈在旁边撑伞。",
+   "cast": [
+    "boy",
+    "lin",
+    "chen"
+   ],
+   "props": [],
+   "flag": true
+  },
+  {
+   "id": "b9",
+   "text": "林夏接过车票低头看，特写她的手和车票上的 1998。",
+   "cast": [
+    "lin"
+   ],
+   "props": [
+    "ticket"
+   ],
+   "flag": false
+  },
+  {
+   "id": "b10",
+   "text": "老陈和林夏在站长室隔着桌子对坐，桌上放着怀表和车票。",
+   "cast": [
+    "chen",
+    "lin"
+   ],
+   "props": [
+    "watch",
+    "ticket"
+   ],
+   "flag": true
+  }
+ ],
+ "emotion_not_shown": [
+  {
+   "id": "c1",
+   "text": "老陈很难过。",
+   "flag": true
+  },
+  {
+   "id": "c2",
+   "text": "老陈低头摩挲怀表，肩膀微微发抖。",
+   "flag": false
+  },
+  {
+   "id": "c3",
+   "text": "林夏非常紧张，心里很害怕。",
+   "flag": true
+  },
+  {
+   "id": "c4",
+   "text": "林夏攥紧手电，频繁回头看向黑暗的轨道。",
+   "flag": false
+  },
+  {
+   "id": "c5",
+   "text": "小宇开心极了。",
+   "flag": true
+  },
+  {
+   "id": "c6",
+   "text": "小宇举起橘猫咯咯笑，雨靴在水洼里踩出水花。",
+   "flag": false
+  },
+  {
+   "id": "c7",
+   "text": "She feels lonely and lost.",
+   "flag": true
+  },
+  {
+   "id": "c8",
+   "text": "She hugs her knees on the bench, staring at the empty tracks.",
+   "flag": false
+  },
+  {
+   "id": "c9",
+   "text": "老陈愤怒地看着林夏，心中充满失望。",
+   "flag": true
+  },
+  {
+   "id": "c10",
+   "text": "老陈下颌绷紧，把车票重重拍在桌上。",
+   "flag": false
+  }
+ ],
+ "multiple_camera_moves": [
+  {
+   "id": "d1",
+   "text": "镜头先推近林夏的脸，再摇到远处的火车，最后拉远成全景。",
+   "flag": true
+  },
+  {
+   "id": "d2",
+   "text": "镜头缓缓推近林夏的脸。",
+   "flag": false
+  },
+  {
+   "id": "d3",
+   "text": "跟拍小宇跑过站台，同时环绕一圈后升高俯拍。",
+   "flag": true
+  },
+  {
+   "id": "d4",
+   "text": "固定机位，小宇抱着猫坐在长椅下。",
+   "flag": false
+  },
+  {
+   "id": "d5",
+   "text": "Slow push in on the pocket watch.",
+   "flag": false
+  },
+  {
+   "id": "d6",
+   "text": "The camera tracks her, then whip pans to the train and cranes up over the station.",
+   "flag": true
+  },
+  {
+   "id": "d7",
+   "text": "镜头从左往右平移扫过空站台。",
+   "flag": false
+  },
+  {
+   "id": "d8",
+   "text": "镜头推进后急速拉远，再切到俯视并旋转。",
+   "flag": true
+  }
+ ],
+ "action_too_long": [
+  {
+   "id": "e1",
+   "seconds": 5,
+   "text": "林夏打着手电沿站台走了几步，停下。",
+   "flag": false
+  },
+  {
+   "id": "e2",
+   "seconds": 5,
+   "text": "林夏巡查完整个车站，回到站长室换衣服，再去售票处买票，最后上车。",
+   "flag": true
+  },
+  {
+   "id": "e3",
+   "seconds": 3,
+   "text": "老陈抬头看了一眼时钟。",
+   "flag": false
+  },
+  {
+   "id": "e4",
+   "seconds": 3,
+   "text": "老陈泡好一壶茶，写完一封长信并装进信封寄出。",
+   "flag": true
+  },
+  {
+   "id": "e5",
+   "seconds": 5,
+   "text": "小宇从长椅下爬出来，抱起猫站好。",
+   "flag": false
+  },
+  {
+   "id": "e6",
+   "seconds": 5,
+   "text": "火车从远处驶来、停站、乘客全部上下车后再开走消失在隧道里。",
+   "flag": true
+  },
+  {
+   "id": "e7",
+   "seconds": 4,
+   "text": "Xiaoyu wipes the rain off the cat's head.",
+   "flag": false
+  },
+  {
+   "id": "e8",
+   "seconds": 4,
+   "text": "They board the train, travel through the night and arrive in a new city at dawn.",
+   "flag": true
+  }
+ ],
+ "upload_card": {
+  "cards": {
+   "alien": "一个矮小的外星生物，半透明的淡蓝色发光皮肤，紫色大眼睛，头上两根顶端发橙光的短触角，浅灰色背景",
+   "a": "一个复古圆润造型的米白色机器人厨师，戴着小厨师帽，浅色背景",
+   "b": "夜晚一家狭小的日式木质面馆，门口挂着暖黄色的纸灯笼",
+   "cat": "一只橘色虎斑猫坐在洒满阳光的木窗台上，背景有绿植",
+   "girl": "夜晚的玉米地里，一个穿红色雨衣和黄色雨靴的小女孩拿着手电筒",
+   "barista": "一个戴黑框眼镜、系棕色围裙的年轻男咖啡师在拉花，温馨的咖啡馆",
+   "fox": "一只红狐狸站在松树林的深雪里，清晨柔和的光线",
+   "alley": "夜晚下雨的赛博朋克小巷，粉色和青色霓虹灯，地上有水洼，没有人"
+  },
+  "decoys": {
+   "alien": "一个矮小的外星生物，半透明的绿色皮肤，红色大眼睛，头上没有触角，浅灰色背景",
+   "a": "一个复古圆润造型的黑色机器人厨师，戴着红色棒球帽，浅色背景",
+   "b": "白天一家宽敞的现代玻璃咖啡馆，门口挂着霓虹灯招牌",
+   "cat": "一只黑白奶牛猫坐在洒满阳光的木窗台上，背景有绿植",
+   "girl": "夜晚的玉米地里，一个穿蓝色羽绒服的小男孩空着手站着",
+   "barista": "一个戴黑框眼镜、系棕色围裙的年长女咖啡师在擦杯子，温馨的咖啡馆",
+   "fox": "一只灰狼站在松树林的深雪里，夜晚的月光下",
+   "alley": "夜晚下雨的赛博朋克小巷，霓虹灯下站着一大群人撑着伞"
+  },
+  "images": {
+   "alien": "images/alien.jpg",
+   "a": "images/a.jpg",
+   "b": "images/b.jpg",
+   "cat": "images/cat.jpg",
+   "girl": "images/girl.jpg",
+   "barista": "images/barista.jpg",
+   "fox": "images/fox.jpg",
+   "alley": "images/alley.jpg"
+  }
+ }
+}
