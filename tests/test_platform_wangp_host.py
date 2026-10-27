@@ -104,6 +104,65 @@ class HostFixture:
 
 
 class HostTests(HostFixture, unittest.TestCase):
+    def test_silent_take_seals_native_joint_result_without_resubmission(self):
+        from types import SimpleNamespace
+
+        from studio_platform.runtime_hosts.wangp_session import PinnedWanGPSession
+        from test_platform_wangp_session import FakeJob, FakeSession as NativeSession
+
+        video = self.output / "native.mp4"
+        video.write_bytes(b"synthetic-native-mux")
+        job = FakeJob(
+            SimpleNamespace(
+                success=True,
+                cancelled=False,
+                total_tasks=1,
+                successful_tasks=1,
+                failed_tasks=0,
+                errors=[],
+                generated_files=[str(video)],
+                artifacts=[
+                    SimpleNamespace(
+                        path=str(video),
+                        media_type="video",
+                        audio_tensor=[[0.1]],
+                        audio_sampling_rate=32000,
+                    )
+                ],
+            )
+        )
+        native = NativeSession(job)
+        self.host.session = PinnedWanGPSession(
+            native,
+            self.output,
+            audio_writer=lambda path, samples, rate: path.write_bytes(b"raw-audio"),
+            worker_alive=lambda: False,
+            quiesce=lambda: None,
+        )
+        request = replace(prepared(), generate_audio=False)
+        op = self.host.submit(request).operation_id
+        job.done = True
+        native.active_job = None
+        receipt = self.host.inspect(op)
+        self.assertEqual(receipt.state, "succeeded")
+        self.assertTrue(receipt.stop_proven)
+        self.assertEqual({v.kind for v in receipt.artifacts}, {"video"})
+        self.assertEqual(
+            (self.output / "native-generated.wav").read_bytes(), b"raw-audio"
+        )
+        self.assertEqual(video.read_bytes(), b"synthetic-native-mux")
+        self.assertEqual(self.host.submit(request), receipt)
+        self.assertEqual(len(native.calls), 1)
+
+    def test_silent_take_still_rejects_unexpected_output_kinds(self):
+        op = self.host.submit(replace(prepared(), generate_audio=False)).operation_id
+        self.complete()
+        outputs = dict(self.session.handle.observation.outputs)
+        outputs["thumbnail"] = outputs["video"]
+        self.session.handle.observation = RuntimeObservation("succeeded", True, outputs)
+        self.assertEqual(self.host.inspect(op).state, "unknown")
+        self.assertEqual(self.session.calls, 1)
+
     def test_concurrent_duplicate_starts_once_with_intent_visible_to_session(self):
         with ThreadPoolExecutor(4) as pool:
             receipts = list(pool.map(lambda _: self.host.submit(prepared()), range(4)))
