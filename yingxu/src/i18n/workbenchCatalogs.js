@@ -68,6 +68,8 @@ export const workbenchCatalogs = {
       'A 5-second shot usually takes a few minutes. The first one can take up to 15 minutes while a machine starts.',
     'workbench.shotN': 'Shot {number}',
     'workbench.shotInvalid': '{shot}: {why}',
+    'workbench.notReady':
+      "No machine can take these shots right now, so they can't start yet. Nothing has been charged. Please try again in a few minutes.",
     'workbench.seconds': '{seconds} s',
     'workbench.empty': 'No takes yet',
     'workbench.shotUnavailable': "This shot isn't in the saved version. Save or refresh the story.",
@@ -158,6 +160,7 @@ export const workbenchCatalogs = {
     'workbench.timing': '一个 5 秒镜头通常几分钟做好。第一个镜头要等机器启动，最长约 15 分钟。',
     'workbench.shotN': '镜头 {number}',
     'workbench.shotInvalid': '{shot}：{why}',
+    'workbench.notReady': '现在没有机器能接这些镜头，所以还不能开始。没有扣费，请过几分钟再试。',
     'workbench.seconds': '{seconds} 秒',
     'workbench.empty': '还没生成',
     'workbench.shotUnavailable': '云端版本里没有这个镜头。请先保存或刷新故事。',
