@@ -5,8 +5,9 @@ def install(app):
     from .inky_routes import register_routes
     from .quality_http import install as quality
     from .inky_hooks import install as inky
+    from .inky_runtime import configure
 
     register_routes(app)
-    # No provider worker/configuration is created merely by mounting readers.
+    configure(app)
     quality(app)
     inky(app)

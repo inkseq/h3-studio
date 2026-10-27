@@ -1,8 +1,9 @@
 # Inky backend — implementation draft (#684)
 
 This branch mounts scoped readers and explicit preference writes in `create_app`.
-The evaluator remains disabled: no worker or provider credentials are created
-by app startup. No rollout or model-quality acceptance is claimed.
+The evaluator is off by default. An explicit protected `INKSEQ_INKY_CONFIG_FILE`
+can construct it without a network call; no deployment configuration supplies
+that file yet. No rollout or model-quality acceptance is claimed.
 
 ## Contract
 
@@ -56,6 +57,11 @@ dead rig-root profile or an automatic profile fallback. Central credentials
 are loaded lazily through the existing loader. No loader/import network calls.
 AWS provisioning is not implemented; a local registry loader is not an AWS
 credential transport. Do not copy its vault or put secrets in the repository.
+The runtime file contract validates the exact profiles/origins, refuses duplicate
+JSON keys, symlinks, multiple hardlinks and unprotected Linux ownership/modes.
+Invalid/missing configuration disables the evaluator with a static diagnostic;
+it never falls back to the local registry. Budget ceilings are not configurable
+through this file. Source construction tests use fake credentials only.
 
 ## Budget and recovery
 
@@ -88,7 +94,7 @@ request limits. On response errors/timeouts, retain the original reservation.
    request-cost envelope; no new key or credential-file import.
 2. Qualify the post-response hooks under the actual server lifecycle and publish
    the final Agent skill contract. Existing accepted job inputs stay unchanged.
-3. Finish account/project erasure and discovery integration regressions.
+3. Preserve account/project erasure and discovery integration regressions.
 4. Upload/card candidate provenance, bounded assets, evaluated decoy fixtures.
 5. One Claude Tier2 review of the final PR, exact-head CI, then staging
    qualification. No review request or activation for this draft milestone.

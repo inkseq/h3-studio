@@ -128,6 +128,7 @@ class Settings:
     capacity_runtime_floor_seconds: int = 1800
     capacity_startup_timeout_seconds: int = 1200
     title_config_file: Path | None = None
+    inky_config_file: Path | None = None
     workos_config_file: Path | None = None
     stripe_config_file: Path | None = None
     stripe_mode: str = "off"
@@ -235,6 +236,11 @@ class Settings:
             if not path.is_absolute() or ".." in path.parts:
                 raise ValueError("WorkOS credential path must be absolute")
             object.__setattr__(self, "workos_config_file", path)
+        if self.inky_config_file is not None:
+            path = Path(self.inky_config_file)
+            if not path.is_absolute() or ".." in path.parts:
+                raise ValueError("Inky credential path must be absolute")
+            object.__setattr__(self, "inky_config_file", path)
         if type(self.title_use_central) is not bool or (
             self.title_config_file is not None and self.title_use_central
         ):
@@ -492,6 +498,9 @@ class Settings:
             ),
             title_config_file=Path(os.environ["SIXNINE_TITLE_CONFIG_FILE"])
             if os.environ.get("SIXNINE_TITLE_CONFIG_FILE")
+            else None,
+            inky_config_file=Path(os.environ["INKSEQ_INKY_CONFIG_FILE"])
+            if os.environ.get("INKSEQ_INKY_CONFIG_FILE")
             else None,
             workos_config_file=Path(os.environ["INKSEQ_WORKOS_CONFIG_FILE"])
             if os.environ.get("INKSEQ_WORKOS_CONFIG_FILE")
