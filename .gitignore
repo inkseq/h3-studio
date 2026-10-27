@@ -863,6 +863,7 @@ inventory.json
 !studio_platform/creator_controls.py
 !tests/test_creator_controls.py
 !tests/test_creator_controls_v6.py
+!tests/test_quick_chat_default_profile.py
 !tools/audit_creator_controls.py
 !docs/CREATOR-CONTROLS.md
 !studio_platform/review_routes.py

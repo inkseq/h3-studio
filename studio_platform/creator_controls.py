@@ -31,6 +31,29 @@ def controls(profile_id, value):
     }
 
 
+def default_chat_profile(settings, body):
+    """Pin an omitted selector on new authoring, never on receipt/replay reads."""
+    if "deployment_profile_id" in body:
+        return body
+    from .execution_profiles import default_profile_id
+    from .quality_tiers import QualitySelectionError
+
+    profile = default_profile_id(settings)
+    if profile is None:
+        if settings.default_deployment_profile_id is not None:
+            raise QualitySelectionError(
+                "quality_tier_unavailable",
+                "Configured default profile is unavailable.",
+                409,
+            )
+        return body
+    return {
+        **body,
+        "deployment_profile_id": profile,
+        "controls": controls(profile, body["controls"]),
+    }
+
+
 def effective_creator_project(project, shot_id, defaults, original):
     """Read-only recipe freshness comparison uses the same creator policy."""
     from .storyboard_versions import effective_project
