@@ -885,3 +885,6 @@ inventory.json
 !studio_platform/capacity_lookahead.py
 !tests/test_capacity_lookahead.py
 !docs/CAPACITY-LOOKAHEAD.md
+!deploy/modal/
+!deploy/modal/README.md
+!deploy/modal/h3_reference.py
