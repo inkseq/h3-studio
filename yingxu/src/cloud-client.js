@@ -146,6 +146,86 @@ function retryDelay(response) {
   return Number.isFinite(delay) && delay >= 0 && delay <= 30000 ? delay : null;
 }
 
+// The words for a refused request: maintenance, budget limits, server detail or status.
+function refusalMessage(status, detail, expectedAccount, maintenance) {
+  const reason =
+    status === 409 && detail?.detail === 'capacity_drain_repreflight'
+      ? ui('client.capacityDrain', expectedAccount)
+      : String(detail?.code || '').startsWith('support_view_')
+        ? ui('client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()), expectedAccount)
+        : typeof detail?.detail === 'string'
+          ? detail.detail
+          : typeof detail?.message === 'string'
+            ? detail.message
+            : status === 409
+              ? ui('client.versionChanged', expectedAccount)
+              : status === 404
+                ? ui('client.notFound', expectedAccount)
+                : status === 401
+                  ? ui('client.login', expectedAccount)
+                  : status >= 500
+                    ? ui('client.unavailable', expectedAccount)
+                    : ui('client.status', expectedAccount, { status });
+  const budgetKey = [
+    'user_daily_limit_reached',
+    'connection_daily_limit_reached',
+    'spending_usage_unconfirmed',
+    'spending_settings_changed',
+    'spending_settings_invalid',
+    'admin_hourly_price_limit_reached',
+    'dstack_test_runtime_limit_reached',
+    'dstack_test_daily_limit_reached',
+    'assistant_quote_unavailable',
+    'spending_confirmation_consumed',
+  ].includes(detail?.code)
+    ? 'errors.' + detail.code
+    : null;
+  const until = maintenance && formatEnd(maintenance.endsAt, uiLocale(expectedAccount));
+  return maintenance
+    ? until
+      ? ui('errors.maintenance_in_progress', expectedAccount, { time: until })
+      : ui('errors.maintenance_in_progress_soon', expectedAccount)
+    : budgetKey
+      ? translate(uiLocale(expectedAccount), budgetKey)
+      : detail?.messages?.[uiLocale(expectedAccount)] || reason;
+}
+
+// A request that never got a response: timed out, aborted or offline.
+function transportError(error, { timedOut, multipart, method, blob, expectedAccount }) {
+  if (timedOut)
+    return new CloudError(
+      ui(
+        multipart
+          ? 'client.uploadTimeout'
+          : method === 'GET'
+            ? blob
+              ? 'client.mediaTimeout'
+              : 'client.readTimeout'
+            : 'client.writeTimeout',
+        expectedAccount,
+      ),
+    );
+  if (error.name === 'AbortError')
+    return new CloudError(ui('client.aborted', expectedAccount), { quiet: method === 'GET' });
+  return new CloudError(ui('client.offline', expectedAccount));
+}
+
+// An explicit per-call deadline, else the media download, upload or ordinary default.
+function requestDuration(
+  requested,
+  blob,
+  multipart,
+  { timeoutMs, uploadTimeoutMs, downloadTimeoutMs },
+) {
+  return Number.isFinite(requested) && requested > 0
+    ? requested
+    : blob
+      ? downloadTimeoutMs
+      : multipart
+        ? uploadTimeoutMs
+        : timeoutMs;
+}
+
 export function createCloudClient({
   fetcher = (...args) => fetch(...args),
   onUnauthorized = () => {},
@@ -194,14 +274,11 @@ export function createCloudClient({
     };
     let timedOut = false,
       releaseRead = null;
-    const duration =
-        Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0
-          ? requestTimeoutMs
-          : blob
-            ? downloadTimeoutMs
-            : multipart
-              ? uploadTimeoutMs
-              : timeoutMs,
+    const duration = requestDuration(requestTimeoutMs, blob, multipart, {
+        timeoutMs,
+        uploadTimeoutMs,
+        downloadTimeoutMs,
+      }),
       deadline = Date.now() + duration;
     const timer = setTimeout(() => {
       timedOut = true;
@@ -286,53 +363,11 @@ export function createCloudClient({
               continue;
             }
           }
-          const reason =
-            response.status === 409 && detail?.detail === 'capacity_drain_repreflight'
-              ? ui('client.capacityDrain', expectedAccount)
-              : String(detail?.code || '').startsWith('support_view_')
-                ? ui(
-                    'client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()),
-                    expectedAccount,
-                  )
-                : typeof detail?.detail === 'string'
-                  ? detail.detail
-                  : typeof detail?.message === 'string'
-                    ? detail.message
-                    : response.status === 409
-                      ? ui('client.versionChanged', expectedAccount)
-                      : response.status === 404
-                        ? ui('client.notFound', expectedAccount)
-                        : response.status === 401
-                          ? ui('client.login', expectedAccount)
-                          : response.status >= 500
-                            ? ui('client.unavailable', expectedAccount)
-                            : ui('client.status', expectedAccount, { status: response.status });
-          const budgetKey = [
-            'user_daily_limit_reached',
-            'connection_daily_limit_reached',
-            'spending_usage_unconfirmed',
-            'spending_settings_changed',
-            'spending_settings_invalid',
-            'admin_hourly_price_limit_reached',
-            'dstack_test_runtime_limit_reached',
-            'dstack_test_daily_limit_reached',
-            'assistant_quote_unavailable',
-            'spending_confirmation_consumed',
-          ].includes(detail?.code)
-            ? 'errors.' + detail.code
-            : null;
           // A release window refuses new work with its end time (#453): say when, and let the
           // banner re-check now instead of at its next poll.
           const maintenance = maintenanceRefusal(detail);
           if (maintenance) announce(MAINTENANCE_CHANGED, maintenance);
-          const until = maintenance && formatEnd(maintenance.endsAt, uiLocale(expectedAccount));
-          const localized = maintenance
-            ? until
-              ? ui('errors.maintenance_in_progress', expectedAccount, { time: until })
-              : ui('errors.maintenance_in_progress_soon', expectedAccount)
-            : budgetKey
-              ? translate(uiLocale(expectedAccount), budgetKey)
-              : detail?.messages?.[uiLocale(expectedAccount)] || reason;
+          const localized = refusalMessage(response.status, detail, expectedAccount, maintenance);
           throw new CloudError(localized, { status: response.status, detail });
         }
         const result = blob
@@ -346,22 +381,7 @@ export function createCloudClient({
       }
     } catch (error) {
       if (error instanceof CloudError) throw error;
-      if (timedOut)
-        throw new CloudError(
-          ui(
-            multipart
-              ? 'client.uploadTimeout'
-              : method === 'GET'
-                ? blob
-                  ? 'client.mediaTimeout'
-                  : 'client.readTimeout'
-                : 'client.writeTimeout',
-            expectedAccount,
-          ),
-        );
-      if (error.name === 'AbortError')
-        throw new CloudError(ui('client.aborted', expectedAccount), { quiet: method === 'GET' });
-      throw new CloudError(ui('client.offline', expectedAccount));
+      throw transportError(error, { timedOut, multipart, method, blob, expectedAccount });
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', cancelRead);

@@ -267,20 +267,8 @@ export function roleSupported(recipe, slot, kind) {
 export function referenceActive(ref, recipe, kind) {
   return ref.enabled !== false && roleSupported(recipe, ref.role, kind);
 }
-export function inputProblems(
-  refs,
-  assets,
-  recipe,
-  { requireReference = false, controls = {} } = {},
-) {
-  if (!recipe) return ['尚未读取到模型能力，不能猜测支持的输入。'];
-  const limits = effectiveLimits(recipe),
-    errors = [],
-    byId = new Map(assets.map((asset) => [asset.id || asset.asset_id, asset])),
-    active = refs.filter((ref) => referenceActive(ref, recipe, byId.get(ref.asset_id)?.kind)),
-    nativeRoles = recipe?.limits?.input_count_semantics === 'native_roles_v2';
-  const normal = active.filter((ref) => ref.role === 'reference'),
-    guides = active.filter((ref) => ref.role === 'guide');
+// First/last frame and anchor counts, and whether this pool takes frames at all.
+function roleCountProblems(errors, active, normal, guides, limits, nativeRoles) {
   for (const role of ['first_frame', 'last_frame'])
     if (active.filter((ref) => ref.role === role).length > 1)
       errors.push(`${ROLE_LABELS[role]}最多一张。`);
@@ -297,122 +285,186 @@ export function inputProblems(
     errors.push(`普通参考合计最多 ${limits.max_total_files} 份。`);
   if (Number.isFinite(limits.max_guides) && guides.length > limits.max_guides)
     errors.push(`当前最多 ${limits.max_guides} 个时间锚点。`);
-  if (nativeRoles) {
-    const unique = (kind) =>
-      new Map(
-        active
-          .filter(
-            (ref) =>
-              ['reference', 'guide'].includes(ref.role) && byId.get(ref.asset_id)?.kind === kind,
-          )
-          .map((ref) => [ref.asset_id, ref]),
-      );
-    const videos = unique('video'),
-      audios = unique('audio'),
-      tracks = [...videos.values()].filter((ref) => ref.use_audio === true),
-      videoExcerpts = Array.isArray(controls.video_excerpts) ? controls.video_excerpts : [],
-      audioExcerpts = Array.isArray(controls.audio_excerpts) ? controls.audio_excerpts : [];
-    const images = new Set(
-        normal.filter((ref) => byId.get(ref.asset_id)?.kind === 'image').map((ref) => ref.asset_id),
-      ).size,
-      videoCount =
-        controls.video_conditioning === 'denoise' ? 0 : videoExcerpts.length || videos.size,
-      audioCount =
-        (controls.audio_conditioning || 'reference') === 'reference'
-          ? audioExcerpts.length || audios.size + tracks.length
-          : 0,
-      sharedTracks =
-        tracks.length > 0 && tracks.length === videos.size && !audios.size && !audioExcerpts.length;
-    const rows = images + videoCount + (sharedTracks ? 0 : audioCount);
-    if (Number.isFinite(limits.max_total_files) && rows > limits.max_total_files)
+}
+// Native roles: images, video and audio share one total; excerpts count as rows.
+function nativeTotalProblems(errors, active, normal, byId, limits, controls) {
+  const unique = (kind) =>
+    new Map(
+      active
+        .filter(
+          (ref) =>
+            ['reference', 'guide'].includes(ref.role) && byId.get(ref.asset_id)?.kind === kind,
+        )
+        .map((ref) => [ref.asset_id, ref]),
+    );
+  const videos = unique('video'),
+    audios = unique('audio'),
+    tracks = [...videos.values()].filter((ref) => ref.use_audio === true),
+    videoExcerpts = Array.isArray(controls.video_excerpts) ? controls.video_excerpts : [],
+    audioExcerpts = Array.isArray(controls.audio_excerpts) ? controls.audio_excerpts : [];
+  const images = new Set(
+      normal.filter((ref) => byId.get(ref.asset_id)?.kind === 'image').map((ref) => ref.asset_id),
+    ).size,
+    videoCount =
+      controls.video_conditioning === 'denoise' ? 0 : videoExcerpts.length || videos.size,
+    audioCount =
+      (controls.audio_conditioning || 'reference') === 'reference'
+        ? audioExcerpts.length || audios.size + tracks.length
+        : 0,
+    sharedTracks =
+      tracks.length > 0 && tracks.length === videos.size && !audios.size && !audioExcerpts.length;
+  const rows = images + videoCount + (sharedTracks ? 0 : audioCount);
+  if (Number.isFinite(limits.max_total_files) && rows > limits.max_total_files)
+    errors.push(
+      `原生参考合计最多 ${limits.max_total_files} 份（摘录按实际条数计，共用视频原声不重复计文件）。`,
+    );
+  if (Number.isFinite(limits.max_audios) && audioCount > limits.max_audios)
+    errors.push(`声音参考最多 ${limits.max_audios} 份（含选用的视频原声和声音摘录）。`);
+  if (Number.isFinite(limits.max_videos) && videoCount > limits.max_videos)
+    errors.push(`视频参考最多 ${limits.max_videos} 份（含视频摘录）。`);
+}
+// Per media kind: how many files, and how long each clip and all clips together are.
+function kindProblems(errors, kind, active, byId, limits, nativeRoles) {
+  const entries = active.filter(
+      (ref) =>
+        (nativeRoles && kind === 'image'
+          ? ref.role === 'reference'
+          : ['reference', 'guide'].includes(ref.role)) && byId.get(ref.asset_id)?.kind === kind,
+    ),
+    unique = new Map(entries.map((ref) => [ref.asset_id, ref]));
+  const max = limits[`max_${kind === 'image' ? 'images' : kind === 'video' ? 'videos' : 'audios'}`];
+  if (Number.isFinite(max) && unique.size > max)
+    errors.push(
+      `${{ image: '图片', video: '视频', audio: '音频' }[kind]}最多 ${max} 份${nativeRoles && kind === 'image' ? '普通参考' : '（参考和锚点共用）'}。`,
+    );
+  if (kind !== 'image') {
+    const clip = clipLimits(limits, kind);
+    let total = 0;
+    for (const ref of unique.values()) {
+      const asset = byId.get(ref.asset_id),
+        duration = referenceDuration(ref, asset),
+        source = mediaDuration(asset);
+      if (
+        !Number.isFinite(duration) ||
+        duration < (clip.minimum ?? 2) ||
+        duration > (clip.maximum ?? 15) ||
+        (ref.start !== undefined &&
+          (!Number.isFinite(ref.start) ||
+            !Number.isFinite(ref.end) ||
+            ref.start < 0 ||
+            (Number.isFinite(source) && ref.end > source)))
+      )
+        errors.push(
+          `「${asset.file_name || '素材'}」需选择 ${displaySeconds(clip.minimum)}–${displaySeconds(clip.maximum)} 秒的有效片段。`,
+        );
+      else total += duration;
+    }
+    const maximum = limits[`max_total_${kind}_duration`];
+    if (Number.isFinite(maximum) && total > maximum + 1e-6)
       errors.push(
-        `原生参考合计最多 ${limits.max_total_files} 份（摘录按实际条数计，共用视频原声不重复计文件）。`,
+        `${kind === 'video' ? '视频' : '音频'}累计片段最多 ${displaySeconds(maximum)} 秒。`,
       );
-    if (Number.isFinite(limits.max_audios) && audioCount > limits.max_audios)
-      errors.push(`声音参考最多 ${limits.max_audios} 份（含选用的视频原声和声音摘录）。`);
-    if (Number.isFinite(limits.max_videos) && videoCount > limits.max_videos)
-      errors.push(`视频参考最多 ${limits.max_videos} 份（含视频摘录）。`);
   }
+}
+// One reference: its file is ready, fits its role, and an anchor falls inside the take.
+// A time anchor: allowed kind for this recipe, and it starts (and ends) inside the take.
+function guideProblems(errors, ref, asset, limits, recipe, controls, nativeRoles) {
+  if (
+    !limits.guide_kinds.includes(asset.kind) ||
+    (limits.guide_recipe_ids && !limits.guide_recipe_ids.includes(recipe.id))
+  )
+    errors.push('当前方式尚未开放这种时间锚点。');
+  const raw = Math.max(5, Math.round((controls.duration || 0) * 24)),
+    outputSeconds = nativeRoles ? (raw + ((5 - (raw % 17) + 17) % 17)) / 24 : controls.duration,
+    end = ref.time_seconds + (asset.kind === 'image' ? 0 : referenceDuration(ref, asset));
+  if (
+    !Number.isFinite(ref.time_seconds) ||
+    ref.time_seconds < 0 ||
+    (Number.isFinite(outputSeconds) &&
+      (ref.time_seconds >= outputSeconds || (!nativeRoles && end > outputSeconds + 1e-6))) ||
+    (Number.isFinite(limits.max_guide_time_seconds) &&
+      ref.time_seconds > limits.max_guide_time_seconds)
+  )
+    errors.push('时间锚点及完整片段须落在生成时长内。');
+  if (nativeRoles && asset.kind !== 'image' && ref.time_seconds !== 0)
+    errors.push('当前原生视频或声音控制从第 0 秒开始；片段范围请用素材选段设置。');
+}
+function referenceProblems(errors, ref, byId, limits, recipe, controls, nativeRoles) {
+  const asset = byId.get(ref.asset_id);
+  if (!asset) {
+    errors.push('有引用尚未读取到素材，请刷新会话。');
+    return;
+  }
+  if (asset.status && asset.status !== 'ready')
+    errors.push(`「${asset.file_name || '素材'}」尚未完成上传校验。`);
+  if (['first_frame', 'last_frame'].includes(ref.role) && asset.kind !== 'image')
+    errors.push('首尾帧只接受图片。');
+  if (ref.role === 'guide')
+    guideProblems(errors, ref, asset, limits, recipe, controls, nativeRoles);
+  if (asset.kind === 'video' && !limits.allow_video_audio && ref.use_audio !== false)
+    errors.push('当前执行池未开放参考视频原声。');
+}
+export function inputProblems(
+  refs,
+  assets,
+  recipe,
+  { requireReference = false, controls = {} } = {},
+) {
+  if (!recipe) return ['尚未读取到模型能力，不能猜测支持的输入。'];
+  const limits = effectiveLimits(recipe),
+    errors = [],
+    byId = new Map(assets.map((asset) => [asset.id || asset.asset_id, asset])),
+    active = refs.filter((ref) => referenceActive(ref, recipe, byId.get(ref.asset_id)?.kind)),
+    nativeRoles = recipe?.limits?.input_count_semantics === 'native_roles_v2';
+  const normal = active.filter((ref) => ref.role === 'reference'),
+    guides = active.filter((ref) => ref.role === 'guide');
+  roleCountProblems(errors, active, normal, guides, limits, nativeRoles);
+  if (nativeRoles) nativeTotalProblems(errors, active, normal, byId, limits, controls);
   if (requireReference && recipe.mode === 'ref' && !(nativeRoles ? active.length : normal.length))
     errors.push('全能参考至少需要一份参考；纯文字可选文生 / 首尾帧。');
-  for (const kind of ['image', 'video', 'audio']) {
-    const entries = active.filter(
-        (ref) =>
-          (nativeRoles && kind === 'image'
-            ? ref.role === 'reference'
-            : ['reference', 'guide'].includes(ref.role)) && byId.get(ref.asset_id)?.kind === kind,
-      ),
-      unique = new Map(entries.map((ref) => [ref.asset_id, ref]));
-    const max =
-      limits[`max_${kind === 'image' ? 'images' : kind === 'video' ? 'videos' : 'audios'}`];
-    if (Number.isFinite(max) && unique.size > max)
-      errors.push(
-        `${{ image: '图片', video: '视频', audio: '音频' }[kind]}最多 ${max} 份${nativeRoles && kind === 'image' ? '普通参考' : '（参考和锚点共用）'}。`,
-      );
-    if (kind !== 'image') {
-      const clip = clipLimits(limits, kind);
-      let total = 0;
-      for (const ref of unique.values()) {
-        const asset = byId.get(ref.asset_id),
-          duration = referenceDuration(ref, asset),
-          source = mediaDuration(asset);
-        if (
-          !Number.isFinite(duration) ||
-          duration < (clip.minimum ?? 2) ||
-          duration > (clip.maximum ?? 15) ||
-          (ref.start !== undefined &&
-            (!Number.isFinite(ref.start) ||
-              !Number.isFinite(ref.end) ||
-              ref.start < 0 ||
-              (Number.isFinite(source) && ref.end > source)))
-        )
-          errors.push(
-            `「${asset.file_name || '素材'}」需选择 ${displaySeconds(clip.minimum)}–${displaySeconds(clip.maximum)} 秒的有效片段。`,
-          );
-        else total += duration;
-      }
-      const maximum = limits[`max_total_${kind}_duration`];
-      if (Number.isFinite(maximum) && total > maximum + 1e-6)
-        errors.push(
-          `${kind === 'video' ? '视频' : '音频'}累计片段最多 ${displaySeconds(maximum)} 秒。`,
-        );
-    }
-  }
-  for (const ref of active) {
-    const asset = byId.get(ref.asset_id);
-    if (!asset) {
-      errors.push('有引用尚未读取到素材，请刷新会话。');
-      continue;
-    }
-    if (asset.status && asset.status !== 'ready')
-      errors.push(`「${asset.file_name || '素材'}」尚未完成上传校验。`);
-    if (['first_frame', 'last_frame'].includes(ref.role) && asset.kind !== 'image')
-      errors.push('首尾帧只接受图片。');
-    if (ref.role === 'guide') {
-      if (
-        !limits.guide_kinds.includes(asset.kind) ||
-        (limits.guide_recipe_ids && !limits.guide_recipe_ids.includes(recipe.id))
-      )
-        errors.push('当前方式尚未开放这种时间锚点。');
-      const raw = Math.max(5, Math.round((controls.duration || 0) * 24)),
-        outputSeconds = nativeRoles ? (raw + ((5 - (raw % 17) + 17) % 17)) / 24 : controls.duration,
-        end = ref.time_seconds + (asset.kind === 'image' ? 0 : referenceDuration(ref, asset));
-      if (
-        !Number.isFinite(ref.time_seconds) ||
-        ref.time_seconds < 0 ||
-        (Number.isFinite(outputSeconds) &&
-          (ref.time_seconds >= outputSeconds || (!nativeRoles && end > outputSeconds + 1e-6))) ||
-        (Number.isFinite(limits.max_guide_time_seconds) &&
-          ref.time_seconds > limits.max_guide_time_seconds)
-      )
-        errors.push('时间锚点及完整片段须落在生成时长内。');
-      if (nativeRoles && asset.kind !== 'image' && ref.time_seconds !== 0)
-        errors.push('当前原生视频或声音控制从第 0 秒开始；片段范围请用素材选段设置。');
-    }
-    if (asset.kind === 'video' && !limits.allow_video_audio && ref.use_audio !== false)
-      errors.push('当前执行池未开放参考视频原声。');
-  }
+  for (const kind of ['image', 'video', 'audio'])
+    kindProblems(errors, kind, active, byId, limits, nativeRoles);
+  for (const ref of active)
+    referenceProblems(errors, ref, byId, limits, recipe, controls, nativeRoles);
   return [...new Set(errors)];
+}
+// One control value against the service's schema; null when it is fine.
+function controlProblem(field, value, item) {
+  if (!item) return `服务未声明控制：${field}`;
+  if (value === undefined) return null;
+  if (
+    value === null &&
+    ((Array.isArray(item.type) && item.type.includes('null')) || field === 'seed')
+  )
+    return null;
+  if (item.available === false)
+    return value !== item.default
+      ? item.reason || `${CONTROL_LABELS[field] || field}不可用。`
+      : null;
+  if (field === 'seed')
+    return typeof value !== 'string' ||
+      !/^\d{1,20}$/.test(value) ||
+      BigInt(value) > 18446744073709551615n
+      ? '随机种子须为完整 64 位十进制字符串。'
+      : null;
+  return validControlValue(value, item)
+    ? null
+    : `${CONTROL_LABELS[field] || field}超出服务声明的类型或范围。`;
+}
+// A custom canvas: multiples of 32, within the area and aspect-ratio limits.
+function customCanvasValid({ width, height }, recipe) {
+  const constraints = recipe?.custom_canvas_constraints || {},
+    envelope = recipe?.execution_support?.constraints || {},
+    max = minimum(constraints.maximum_pixel_area, envelope.max_pixels);
+  return !(
+    !Number.isFinite(width) ||
+    !Number.isFinite(height) ||
+    width % 32 ||
+    height % 32 ||
+    (max && width * height > max) ||
+    width / height < (constraints.minimum_aspect_ratio ?? 0.4) ||
+    width / height > (constraints.maximum_aspect_ratio ?? 2.5)
+  );
 }
 export function settingsProblems(settings, recipe, copiesMax = 4) {
   const errors = [],
@@ -421,50 +473,11 @@ export function settingsProblems(settings, recipe, copiesMax = 4) {
   if (!Number.isInteger(settings.copies) || settings.copies < 1 || settings.copies > copiesMax)
     errors.push('takes.invalidPreferences');
   for (const [field, value] of Object.entries(controls)) {
-    const item = schema[field];
-    if (!item) {
-      errors.push(`服务未声明控制：${field}`);
-      continue;
-    }
-    if (value === undefined) continue;
-    if (
-      value === null &&
-      ((Array.isArray(item.type) && item.type.includes('null')) || field === 'seed')
-    )
-      continue;
-    if (item.available === false) {
-      if (value !== item.default)
-        errors.push(item.reason || `${CONTROL_LABELS[field] || field}不可用。`);
-      continue;
-    }
-    if (field === 'seed') {
-      if (
-        typeof value !== 'string' ||
-        !/^\d{1,20}$/.test(value) ||
-        BigInt(value) > 18446744073709551615n
-      )
-        errors.push('随机种子须为完整 64 位十进制字符串。');
-      continue;
-    }
-    if (!validControlValue(value, item))
-      errors.push(`${CONTROL_LABELS[field] || field}超出服务声明的类型或范围。`);
+    const problem = controlProblem(field, value, schema[field]);
+    if (problem) errors.push(problem);
   }
-  if (controls.resolution === 'custom') {
-    const { width, height } = controls,
-      constraints = recipe?.custom_canvas_constraints || {},
-      envelope = recipe?.execution_support?.constraints || {},
-      max = minimum(constraints.maximum_pixel_area, envelope.max_pixels);
-    if (
-      !Number.isFinite(width) ||
-      !Number.isFinite(height) ||
-      width % 32 ||
-      height % 32 ||
-      (max && width * height > max) ||
-      width / height < (constraints.minimum_aspect_ratio ?? 0.4) ||
-      width / height > (constraints.maximum_aspect_ratio ?? 2.5)
-    )
-      errors.push('自定义宽高须为 32 的倍数，并满足面积、宽高比限制。');
-  }
+  if (controls.resolution === 'custom' && !customCanvasValid(controls, recipe))
+    errors.push('自定义宽高须为 32 的倍数，并满足面积、宽高比限制。');
   if (
     controls.video_decode === 'tiled' &&
     (controls.video_overlap >= controls.video_tile_size ||
@@ -477,36 +490,34 @@ export function validControlValue(value, schema) {
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
   if (value === null) return types.includes('null');
   if (schema.enum && !schema.enum.some((option) => Object.is(option, value))) return false;
-  if (types.includes('array'))
-    return (
-      Array.isArray(value) &&
-      (!Number.isInteger(schema.maxItems) || value.length <= schema.maxItems) &&
-      (!schema.items || value.every((item) => validControlValue(item, schema.items)))
-    );
-  if (types.includes('object'))
-    return (
-      value &&
-      typeof value === 'object' &&
-      !Array.isArray(value) &&
-      (schema.required || []).every((key) => Object.hasOwn(value, key)) &&
-      Object.entries(value).every(([key, item]) =>
-        schema.properties?.[key]
-          ? validControlValue(item, schema.properties[key])
-          : schema.additionalProperties !== false,
-      )
-    );
+  if (types.includes('array')) return validArray(value, schema);
+  if (types.includes('object')) return validObject(value, schema);
   if (types.includes('integer') || types.includes('number'))
-    return (
-      typeof value === 'number' &&
-      Number.isFinite(value) &&
-      (!types.includes('integer') || Number.isInteger(value)) &&
-      (schema.minimum === undefined || value >= schema.minimum) &&
-      (schema.maximum === undefined || value <= schema.maximum) &&
-      (!schema.multipleOf ||
-        Math.abs(value / schema.multipleOf - Math.round(value / schema.multipleOf)) <= 1e-7)
-    );
+    return validNumber(value, schema, types.includes('integer'));
   return types.includes(typeof value);
 }
+const validArray = (value, schema) =>
+  Array.isArray(value) &&
+  (!Number.isInteger(schema.maxItems) || value.length <= schema.maxItems) &&
+  (!schema.items || value.every((item) => validControlValue(item, schema.items)));
+const validObject = (value, schema) =>
+  !!value &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  (schema.required || []).every((key) => Object.hasOwn(value, key)) &&
+  Object.entries(value).every(([key, item]) =>
+    schema.properties?.[key]
+      ? validControlValue(item, schema.properties[key])
+      : schema.additionalProperties !== false,
+  );
+const validNumber = (value, schema, integer) =>
+  typeof value === 'number' &&
+  Number.isFinite(value) &&
+  (!integer || Number.isInteger(value)) &&
+  (schema.minimum === undefined || value >= schema.minimum) &&
+  (schema.maximum === undefined || value <= schema.maximum) &&
+  (!schema.multipleOf ||
+    Math.abs(value / schema.multipleOf - Math.round(value / schema.multipleOf)) <= 1e-7);
 export function newExcerptControl(field, schema) {
   const properties = schema.items?.properties || {},
     duration = properties.duration_seconds?.default ?? properties.duration_seconds?.minimum ?? null;

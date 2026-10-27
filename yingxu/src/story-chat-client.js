@@ -6,7 +6,7 @@ import { track } from './analytics.js';
 
 const KIND = { characters: 'character', places: 'place', props: 'prop' };
 
-export function fromServer(view, labels = {}) {
+function cardsFromServer(view) {
   const cards = [];
   for (const [group, kind] of Object.entries(KIND))
     for (const card of view.cards?.[group] || [])
@@ -36,6 +36,73 @@ export function fromServer(view, labels = {}) {
       status: shot.selected_artifact_id ? 'ready' : shot.takes > 0 ? 'pick' : 'draft',
       version: shot.version,
     });
+  return cards;
+}
+
+// One summary row per kind of created card, and one for edits.
+function changeRows(message, messages) {
+  const counts = {};
+  for (const change of message.changes || []) {
+    if (change.op !== 'create') continue;
+    const kind = change.kind === 'location' || change.kind === 'prop' ? 'place' : change.kind;
+    counts[kind] = (counts[kind] || 0) + 1;
+  }
+  const edits = (message.changes || []).filter(
+    (change) => change.op === 'update' && change.kind !== 'title',
+  ).length;
+  for (const [kind, count] of Object.entries(counts))
+    if (['character', 'place', 'shot'].includes(kind))
+      messages.push({ id: `${message.id}-${kind}`, role: 'change', summary: { kind, count } });
+  if (edits)
+    messages.push({
+      id: `${message.id}-edit`,
+      role: 'change',
+      summary: { kind: 'edit', count: edits },
+    });
+}
+
+// The newest reply's proposals become confirm cards: pictures, a new story, generation.
+function proposalQuotes(message, { cards, labels, messages, quotes }) {
+  // Suggested card pictures: a confirm card each; the id is stable, so a replay never
+  // draws or charges twice.
+  if (labels.picturesEnabled !== false)
+    for (const card of message.proposal?.picture_card_ids || []) {
+      const id = `pic-${message.id.slice(-14)}-${card.slice(-14)}`.replace(/[^A-Za-z0-9_-]/g, '');
+      const name = cards.find((item) => item.id === card)?.name || '';
+      quotes[id] = {
+        id,
+        status: 'open',
+        action: { kind: 'image', cards: [card] },
+        credits: labels.imageCredits ?? null,
+        label: labels.picture?.(name) || name,
+      };
+      messages.push({ id, role: 'quote', quoteId: id });
+    }
+  if (message.proposal?.new_story) {
+    const id = `new-${message.id.slice(-20)}`.replace(/[^A-Za-z0-9_-]/g, '');
+    quotes[id] = {
+      id,
+      status: 'open',
+      action: { kind: 'new_story', idea: message.proposal.new_story },
+      label: labels.newStory?.(message.proposal.new_story) || message.proposal.new_story,
+    };
+    messages.push({ id, role: 'quote', quoteId: id });
+  }
+  if (message.proposal?.shot_ids?.length) {
+    const id = `${message.id}-q`;
+    quotes[id] = {
+      id,
+      live: true,
+      status: 'open',
+      action: { kind: 'generate', cards: message.proposal.shot_ids },
+      label: labels.generate?.(message.proposal.shot_ids.length) || '',
+    };
+    messages.push({ id, role: 'quote', quoteId: id });
+  }
+}
+
+export function fromServer(view, labels = {}) {
+  const cards = cardsFromServer(view);
   const messages = [],
     quotes = {};
   // Only the newest reply's proposal is actionable; older ones are superseded by later edits.
@@ -51,24 +118,7 @@ export function fromServer(view, labels = {}) {
       });
       continue;
     }
-    const counts = {};
-    for (const change of message.changes || []) {
-      if (change.op !== 'create') continue;
-      const kind = change.kind === 'location' || change.kind === 'prop' ? 'place' : change.kind;
-      counts[kind] = (counts[kind] || 0) + 1;
-    }
-    const edits = (message.changes || []).filter(
-      (change) => change.op === 'update' && change.kind !== 'title',
-    ).length;
-    for (const [kind, count] of Object.entries(counts))
-      if (['character', 'place', 'shot'].includes(kind))
-        messages.push({ id: `${message.id}-${kind}`, role: 'change', summary: { kind, count } });
-    if (edits)
-      messages.push({
-        id: `${message.id}-edit`,
-        role: 'change',
-        summary: { kind: 'edit', count: edits },
-      });
+    changeRows(message, messages);
     messages.push({
       id: message.id,
       role: 'assistant',
@@ -77,42 +127,7 @@ export function fromServer(view, labels = {}) {
       chips: message.chips || [],
       turnId: message.turn_id || null,
     });
-    // Suggested card pictures: a confirm card each; the id is stable, so a replay never
-    // draws or charges twice.
-    if (message === latest && labels.picturesEnabled !== false)
-      for (const card of message.proposal?.picture_card_ids || []) {
-        const id = `pic-${message.id.slice(-14)}-${card.slice(-14)}`.replace(/[^A-Za-z0-9_-]/g, '');
-        const name = cards.find((item) => item.id === card)?.name || '';
-        quotes[id] = {
-          id,
-          status: 'open',
-          action: { kind: 'image', cards: [card] },
-          credits: labels.imageCredits ?? null,
-          label: labels.picture?.(name) || name,
-        };
-        messages.push({ id, role: 'quote', quoteId: id });
-      }
-    if (message === latest && message.proposal?.new_story) {
-      const id = `new-${message.id.slice(-20)}`.replace(/[^A-Za-z0-9_-]/g, '');
-      quotes[id] = {
-        id,
-        status: 'open',
-        action: { kind: 'new_story', idea: message.proposal.new_story },
-        label: labels.newStory?.(message.proposal.new_story) || message.proposal.new_story,
-      };
-      messages.push({ id, role: 'quote', quoteId: id });
-    }
-    if (message === latest && message.proposal?.shot_ids?.length) {
-      const id = `${message.id}-q`;
-      quotes[id] = {
-        id,
-        live: true,
-        status: 'open',
-        action: { kind: 'generate', cards: message.proposal.shot_ids },
-        label: labels.generate?.(message.proposal.shot_ids.length) || '',
-      };
-      messages.push({ id, role: 'quote', quoteId: id });
-    }
+    if (message === latest) proposalQuotes(message, { cards, labels, messages, quotes });
   }
   return {
     title: view.title || '',

@@ -1,7 +1,7 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Button } from './ui/Button.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import { usePageActive } from './AppRouteCache.jsx';
 import React, { useEffect, useRef, useState, useEffectEvent } from 'react';
 import {
   cancellationReasons,
@@ -72,45 +72,16 @@ export function OperatorJobsTable({
 }
 function CancelReview({ jobs, reason, busy, current, onClose, onConfirm }) {
   const { t, locale } = useI18n();
-  const active = usePageActive(),
-    ref = useRef(),
-    opener = useRef(globalThis.document?.activeElement),
-    label = cancellationReasons.some((item) => item.code === reason)
-      ? t('operator.reason.' + reason)
-      : reason;
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!active) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    const openerRef = opener;
-    return () => {
-      dialog.close();
-      if (openerRef.current?.isConnected && !openerRef.current.closest('[inert]'))
-        openerRef.current.focus();
-    };
-  }, [active]);
+  const label = cancellationReasons.some((item) => item.code === reason)
+    ? t('operator.reason.' + reason)
+    : reason;
   return (
-    <dialog
-      ref={ref}
-      className="p4-dialog"
-      aria-label={t('operator.status120')}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) onClose();
-      }}
+    <Dialog
+      title={t('operator.confirmJobs', { count: jobs.length })}
+      subtitle={t('operator.copy31')}
+      busy={busy}
+      onClose={onClose}
     >
-      <header>
-        <div>
-          <h2>{t('operator.confirmJobs', { count: jobs.length })}</h2>
-          <p>{t('operator.copy31')}</p>
-        </div>
-        <Button disabled={busy} aria-label={t('operator.status121')} onClick={onClose}>
-          {t('operator.copy32')}
-        </Button>
-      </header>
       <ul className="p4-cancel-review">
         {jobs.map((job) => (
           <li key={job.id}>
@@ -128,15 +99,15 @@ function CancelReview({ jobs, reason, busy, current, onClose, onConfirm }) {
           {t('operator.copy35')}
         </p>
       )}
-      <footer>
+      <DialogActions>
         <Button disabled={busy} onClick={onClose}>
           {t('operator.copy36')}
         </Button>
-        <Button className="p4-primary" disabled={busy || !current} onClick={onConfirm}>
+        <Button variant="primary" disabled={busy || !current} onClick={onConfirm}>
           {busy ? t('operator.status68') : t('operator.status69')}
         </Button>
-      </footer>
-    </dialog>
+      </DialogActions>
+    </Dialog>
   );
 }
 export default function OperatorJobsPanel({ controller, state, busy = false }) {

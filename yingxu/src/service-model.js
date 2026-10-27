@@ -27,15 +27,10 @@ export function executionStatus(capabilities, locale = 'zh') {
     detail: at('adjunct.executionStatus.copy7'),
   };
 }
-export function inputUsage(project, shotId, recipe, locale = 'zh') {
-  const at = (key, values) => translate(locale, key, values);
-  const shot = project.entities.find((e) => e.id === shotId),
-    limits = recipe?.limits || {},
-    spec = referenceSpecs(project, shotId, { mode: recipe?.mode, locale }),
-    frames = spec.references.filter((ref) => ['firstFrame', 'lastFrame'].includes(ref.purpose)),
-    items = new Map(),
-    issues = [...spec.issues];
-  for (const ref of spec.references.filter(
+// Distinct non-frame inputs (by media and range) with their known durations.
+function usageItems(references) {
+  const items = new Map();
+  for (const ref of references.filter(
     (ref) => !['firstFrame', 'lastFrame'].includes(ref.purpose),
   )) {
     const key = [ref.entity.id, ref.range?.start ?? '', ref.range?.end ?? ''].join('|');
@@ -53,6 +48,55 @@ export function inputUsage(project, shotId, recipe, locale = 'zh') {
       });
     }
   }
+  return items;
+}
+
+// Count, clip length and total length limits for one media kind.
+function kindUsageIssues(kind, key, { groups, limits, issues, at }) {
+  const group = groups[kind],
+    name = {
+      image: at('adjunct.inputUsage.copy8'),
+      video: at('adjunct.inputUsage.copy9'),
+      audio: at('adjunct.inputUsage.copy10'),
+    }[kind];
+  if (Number.isFinite(limits['max_' + key]) && group.count > limits['max_' + key])
+    issues.push(
+      at('adjunct.inputUsage.copy11', { v0: name, v1: group.count, v2: limits['max_' + key] }),
+    );
+  if (kind !== 'image') {
+    for (const item of group.entries)
+      if (
+        item.duration !== null &&
+        (item.duration < limits.min_clip_duration || item.duration > limits.max_clip_duration)
+      )
+        issues.push(
+          at('adjunct.inputUsage.copy12', {
+            v0: item.title,
+            v1: Number(item.duration.toFixed(3)),
+            v2: limits.min_clip_duration,
+            v3: limits.max_clip_duration,
+          }),
+        );
+    const max = limits['max_total_' + kind + '_duration'];
+    if (Number.isFinite(max) && group.duration > max)
+      issues.push(
+        at('adjunct.inputUsage.copy13', {
+          v0: name,
+          v1: Number(group.duration.toFixed(3)),
+          v2: max,
+        }),
+      );
+  }
+}
+
+export function inputUsage(project, shotId, recipe, locale = 'zh') {
+  const at = (key, values) => translate(locale, key, values);
+  const shot = project.entities.find((e) => e.id === shotId),
+    limits = recipe?.limits || {},
+    spec = referenceSpecs(project, shotId, { mode: recipe?.mode, locale }),
+    frames = spec.references.filter((ref) => ['firstFrame', 'lastFrame'].includes(ref.purpose)),
+    items = usageItems(spec.references),
+    issues = [...spec.issues];
   const groups = Object.fromEntries(
     ['image', 'video', 'audio'].map((kind) => {
       const entries = [...items.values()].filter((item) => item.kind === kind),
@@ -65,42 +109,8 @@ export function inputUsage(project, shotId, recipe, locale = 'zh') {
     ['image', 'images'],
     ['video', 'videos'],
     ['audio', 'audios'],
-  ]) {
-    const group = groups[kind],
-      name = {
-        image: at('adjunct.inputUsage.copy8'),
-        video: at('adjunct.inputUsage.copy9'),
-        audio: at('adjunct.inputUsage.copy10'),
-      }[kind];
-    if (Number.isFinite(limits['max_' + key]) && group.count > limits['max_' + key])
-      issues.push(
-        at('adjunct.inputUsage.copy11', { v0: name, v1: group.count, v2: limits['max_' + key] }),
-      );
-    if (kind !== 'image') {
-      for (const item of group.entries)
-        if (
-          item.duration !== null &&
-          (item.duration < limits.min_clip_duration || item.duration > limits.max_clip_duration)
-        )
-          issues.push(
-            at('adjunct.inputUsage.copy12', {
-              v0: item.title,
-              v1: Number(item.duration.toFixed(3)),
-              v2: limits.min_clip_duration,
-              v3: limits.max_clip_duration,
-            }),
-          );
-      const max = limits['max_total_' + kind + '_duration'];
-      if (Number.isFinite(max) && group.duration > max)
-        issues.push(
-          at('adjunct.inputUsage.copy13', {
-            v0: name,
-            v1: Number(group.duration.toFixed(3)),
-            v2: max,
-          }),
-        );
-    }
-  }
+  ])
+    kindUsageIssues(kind, key, { groups, limits, issues, at });
   if (Number.isFinite(limits.max_total_files) && items.size > limits.max_total_files)
     issues.push(at('adjunct.inputUsage.copy14', { v0: items.size, v1: limits.max_total_files }));
   if (recipe?.mode === 'ref' && frames.length && !roleSupported(recipe, 'first_frame', 'image'))
