@@ -371,8 +371,12 @@ class WanGPHost:
 
     def _seal(self, receipt, outputs):
         expected = {"video", "audio"} if receipt.generate_audio else {"video"}
-        if set(outputs) != expected or any(
-            not isinstance(v, RuntimeOutput) for v in outputs.values()
+        # H3 produces joint latents even for silent delivery. Keep the raw pair
+        # on the runtime, but seal only the frozen request's deliverables.
+        if (
+            not expected <= set(outputs)
+            or set(outputs) - {"video", "audio"}
+            or any(not isinstance(v, RuntimeOutput) for v in outputs.values())
         ):
             raise BackendError("wangp_incomplete_outputs")
         folder = checked_directory(self.sealed_root / receipt.operation_id, create=True)
