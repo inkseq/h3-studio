@@ -1,7 +1,8 @@
 """Closed no-contract evidence from the pinned native allocator's original run.
 
 A failed run or empty provider list alone is not evidence of a zero-cost start.
-Only the complete, typed rejection list from the reviewed native patch qualifies.
+Complete typed provider rejections or the pinned pre-allocation fleet-selection
+failure qualify. Generic capacity failures remain financially unresolved.
 """
 
 from __future__ import annotations
@@ -13,6 +14,11 @@ import re
 import uuid
 
 PREFIX = "sixnine_vast_attempts_v1:"
+NO_FLEET_MESSAGE = (
+    "No matching fleet found. Possible reasons: "
+    "https://dstack.ai/docs/guides/troubleshooting/#no-fleets"
+)
+NO_FLEET_SOURCE = "native_dstack_0225_no_fleet_v1"
 SAFE_REJECTIONS = {
     (400, "invalid_args"),
     (404, "no_such_ask"),
@@ -78,7 +84,7 @@ def validate_proof(value, binding):
             or set(value) != PROOF_FIELDS
             or type(value["version"]) is not int
             or value["version"] != 1
-            or value["source"] != "native_vast_rejections_v1"
+            or value["source"] not in {"native_vast_rejections_v1", NO_FLEET_SOURCE}
             or not _uuid(value["run_id"])
             or value["run_id"] != binding.get("run_id")
             or not _uuid(value["submission_id"])
@@ -102,6 +108,22 @@ def validate_proof(value, binding):
         ):
             return None
         attempts = value["attempts"]
+        if value["source"] == NO_FLEET_SOURCE:
+            # The pinned scheduler rejected fleet selection before a provider
+            # attempt. This is distinct from an empty provider-rejection list.
+            if (
+                type(value["attempted_count"]) is not int
+                or value["attempted_count"] != 0
+                or attempts != []
+                or type(attempts) is not list
+            ):
+                return None
+            payload = {key: value[key] for key in PROOF_FIELDS - {"evidence_sha256"}}
+            return (
+                copy.deepcopy(value)
+                if value["evidence_sha256"] == _digest(payload)
+                else None
+            )
         if (
             type(attempts) is not list
             or not 1 <= len(attempts) <= 25
@@ -139,6 +161,25 @@ def from_terminal_run(run, binding):
     try:
         submission = run["latest_job_submission"]
         message = submission.get("termination_reason_message")
+        if message == NO_FLEET_MESSAGE:
+            from .dstack_capacity import terminal_no_allocation_shape
+
+            # dstack0.22.5 jobs_submitted._apply_no_fleet_selection emits this
+            # exact message before provisioning. Require the complete original
+            # singleton history and explicit null runtime/allocation fields;
+            # a substring, generic failure or current empty inventory is not proof.
+            if not terminal_no_allocation_shape(run, binding):
+                return None
+            proof = {
+                "version": 1,
+                "source": NO_FLEET_SOURCE,
+                "run_id": run["id"],
+                "submission_id": submission["id"],
+                "attempted_count": 0,
+                "attempts": [],
+            }
+            proof["evidence_sha256"] = _digest(proof)
+            return validate_proof(proof, binding)
         if (
             not isinstance(message, str)
             or len(message.encode()) > 8192

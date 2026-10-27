@@ -881,3 +881,4 @@ inventory.json
 !docs/PRODUCTION-OPERATION-GUARDS.md
 !deploy/platform/operation_qualification.py
 !tests/test_operation_qualification.py
+!docs/DSTACK-NO-FLEET-EVIDENCE.md
