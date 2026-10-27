@@ -41,6 +41,10 @@ inventory.json
 !tests/fixtures/targon_execution_policies.json
 !tests/fixtures/h3-ref-bf16-workflow.json
 !tests/fixtures/emsign-ecc-g3.pem
+!tests/fixtures/inky/
+!tests/fixtures/inky/eval-cases.json
+!tests/fixtures/inky/images/
+!tests/fixtures/inky/images/*.jpg
 !tools/
 !tools/ci_media_tools.py
 !tools/ci_test_shards.py
@@ -904,3 +908,6 @@ inventory.json
 !deploy/platform/operation_qualification.py
 !tests/test_operation_qualification.py
 !docs/DSTACK-NO-FLEET-EVIDENCE.md
+!studio_platform/capacity_lookahead.py
+!tests/test_capacity_lookahead.py
+!docs/CAPACITY-LOOKAHEAD.md
