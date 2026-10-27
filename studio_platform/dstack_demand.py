@@ -37,7 +37,12 @@ def demand_configuration(config, *, now):
         return None
     selected = demand.get("profile_ids")
     if (
-        set(demand) - {"profile_ids", "test_task_id"}
+        set(demand) - {"profile_ids", "test_task_id", "lookahead_version"}
+        or "lookahead_version" in demand
+        and (
+            type(demand["lookahead_version"]) is not int
+            or demand["lookahead_version"] != 1
+        )
         or policy.get("enabled") is not True
         or policy.get("lifecycle_version") != 2
         or not _open(policy.get("expires_at", 0), now)
@@ -357,7 +362,7 @@ def validate_start(service, connection, job_id, profile_id):
         == "active",
         "dstack_demand_changed",
     )
-    return {
+    result = {
         "job_id": job_id,
         "plan_id": job["plan_id"],
         "request_hash": job["request_hash"],
@@ -367,6 +372,11 @@ def validate_start(service, connection, job_id, profile_id):
         "policy_hash": job["execution_plan"]["policy_hash"],
         "runtime_revision": runtime["revision"],
     }
+    from .capacity_lookahead_runtime import enabled, rules
+
+    if enabled(service):
+        result["start_rules_revision"] = rules(service, connection, profile)["revision"]
+    return result
 
 
 def _nodes(connection, tenant):
