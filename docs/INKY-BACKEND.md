@@ -134,6 +134,16 @@ hard cap from the historical average example cost.
 
 ## Staging adoption (prepared, not executed)
 
+The trusted host allowlist and companion checker changes are deferred.
+Inky mount validation stays in `tools/inky_deploy_validation.py` and offline
+rollout tests until the qualified host installation. The disabled application and
+Compose preparation can deploy with the existing installed maintenance helper;
+`INKSEQ_INKY_CONFIG_FILE` is deliberately refused in protected host settings,
+including an empty value. No credential path may be added yet. Activation needs
+a separately reviewed restoration of the fixed `/run/sixnine-secrets/inky` path
+validation and its qualified helper installation in the zero-work window below.
+This does not relax installed-helper hash checks or cancel queued acceptance jobs.
+
 1. Verify the final reviewed SHA and green CI, original SSM parameter outcomes,
    owner credential authority, and a fresh zero-nonterminal-job staging window.
    Preserve the original protected host tuple and helper hashes under the
@@ -148,6 +158,8 @@ hard cap from the historical average example cost.
    argument or input file exists. Preserve its names/types/versions receipt.
    A lost response is unknown: inspect original parameters, never overwrite.
 4. Through the qualified root helper installation lane, install the reviewed
+   maintenance helper with the explicit Inky allowlist and fixed-path validation,
+   the companion migration checker with Inky mount validation integrated,
    `runtime_secrets_aws.py`, sibling `inky_credentials.py`, and dependency-free
    `studio_platform/inky_config.py` alongside the existing host package. Preserve
    their previous bytes and metadata for rollback; no hot patch of app code.

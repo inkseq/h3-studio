@@ -87,28 +87,6 @@ def validate_workos(document):
             'migration_workos_configuration_invalid')
 
 
-def validate_inky(document):
-    """Advice credentials are opt-in, fixed-path, and API-only."""
-    services, secrets = document['services'], document.get('secrets', {})
-    app = services['app']
-    selected = app.get('environment', {}).get('INKSEQ_INKY_CONFIG_FILE', '')
-    require(selected in {'', '/run/secrets/inky'}, 'migration_inky_configuration_invalid')
-    for name, service in services.items():
-        require(name == 'app' or ('INKSEQ_INKY_CONFIG_FILE' not in service.get('environment', {})
-                and 'inky' not in secret_names(service)), 'migration_inky_outside_app')
-    configured = secrets.get('inky')
-    if configured is None:
-        require(not selected and 'inky' not in secret_names(app), 'migration_inky_configuration_invalid')
-        return  # Existing rollback bundles need no new file.
-    expected = '/run/sixnine-secrets/inky' if selected else secrets['execution_profiles']['file']
-    require(configured.get('file') == expected and 'inky' in secret_names(app),
-            'migration_inky_configuration_invalid')
-    for item in app.get('secrets', []):
-        if isinstance(item, dict) and item.get('source') == 'inky':
-            require(item.get('target', 'inky') in {'inky', '/run/secrets/inky'},
-                    'migration_inky_configuration_invalid')
-
-
 def validate_error_monitoring(document, *, target):
     """API errors and closed controller reclaim events use the owner project."""
     approved = "https://7339f473c737f7b493b03da92a2bb925@o4512306171019264.ingest.us.sentry.io/4512306334728192"
@@ -315,7 +293,6 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
         require(env.get("SIXNINE_TELEMETRY_CONFIG_FILE") == "/run/secrets/grafana_cloud", "migration_cloud_telemetry_missing")
     validate_storage(document, target=target)
     validate_workos(document)
-    validate_inky(document)
     validate_error_monitoring(document, target=target)
     validate_stripe(document, target=target)
     controller = services["controller"]
