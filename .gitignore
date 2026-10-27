@@ -194,6 +194,8 @@ inventory.json
 !studio_platform/storage_schema.py
 !studio_platform/backup.py
 !studio_platform/backup_missing.py
+!studio_platform/capacity_memory.py
+!tests/test_capacity_memory.py
 !studio_platform/backup_cli.py
 !studio_platform/lium_provider.py
 !studio_platform/capacity.py

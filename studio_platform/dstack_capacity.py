@@ -26,6 +26,7 @@ from uuid import UUID
 import httpx
 
 from .inference.wangp_contract import HostReadiness, safe_model_progress
+from .capacity_memory import vast_ram_floor
 
 DSTACK_VERSION = "0.22.5"
 BACKENDS = frozenset({"vastai", "runpod"})
@@ -748,7 +749,7 @@ class DstackClient:
             "rented": {"eq": False},
             "num_gpus": {"eq": 1},
             "cpu_cores": {"gte": request.cpu_count},
-            "cpu_ram": {"gte": request.memory_gib * 1000},
+            "cpu_ram": {"gte": vast_ram_floor(request)},
             "gpu_ram": {"gte": request.gpu_memory_gib * 1024 * 0.93},
             "disk_space": {"gte": request.disk_gib},
             "dph_total": {"lte": request.max_price_microusd / 1_000_000},
