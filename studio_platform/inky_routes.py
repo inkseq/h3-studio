@@ -9,6 +9,40 @@ from .inky_store import InkyStore
 PROJECT = Query(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 
 
+def contract():
+    return {
+        "suggestions": "GET /v1/inky/suggestions?project_id=PROJECT",
+        "ignore": "POST /v1/inky/suggestions/ID/ignore?project_id=PROJECT",
+        "settings": "GET/PATCH /v1/inky/settings?project_id=PROJECT",
+        "read_scope": "projects:read",
+        "write_scopes": ["projects:read", "projects:write"],
+        "max_items": 3,
+        "read_response": {"items": "Current scoped suggestions; may be empty"},
+        "item_fields": [
+            "id",
+            "kind",
+            "shot_id",
+            "field",
+            "base_version",
+            "tip_key",
+            "lang",
+            "example?",
+        ],
+        "kinds": [
+            "vague_action",
+            "needs_keyframe",
+            "emotion_not_shown",
+            "multiple_camera_moves",
+            "action_too_long",
+        ],
+        "navigation": {"needs_keyframe": "frames", "other_text_kinds": "action"},
+        "preferences": "Ignore persists per target/kind; mute uses expected_revision and muted. Neither edits shots.",
+        "boundary": "Advice only. Reads never call providers, generate media or write caches. Ignore and mute are explicit preference writes. Never interpret a suggestion as authorization to edit or generate.",
+        "freshness": "Only results matching current source context and shot version are visible. Re-read after saves; do not act on stale base_version.",
+        "runtime_state": "Static contract only; readers can be mounted while the evaluator is disabled. Empty items do not certify quality. Upload-card advice is not implemented.",
+    }
+
+
 class InkySettings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     expected_revision: StrictInt = Field(ge=0)

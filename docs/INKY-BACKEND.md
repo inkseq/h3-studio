@@ -1,8 +1,8 @@
 # Inky backend — implementation draft (#684)
 
-This branch is not enabled in the application. `inky_routes.register_routes`
-and `InkyWorker` exist for offline contract tests but are not mounted or started
-by `create_app`. No rollout or model-quality acceptance is claimed.
+This branch mounts scoped readers and explicit preference writes in `create_app`.
+The evaluator remains disabled: no worker or provider credentials are created
+by app startup. No rollout or model-quality acceptance is claimed.
 
 ## Contract
 
@@ -29,8 +29,17 @@ props, incoming links and rubric revision. It changes when shared scene/card
 context changes even without a shot version bump. Explicit empty shot cast
 means no people. Old results are hidden on read and rejected on publication.
 Claims contain IDs/status only; the current per-shot cache may contain the
-generated example. Project-purge redaction is implemented as a function and
-tested, but still needs wiring into the existing lifecycle transaction.
+generated example. Project-purge redaction runs inside the existing proven purge
+transaction; account deletion already redacts all owner-scoped documents.
+
+When a worker is explicitly configured, a pure ASGI boundary collects committed
+Guided saves/actions and successful explicit generation preflights. It runs
+optional advice after the response and any original background task, using the
+existing Starlette thread pool. Reads, rejected writes and idempotent action
+replays cannot trigger it. Durable source claims prevent duplicate evaluations.
+No daemon, automatic recovery or retry is introduced. A crash can omit advice;
+it cannot authorize replay of an uncertain provider call. Optional worker errors
+do not change a committed save and log only a fixed event name.
 
 ## Models and credentials
 
@@ -77,10 +86,9 @@ request limits. On response errors/timeouts, retain the original reservation.
 
 1. Qualified server credential transport and activation, with the reviewed
    request-cost envelope; no new key or credential-file import.
-2. Post-commit save and explicit preflight background hooks, no work on GET or
-   failed mutation. Existing accepted job inputs must remain unchanged.
-3. Mount the routes, connect project purge/mute and account lifecycle fences,
-   publish discovery/Agent docs and integration regressions.
+2. Qualify the post-response hooks under the actual server lifecycle and publish
+   the final Agent skill contract. Existing accepted job inputs stay unchanged.
+3. Finish account/project erasure and discovery integration regressions.
 4. Upload/card candidate provenance, bounded assets, evaluated decoy fixtures.
 5. One Claude Tier2 review of the final PR, exact-head CI, then staging
    qualification. No review request or activation for this draft milestone.

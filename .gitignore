@@ -888,5 +888,9 @@ inventory.json
 !studio_platform/inky_providers.py
 !tests/test_inky_providers.py
 !docs/INKY-BACKEND.md
+!studio_platform/inky_hooks.py
+!tests/test_inky_integration.py
+!studio_platform/http_boundaries.py
+!studio_platform/review_privacy.py
 !deploy/platform/operation_qualification.py
 !tests/test_operation_qualification.py
