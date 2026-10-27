@@ -101,7 +101,7 @@ class InkyDeploymentTests(unittest.TestCase):
                     )
 
     @unittest.skipIf(os.name == 'nt', 'Fixed runtime paths target Linux hosts')
-    def test_host_allowlist_accepts_only_the_protected_path(self):
+    def test_host_activation_is_deferred_until_qualified_helper_install(self):
         from test_migration_release import maintenance
 
         with tempfile.TemporaryDirectory() as directory:
@@ -119,12 +119,10 @@ class InkyDeploymentTests(unittest.TestCase):
                 'host_memory_mib': 4096,
                 'environment': environment,
             }
-            for selected in ('', '/run/sixnine-secrets/inky'):
+            self.assertEqual(maintenance.settings_document(candidate), candidate)
+            for selected in ('', '/run/sixnine-secrets/inky', '/run/sixnine-secrets/workos'):
                 environment['INKSEQ_INKY_CONFIG_FILE'] = selected
-                self.assertEqual(maintenance.settings_document(candidate), candidate)
-            environment['INKSEQ_INKY_CONFIG_FILE'] = '/run/sixnine-secrets/workos'
-            with self.assertRaisesRegex(
-                maintenance.release.ReleaseError,
-                'migration_inky_configuration_path_invalid',
-            ):
-                maintenance.settings_document(candidate)
+                with self.subTest(selected=selected), self.assertRaisesRegex(
+                    maintenance.release.ReleaseError, 'migration_paths_invalid'
+                ):
+                    maintenance.settings_document(candidate)
