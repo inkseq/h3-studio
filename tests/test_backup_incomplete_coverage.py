@@ -30,7 +30,9 @@ class IncompleteCoverageTests(unittest.TestCase):
     setUp = fixtures.BackupTests.setUp
     target = remote_fixtures.RemoteBackupTests.target
 
-    def source(self, *, failure="missing", allow=True, name="coverage"):
+    def source(
+        self, *, failure="missing", allow=True, name="coverage", classified=False
+    ):
         local = self.store
         config = SimpleNamespace(
             provider="r2",
@@ -173,6 +175,7 @@ class IncompleteCoverageTests(unittest.TestCase):
                 destination,
                 stores={"local": local, "r2": R2()},
                 allow_missing_media=allow,
+                **({'classify_expected_deletions': True} if classified else {}),
             )
         return destination
 
@@ -190,18 +193,44 @@ class IncompleteCoverageTests(unittest.TestCase):
         self.assertEqual(manifest["coverage"]["missing_bytes"], 0)
         backup.restore_local(source, self.root / "complete-restored")
 
-    def test_local_notfound_is_not_eligible_for_r2_degradation(self):
-        original_stat = self.store.stat
+    def test_local_absence_is_incomplete_and_restoration_requires_optin(self):
         key = self.assets.get("superdan", self.asset["id"])["original"]["key"]
+        self.store.delete(key)
+        source = self.source(failure='none', classified=True)
+        manifest = backup.verify_local(source, allow_incomplete=True)
+        missing = next(x for x in manifest['missing_objects'] if x['key'] == key)
+        self.assertEqual(missing['observation'], 'local_absent')
+        self.assertEqual(missing['classification'], 'unexpected_missing')
+        self.assertEqual(missing['deletion_evidence'], [])
+        self.assertTrue(manifest['coverage']['loss_alert_required'])
+        self.assertEqual(manifest['coverage']['status'], 'incomplete')
+        with self.assertRaises(backup.BackupError):
+            backup.restore_local(source, self.root / 'refused-local')
+        target = self.root / 'restored-local'
+        backup.restore_local(source, target, allow_incomplete=True)
+        hold = json.loads((target / 'RECOVERY-HOLD.json').read_bytes())
+        self.assertFalse(hold['execution_enabled'])
+        self.assertFalse(hold['media_recovery_complete'])
+        self.assertEqual(hold['missing_objects'], manifest['missing_objects'])
+        missing['observation'] = 'head'
+        (source / 'manifest.json').write_text(json.dumps(manifest))
+        with self.assertRaises(backup.BackupError):
+            backup.verify_local(source, allow_incomplete=True)
 
-        def stat(candidate):
-            if candidate == key:
-                raise ObjectNotFound("synthetic local missing")
-            return original_stat(candidate)
+    def test_local_missing_still_refuses_without_explicit_optin(self):
+        key = self.assets.get('superdan', self.asset['id'])['original']['key']
+        self.store.delete(key)
+        with self.assertRaises(backup.BackupError):
+            self.source(failure='none', allow=False)
+        self.assertFalse((self.root / 'coverage' / 'manifest.json').exists())
 
-        with mock.patch.object(self.store, "stat", side_effect=stat):
-            with self.assertRaises(backup.BackupError):
-                self.source(failure="none")
+    def test_partial_local_object_is_not_classified_as_absent(self):
+        key = self.assets.get('superdan', self.asset['id'])['original']['key']
+        (self.store._directory(key) / 'blob').unlink()
+        with self.assertRaisesRegex(
+            backup.BackupError, 'backup_local_object_incomplete'
+        ):
+            self.source(failure='none', classified=True)
         self.assertFalse((self.root / "coverage" / "manifest.json").exists())
 
     def test_mixed_available_bytes_and_missing_receipt_restore_only_with_optin(self):
@@ -339,7 +368,15 @@ class IncompleteCoverageTests(unittest.TestCase):
     def test_remote_roundtrip_reports_incomplete_coverage_and_never_retries_unknown_put(
         self,
     ):
+        key = self.assets.get('superdan', self.asset['id'])['original']['key']
+        self.store.delete(key)
         source = self.source()
+        manifest = backup.verify_local(source, allow_incomplete=True)
+        self.assertEqual(manifest['version'], 2)
+        self.assertEqual(
+            {x['observation'] for x in manifest['missing_objects']},
+            {'local_absent', 'head'},
+        )
         target = self.target()
         client = remote_fixtures.FakeS3(target)
         with self.assertRaises(backup.BackupError):
