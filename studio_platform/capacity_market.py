@@ -15,6 +15,7 @@ from sqlalchemy import Column, Float, JSON, String, Table, insert, select, updat
 
 from .repository import metadata, request_hash
 from .runtime_catalog import get_profile
+from .capacity_memory import planning_ram_gib
 
 PROVIDERS = ("lium", "targon")
 FRESH_SECONDS = 120
@@ -286,7 +287,9 @@ def _filters(registry, chosen):
         return None, "unknown"
     hardware = profile["hardware_filters"]
     return {
-        "min_ram_gib": math.ceil(profile["minimum_ram_bytes"] / 1024**3),
+        "min_ram_gib": planning_ram_gib(
+            profile["id"], math.ceil(profile["minimum_ram_bytes"] / 1024**3)
+        ),
         "min_disk_gib": math.ceil(profile["minimum_disk_bytes"] / 1024**3),
         "min_download_mbps": hardware["minimum_download_mbps"],
         "max_price_per_gpu_hour_microusd": hardware[
