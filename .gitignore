@@ -923,4 +923,7 @@ inventory.json
 !deploy/modal/README.md
 !deploy/modal/h3_reference.py
 
+!tools/reconcile_staging_intent.py
+!tests/test_staging_intent_reconcile.py
+!docs/STAGING-INTENT-707.md
 !tools/inky_deploy_validation.py
