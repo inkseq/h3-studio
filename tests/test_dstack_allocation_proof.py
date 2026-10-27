@@ -6,7 +6,13 @@ from unittest.mock import patch
 
 from sqlalchemy import select
 
-from studio_platform.dstack_allocation_proof import PREFIX, from_terminal_run
+from studio_platform.dstack_allocation_proof import (
+    PREFIX,
+    NO_FLEET_MESSAGE,
+    NO_FLEET_SOURCE,
+    from_terminal_run,
+    validate_proof,
+)
 from studio_platform.dstack_capacity import terminal_no_allocation
 from studio_platform.repository import (
     budget_reservations,
@@ -175,6 +181,140 @@ class AllocationProofTests(LedgerCase):
         self.assertIsNone(from_terminal_run(run, bound))
         self.capacity.observe(node)
         self.assertEqual(self.reservation(node), before)
+
+    def test_exact_preallocation_no_fleet_releases_original_once_and_unblocks_replacement(
+        self,
+    ):
+        from studio_platform.dstack_demand_start import _ended_for_replacement
+        from studio_platform.operator_capacity import operator_nodes
+
+        unrelated = self.job("keep-job")
+        node, bound, run = self.failed(NO_FLEET_MESSAGE)
+        original = self.reservation(node)
+        proof = from_terminal_run(run, bound)
+        self.assertEqual(proof["source"], NO_FLEET_SOURCE)
+        self.assertEqual((proof["attempted_count"], proof["attempts"]), (0, []))
+        with self.repo.engine.connect() as conn:
+            row = (
+                conn.execute(
+                    select(operator_nodes).where(operator_nodes.c.intent_id == node)
+                )
+                .mappings()
+                .one()
+            )
+            self.assertFalse(_ended_for_replacement(conn, row))
+        self.capacity.observe(node)
+        settled = self.reservation(node)
+        self.assertEqual(
+            (settled["id"], settled["amount_microusd"]),
+            (original["id"], original["amount_microusd"]),
+        )
+        self.assertEqual(
+            (settled["state"], settled["actual_cost_microusd"]), ("released", 0)
+        )
+        with self.repo.engine.connect() as conn:
+            row = (
+                conn.execute(
+                    select(operator_nodes).where(operator_nodes.c.intent_id == node)
+                )
+                .mappings()
+                .one()
+            )
+            self.assertTrue(_ended_for_replacement(conn, row))
+            self.assertEqual(
+                conn.scalar(
+                    select(budget_reservations.c.state).where(
+                        budget_reservations.c.reference_id == unrelated["id"]
+                    )
+                ),
+                "reserved",
+            )
+        self.capacity.observe(node)
+        self.assertEqual(self.reservation(node), settled)
+        self.assertEqual(len(self.client.applied), 1)
+        with self.repo.engine.connect() as conn:
+            receipts = list(
+                conn.execute(
+                    select(scaler_receipts).where(
+                        scaler_receipts.c.intent_id == node,
+                        scaler_receipts.c.operation == "no_allocation",
+                    )
+                )
+            )
+        self.assertEqual(len(receipts), 1)
+
+    def test_no_fleet_requires_exact_message_and_complete_original_history(self):
+        _, bound, run = self.failed(NO_FLEET_MESSAGE)
+        for message in (
+            "No matching fleet found",
+            NO_FLEET_MESSAGE + " ",
+            "provider error: " + NO_FLEET_MESSAGE,
+            "Failed to use specified fleets",
+            "No offers available",
+        ):
+            changed = copy.deepcopy(run)
+            changed["latest_job_submission"]["termination_reason_message"] = message
+            self.assertIsNone(from_terminal_run(changed, bound))
+        for change in (
+            "retry",
+            "missing",
+            "provisioned",
+            "runtime",
+            "not_terminal",
+            "different_latest",
+        ):
+            changed = copy.deepcopy(run)
+            if change == "retry":
+                changed["jobs"][0]["job_submissions"].append(
+                    copy.deepcopy(changed["latest_job_submission"])
+                )
+            elif change == "missing":
+                del changed["latest_job_submission"]["job_provisioning_data"]
+            elif change == "provisioned":
+                changed["latest_job_submission"]["job_provisioning_data"] = {
+                    "instance_id": "123"
+                }
+            elif change == "runtime":
+                changed["latest_job_submission"]["job_runtime_data"] = {}
+            elif change == "not_terminal":
+                changed["status"] = "running"
+            else:
+                changed["jobs"][0]["job_submissions"] = []
+            with self.subTest(change=change):
+                self.assertIsNone(from_terminal_run(changed, bound))
+        for field, value in (
+            ("run_id", "foreign"),
+            ("provider_instance_id", "123"),
+            ("bootstrap_started", True),
+            ("runtime_incarnation", "x"),
+            ("first_runtime_ready_at", 1),
+            ("backend", "runpod"),
+        ):
+            self.assertIsNone(from_terminal_run(run, {**bound, field: value}))
+        proof = from_terminal_run(run, bound)
+        for field, value in (
+            ("attempted_count", False),
+            ("attempted_count", 1),
+            ("attempts", [{}]),
+            ("evidence_sha256", "0" * 64),
+        ):
+            self.assertIsNone(validate_proof({**proof, field: value}, bound))
+
+    def test_no_fleet_settlement_failure_rolls_back_and_reconciles_original(self):
+        node, _, _ = self.failed(NO_FLEET_MESSAGE)
+        before = self.reservation(node)
+        original = self.repo._settle
+
+        def lost_commit(*args, **kwargs):
+            original(*args, **kwargs)
+            raise RuntimeError("fixture_interrupted_commit")
+
+        with patch.object(self.repo, "_settle", side_effect=lost_commit):
+            with self.assertRaisesRegex(RuntimeError, "fixture_interrupted_commit"):
+                self.capacity.observe(node)
+        self.assertEqual(self.reservation(node), before)
+        self.capacity.observe(node)
+        self.assertEqual(self.reservation(node)["state"], "released")
 
     def test_documented_rejections_release_only_the_original_hold(self):
         for status, code in ((400, "invalid_args"), (410, "no_such_ask")):
