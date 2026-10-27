@@ -885,5 +885,8 @@ inventory.json
 !studio_platform/inky_routes.py
 !studio_platform/inky_worker.py
 !tests/test_inky_worker.py
+!studio_platform/inky_providers.py
+!tests/test_inky_providers.py
+!docs/INKY-BACKEND.md
 !deploy/platform/operation_qualification.py
 !tests/test_operation_qualification.py
