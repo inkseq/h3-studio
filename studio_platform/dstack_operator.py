@@ -28,6 +28,7 @@ from .dstack_capacity import (
     live_capacity_usage,
 )
 from .capacity_policy import window_open, cold_unadmitted_runtime
+from .capacity_memory import configured_ram, require_preview_ram, catalog_resources
 
 # Compatibility names for retained callers; all current call sites use the contract.
 _window_open = window_open
@@ -1555,7 +1556,7 @@ class DstackOperator:
             manifest_digest=profile["manifest_digest"],
             image=profile["image"],
             gpu_names=tuple(profile["gpu_names"]),
-            memory_gib=profile["memory_gib"],
+            memory_gib=configured_ram(profile),
             disk_gib=profile["disk_gib"],
             gpu_memory_gib=profile["gpu_memory_gib"],
             cpu_count=profile["cpu_count"],
@@ -1788,7 +1789,7 @@ class DstackOperator:
                     _, reason = self._execution_check(profile, observed_at)
                 profiles.append(
                     {
-                        **{key: copy.deepcopy(profile[key]) for key in fields},
+                        **catalog_resources(profile, fields),
                         "max_price_microusd": price["max_price_microusd"],
                         "price_ceiling_microusd": price["price_ceiling_microusd"],
                         "price_policy_snapshot": price["snapshot"],
@@ -2675,7 +2676,7 @@ class DstackOperator:
             now, capacity_snapshot, usage = self._admit_start_capacity(
                 connection, owner, value, profile
             )
-            original = value["request"]
+            original = require_preview_ram(value["request"], profile)
             host_selection = self._validate_start_hosts(
                 connection, profile, original, now, demand_job_id
             )
