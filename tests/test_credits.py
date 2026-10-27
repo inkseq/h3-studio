@@ -736,7 +736,9 @@ class CreditTests(LedgerCase):
             )
             self.assertNotIn("fingerprint", json.dumps(first))
             self.assertNotIn("receipt_url", json.dumps(first))
-            self.assertEqual(set(connection.scalars(select(entries.c.receipt_url))), {private_url})
+            self.assertEqual(
+                set(connection.scalars(select(entries.c.receipt_url))), {private_url}
+            )
             with self.assertRaisesRegex(credits.CreditError, "credit_cursor_invalid"):
                 credits.entries(
                     connection,
