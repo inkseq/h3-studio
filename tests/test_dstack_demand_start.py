@@ -26,6 +26,78 @@ import test_dstack_operator as original
 
 
 class DemandStartTests(LedgerCase):
+    def fleet_planner(self, *, fleet_available):
+        import httpx
+        from studio_platform.dstack_capacity import DstackClient
+
+        stock_plan = self.client.plan
+        reads = []
+
+        def handler(request):
+            self.assertEqual(request.url.path, '/api/project/sixnine/runs/get_plan')
+            body = json.loads(request.content)
+            reads.append(body)
+            # Model pinned 0.22.5: stock exists, but ordinary run planning must
+            # select a fleet with room before it can expose those offers.
+            plan = stock_plan(body['run_spec'])
+            if not body.get('for_offers_only', False) and not fleet_available:
+                plan['job_plans'][0]['offers'] = []
+            return httpx.Response(200, json=plan)
+
+        session = httpx.Client(transport=httpx.MockTransport(handler))
+        self.addCleanup(session.close)
+        client = DstackClient(
+            'http://127.0.0.1:3000', 'isolated-test-token', 'sixnine', session=session
+        )
+        replacement = patch.object(self.client, 'plan', side_effect=client.plan)
+        replacement.start()
+        self.addCleanup(replacement.stop)
+        return reads
+
+    def test_global_stock_without_fleet_cannot_reserve_or_apply(self):
+        self.enabled()
+        job = self.accepted()
+        reads = self.fleet_planner(fleet_available=False)
+        with self.repo.engine.connect() as connection:
+            before = list(connection.execute(select(budget_reservations)).mappings())
+        result = start_once(self.service)
+        self.assertEqual(
+            result, {'state': 'blocked', 'reason_code': 'offer_unavailable'}
+        )
+        self.assertEqual(len(reads), 1)
+        self.assertFalse(reads[0]['for_offers_only'])
+        self.assertEqual(self.client.applied, [])
+        self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                list(connection.execute(select(budget_reservations)).mappings()), before
+            )
+            self.assertEqual(list(connection.execute(select(operator_nodes))), [])
+            self.assertEqual(
+                list(
+                    connection.execute(
+                        select(operator_commands).where(
+                            operator_commands.c.kind == 'dstack_start'
+                        )
+                    )
+                ),
+                [],
+            )
+
+    def test_matching_fleet_keeps_original_guarded_start_path(self):
+        self.enabled()
+        self.accepted()
+        reads = self.fleet_planner(fleet_available=True)
+        first = start_once(self.service)
+        self.assertEqual(first['state'], 'accepted')
+        self.assertEqual(len(self.client.applied), 1)
+        self.assertEqual(len(reads), 1)
+        self.assertFalse(reads[0]['for_offers_only'])
+        # Observing the accepted start must not plan or allocate again.
+        self.assertEqual(start_once(self.service)['state'], 'observing')
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(len(self.client.applied), 1)
+
     def summary_job(self):
         job = self.accepted()
         with self.repo.transaction() as connection:
