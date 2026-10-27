@@ -18,8 +18,8 @@ import {
   ChevronUp,
   ChevronsDownUp,
   ChevronsUpDown,
-  AlertTriangle,
   CheckCheck,
+  Clapperboard,
 } from 'lucide-react';
 import { RenameDialog, useTrash } from './UniversalTrash.jsx';
 import ItemMenu from './ItemMenu.jsx';
@@ -578,7 +578,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   <PanelLeftClose size={16} />
                 )}
               </Button>
-              <h1>{multi ? state.project.title : state.project.chapter}</h1>
+              <h1>{chapterHeading(state, multi)}</h1>
               <small className="muted">
                 {t('storyboard.summary', {
                   shots: state.shots.length,
@@ -612,9 +612,11 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   <span className="label">{t('v2.newScene')}</span>
                 </Button>
               )}
+              {/* Making the missing shots is the next step, not a warning; it leads until the
+                  first video exists, then Export film takes over (owner, 2026-10-28). */}
               {pending.length > 0 && (
                 <Button
-                  className="sb-pending-chip"
+                  variant={count === 0 ? 'primary' : undefined}
                   disabled={state.busy || !state.copiesMax}
                   title={t('storyboard.pendingHint')}
                   onClick={() =>
@@ -625,8 +627,17 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                     })
                   }
                 >
-                  <AlertTriangle size={14} />
-                  <span className="label">{t('storyboard.copy35', { count: pending.length })}</span>
+                  <Clapperboard size={14} />
+                  <span className="label">
+                    {t(
+                      pending.length === 1
+                        ? 'storyboard.makePending.one'
+                        : 'storyboard.makePending',
+                      {
+                        count: pending.length,
+                      },
+                    )}
+                  </span>
                 </Button>
               )}
               {unpicked.length > 0 && (
@@ -643,7 +654,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   </span>
                 </Button>
               )}
-              <span className="sb-film-primary">{filmControl}</span>
+              <span className="sb-film-primary">
+                {filmControl && React.cloneElement(filmControl, { primary: count > 0 })}
+              </span>
               <Button
                 variant="ghost"
                 className="sb-head-toggle"
@@ -696,7 +709,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   return (
                     <section className="scene" key={group.id || 'unparented'}>
                       <div className="scene-head">
-                        <b>{group.title}</b>
+                        <b>{sceneHeading(group.title, t)}</b>
                         <small>
                           {t(
                             group.shots.length === 1
@@ -975,24 +988,44 @@ function useGuideField(pageActive, search, selected) {
 // The story chat's "Make video" lands here: open the generate confirmation for the shots
 // without video once the story and its limits are loaded, then drop the request from the URL
 // so a reload never asks again. Nothing is charged until the user confirms.
+// Default chapter and scene names come from whoever made the story (assistant, server or an
+// older build), often in the other language. Show the story title for a lone default chapter
+// and "Scene N" in the reader's language; names the user typed stay as they are.
+const DEFAULT_CHAPTER_NAMES = new Set(['Story', '故事', '第一章', 'Chapter 1']);
+const chapterHeading = (state, multi) =>
+  multi || DEFAULT_CHAPTER_NAMES.has(state.project.chapter)
+    ? state.project.title || state.project.chapter
+    : state.project.chapter;
+const sceneHeading = (title, t) => {
+  const n = /^(?:Scene |场景 ?)(\d+)$/.exec(title || '')?.[1];
+  return n ? t('storyboard.sceneN', { number: n }) : title;
+};
 function useGenerateLink(pageActive, search, state, dispatch) {
   const link = readAgentLink(search),
-    asked = useRef(false);
-  const ready =
-    pageActive &&
-    link?.generate &&
-    link.projectId === state.project.id &&
-    !state.busy &&
-    !!state.copiesMax;
+    asked = link?.generate ? link.projectId : null;
+  // Remember the request: opening the story rewrites the URL before the story has loaded.
+  const [wanted, setWanted] = useState(null),
+    [pricing, setPricing] = useState(false);
   useEffect(() => {
-    if (!ready || asked.current) return;
-    asked.current = true;
+    if (asked) setWanted(asked);
+  }, [asked]);
+  const ready =
+    pageActive && wanted && wanted === state.project.id && !state.busy && !!state.copiesMax;
+  useEffect(() => {
+    if (!ready) return;
+    setWanted(null);
     const url = new URL(window.location.href);
-    url.searchParams.delete('panel');
-    navigateApp(url.pathname + url.search, { replace: true, restore: false });
+    if (url.searchParams.get('panel') === 'generate') {
+      url.searchParams.delete('panel');
+      navigateApp(url.pathname + url.search, { replace: true, restore: false });
+    }
     const ids = state.shots.filter((shot) => !shot.versions.length).map((shot) => shot.id);
-    if (ids.length) void dispatch({ type: 'workbenchGenerate', ids, copies: 1 });
+    if (!ids.length) return;
+    setPricing(true);
+    dispatch({ type: 'workbenchGenerate', ids, copies: 1 }).finally(() => setPricing(false));
   }, [ready, state.shots, dispatch]);
+  // Loading the story and pricing every shot takes several seconds; say what is happening.
+  return !!wanted || pricing;
 }
 function StoryboardShell({ onNewScene, filmControl }) {
   const { t } = useI18n();
@@ -1023,7 +1056,7 @@ function StoryboardShell({ onNewScene, filmControl }) {
     else if (!id) setSelected(null);
   }, [pageActive, location.path, location.search, state.project.id, shotIdsKey]);
   useGuideField(pageActive, location.search, selected);
-  useGenerateLink(pageActive, location.search, state, dispatch);
+  const pricing = useGenerateLink(pageActive, location.search, state, dispatch);
   const container = useRef(),
     sensors = useSensors(
       useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -1156,6 +1189,7 @@ function StoryboardShell({ onNewScene, filmControl }) {
           }
           onDismiss={clearError}
         />
+        <FloatingMessage tone="info" text={pricing ? t('storyboard.pricing') : null} />
         <FloatingMessage
           tone="warn"
           text={state.workbenchPending ? t('workbench.pending') : null}
