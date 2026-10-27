@@ -249,3 +249,77 @@ and real PostgreSQL same-snapshot/restore-hold tests. A new production recovery
 requires an explicit reviewed path that preserves both failed attempts. Do not
 change their dates, remove their fences, reuse the exhausted helper, or substitute
 an old snapshot for a fresh backup. Claude owns the normal source-fix promotion.
+
+## Explicit terminal capture reconciliation for the next daily copy
+
+After Claude promoted 66061643, read-only SSM
+`31dd0cd9-5b90-40f5-88f6-994622a75402` confirmed that the installed host helper
+still requires every prior day to have `completed.json`. The exhausted October26
+operation has no completion. Therefore the October27 timer will refuse before
+capture despite the deployed memory fixes. Merely waiting for the timer is not
+a recovery plan. No timer or failed recovery was invoked to establish this.
+
+The smallest change is a **separate, root-attested terminal capture failure** for
+that exact day/nonce. It is not a successful backup, not a restored snapshot,
+not a waiver for arbitrary failures and not permission to retry October26.
+The normal daily-preserve path can subsequently create its own fresh day once;
+all other incomplete operations retain the existing hard refusal. Unknown uploads
+cannot use this path. The old helpers, fences and both failed partial directories
+remain untouched; existing completion/alerts/retention readers do not treat this
+acknowledgement as `completed.json`. Normal automatic cleanup is not enabled.
+
+This is Tier2 production-host machinery: one Claude PR review before adopting.
+The source addition alone does nothing until the explicit acknowledgement exists.
+Operator adoption, under the existing #193 hold and zero-work gate:
+
+1. Re-read the actual production release/image, approved manifests and backup
+   configuration. CAS-pin current/previous markers, neighboring helper hashes and
+   container identities. Qualify only, then repeat under `release.lock` before
+   writing. A promotion between qualification and apply must refuse; do not use
+   fd2-era pins after the 6606 promotion.
+2. Reconcile the **original** failed commands `3849a3e9-2d95-416c-b78d-f0c527aee51f`
+   and `719e7d8c-5135-4452-87d9-f98a0cfc5b3a`, their OOM evidence and final process
+   state. Check zero nonterminal jobs, no surviving capture writer, no original
+   nonce transport container and inactive/failed backup service. Do not stop work
+   to force this check. Hash/preserve both original and OOM partial trees.
+3. Read **all** object versions and delete markers for
+   `business-backups/9f8335d4-2da3-42ac-81c0-4f4104af2ee8/` in the configured
+   production bucket, owner829135631045. Both must be empty, not an access error
+   or incomplete listing. This wake's read returned empty; refresh immediately
+   before adoption. Any object, transport evidence or unknown writer blocks the
+   acknowledgement and requires original-operation reconciliation instead.
+4. CAS-install the reviewed `business_backup.py` with rollback outside the dated
+   history tree. All other helper files, units/timers and application containers
+   remain unchanged. Then exclusively create and fsync root0600
+   `/var/lib/inkseq-business-backup/2026-10-26/failed-capture-reconciled.json`.
+   Preserve the six original metadata files, whose hashes are fixed in
+   `FAILED_CAPTURE_FILES` (read-back `d1ee71ed-4520-4881-817d-56dfeccb8701`).
+   The code accepts exactly these keys, with no generic skip flag:
+
+   - `version: 1`, `state: "failed_capture_reconciled_not_completed"`, original
+     `day: "2026-10-26"` and `operation_id`, `evidence: FAILED_CAPTURE_FILES`.
+   - `bucket: "sixnine-business-backup-829135631045-ap-southeast-1"`, exact original
+     `prefix`, integer `versions: 0` and `delete_markers: 0`.
+   - `checked_at`: actual timezone-aware UTC read-back time; `release` and `image`:
+     exact verified current SHA and Docker image ID, never a tag or guessed pin.
+   - `zero_work: true`, `no_writer_or_transport: true`, `partials_preserved: true`,
+     `automatic_retry: false`. These are operator attestations from steps1–3,
+     not fields the application may supply or self-certify.
+
+5. Read back the installed bytes/acknowledgement, unchanged original hashes and
+   partials, and unchanged neighboring runtime identities. The history reader
+   must reject the same/earlier day and any unrelated failed day; it may permit
+   a later day only on the configured production host/bucket. No backup execution
+   belongs in this install step. If adoption is uncertain, reconcile its original
+   command and files; never recreate the acknowledgement or clear a fence.
+6. Observe the next normal daily-preserve run. Only its real S3 completion
+   version/hash proves a new backup. Report October26 as **failed, preserved,
+   reconciled without upload**, never as a second completed copy. Clearing the
+   remaining hold must explicitly account for that dated failure and the actual
+   fresh-copy receipt. No claim of a restore follows from a successful copy.
+
+Regression tests cover absent/forged/transplanted acknowledgements, changed or
+extra handoff/transfer evidence, boolean counts, pending original outcomes,
+same-day retry refusal, wrong environment/bucket, malformed pins/timestamps,
+protected-file rejection, preserved bytes and unchanged completion validation.
+They do not themselves attest production S3 emptiness or authorize a host write.
