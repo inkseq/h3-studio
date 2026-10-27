@@ -91,13 +91,15 @@ class StartRules:
             "value": value,
         }, row["version"]
 
-    @staticmethod
-    def _public(binding, stored):
+    def _public(self, binding, stored):
+        from .capacity_lookahead_runtime import enabled
+
+        connected = enabled(self.workspace.service)
         return {
             **copy.deepcopy(stored),
             "binding": copy.deepcopy(binding),
-            "execution_connected": False,
-            "applied": False,
+            "execution_connected": connected,
+            "applied": connected,
             "keep_alive_seconds": stored["value"]["boot_seconds"],
         }
 
@@ -152,7 +154,7 @@ class StartRules:
             "value": value,
             "keep_alive_seconds": value["boot_seconds"],
             "confirmation_digest": digest,
-            "execution_connected": False,
+            "execution_connected": self._public(binding, old)["execution_connected"],
             "applied": False,
         }, version
 
