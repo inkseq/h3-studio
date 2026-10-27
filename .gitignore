@@ -879,3 +879,6 @@ inventory.json
 !tests/test_inky_models.py
 !studio_platform/inky_budget.py
 !tests/test_inky_budget.py
+!studio_platform/inky_source.py
+!studio_platform/inky_store.py
+!tests/test_inky_store.py

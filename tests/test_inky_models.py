@@ -16,6 +16,7 @@ class InkyModelsTests(unittest.TestCase):
             "place": "platform",
             "props": ["ticket"],
             "lang": "en",
+            "seconds": 5,
             **changes,
         }
 
@@ -42,6 +43,9 @@ class InkyModelsTests(unittest.TestCase):
             {"lang": "auto"},
             {"props": [""]},
             {"shot_action": None},
+            {"seconds": True},
+            {"seconds": float("nan")},
+            {"seconds": 0},
         ):
             with (
                 self.subTest(changes=list(changes)),
@@ -50,14 +54,31 @@ class InkyModelsTests(unittest.TestCase):
                 core.judgement_payload(self.source(**changes))
 
     def test_expected_score_threshold_is_inclusive_only_for_keyframe(self):
-        answers = {"spec": self.distribution(), "cx": self.distribution()}
+        answers = {
+            "spec": self.distribution(),
+            "cx": self.distribution(),
+            "emo": {"probabilities": {"0": 0, "1": 0, "2": 0, "3": 1}},
+            "cam": {"probabilities": {"0": 1, "1": 0, "2": 0, "3": 0}},
+            "dur": {"probabilities": {"0": 1, "1": 0, "2": 0, "3": 0}},
+        }
         self.assertEqual(core.text_findings({"answers": answers}), ["needs_keyframe"])
         answers["spec"] = self.distribution(**{"1": 0.51, "2": 0.49})
         answers["cx"] = self.distribution(**{"1": 0.51, "2": 0.49})
         self.assertEqual(core.text_findings({"answers": answers}), ["vague_action"])
+        answers["emo"] = self.distribution(**{"1": 0.51, "2": 0.49})
+        answers["cam"] = answers["dur"] = self.distribution()
+        self.assertEqual(
+            core.text_findings({"answers": answers}),
+            [
+                "vague_action",
+                "emotion_not_shown",
+                "multiple_camera_moves",
+                "action_too_long",
+            ],
+        )
         # Do not trust a provider's convenient scalar over its distribution.
         answers["spec"]["score"] = 3
-        self.assertEqual(core.text_findings({"answers": answers}), ["vague_action"])
+        self.assertIn("vague_action", core.text_findings({"answers": answers}))
 
     def test_invalid_distribution_never_becomes_advice(self):
         for invalid in (
