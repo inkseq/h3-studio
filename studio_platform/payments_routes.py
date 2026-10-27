@@ -16,7 +16,6 @@ from .stripe_client import (
     MAX_BODY,
     StripeGateway,
     StripeGatewayError,
-    optional_receipt_url,
     provider_url,
 )
 
@@ -27,6 +26,32 @@ PACK_SCOPE = {
     "document_id": "active",
 }
 MAX_CREDITS = (1 << 63) - 1
+
+
+def customer_receipt(row):
+    """Project original paid facts, never provider contact details or URLs."""
+    if row["paid_at"] is None or row["status"] not in {"paid", "refunded", "disputed"}:
+        return None
+    return {
+        "payment_id": row["id"],
+        **{
+            key: row[key]
+            for key in (
+                "pack_id",
+                "amount_cents",
+                "currency",
+                "credits",
+                "status",
+                "refunded_cents",
+            )
+        },
+        "paid_at": datetime.fromtimestamp(row["paid_at"], timezone.utc).isoformat(),
+        "issuer": {
+            "name": "Inkseq",
+            "abn": "68 442 632 833",
+            "support_email": "support@inkseq.com",
+        },
+    }
 
 
 class BillingError(Exception):
@@ -508,13 +533,42 @@ class PaymentAPI:
                 paid_at=datetime.fromtimestamp(row["paid_at"], timezone.utc).isoformat()
                 if row["paid_at"] is not None
                 else None,
-                receipt_url=optional_receipt_url(row["receipt_url"]),
+                receipt_url=None,
+                receipt=customer_receipt(row),
             )
             result.append(item)
         return {
             "payments": result,
             "next_cursor": rows[limit - 1]["id"] if len(rows) > limit else None,
         }
+
+    def receipt(self, principal, payment_id):
+        from .payment_schema import PaymentSchemaError, payments, ready
+
+        with self.repo.engine.connect() as connection:
+            user = self._user(connection, principal)
+            try:
+                if not ready(connection):
+                    raise PaymentSchemaError()
+            except PaymentSchemaError:
+                raise BillingError(
+                    "billing_unavailable", "Payment history is not ready.", 503
+                ) from None
+            row = (
+                connection.execute(
+                    select(payments).where(
+                        payments.c.id == payment_id,
+                        payments.c.tenant == self.settings.tenant_id,
+                        payments.c.user_id == user["id"],
+                    )
+                )
+                .mappings()
+                .first()
+            )
+        receipt = customer_receipt(row) if row is not None else None
+        if receipt is None:
+            raise BillingError("billing_receipt_not_found", "Receipt unavailable.", 404)
+        return {"receipt": receipt}
 
 
 def register_routes(
@@ -584,6 +638,10 @@ def register_routes(
         return response(
             service.history(principal_resolver(request), before=cursor, limit=limit)
         )
+
+    @app.get("/v1/billing/payments/{payment_id}/receipt")
+    def receipt(request: Request, payment_id: str):
+        return response(service.receipt(principal_resolver(request), payment_id))
 
     @app.post("/v1/billing/stripe/webhook")
     async def webhook(request: Request):
