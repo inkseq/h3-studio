@@ -707,6 +707,12 @@ inventory.json
 !yingxu/src/v2/**
 !yingxu/src/ui/
 !yingxu/src/ui/**
+!yingxu/src/inky/
+!yingxu/src/inky/**
+!yingxu/src/guide.js
+!yingxu/src/guide.css
+!yingxu/src/guide.test.js
+!yingxu/src/inky-model.test.js
 !yingxu/src/data/
 !yingxu/src/data/**
 
