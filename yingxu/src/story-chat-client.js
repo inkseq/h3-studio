@@ -247,7 +247,7 @@ export function createLiveChat({
         return;
       }
       if (quote.action.kind !== 'image') {
-        labels.openWorks?.(project, quote.action.cards?.[0]);
+        labels.openWorks?.(project, quote.action.cards?.[0], { generate: true });
         return;
       }
       // A confirmed picture: the server holds the credits, draws, and charges only when

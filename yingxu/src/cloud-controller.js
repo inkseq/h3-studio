@@ -1670,7 +1670,7 @@ export function createCloudController({
       if (!shot) throw Error('workbench.changed');
       if (shot.data.h3?.explicitReferences) {
         if (preview.project_version !== current().workspace.serverVersion || preview.issues?.length)
-          throw Error('workbench.inputsInvalid');
+          throw Object.assign(Error('workbench.inputsInvalid'), { shotId });
         continue;
       }
       if (b.continuePrevious && (mode === 'fl' || support?.input_support?.first_frame === true)) {
@@ -1763,7 +1763,7 @@ export function createCloudController({
       preview = await api.generationDraft(ctx.projectId, shotId);
       guard(ctx);
       if (preview.project_version !== current().workspace.serverVersion || preview.issues?.length)
-        throw Error('workbench.inputsInvalid');
+        throw Object.assign(Error('workbench.inputsInvalid'), { shotId });
     }
   }
   async function workbenchRead(suffix) {
