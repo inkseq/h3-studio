@@ -2196,7 +2196,7 @@ class DstackRESTTests(unittest.TestCase):
             ],
         )
         self.assertFalse(seen[1][1]["force"])
-        self.assertTrue(seen[0][1]["for_offers_only"])
+        self.assertFalse(seen[0][1]["for_offers_only"])
         self.assertNotIn("for_offers_only", seen[1][1])
         self.assertIsNone(seen[1][1]["plan"]["current_resource"])
         self.assertFalse(seen[3][1]["abort"])
