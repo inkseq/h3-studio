@@ -19,7 +19,7 @@ BOUNDS = {
     "boot_seconds": (1, 86400),
     "minimum_jobs": (1, 10000),
 }
-KIND = "capacity_start_rules_set"
+KIND = "start_rules_set"
 EVENT = "operator.start_rules_updated"
 
 

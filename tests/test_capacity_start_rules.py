@@ -7,10 +7,14 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from sqlalchemy import insert, select, update
 
-from studio_platform.capacity_start_rules import StartRules, DEFAULTS
+from studio_platform.capacity_start_rules import StartRules, DEFAULTS, KIND
 from studio_platform.dstack_demand_policy import read_runtime
 from studio_platform.dstack_workspace import DstackWorkspace
-from studio_platform.operator_capacity import OperatorError, operator_policy
+from studio_platform.operator_capacity import (
+    OperatorError,
+    operator_policy,
+    operator_commands,
+)
 from test_platform_repository import LedgerCase
 import test_dstack_operator as fixtures
 import test_dstack_demand_api as api_fixtures
@@ -57,6 +61,7 @@ class StartRulesTests(LedgerCase):
         self.assertEqual(self.counts(), before)
 
     def test_cas_confirmation_replay_history_and_demand_unchanged(self):
+        self.assertLessEqual(len(KIND), operator_commands.c.kind.type.length)
         before = self.counts()
         body = self.confirmed(self.body())
         first = self.rules.write(self.owner, body, "first")
