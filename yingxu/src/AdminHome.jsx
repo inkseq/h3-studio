@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
 import CapacitySettings from './CapacitySettings.jsx';
+import StartRulesPanel from './StartRulesPanel.jsx';
 import { AdminBudgetPanel } from './OperatorBudgetPanel.jsx';
 import { createP4OperatorController } from './p4-operator-controller.js';
 import { readBrowserLocale } from './i18n/locale.js';
@@ -602,6 +603,7 @@ function Limits({ api, active, account }) {
       ) : (
         <Note tone="warn">{t('adminHome.noPolicy')}</Note>
       )}
+      <StartRulesPanel api={api} active={active} />
       <Disclosure className="admin-fold" summary={t('admin.legacyBudgets')}>
         <BudgetAdministration account={account} />
       </Disclosure>

@@ -470,5 +470,102 @@ class ReconciledCaptureHistoryTests(unittest.TestCase):
             self.check()
 
 
+class October27CaptureHistoryTests(unittest.TestCase):
+    setUp = ReconciledCaptureHistoryTests.setUp
+    write_ack = ReconciledCaptureHistoryTests.write_ack
+    check = ReconciledCaptureHistoryTests.check
+
+    def add_oct27(self):
+        import hashlib
+
+        prior = self.root / '2026-10-27'
+        prior.mkdir()
+        files = {}
+        for name in host.OCT27_CAPTURE_FILES:
+            raw = json.dumps({'oct27_original': name}).encode()
+            (prior / name).write_bytes(raw)
+            files[name] = hashlib.sha256(raw).hexdigest()
+        value = {
+            **self.ack,
+            'day': prior.name,
+            'operation_id': host.OCT27_CAPTURE_NONCE,
+            'prefix': 'business-backups/' + host.OCT27_CAPTURE_NONCE + '/',
+            'evidence': files,
+            'checked_at': '2026-10-27T16:40:00Z',
+        }
+        path = prior / host.FAILED_CAPTURE_ACK
+        path.write_text(json.dumps(value))
+        patch = mock.patch.object(host, 'OCT27_CAPTURE_FILES', files)
+        patch.start()
+        self.addCleanup(patch.stop)
+        host.datetime.now.return_value = host.datetime.fromisoformat(
+            '2026-10-27T17:00:00+00:00'
+        )
+        return prior, path, value
+
+    def test_both_exact_failures_allow_future_day_without_completion_or_replay(self):
+        prior, _, _ = self.add_oct27()
+        before = {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        self.assertFalse(self.check('2026-10-28'))
+        self.assertEqual(
+            before,
+            {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()},
+        )
+        self.assertFalse((prior / 'completed.json').exists())
+        self.assertFalse((self.root / '2026-10-28').exists())
+        with self.assertRaisesRegex(ValueError, 'day_refused'):
+            self.check('2026-10-27')
+
+    def test_old_ack_does_not_cover_new_failure_or_an_unknown_day(self):
+        prior, path, value = self.add_oct27()
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'prior_outcome'):
+            self.check('2026-10-28')
+        path.write_text(json.dumps(self.ack))
+        with self.assertRaisesRegex(ValueError, 'ack_invalid'):
+            self.check('2026-10-28')
+        path.write_text(json.dumps(value))
+        prior.rename(self.root / '2026-10-25')
+        with self.assertRaisesRegex(ValueError, 'day_refused'):
+            self.check('2026-10-28')
+
+    def test_new_failure_requires_its_own_fresh_negative_proof(self):
+        _, path, value = self.add_oct27()
+        for field, bad in (
+            ('checked_at', '2026-10-27T16:34:49Z'),
+            ('checked_at', '2026-10-27T18:00:00Z'),
+            ('versions', 1),
+            ('versions', False),
+            ('delete_markers', 1),
+            ('evidence', self.ack['evidence']),
+            ('operation_id', host.FAILED_CAPTURE_NONCE),
+        ):
+            with self.subTest(field=field, bad=bad):
+                path.write_text(json.dumps({**value, field: bad}))
+                with self.assertRaises(ValueError):
+                    self.check('2026-10-28')
+
+    def test_new_handoff_transport_or_modified_metadata_refuses(self):
+        prior, _, _ = self.add_oct27()
+        for name in host.OCT27_CAPTURE_FILES:
+            path = prior / name
+            raw = path.read_bytes()
+            path.write_bytes(raw + b' ')
+            with self.assertRaisesRegex(ValueError, 'evidence_changed'):
+                self.check('2026-10-28')
+            path.write_bytes(raw)
+        for name in (
+            'phase-handoff-started.json',
+            'target.json',
+            'output',
+            'oom-recovery',
+        ):
+            path = prior / name
+            path.write_text('{}')
+            with self.assertRaisesRegex(ValueError, 'evidence_changed'):
+                self.check('2026-10-28')
+            path.unlink()
+
+
 if __name__ == '__main__':
     unittest.main()

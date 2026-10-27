@@ -1,5 +1,39 @@
 export const capacityCatalogs = {
   en: {
+    'rules.title': 'Machine start rules',
+    'rules.intro':
+      'How the automatic start planner decides when one more machine is worth starting, and how long an idle machine stays on.',
+    'rules.prepared': 'Prepared',
+    'rules.inUse': 'In use',
+    'rules.notConnected':
+      'Prepared settings: the planner that reads them is not switched on yet, so machines start and stop exactly as they do today.',
+    'rules.target': 'Machine type',
+    'rules.targetHelp': 'Each model, mode and pool has its own rules.',
+    'rules.field.job_seconds': 'Time per job',
+    'rules.field.boot_seconds': 'Time to boot',
+    'rules.field.minimum_jobs': 'Jobs per extra machine',
+    'rules.help.job_seconds': 'Expected generation time for one job on a ready machine.',
+    'rules.help.boot_seconds':
+      'From starting a machine to its first job. An idle machine also stays on this long before it stops.',
+    'rules.help.minimum_jobs':
+      'Start one more machine for every this many jobs still waiting once a new machine is ready.',
+    'rules.unit.seconds': 's',
+    'rules.unit.jobs': 'jobs',
+    'rules.summary':
+      'With these numbers: if at least {jobs} jobs would still be waiting after a {boot} boot (about {job} each), start another machine. With work queued and no machine, one machine always starts.',
+    'rules.check': 'Review change',
+    'rules.reviewTitle': 'Save this change?',
+    'rules.reason': 'Reason (kept in the audit log)',
+    'rules.save': 'Save rules',
+    'rules.saved': 'Saved. The next start decision uses the new rules.',
+    'rules.savedPrepared':
+      'Saved as prepared rules. Nothing uses them until the planner is switched on.',
+    'rules.history': 'Change history',
+    'rules.noHistory': 'No changes yet. These are the default rules.',
+    'rules.err.changed':
+      'Someone changed these rules. The latest values are loaded; check them and try again.',
+    'rules.err.invalid': 'The server refused these values. Check each number is in range.',
+    'rules.err.range': 'Use a whole number from {min} to {max}.',
     'capacity.title': 'Machines and spending limits',
     'capacity.intro':
       'Every number here is a setting. Changes apply to the next machine or job that starts; work already running is not stopped.',
@@ -109,6 +143,35 @@ export const capacityCatalogs = {
       'These are counted as unknown, not as zero. Reconcile them in the supplier console.',
   },
   zh: {
+    'rules.title': '开机规则',
+    'rules.intro': '自动开机在什么时候值得多开一台机器，以及空闲机器保留多久。',
+    'rules.prepared': '已准备',
+    'rules.inUse': '使用中',
+    'rules.notConnected':
+      '这些是预先准备的设置：读取它们的开机规划还没打开，机器的开关方式和现在完全一样。',
+    'rules.target': '机器类型',
+    'rules.targetHelp': '每种模型、模式和机器池各有一套规则。',
+    'rules.field.job_seconds': '每个任务用时',
+    'rules.field.boot_seconds': '开机用时',
+    'rules.field.minimum_jobs': '每多开一台需要的任务数',
+    'rules.help.job_seconds': '一台准备好的机器生成一个任务的预计用时。',
+    'rules.help.boot_seconds': '从开机到开始第一个任务的时间。空闲机器也会保留这么久再关机。',
+    'rules.help.minimum_jobs': '新机器准备好时，还在排队的任务每满这么多个，就多开一台。',
+    'rules.unit.seconds': '秒',
+    'rules.unit.jobs': '个任务',
+    'rules.summary':
+      '按这些数字：开机 {boot} 后如果还有至少 {jobs} 个任务在排队（每个约 {job}），就再开一台。有任务排队又没有机器时，总会开一台。',
+    'rules.check': '检查改动',
+    'rules.reviewTitle': '保存这个改动？',
+    'rules.reason': '原因（会记入审计日志）',
+    'rules.save': '保存规则',
+    'rules.saved': '已保存。下一次开机判断会用新规则。',
+    'rules.savedPrepared': '已保存为准备好的规则。开机规划打开前不会用到。',
+    'rules.history': '修改记录',
+    'rules.noHistory': '还没有改过，现在是默认规则。',
+    'rules.err.changed': '这些规则刚被别人改过。已载入最新数值，请核对后再试。',
+    'rules.err.invalid': '服务器拒绝了这些数值。请检查每个数字是否在范围内。',
+    'rules.err.range': '请填 {min} 到 {max} 之间的整数。',
     'capacity.title': '机器和花费上限',
     'capacity.intro':
       '这里每个数字都是设置，可以随时改。改动从下一台开机或下一个任务开始生效；已经在跑的不会被停掉。',

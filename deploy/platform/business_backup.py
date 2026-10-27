@@ -215,10 +215,28 @@ FAILED_CAPTURE_FILES = {
     'oom-recovery/phase-snapshot-started.json': 'a02f58d178ba67a38a36b9cc6bcefb01f60305e94ccba9b10018d7e64b3194d8',
     'oom-recovery/phase-snapshot-unknown.json': 'e41a9635c09e4fd29f7033ecfc54073b0f6558b7462f830f0c599b1f4d9643e4',
 }
+OCT27_CAPTURE_NONCE = '8e51de50-8b9d-4338-beda-c02b94d06aca'
+# Original terminal metadata from SSM536f0f66 (#655); no handoff or transfer.
+OCT27_CAPTURE_FILES = {
+    'intent.json': 'b1ec9657af4f0f837868394ba7525643cd3ffac62ccb24fc455a2582140213a6',
+    'phase-snapshot-started.json': 'd23070d558a96f3aa8a7f00d6bcaa06a3e7be900ec81553f8f638c8ecbca7fd7',
+    'phase-snapshot-unknown.json': 'f92196675d0a7dd6651e0b7e43d105ba6a030c3ade5b846ad4fedde41c7eb0e7',
+}
+
+
+def failed_capture_spec(day):
+    # Closed receipt registry, not an operator-supplied skip/history policy.
+    if day == FAILED_CAPTURE_DAY:
+        return (FAILED_CAPTURE_NONCE, FAILED_CAPTURE_FILES, {'oom-recovery'},
+                datetime(2026,10,26,21,50,tzinfo=timezone.utc))
+    if day == '2026-10-27':
+        return (OCT27_CAPTURE_NONCE, OCT27_CAPTURE_FILES, set(),
+                datetime(2026,10,27,16,34,49,278933,tzinfo=timezone.utc))
+    return None
 
 
 def reconciled_failed_capture(prior, day, config):
-    """One root-attested capture-only failure; not completion or replay authority.
+    """Exact root-attested capture-only failures; not completion/replay authority.
 
     The acknowledgement is installed separately under the reviewed zero-work CAS
     procedure, after proving no writer/transport and no original-prefix versions.
@@ -230,8 +248,10 @@ def reconciled_failed_capture(prior, day, config):
     value = read(ack)
     if type(value.get('version')) is int and value['version'] == 2:
         return reconciled_capture_v2(prior, day, config, value)
-    require(prior.name == FAILED_CAPTURE_DAY and re.fullmatch(r'\d{4}-\d{2}-\d{2}', day)
-        and day > FAILED_CAPTURE_DAY, 'backup_failed_capture_day_refused')
+    spec = failed_capture_spec(prior.name)
+    require(spec is not None and re.fullmatch(r'\d{4}-\d{2}-\d{2}', day)
+        and day > prior.name, 'backup_failed_capture_day_refused')
+    nonce, files, directories, not_before = spec
     require(config is not None and config.get('environment') == 'production'
         and config.get('instance_id') == HOSTS['production'], 'backup_failed_capture_host_refused')
     bucket = 'sixnine-business-backup-829135631045-ap-southeast-1'
@@ -242,9 +262,9 @@ def reconciled_failed_capture(prior, day, config):
         'zero_work', 'no_writer_or_transport', 'partials_preserved', 'automatic_retry'}
     require(set(value) == fields and type(value['version']) is int and value['version'] == 1
         and value['state'] == 'failed_capture_reconciled_not_completed'
-        and value['day'] == FAILED_CAPTURE_DAY and value['operation_id'] == FAILED_CAPTURE_NONCE
-        and value['evidence'] == FAILED_CAPTURE_FILES and value['bucket'] == bucket
-        and value['prefix'] == 'business-backups/'+FAILED_CAPTURE_NONCE+'/'
+        and value['day'] == prior.name and value['operation_id'] == nonce
+        and value['evidence'] == files and value['bucket'] == bucket
+        and value['prefix'] == 'business-backups/'+nonce+'/'
         and type(value['versions']) is int and value['versions'] == 0
         and type(value['delete_markers']) is int and value['delete_markers'] == 0
         and value['zero_work'] is True and value['no_writer_or_transport'] is True
@@ -254,18 +274,18 @@ def reconciled_failed_capture(prior, day, config):
         and isinstance(value['image'], str) and re.fullmatch('sha256:[0-9a-f]{64}', value['image'])
         and isinstance(value['checked_at'], str), 'backup_failed_capture_pin_invalid')
     checked = datetime.fromisoformat(value['checked_at'].replace('Z', '+00:00'))
-    require(checked.tzinfo is not None and checked >= datetime(2026,10,26,21,50,tzinfo=timezone.utc)
+    require(checked.tzinfo is not None and checked >= not_before
         and checked <= datetime.now(timezone.utc), 'backup_failed_capture_time_invalid')
     # Extra handoff/output/transfer files invalidate the capture-only conclusion.
-    expected = set(FAILED_CAPTURE_FILES) | {FAILED_CAPTURE_ACK, 'oom-recovery'}
+    expected = set(files) | {FAILED_CAPTURE_ACK} | directories
     actual = set()
     for path in prior.rglob('*'):
         name = path.relative_to(prior).as_posix()
         require(name in expected, 'backup_failed_capture_evidence_changed')
-        protected(path, name == 'oom-recovery')
+        protected(path, name in directories)
         actual.add(name)
     require(actual == expected, 'backup_failed_capture_evidence_changed')
-    for name, digest in FAILED_CAPTURE_FILES.items():
+    for name, digest in files.items():
         path = protected(prior/name)
         require(path.stat().st_size <= 65536 and hashlib.sha256(path.read_bytes()).hexdigest() == digest,
             'backup_failed_capture_evidence_changed')
