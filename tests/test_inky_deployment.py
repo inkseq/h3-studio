@@ -120,9 +120,16 @@ class InkyDeploymentTests(unittest.TestCase):
                 'environment': environment,
             }
             self.assertEqual(maintenance.settings_document(candidate), candidate)
-            for selected in ('', '/run/sixnine-secrets/inky', '/run/sixnine-secrets/workos'):
+            for selected in (
+                '',
+                '/run/sixnine-secrets/inky',
+                '/run/sixnine-secrets/workos',
+            ):
                 environment['INKSEQ_INKY_CONFIG_FILE'] = selected
-                with self.subTest(selected=selected), self.assertRaisesRegex(
-                    maintenance.release.ReleaseError, 'migration_paths_invalid'
+                with (
+                    self.subTest(selected=selected),
+                    self.assertRaisesRegex(
+                        maintenance.release.ReleaseError, 'migration_paths_invalid'
+                    ),
                 ):
                     maintenance.settings_document(candidate)
