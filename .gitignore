@@ -922,3 +922,5 @@ inventory.json
 !deploy/modal/
 !deploy/modal/README.md
 !deploy/modal/h3_reference.py
+
+!tools/inky_deploy_validation.py
