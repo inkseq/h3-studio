@@ -605,7 +605,8 @@ export const legacyCatalogs = {
     'legacy.projection40':
       'Characters, locations and props use text descriptions in first/last-frame mode.',
     'legacy.projection41': 'The current capability’s time-anchor count limit',
-    'legacy.projection42': 'All-reference mode needs at least one available reference.',
+    'legacy.projection42':
+      'Needs a picture: give a character, place or prop in this shot a picture, or switch to First/last frame.',
     'legacy.projection43': 'Capabilities not loaded yet',
     'journey.directionSaved': 'Direction recorded',
     'journey.awaitIdea': 'Waiting for your idea',
@@ -2010,7 +2011,7 @@ export const legacyCatalogs = {
     'legacy.projection39': '附加参考保留，切回全能参考时使用。',
     'legacy.projection40': '人物、场景和道具在首尾帧模式中使用文字描述。',
     'legacy.projection41': '当前能力的时间锚点数量上限',
-    'legacy.projection42': '全能参考至少需要一份可用参考。',
+    'legacy.projection42': '还缺图片：给这一镜的角色、地点或道具配一张图，或者改用首尾帧。',
     'legacy.projection43': '能力尚未读取',
     'journey.directionSaved': '方向已记录',
     'journey.awaitIdea': '等待你的想法',

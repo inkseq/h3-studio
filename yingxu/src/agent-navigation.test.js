@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   readAgentLink,
+  agentLinkSearch,
   locateEntity,
   mergeActivity,
   freestyleEntityTarget,
@@ -14,6 +15,7 @@ test('shared links parse only bounded project/entity identifiers and no credenti
     projectId: 'cloud-1',
     entityId: 'shot-2',
     activity: true,
+    generate: false,
   });
   for (const search of [
     '',
@@ -25,6 +27,12 @@ test('shared links parse only bounded project/entity identifiers and no credenti
   ])
     assert.equal(readAgentLink(search), null);
   assert.equal(readAgentLink('?project=cloud-1&panel=delete').activity, false);
+  assert.equal(readAgentLink('?project=cloud-1&panel=delete').generate, false);
+  // The chat's "Make video" hand-off only asks Works to open the confirmation.
+  assert.equal(
+    readAgentLink(agentLinkSearch({ projectId: 'cloud-1', generate: true })).generate,
+    true,
+  );
 });
 test('quick links locate the requested second shot only after the correct account and cloud project open', () => {
   const project = {

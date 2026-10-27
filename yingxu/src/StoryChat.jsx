@@ -132,7 +132,9 @@ function QuoteCard({ quote, balance, onSettle }) {
       </div>
       {quote.status === 'open' ? (
         <div className="sc-quote-actions">
-          {Number.isFinite(balance) && <small>{t('storyChat.quoteBalance', { balance })}</small>}
+          {Number.isFinite(balance) && (
+            <small>{t('storyChat.quoteBalance', { balance: balance.toLocaleString() })}</small>
+          )}
           {affordable ? (
             <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
               {t('storyChat.confirm')}
@@ -355,7 +357,7 @@ function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
                 >
                   <Thumb card={card} />
                   <strong>{card.name}</strong>
-                  <small>{card.text}</small>
+                  <small>{card.status === 'generating' ? t('storyChat.drawing') : card.text}</small>
                 </Button>
               ))}
             </div>
@@ -416,8 +418,8 @@ function whenText(seconds, locale) {
   }).format(date);
 }
 
-const openInWorks = (projectId, entityId) => {
-  const search = agentLinkSearch({ projectId, entityId: entityId || null });
+const openInWorks = (projectId, entityId, { generate = false } = {}) => {
+  const search = agentLinkSearch({ projectId, entityId: entityId || null, generate });
   if (search) navigateApp('/' + search);
 };
 
@@ -534,7 +536,8 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
       language: locale === 'zh' ? 'zh' : 'en',
       projectId: story.current,
       labels: {
-        generate: (count) => t('storyChat.liveQuote', { count }),
+        generate: (count) =>
+          t(count === 1 ? 'storyChat.liveQuote.one' : 'storyChat.liveQuote', { count }),
         failed: (failure) => {
           const code = failure.detail?.detail?.code;
           if (code === 'image_billing_unavailable') return t('storyChat.pictureUnavailable');
@@ -826,7 +829,12 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                     onClick={() => setTab('cards')}
                   >
                     <Check size={13} aria-hidden="true" />
-                    {t('storyChat.change.' + message.summary.kind, message.summary)}
+                    {t(
+                      'storyChat.change.' +
+                        message.summary.kind +
+                        (message.summary.count === 1 ? '.one' : ''),
+                      message.summary,
+                    )}
                   </Button>
                 );
               if (message.role === 'quote')
@@ -880,7 +888,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                 <span />
                 <span />
                 <span />
-                <small>{t('storyChat.thinking')}</small>
+                <small>{t(state.cards.length ? 'storyChat.working' : 'storyChat.thinking')}</small>
               </div>
             )}
             {done.done && (

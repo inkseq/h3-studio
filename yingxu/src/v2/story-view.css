@@ -620,10 +620,6 @@ body.sb-resizing-y video {
   pointer-events: none;
 }
 .sb-workspace .sb-queue {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 11px;
   color: var(--muted);
 }
 .sb-portal.sb-dialog {
