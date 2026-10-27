@@ -137,156 +137,150 @@ export function validateLink(project, source, target, role) {
   }
   return { ok: true };
 }
-export function validateProject(input) {
-  const fail = (error) => ({ ok: false, error });
-  if (!isObject(input) || !plain(input))
-    return fail('项目必须是普通 JSON 数据，不能包含非法键、过深结构或过长内容。');
-  if (input.schemaVersion !== 4) return fail('项目版本不支持；请导入本工作室导出的 v4 项目。');
-  if (typeof input.id !== 'string' || !input.id || input.id.length > 160)
-    return fail('项目 ID 无效。');
+// Each check below returns the first problem as user-facing text, or nothing.
+function projectHeaderIssue(input) {
+  if (input.schemaVersion !== 4) return '项目版本不支持；请导入本工作室导出的 v4 项目。';
+  if (typeof input.id !== 'string' || !input.id || input.id.length > 160) return '项目 ID 无效。';
   if (typeof input.title !== 'string' || !input.title.trim() || input.title.length > 160)
-    return fail('项目标题应为 1 至 160 个字符。');
+    return '项目标题应为 1 至 160 个字符。';
   if (typeof input.logline !== 'string' || input.logline.length > 24000)
-    return fail('项目简介应为不超过 24000 字符的文本。');
+    return '项目简介应为不超过 24000 字符的文本。';
   if (input.journey !== undefined) {
-    if (!isObject(input.journey)) return fail('创作导航内容必须为普通对象。');
+    if (!isObject(input.journey)) return '创作导航内容必须为普通对象。';
     if (
       input.journey.stage !== undefined &&
       (!Number.isInteger(input.journey.stage) || input.journey.stage < 1 || input.journey.stage > 7)
     )
-      return fail('创作导航阶段应为 1 至 7。');
+      return '创作导航阶段应为 1 至 7。';
     for (const field of ['brief', 'sound'])
       if (input.journey[field] !== undefined && !isObject(input.journey[field]))
-        return fail('创作导航的简报和声音设定格式不正确。');
+        return '创作导航的简报和声音设定格式不正确。';
   }
-  if (!Array.isArray(input.entities) || input.entities.length > 5000)
-    return fail('项目节点必须为数组，最多 5000 个。');
-  if (!Array.isArray(input.links) || input.links.length > 20000)
-    return fail('项目连线必须为数组，最多 20000 条。');
-  const ids = new Set();
-  for (const e of input.entities) {
-    if (!isObject(e) || typeof e.id !== 'string' || !e.id || e.id.length > 160 || ids.has(e.id))
-      return fail('节点 ID 无效或重复，请检查导出文件。');
-    ids.add(e.id);
-    if (!Object.hasOwn(typeLabels, e.type)) return fail(`节点 ${e.id} 的类型不支持。`);
-    if (typeof e.title !== 'string' || e.title.length > 160)
-      return fail(`节点 ${e.id} 的标题应为不超过 160 个字符的文本。`);
-    if (typeof e.description !== 'string' || e.description.length > 24000)
-      return fail(`节点「${e.title}」描述过长或不是文本。`);
-    if (e.parentId !== null && typeof e.parentId !== 'string')
-      return fail(`节点「${e.title}」的父级无效。`);
-    if (!finite(e.order) || !Number.isInteger(e.order) || e.order < 0)
-      return fail(`节点「${e.title}」的顺序必须为非负整数。`);
-    if (!Number.isInteger(e.version) || e.version < 1)
-      return fail(`节点「${e.title}」的版本必须为正整数。`);
-    if (!['draft', 'review', 'ready'].includes(e.status) || !isObject(e.data))
-      return fail(`节点「${e.title}」的状态或内容格式无效。`);
-    if (e.data.selectedVideoRange !== undefined) {
-      const issue = rangeShapeIssue(e.data.selectedVideoRange);
-      if (e.type !== 'shot' || issue)
-        return fail(`镜头「${e.title}」${issue || '只有镜头可以设置采用视频选段。'}`);
-    }
-    if (
-      e.data.seconds !== undefined &&
-      (!finite(e.data.seconds) || e.data.seconds <= 0 || e.data.seconds > 3600)
-    )
-      return fail(`节点「${e.title}」的时长必须大于 0 且不超过 3600 秒。`);
-    if (e.type === 'generation' && !['video', 'image', 'music'].includes(e.data.recipe))
-      return fail(`生成步骤「${e.title}」请选择视频、图片或音乐配方。`);
-    if (
-      e.data.script !== undefined &&
-      (typeof e.data.script !== 'string' || e.data.script.length > 120000)
-    )
-      return fail(`节点「${e.title}」的剧本应为不超过 120000 字符的文本。`);
-    for (const field of [
-      'prompt',
-      'goal',
-      'look',
-      'role',
-      'time',
-      'props',
-      'age',
-      'source',
-      'referenceRole',
-      'worldStatus',
-    ])
-      if (
-        e.data[field] !== undefined &&
-        (typeof e.data[field] !== 'string' || e.data[field].length > 24000)
-      )
-        return fail(`节点「${e.title}」的 ${field} 应为文本。`);
-    if (e.data.bytes !== undefined && (!Number.isSafeInteger(e.data.bytes) || e.data.bytes < 0))
-      return fail(`素材「${e.title}」的文件大小无效。`);
-    for (const field of ['fileId', 'fileName', 'mime'])
-      if (
-        e.data[field] !== undefined &&
-        (typeof e.data[field] !== 'string' || e.data[field].length > 1000)
-      )
-        return fail(`素材「${e.title}」的 ${field} 无效。`);
+}
+function entityShapeIssue(e) {
+  if (!Object.hasOwn(typeLabels, e.type)) return `节点 ${e.id} 的类型不支持。`;
+  if (typeof e.title !== 'string' || e.title.length > 160)
+    return `节点 ${e.id} 的标题应为不超过 160 个字符的文本。`;
+  if (typeof e.description !== 'string' || e.description.length > 24000)
+    return `节点「${e.title}」描述过长或不是文本。`;
+  if (e.parentId !== null && typeof e.parentId !== 'string')
+    return `节点「${e.title}」的父级无效。`;
+  if (!finite(e.order) || !Number.isInteger(e.order) || e.order < 0)
+    return `节点「${e.title}」的顺序必须为非负整数。`;
+  if (!Number.isInteger(e.version) || e.version < 1)
+    return `节点「${e.title}」的版本必须为正整数。`;
+  if (!['draft', 'review', 'ready'].includes(e.status) || !isObject(e.data))
+    return `节点「${e.title}」的状态或内容格式无效。`;
+}
+function entityDataIssue(e) {
+  if (e.data.selectedVideoRange !== undefined) {
+    const issue = rangeShapeIssue(e.data.selectedVideoRange);
+    if (e.type !== 'shot' || issue)
+      return `镜头「${e.title}」${issue || '只有镜头可以设置采用视频选段。'}`;
   }
-  for (const e of input.entities) {
+  if (
+    e.data.seconds !== undefined &&
+    (!finite(e.data.seconds) || e.data.seconds <= 0 || e.data.seconds > 3600)
+  )
+    return `节点「${e.title}」的时长必须大于 0 且不超过 3600 秒。`;
+  if (e.type === 'generation' && !['video', 'image', 'music'].includes(e.data.recipe))
+    return `生成步骤「${e.title}」请选择视频、图片或音乐配方。`;
+  if (
+    e.data.script !== undefined &&
+    (typeof e.data.script !== 'string' || e.data.script.length > 120000)
+  )
+    return `节点「${e.title}」的剧本应为不超过 120000 字符的文本。`;
+  for (const field of [
+    'prompt',
+    'goal',
+    'look',
+    'role',
+    'time',
+    'props',
+    'age',
+    'source',
+    'referenceRole',
+    'worldStatus',
+  ])
     if (
-      e.data.locationId !== undefined &&
-      (typeof e.data.locationId !== 'string' ||
-        (e.data.locationId !== '' &&
-          (!['scene', 'shot'].includes(e.type) ||
-            input.entities.find((asset) => asset.id === e.data.locationId)?.type !== 'location')))
+      e.data[field] !== undefined &&
+      (typeof e.data[field] !== 'string' || e.data[field].length > 24000)
     )
-      return fail(`「${e.title}」的绑定地点无效。`);
+      return `节点「${e.title}」的 ${field} 应为文本。`;
+  if (e.data.bytes !== undefined && (!Number.isSafeInteger(e.data.bytes) || e.data.bytes < 0))
+    return `素材「${e.title}」的文件大小无效。`;
+  for (const field of ['fileId', 'fileName', 'mime'])
     if (
-      e.data.referenceAssetIds !== undefined &&
-      (e.type !== 'location' ||
-        !Array.isArray(e.data.referenceAssetIds) ||
-        new Set(e.data.referenceAssetIds).size !== e.data.referenceAssetIds.length ||
-        e.data.referenceAssetIds.some(
-          (id) =>
-            typeof id !== 'string' ||
-            input.entities.find((asset) => asset.id === id)?.type !== 'image',
-        ))
+      e.data[field] !== undefined &&
+      (typeof e.data[field] !== 'string' || e.data[field].length > 1000)
     )
-      return fail(`地点「${e.title}」的参考图片不存在或格式无效。`);
-    if (e.data.selectedAssetId !== undefined && e.data.selectedAssetId !== '') {
-      const asset = input.entities.find((a) => a.id === e.data.selectedAssetId);
-      if (
-        e.type !== 'shot' ||
-        typeof e.data.selectedAssetId !== 'string' ||
-        !asset ||
-        !['image', 'video'].includes(asset.type)
-      )
-        return fail(
-          `镜头「${e.title || '未命名'}」选定的候选素材不存在或不是图片 / 视频，请重新选择。`,
-        );
-    }
-    const parent = e.parentId === null ? null : input.entities.find((x) => x.id === e.parentId);
-    if (e.parentId !== null && !parent) return fail(`节点「${e.title}」引用的父级不存在。`);
-    if (!validParent(e.type, parent))
-      return fail(
-        `「${e.title}」的层级不正确：章节包含场戏，场戏包含镜头；共享节点可位于项目或故事节点内。`,
-      );
-    const seen = new Set([e.id]);
-    let p = parent;
-    while (p) {
-      if (seen.has(p.id)) return fail(`「${e.title}」存在循环父级关系。`);
-      seen.add(p.id);
-      p = input.entities.find((x) => x.id === p.parentId);
-    }
+      return `素材「${e.title}」的 ${field} 无效。`;
+}
+// Location, reference images and chosen take must point at the right kind of node.
+function entityBindingIssue(e, entities) {
+  if (
+    e.data.locationId !== undefined &&
+    (typeof e.data.locationId !== 'string' ||
+      (e.data.locationId !== '' &&
+        (!['scene', 'shot'].includes(e.type) ||
+          entities.find((asset) => asset.id === e.data.locationId)?.type !== 'location')))
+  )
+    return `「${e.title}」的绑定地点无效。`;
+  if (
+    e.data.referenceAssetIds !== undefined &&
+    (e.type !== 'location' ||
+      !Array.isArray(e.data.referenceAssetIds) ||
+      new Set(e.data.referenceAssetIds).size !== e.data.referenceAssetIds.length ||
+      e.data.referenceAssetIds.some(
+        (id) =>
+          typeof id !== 'string' || entities.find((asset) => asset.id === id)?.type !== 'image',
+      ))
+  )
+    return `地点「${e.title}」的参考图片不存在或格式无效。`;
+  if (e.data.selectedAssetId !== undefined && e.data.selectedAssetId !== '') {
+    const asset = entities.find((a) => a.id === e.data.selectedAssetId);
+    if (
+      e.type !== 'shot' ||
+      typeof e.data.selectedAssetId !== 'string' ||
+      !asset ||
+      !['image', 'video'].includes(asset.type)
+    )
+      return `镜头「${e.title || '未命名'}」选定的候选素材不存在或不是图片 / 视频，请重新选择。`;
   }
+}
+// The parent exists, may hold this type, and the chain has no loop.
+function entityParentIssue(e, entities) {
+  const parent = e.parentId === null ? null : entities.find((x) => x.id === e.parentId);
+  if (e.parentId !== null && !parent) return `节点「${e.title}」引用的父级不存在。`;
+  if (!validParent(e.type, parent))
+    return `「${e.title}」的层级不正确：章节包含场戏，场戏包含镜头；共享节点可位于项目或故事节点内。`;
+  const seen = new Set([e.id]);
+  let p = parent;
+  while (p) {
+    if (seen.has(p.id)) return `「${e.title}」存在循环父级关系。`;
+    seen.add(p.id);
+    p = entities.find((x) => x.id === p.parentId);
+  }
+}
+function linksIssue(input) {
   const check = { ...input, links: [] },
     linkIds = new Set();
   for (const l of input.links) {
     if (!isObject(l) || typeof l.id !== 'string' || !l.id || l.id.length > 160 || linkIds.has(l.id))
-      return fail('连线 ID 无效或重复。');
+      return '连线 ID 无效或重复。';
     linkIds.add(l.id);
     const result = validateLink(check, l.source, l.target, l.role);
-    if (!result.ok) return fail(`连线检查失败：${result.error}`);
+    if (!result.ok) return `连线检查失败：${result.error}`;
     check.links.push(l);
   }
+}
+function layoutIssue(input, ids) {
   if (
     !isObject(input.layout) ||
     !isObject(input.layout.positions) ||
     !isObject(input.layout.viewport)
   )
-    return fail('画布布局格式无效。');
+    return '画布布局格式无效。';
   for (const [id, p] of Object.entries(input.layout.positions))
     if (
       !ids.has(id) ||
@@ -296,11 +290,13 @@ export function validateProject(input) {
       Math.abs(p.x) > 1e7 ||
       Math.abs(p.y) > 1e7
     )
-      return fail('画布节点位置无效，或位置引用了不存在的节点。');
+      return '画布节点位置无效，或位置引用了不存在的节点。';
   const v = input.layout.viewport;
   if (!finite(v.x) || !finite(v.y) || !finite(v.zoom) || v.zoom < 0.05 || v.zoom > 10)
-    return fail('画布缩放或视口无效。');
-  if (!Array.isArray(input.jobs) || input.jobs.length > 10000) return fail('任务记录格式无效。');
+    return '画布缩放或视口无效。';
+}
+// Generated sound keeps its job's video/audio binding and the shot start.
+function soundTracksIssue(input) {
   for (const tracks of Object.values(input.journey?.soundTracks || {}))
     if (Array.isArray(tracks))
       for (const track of tracks)
@@ -322,8 +318,37 @@ export function validateProject(input) {
             (track.slow_rate_audio_enabled !== undefined &&
               typeof track.slow_rate_audio_enabled !== 'boolean')
           )
-            return fail('生成声音须保留同任务视频／音频绑定与镜头起点；请解除关联后再独立编辑。');
+            return '生成声音须保留同任务视频／音频绑定与镜头起点；请解除关联后再独立编辑。';
         }
+}
+
+export function validateProject(input) {
+  const fail = (error) => ({ ok: false, error });
+  if (!isObject(input) || !plain(input))
+    return fail('项目必须是普通 JSON 数据，不能包含非法键、过深结构或过长内容。');
+  const header = projectHeaderIssue(input);
+  if (header) return fail(header);
+  if (!Array.isArray(input.entities) || input.entities.length > 5000)
+    return fail('项目节点必须为数组，最多 5000 个。');
+  if (!Array.isArray(input.links) || input.links.length > 20000)
+    return fail('项目连线必须为数组，最多 20000 条。');
+  const ids = new Set();
+  for (const e of input.entities) {
+    if (!isObject(e) || typeof e.id !== 'string' || !e.id || e.id.length > 160 || ids.has(e.id))
+      return fail('节点 ID 无效或重复，请检查导出文件。');
+    ids.add(e.id);
+    const issue = entityShapeIssue(e) || entityDataIssue(e);
+    if (issue) return fail(issue);
+  }
+  for (const e of input.entities) {
+    const issue = entityBindingIssue(e, input.entities) || entityParentIssue(e, input.entities);
+    if (issue) return fail(issue);
+  }
+  const later = linksIssue(input) || layoutIssue(input, ids);
+  if (later) return fail(later);
+  if (!Array.isArray(input.jobs) || input.jobs.length > 10000) return fail('任务记录格式无效。');
+  const sound = soundTracksIssue(input);
+  if (sound) return fail(sound);
   return { ok: true, project: clone(input) };
 }
 export function readiness(project, id, { includeConnectionNotice = true, locale = 'zh' } = {}) {

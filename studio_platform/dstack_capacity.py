@@ -1124,11 +1124,11 @@ class DstackClient:
             raise DstackError("dstack_provider_inventory_unavailable") from None
 
     def plan(self, spec):
-        # 0.22.5 ordinary planning selects an existing fleet. This endpoint is
-        # our advisory global stock query; it does not create a fleet or run.
+        # Use the same fleet selection as apply. Global stock browsing can
+        # offer machines that the configured native fleet cannot place (#659).
         return self._post(
             f"/api/project/{self.project}/runs/get_plan",
-            {"run_spec": spec, "max_offers": 100, "for_offers_only": True},
+            {"run_spec": spec, "max_offers": 100, "for_offers_only": False},
         )
 
     def apply(self, spec):

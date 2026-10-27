@@ -1,3 +1,63 @@
+// Drop deleted ids from a list field; returns how many were removed.
+function keepLive(holder, field, ids, idOf = (value) => value) {
+  if (!Array.isArray(holder?.[field])) return 0;
+  const kept = holder[field].filter((value) => !ids.has(idOf(value)));
+  const removed = holder[field].length - kept.length;
+  holder[field] = kept;
+  return removed;
+}
+
+// Clear deleted look images; a changed look gets a new version.
+function detachGallery(looks, ids, counts) {
+  let edited = false;
+  for (const look of looks || []) {
+    let lookChanged = false;
+    for (const [slot, assetId] of Object.entries(look.gallery || {}))
+      if (ids.has(assetId)) {
+        look.gallery[slot] = '';
+        counts.gallery++;
+        lookChanged = true;
+      }
+    if (lookChanged) {
+      look.version = (look.version || 1) + 1;
+      edited = true;
+    }
+  }
+  return edited;
+}
+
+// Delete keys of a map that point at removed things.
+function dropKeys(map, removed) {
+  let edited = false;
+  for (const id of Object.keys(map || {}))
+    if (removed.has(id)) {
+      delete map[id];
+      edited = true;
+    }
+  return edited;
+}
+
+// One entity's live references to deleted ids; returns whether anything changed.
+function detachFromData(data, ids, removedLinks, counts) {
+  const cast = keepLive(data, 'cast', ids, (c) => (typeof c === 'string' ? c : c.characterId)),
+    refs = keepLive(data, 'referenceAssetIds', ids),
+    guides = keepLive(data.h3, 'guides', ids, (g) => g.media_id);
+  counts.cast += cast;
+  counts.locations += refs;
+  counts.guides += guides;
+  let edited = cast + refs + guides > 0;
+  edited = detachGallery(data.looks, ids, counts) || edited;
+  for (const field of ['locationId', 'selectedAssetId'])
+    if (ids.has(data[field])) {
+      data[field] = '';
+      counts[field === 'locationId' ? 'locations' : 'selected']++;
+      edited = true;
+    }
+  edited = dropKeys(data.referenceRanges, removedLinks) || edited;
+  edited = dropKeys(data.h3?.video_audio, ids) || edited;
+  return edited;
+}
+
 // Remove only live editing references. Jobs and their historical input snapshots stay intact.
 // The caller commits one project snapshot, so one Undo restores every affected binding.
 export function detachDeletedReferences(project, ids) {
@@ -9,61 +69,7 @@ export function detachDeletedReferences(project, ids) {
   for (const entity of project.entities) {
     if (ids.has(entity.id)) continue;
     const data = entity.data;
-    let edited = false;
-    if (Array.isArray(data.cast)) {
-      const kept = data.cast.filter((c) => !ids.has(typeof c === 'string' ? c : c.characterId));
-      counts.cast += data.cast.length - kept.length;
-      edited ||= kept.length !== data.cast.length;
-      data.cast = kept;
-    }
-    for (const look of data.looks || []) {
-      let lookChanged = false;
-      for (const [slot, assetId] of Object.entries(look.gallery || {}))
-        if (ids.has(assetId)) {
-          look.gallery[slot] = '';
-          counts.gallery++;
-          lookChanged = true;
-        }
-      if (lookChanged) {
-        look.version = (look.version || 1) + 1;
-        edited = true;
-      }
-    }
-    if (ids.has(data.locationId)) {
-      data.locationId = '';
-      counts.locations++;
-      edited = true;
-    }
-    if (Array.isArray(data.referenceAssetIds)) {
-      const kept = data.referenceAssetIds.filter((id) => !ids.has(id));
-      counts.locations += data.referenceAssetIds.length - kept.length;
-      edited ||= kept.length !== data.referenceAssetIds.length;
-      data.referenceAssetIds = kept;
-    }
-    if (ids.has(data.selectedAssetId)) {
-      data.selectedAssetId = '';
-      counts.selected++;
-      edited = true;
-    }
-    if (Array.isArray(data.h3?.guides)) {
-      const kept = data.h3.guides.filter((g) => !ids.has(g.media_id));
-      counts.guides += data.h3.guides.length - kept.length;
-      edited ||= kept.length !== data.h3.guides.length;
-      data.h3.guides = kept;
-    }
-    for (const field of ['referenceRanges'])
-      if (data[field])
-        for (const id of Object.keys(data[field]))
-          if (removedLinks.has(id)) {
-            delete data[field][id];
-            edited = true;
-          }
-    if (data.h3?.video_audio)
-      for (const id of Object.keys(data.h3.video_audio))
-        if (ids.has(id)) {
-          delete data.h3.video_audio[id];
-          edited = true;
-        }
+    const edited = detachFromData(data, ids, removedLinks, counts);
     if (ids.has(data.characterReview?.characterId)) delete data.characterReview;
     if (edited) {
       entity.version++;

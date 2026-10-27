@@ -17,18 +17,9 @@ const display = (value, locale) =>
       : String(value);
 const mediaKey = (entity, range) => `${entity.id}:${range?.start ?? ''}:${range?.end ?? ''}`;
 
-function describeInputLimits(
-  limits,
-  { recipe, project, shot, references, guides, issues, summary, locale },
-) {
-  const at = (key, values) => translate(locale, key, values);
-  if (!limits) return;
-  const labels = {
-      image: at('adjunct.describeInputLimits.copy68'),
-      video: at('adjunct.describeInputLimits.copy69'),
-      audio: at('adjunct.describeInputLimits.copy70'),
-    },
-    kinds = { image: new Map(), video: new Map(), audio: new Map() },
+// Every distinct input (by media and range), and the non-frame ones per media kind.
+function collectInputs(references, guides, project) {
+  const kinds = { image: new Map(), video: new Map(), audio: new Map() },
     all = new Map();
   for (const ref of references) {
     const entry = { entity: ref.entity, range: ref.range },
@@ -44,70 +35,54 @@ function describeInputLimits(
     all.set(key, entry);
     kinds[entity.type]?.set(key, entry);
   }
-  for (const [kind, entries] of Object.entries(kinds)) {
-    const maxCount =
-      limits[{ image: 'max_images', video: 'max_videos', audio: 'max_audios' }[kind]];
-    if (Number.isInteger(maxCount)) {
-      summary.push(at('adjunct.describeInputLimits.copy71', { v0: labels[kind], v1: maxCount }));
-      if (entries.size > maxCount)
-        issues.push(
-          at('adjunct.describeInputLimits.copy72', {
-            v0: entries.size,
-            v1: labels[kind],
-            v2: maxCount,
-          }),
-        );
+  return { kinds, all };
+}
+
+// How many files of one kind, and how long they are together.
+function describeKindLimits(kind, entries, limits, { labels, issues, summary, at }) {
+  const maxCount = limits[{ image: 'max_images', video: 'max_videos', audio: 'max_audios' }[kind]];
+  if (Number.isInteger(maxCount)) {
+    summary.push(at('adjunct.describeInputLimits.copy71', { v0: labels[kind], v1: maxCount }));
+    if (entries.size > maxCount)
+      issues.push(
+        at('adjunct.describeInputLimits.copy72', {
+          v0: entries.size,
+          v1: labels[kind],
+          v2: maxCount,
+        }),
+      );
+  }
+  const maxDuration = limits[`max_${kind}_duration_seconds`];
+  if (Number.isFinite(maxDuration)) {
+    summary.push(
+      at('adjunct.describeInputLimits.copy73', {
+        v0: labels[kind],
+        v1: Number(maxDuration.toFixed(3)),
+      }),
+    );
+    let total = 0;
+    for (const { entity, range } of entries.values()) {
+      const meta = entity.data.metadata || {},
+        duration = range
+          ? range.end - range.start
+          : Math.max(meta.duration || 0, meta.source_duration || 0);
+      if (Number.isFinite(duration)) total += duration;
     }
-    const maxDuration = limits[`max_${kind}_duration_seconds`];
-    if (Number.isFinite(maxDuration)) {
-      summary.push(
-        at('adjunct.describeInputLimits.copy73', {
+    if (total > maxDuration + 1e-6)
+      issues.push(
+        at('adjunct.describeInputLimits.copy74', {
           v0: labels[kind],
           v1: Number(maxDuration.toFixed(3)),
         }),
       );
-      let total = 0;
-      for (const { entity, range } of entries.values()) {
-        const meta = entity.data.metadata || {},
-          duration = range
-            ? range.end - range.start
-            : Math.max(meta.duration || 0, meta.source_duration || 0);
-        if (Number.isFinite(duration)) total += duration;
-      }
-      if (total > maxDuration + 1e-6)
-        issues.push(
-          at('adjunct.describeInputLimits.copy74', {
-            v0: labels[kind],
-            v1: Number(maxDuration.toFixed(3)),
-          }),
-        );
-    }
   }
-  for (const kind of ['image', 'video']) {
-    const maximum = limits[`max_${kind}_pixels`];
-    if (Number.isFinite(maximum))
-      summary.push(
-        at('adjunct.describeInputLimits.copy75', {
-          v0:
-            kind === 'image'
-              ? at('adjunct.describeInputLimits.copy76')
-              : at('adjunct.describeInputLimits.copy69'),
-          v1: maximum.toLocaleString(locale === 'en' ? 'en-US' : 'zh-CN'),
-        }),
-      );
-  }
-  for (const { entity } of all.values()) {
-    const meta = entity.data.metadata || {},
-      maximum = limits[`max_${entity.type}_pixels`];
-    if (Number.isFinite(maximum) && Number(meta.width) * Number(meta.height) > maximum)
-      issues.push(
-        at('adjunct.describeInputLimits.copy78', {
-          v0: entity.title,
-          v1: meta.width,
-          v2: meta.height,
-        }),
-      );
-  }
+}
+
+// Which recipes, kinds and times guides may use, and whether video audio may be kept.
+function describeGuideLimits(
+  limits,
+  { recipe, project, shot, references, guides, labels, issues, summary, at },
+) {
   if (Array.isArray(limits.guide_recipe_ids) && !limits.guide_recipe_ids.includes(recipe.id)) {
     summary.push(at('adjunct.describeInputLimits.copy79'));
     if (guides.length) issues.push(at('adjunct.describeInputLimits.copy80'));
@@ -146,18 +121,63 @@ function describeInputLimits(
       );
     if (hasReference || hasGuide) issues.push(at('adjunct.describeInputLimits.copy87'));
   }
+}
+
+function describeInputLimits(
+  limits,
+  { recipe, project, shot, references, guides, issues, summary, locale },
+) {
+  const at = (key, values) => translate(locale, key, values);
+  if (!limits) return;
+  const labels = {
+      image: at('adjunct.describeInputLimits.copy68'),
+      video: at('adjunct.describeInputLimits.copy69'),
+      audio: at('adjunct.describeInputLimits.copy70'),
+    },
+    { kinds, all } = collectInputs(references, guides, project);
+  for (const [kind, entries] of Object.entries(kinds))
+    describeKindLimits(kind, entries, limits, { labels, issues, summary, at });
+  for (const kind of ['image', 'video']) {
+    const maximum = limits[`max_${kind}_pixels`];
+    if (Number.isFinite(maximum))
+      summary.push(
+        at('adjunct.describeInputLimits.copy75', {
+          v0:
+            kind === 'image'
+              ? at('adjunct.describeInputLimits.copy76')
+              : at('adjunct.describeInputLimits.copy69'),
+          v1: maximum.toLocaleString(locale === 'en' ? 'en-US' : 'zh-CN'),
+        }),
+      );
+  }
+  for (const { entity } of all.values()) {
+    const meta = entity.data.metadata || {},
+      maximum = limits[`max_${entity.type}_pixels`];
+    if (Number.isFinite(maximum) && Number(meta.width) * Number(meta.height) > maximum)
+      issues.push(
+        at('adjunct.describeInputLimits.copy78', {
+          v0: entity.title,
+          v1: meta.width,
+          v2: meta.height,
+        }),
+      );
+  }
+  describeGuideLimits(limits, {
+    recipe,
+    project,
+    shot,
+    references,
+    guides,
+    labels,
+    issues,
+    summary,
+    at,
+  });
   summary.push(at('adjunct.describeInputLimits.copy88'));
 }
 
-// Describes the server's qualified envelope, never grants admission or changes
-// user inputs. The authenticated preflight remains authoritative for execution.
-export function recipeExecutionStatus(
-  recipe,
-  { project, shot, now = Date.now(), locale = 'zh' } = {},
-) {
-  const at = (key, values) => translate(locale, key, values);
-  const names = namesFor(locale),
-    support = recipe?.execution_support;
+// A status card for a recipe the server has not qualified (or whose envelope is missing).
+function unqualifiedStatus(support, now, at) {
   if (!support)
     return {
       kind: 'unknown',
@@ -187,8 +207,7 @@ export function recipeExecutionStatus(
       issues: [],
       summary: [],
     };
-  const limits = support.constraints;
-  if (!limits)
+  if (!support.constraints)
     return {
       kind: 'unknown',
       title: at('adjunct.recipeExecutionStatus.copy97'),
@@ -196,9 +215,11 @@ export function recipeExecutionStatus(
       issues: [],
       summary: [],
     };
-  const values = controlsForRecipe(recipe, shot?.data.h3?.controls, shot?.data.seconds),
-    issues = [],
-    summary = [];
+  return null;
+}
+
+// Duration, steps and custom size against the qualified envelope.
+function describeControlLimits(limits, values, { issues, summary, at, locale }) {
   if (Number.isFinite(limits.max_duration_seconds)) {
     summary.push(at('adjunct.recipeExecutionStatus.copy99', { v0: limits.max_duration_seconds }));
     if (Number(values.duration) > limits.max_duration_seconds)
@@ -230,9 +251,10 @@ export function recipeExecutionStatus(
         at('adjunct.recipeExecutionStatus.copy104', { v0: values.width, v1: values.height }),
       );
   }
-  const references =
-      project && shot ? referenceSpecs(project, shot.id, { mode: recipe.mode }).references : [],
-    guides = shot?.data.h3?.guides || [];
+}
+
+// Reference files, guides, first/last frames and generated audio.
+function describeMediaLimits(limits, values, { references, guides, issues, summary, at }) {
   const mediaKeys = new Set(references.map((ref) => mediaKey(ref.entity, ref.range)));
   for (const guide of guides)
     mediaKeys.add(
@@ -267,16 +289,11 @@ export function recipeExecutionStatus(
     summary.push(at('adjunct.recipeExecutionStatus.copy113'));
     if (values.generate_audio) issues.push(at('adjunct.recipeExecutionStatus.copy114'));
   }
-  describeInputLimits(limits.input_limits, {
-    recipe,
-    project,
-    shot,
-    references,
-    guides,
-    issues,
-    summary,
-    locale,
-  });
+}
+
+// Server-listed control options (sampler, resolution and so on).
+function describeControlOptions(limits, values, { issues, summary, at, locale }) {
+  const names = namesFor(locale);
   for (const [field, options] of Object.entries(limits.controls || {}))
     if (names[field] && Array.isArray(options) && options.length) {
       summary.push(
@@ -291,6 +308,38 @@ export function recipeExecutionStatus(
           }),
         );
     }
+}
+
+// Describes the server's qualified envelope, never grants admission or changes
+// user inputs. The authenticated preflight remains authoritative for execution.
+export function recipeExecutionStatus(
+  recipe,
+  { project, shot, now = Date.now(), locale = 'zh' } = {},
+) {
+  const at = (key, values) => translate(locale, key, values);
+  const support = recipe?.execution_support;
+  const unqualified = unqualifiedStatus(support, now, at);
+  if (unqualified) return unqualified;
+  const limits = support.constraints;
+  const values = controlsForRecipe(recipe, shot?.data.h3?.controls, shot?.data.seconds),
+    issues = [],
+    summary = [];
+  describeControlLimits(limits, values, { issues, summary, at, locale });
+  const references =
+      project && shot ? referenceSpecs(project, shot.id, { mode: recipe.mode }).references : [],
+    guides = shot?.data.h3?.guides || [];
+  describeMediaLimits(limits, values, { references, guides, issues, summary, at });
+  describeInputLimits(limits.input_limits, {
+    recipe,
+    project,
+    shot,
+    references,
+    guides,
+    issues,
+    summary,
+    locale,
+  });
+  describeControlOptions(limits, values, { issues, summary, at, locale });
   const runtime = support.status === 'runtime_required';
   return {
     kind: issues.length ? 'outside' : runtime ? 'runtime_required' : 'qualified',

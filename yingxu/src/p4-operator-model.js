@@ -103,6 +103,17 @@ export function bytes(value) {
     units[index]
   );
 }
+function byteAmount(complete, total, prefix, locale) {
+  if (complete === null) return translate(locale, 'operator.more.downloadBytesUnknown');
+  if (total !== null && complete <= total) return prefix + bytes(complete) + ' / ' + bytes(total);
+  return (prefix || translate(locale, 'operator.more.downloaded')) + bytes(complete);
+}
+function fileCount(files, fileTotal, locale) {
+  if (files === null) return '';
+  return fileTotal !== null && files <= fileTotal
+    ? translate(locale, 'operator.more.fileProgress', { complete: files, total: fileTotal })
+    : translate(locale, 'operator.more.files', { count: files });
+}
 export function transferProgress(value, locale = 'zh') {
   if (!value || typeof value !== 'object')
     return { label: translate(locale, 'operator.more.downloadUnknown'), percent: null };
@@ -120,18 +131,8 @@ export function transferProgress(value, locale = 'zh') {
       : value.basis === 'completed_files'
         ? translate(locale, 'operator.more.completedFiles')
         : '';
-  const amount =
-    complete !== null
-      ? total !== null && complete <= total
-        ? prefix + bytes(complete) + ' / ' + bytes(total)
-        : (prefix || translate(locale, 'operator.more.downloaded')) + bytes(complete)
-      : translate(locale, 'operator.more.downloadBytesUnknown');
-  const fileAmount =
-    files === null
-      ? ''
-      : fileTotal !== null && files <= fileTotal
-        ? translate(locale, 'operator.more.fileProgress', { complete: files, total: fileTotal })
-        : translate(locale, 'operator.more.files', { count: files });
+  const amount = byteAmount(complete, total, prefix, locale),
+    fileAmount = fileCount(files, fileTotal, locale);
   // A progress bar is only shown for a reported percentage backed by a valid
   // known total. File/byte counters are not converted into an invented rate.
   const percent =
@@ -154,20 +155,14 @@ export function transferProgress(value, locale = 'zh') {
     percent,
   };
 }
-export function preparationView(node, locale = 'zh') {
-  const source =
-      node?.preparation && typeof node.preparation === 'object' ? node.preparation : null,
-    authority = phase(node, locale);
+// The phase to show: stop and job states win over the reported preparation phase.
+function preparationStatus(node, source, authority, locale) {
+  const loading = source?.model?.state === 'loading' && source?.stale !== true;
   let id = source && Object.hasOwn(preparationLabels, source.phase) ? source.phase : authority.id;
   if (terminal(node)) id = 'stopped';
   else if (stopping(node)) id = 'stopping';
-  else if (node?.current_job)
-    id =
-      source?.model?.state === 'loading' && source?.stale !== true
-        ? 'loading_model'
-        : 'running_job';
-  else if (authority.id === 'ready')
-    id = source?.model?.state === 'loading' && source?.stale !== true ? 'loading_model' : 'ready';
+  else if (node?.current_job) id = loading ? 'loading_model' : 'running_job';
+  else if (authority.id === 'ready') id = loading ? 'loading_model' : 'ready';
   const status = {
     id,
     label: Object.hasOwn(preparationLabels, id)
@@ -181,10 +176,10 @@ export function preparationView(node, locale = 'zh') {
   };
   if (id === 'ready' && authority.id !== 'ready' && authority.id !== 'running')
     status.label = translate(locale, 'workspace.preparationDetail0');
-  const elapsedSeconds = nonnegative(source?.elapsed_seconds) ? source.elapsed_seconds : null,
-    phaseElapsed = nonnegative(source?.phase_elapsed_seconds) ? source.phase_elapsed_seconds : null;
-  const download = transferProgress(source?.download, locale),
-    image = transferProgress(source?.image, locale);
+  return status;
+}
+// Whether the model is in GPU memory, as last observed.
+function modelView(node, source, locale) {
   const modelState = ['not_loaded', 'loading', 'loaded', 'not_observed'].includes(
     source?.model?.state,
   )
@@ -199,24 +194,34 @@ export function preparationView(node, locale = 'zh') {
           loaded: translate(locale, 'workspace.preparationDetail4'),
           not_observed: translate(locale, 'workspace.preparationDetail5'),
         }[modelState];
-  const reasonCode = diagnosticCode(source?.reason_code ?? node?.reason_code);
-  let reasonText =
+  return { modelState, modelLabel };
+}
+// The service emits this closed diagnostic projection; user content is never translated.
+function preparationReason(source, reasonCode, locale) {
+  const text =
     typeof source?.reason_text === 'string' && source.reason_text.trim()
       ? source.reason_text.trim().slice(0, 600)
       : null;
-  // The service emits this closed diagnostic projection; user content is never translated.
-  if (locale !== 'zh' && reasonText) {
-    const reason = operatorReasonCodes.includes(reasonCode)
-      ? reasonCode
-      : reasonCode
-        ? 'unknown'
-        : source?.stale === true
-          ? 'stale'
-          : source?.stalled === true
-            ? 'stalled'
-            : null;
-    if (reason) reasonText = translate(locale, 'operator.reason.' + reason);
-  }
+  if (locale === 'zh' || !text) return text;
+  let reason = null;
+  if (operatorReasonCodes.includes(reasonCode)) reason = reasonCode;
+  else if (reasonCode) reason = 'unknown';
+  else if (source?.stale === true) reason = 'stale';
+  else if (source?.stalled === true) reason = 'stalled';
+  return reason ? translate(locale, 'operator.reason.' + reason) : text;
+}
+export function preparationView(node, locale = 'zh') {
+  const source =
+      node?.preparation && typeof node.preparation === 'object' ? node.preparation : null,
+    authority = phase(node, locale);
+  const status = preparationStatus(node, source, authority, locale);
+  const elapsedSeconds = nonnegative(source?.elapsed_seconds) ? source.elapsed_seconds : null,
+    phaseElapsed = nonnegative(source?.phase_elapsed_seconds) ? source.phase_elapsed_seconds : null;
+  const download = transferProgress(source?.download, locale),
+    image = transferProgress(source?.image, locale);
+  const { modelState, modelLabel } = modelView(node, source, locale);
+  const reasonCode = diagnosticCode(source?.reason_code ?? node?.reason_code),
+    reasonText = preparationReason(source, reasonCode, locale);
   const stale = source?.stale === true,
     stalled = source?.stalled === true;
   const observationAge = nonnegative(source?.observation_age_seconds)
@@ -438,25 +443,35 @@ export function previewCurrent(preview, selection, now = Date.now()) {
   )
     return false;
   return (
+    previewLive(preview, now) && !!policy && previewMatchesSelection(preview, policy, selection)
+  );
+}
+// A startable dstack preview that has not expired and states a positive price.
+function previewLive(preview, now) {
+  return (
     preview?.capacity_backend === 'dstack-v1' &&
     preview.can_start === true &&
     typeof preview.preview_id === 'string' &&
     finite(preview.expires_at) &&
     preview.expires_at * 1000 > now &&
-    policy &&
+    finite(preview.hourly_cost_microusd) &&
+    preview.hourly_cost_microusd > 0 &&
+    finite(preview.reservation_microusd) &&
+    preview.reservation_microusd >= 0
+  );
+}
+// The preview was made for exactly this selection: profile, group, keep-on, idle stop, price.
+function previewMatchesSelection(preview, policy, selection) {
+  return (
     typeof selection?.profile_id === 'string' &&
     policy.keep_on === selection.keep_on &&
     (!Object.hasOwn(selection, 'idle_shutdown_seconds') ||
       policy.idle_shutdown_seconds === selection.idle_shutdown_seconds) &&
     (!preview.profile_id || preview.profile_id === selection.profile_id) &&
     (!Object.hasOwn(preview, 'group_id') || preview.group_id === selection.group_id) &&
-    finite(preview.hourly_cost_microusd) &&
-    preview.hourly_cost_microusd > 0 &&
     (!Object.hasOwn(selection, 'max_price_microusd') ||
       (preview.max_price_microusd === selection.max_price_microusd &&
-        preview.hourly_cost_microusd === selection.max_price_microusd)) &&
-    finite(preview.reservation_microusd) &&
-    preview.reservation_microusd >= 0
+        preview.hourly_cost_microusd === selection.max_price_microusd))
   );
 }
 export function testTaskBody(required, value) {

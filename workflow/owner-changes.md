@@ -640,3 +640,45 @@ Owner, 2026-10-27 (to Claude): too much time went to approvals and queues for sm
   (backup recovery, helper installs) posts a hold on #193; the promoter respects open holds.
 - Unchanged hard limits: ask the owner for budget overrun, permanent user-data deletion,
   credential/provider-account changes and charging/Checkout changes.
+
+## CR-20261027-71 — Xiaomo advises and navigates; contextual examples are bounded
+
+Owner directions recorded on #679:
+[6433837121](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433837121),
+[6433894374](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433894374),
+[6433915423](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433915423),
+and [6433954470](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433954470).
+These supersede the issue body's v1 batch-edit proposal. Timing remains after the
+current batch ships; this record does not start or activate the feature.
+
+- Xiaomo v1 only advises and guides. Each item has a typed navigation target
+  `{project_id, step: story|storyboard|film, entity_id?, field?}`. Open/select/
+  focus/highlight take the user to the field; the user edits it. No mutation,
+  generation or spend tool is granted to Xiaomo. Agent editing is deferred.
+- Free code pre-checks precede batched Jev judgements on save and before generation.
+  V1 judgements cover description specificity, keyframe need and upload-to-card
+  suitability. Do not use Jev for likeness, identity/reference fidelity or
+  message-to-card targeting. Consistency checks compare structured fields.
+- Tip wording uses fixed zh/en templates; a matching scene-script quotation is
+  the free example path. The later contextual-guidance direction permits an LLM
+  only for Jev-flagged items: the top 1–3 per save, other items on click. Use minimal
+  shot fields, scene excerpt, card names and step; cache by target/version. A slow
+  or failed LLM falls back to the template/script quote. A per-story daily budget
+  applies; unrestricted background generation is not authorized.
+- The selected contextual model is GPT-6.1 Terra, configured server-side as
+  `gpt-6.1-terra`, with low reasoning effort; never show model controls/names to
+  creators. Resolve the exact upstream identifier and authorized existing registry
+  profile before implementation. A provider-qualified model identifier is not
+  interchangeable with the direct API identifier, and an evaluation receipt is
+  not deployment or credential authority. No new key, profile, payment or budget
+  increase is authorized by this documentation change.
+- At most three open items, per-target ignored-kind suppression and a mute switch.
+  Claude owns the navigation/moving mascot UI, reduced-motion behavior, mobile
+  placement, staging acceptance and production promotion. Codex owns the later
+  backend contract. No frontend or runtime change is included here.
+
+Claude's [evaluation6434231644](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6434231644)
+is implementation evidence, not a broader owner decision: it recommends fixed
+tips with cast/script-bound examples and an explicit language field after one
+English input received a Chinese example. Verify those constraints in the feature
+tests; the evaluation does not establish universal accuracy or production readiness.
