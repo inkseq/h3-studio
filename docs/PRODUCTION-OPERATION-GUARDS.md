@@ -73,7 +73,10 @@ from whatever host happens to be current at execution time. Version 1 requires:
 It checks protected paths, independent manifest approval hashes, current app
 image, live container identities, and zero nonterminal jobs under the existing
 release lock, then rechecks the tuple before yielding. Its only subprocesses
-are Docker inventory/inspect and a read-only SQL count inside the pinned app.
+are Docker inventory/inspect, a read-only SQL count inside the pinned app, and
+the root-installed archive identity validator in an isolated Python subprocess.
+OCI manifest digests and Docker config IDs are checked against the same approved
+archive, rather than incorrectly requiring the two digest formats to be equal.
 No intents, configs, bytecode files, containers or artifacts are created.
 Diagnostics contain fixed error codes, never config contents or raw stderr.
 
@@ -84,7 +87,8 @@ a later command, prove no new job can arrive, or replace admission quiescence,
 writer/transport checks, retained artifact/helper compatibility checks,
 operation-specific fences, backup/rollback or completion verification. Those
 remain the writer's responsibility. This slice checks manifest pins and approvals;
-it does not execute incoming artifact code or validate every archive payload.
+it does not execute incoming artifact code or replace the writer's full artifact
+and configuration compatibility validation.
 The remaining installer/writer integration keeps #665 open.
 
 ## Offline regression contract

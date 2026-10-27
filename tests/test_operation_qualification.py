@@ -72,10 +72,15 @@ class Fixture:
         self.raw[q.ROOT / name] = raw
         self.binding['files'][name] = q.sha(raw)
 
-    def check(self):
+    def check(self, archive_ids=None):
         with (
             patch.object(q, 'read', side_effect=lambda path: self.raw[path]),
             patch.object(q, 'runtime', return_value=self.binding['containers']),
+            patch.object(
+                q,
+                'archive_image_ids',
+                return_value=archive_ids or {'sha256:' + 'c' * 64},
+            ),
             patch.object(q, 'directory'),
         ):
             q.check(q.validate(self.binding))
@@ -137,15 +142,16 @@ class QualificationTests(Fixture, unittest.TestCase):
                     self.check()
                 self.raw, self.binding['files'] = raw, pins
 
-    def test_approved_manifest_image_must_match_app(self):
+    def test_oci_manifest_and_config_can_differ_but_app_must_belong_to_archive(self):
         name = 'releases/' + 'a' * 40 + '/release-manifest.json'
         self.put(name, {'commit': 'a' * 40, 'image_id': 'sha256:' + 'd' * 64})
         self.put(
             'approved-releases/' + 'a' * 40 + '.sha256',
             q.sha(self.raw[q.ROOT / name]).encode(),
         )
+        self.check(archive_ids={'sha256:' + 'd' * 64, 'sha256:' + 'c' * 64})
         with self.assertRaisesRegex(q.Refused, 'manifest_image_changed'):
-            self.check()
+            self.check(archive_ids={'sha256:' + 'd' * 64})
 
     def test_cli_does_not_leak_subprocess_or_config_error(self):
         output = io.StringIO()
@@ -156,6 +162,22 @@ class QualificationTests(Fixture, unittest.TestCase):
             self.assertEqual(q.main(['/root/pins.json']), 1)
         self.assertNotIn('SECRET', output.getvalue())
         self.assertIn('qualification_read_failed', output.getvalue())
+
+    def test_archive_reader_failures_refuse_and_never_load_images(self):
+        result = subprocess.CompletedProcess([], 0, b'["sha256:' + b'c' * 64 + b'"]')
+        with patch.object(q.subprocess, 'run', return_value=result) as run:
+            self.assertEqual(q.archive_image_ids('a' * 40, {}), {'sha256:' + 'c' * 64})
+            self.assertEqual(
+                run.call_args.args[0][:3], ['/usr/bin/python3', '-I', '-B']
+            )
+            self.assertIn('validate_image_archive', run.call_args.args[0][4])
+            result.returncode = 1
+            with self.assertRaisesRegex(q.Refused, 'archive_invalid'):
+                q.archive_image_ids('a' * 40, {})
+            result.returncode = 0
+            result.stdout = b'["not-an-image"]'
+            with self.assertRaisesRegex(q.Refused, 'archive_identity_invalid'):
+                q.archive_image_ids('a' * 40, {})
 
     def test_runtime_checks_unique_service_and_reads_only_selected_fields(self):
         observed = self.binding['containers']
@@ -260,6 +282,7 @@ class LockTests(Fixture, unittest.TestCase):
                 ],
             ),
             patch.object(q, 'runtime', return_value=self.binding['containers']),
+            patch.object(q, 'archive_image_ids', return_value={'sha256:' + 'c' * 64}),
         ):
             operation.mkdir()
             with self.assertRaisesRegex(q.Refused, 'prior_outcome_exists'):

@@ -163,6 +163,30 @@ def runtime():
     return result
 
 
+def archive_image_ids(commit, manifest):
+    # OCI manifest and Docker config IDs may differ in the same approved archive.
+    # Reuse the installed validator without loading images or incoming scripts.
+    program = """import json,sys
+from pathlib import Path
+sys.path.insert(0,sys.argv[1])
+import release
+assert Path(release.__file__)==Path(sys.argv[1])/'release.py'
+value=json.loads(sys.stdin.read())
+print(json.dumps(sorted(release.validate_image_archive(Path(sys.argv[2]),value))))
+"""
+    archive = ROOT / 'releases' / commit / 'image.tar.gz'
+    process = subprocess.run(['/usr/bin/python3', '-I', '-B', '-c', program,
+                              str(HELPERS), str(archive)],
+                             input=json.dumps(manifest).encode(), capture_output=True,
+                             env=ENV, timeout=120, check=False, cwd='/')
+    need(process.returncode == 0, 'qualification_approved_archive_invalid')
+    values = json.loads(process.stdout)
+    need(type(values) is list and bool(values)
+         and all(matches(x, 'sha256:[0-9a-f]{64}') for x in values),
+         'qualification_archive_identity_invalid')
+    return set(values)
+
+
 def check(binding):
     need(read(INSTANCE).decode().strip() == binding['instance_id'], 'qualification_wrong_host')
     for name, digest in binding['helpers'].items():
@@ -190,7 +214,7 @@ def check(binding):
         manifest = json.loads(files[f'releases/{commit}/release-manifest.json'])
         need(manifest.get('commit') == commit, 'qualification_manifest_commit_changed')
         if commit == binding['current']:
-            need(manifest.get('image_id') == binding['containers']['app']['image'],
+            need(binding['containers']['app']['image'] in archive_image_ids(commit, manifest),
                  'qualification_manifest_image_changed')
     for name in binding['absent']:
         path = ROOT / name
