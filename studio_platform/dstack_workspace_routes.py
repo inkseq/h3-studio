@@ -11,6 +11,9 @@ PREFIX = "/v1/operator/dstack"
 def register_routes(app, *, service):
     workspace = DstackWorkspace(service)
     app.state.dstack_workspace = workspace
+    from .capacity_start_rules import register_routes as register_start_rules
+
+    register_start_rules(app, workspace)
 
     def principal(request):
         return getattr(request.state, "principal", None)
