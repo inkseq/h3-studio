@@ -5,10 +5,48 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from tools import reconcile_staging_intent as recovery
+
+
+class ContainerObservationTests(unittest.TestCase):
+    def rows(self):
+        return [
+            {
+                'id': service,
+                'service': service,
+                'running': True,
+                'health': None if service == 'caddy' else 'healthy',
+            }
+            for service in ('app', 'controller', 'db', 'dstack', 'caddy')
+        ]
+
+    def observe(self, rows):
+        with patch.object(
+            recovery.subprocess,
+            'run',
+            side_effect=[
+                SimpleNamespace(stdout=' '.join(row['id'] for row in rows)),
+                SimpleNamespace(stdout='\n'.join(json.dumps(row) for row in rows)),
+            ],
+        ):
+            return recovery.containers()
+
+    def test_missing_health_is_supported_but_unhealthy_still_refuses(self):
+        rows = self.rows()
+        self.assertEqual(len(self.observe(rows)), 5)
+        rows[0]['health'] = 'unhealthy'
+        with self.assertRaisesRegex(ValueError, 'container_unhealthy'):
+            self.observe(rows)
+
+    def test_required_service_must_still_be_running(self):
+        rows = self.rows()
+        rows[0]['running'] = False
+        with self.assertRaisesRegex(ValueError, 'required_service_missing'):
+            self.observe(rows)
 
 
 class RootOwnedStat:

@@ -132,7 +132,7 @@ def containers():
         ['ps', '-aq', '--filter', 'label=com.docker.compose.project=sixnine-platform']
     ).split()
     need(bool(ids), 'containers_missing')
-    template = '{"id":{{json .Id}},"image":{{json .Image}},"running":{{json .State.Running}},"started":{{json .State.StartedAt}},"health":{{if .State.Health}}{{json .State.Health.Status}}{{else}}null{{end}},"service":{{json (index .Config.Labels "com.docker.compose.service")}}}'
+    template = '{"id":{{json .Id}},"image":{{json .Image}},"running":{{json .State.Running}},"started":{{json .State.StartedAt}},"health":{{with (index .State "Health")}}{{json .Status}}{{else}}null{{end}},"service":{{json (index .Config.Labels "com.docker.compose.service")}}}'
     rows = [
         json.loads(line)
         for line in command(['inspect', '--format', template, *ids]).splitlines()
