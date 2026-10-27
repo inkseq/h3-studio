@@ -1813,6 +1813,27 @@ export function createCloudController({
     if (!Array.isArray(value)) throw Error('review.unavailable');
     return value;
   }
+  // Inky (h3-studio#679/#685): advice only. Reads never trigger evaluation; ignore is an
+  // explicit per-target preference and never edits the shot.
+  const inkyQuery = (ctx) => '?project_id=' + encodeURIComponent(ctx.projectId);
+  async function readInkySuggestions() {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request('/v1/inky/suggestions' + inkyQuery(ctx));
+    guard(ctx);
+    if (!Array.isArray(value?.items)) throw Error('inky.unavailable');
+    return value;
+  }
+  async function ignoreInkySuggestion(id) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(
+      `/v1/inky/suggestions/${encodeURIComponent(id)}/ignore` + inkyQuery(ctx),
+      { method: 'POST' },
+    );
+    guard(ctx);
+    return value;
+  }
   async function saveTakeReview(shotId, artifactId, body, key) {
     requireCloud();
     const ctx = context();
@@ -2023,6 +2044,8 @@ export function createCloudController({
     previewScriptWindows: (shotId, options) => previewScriptWindows(shotId, options),
     readTakeReview: (shotId, artifactId) => readTakeReview(shotId, artifactId),
     readTakeReviewSummaries: (shotId) => readTakeReviewSummaries(shotId),
+    readInkySuggestions: () => readInkySuggestions(),
+    ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
     saveTakeReview: (shotId, artifactId, body, key) =>
       saveTakeReview(shotId, artifactId, body, key),
     // Story edits share one version, so they run one after another: a quick second click
