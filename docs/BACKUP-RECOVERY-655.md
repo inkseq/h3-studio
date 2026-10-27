@@ -323,3 +323,45 @@ extra handoff/transfer evidence, boolean counts, pending original outcomes,
 same-day retry refusal, wrong environment/bucket, malformed pins/timestamps,
 protected-file rejection, preserved bytes and unchanged completion validation.
 They do not themselves attest production S3 emptiness or authorize a host write.
+
+## October 27 capture-only reconciliation (#710)
+
+The normal October 27 operation `8e51de50-8b9d-4338-beda-c02b94d06aca`
+terminated at 16:32:02 UTC, exit 1, before handoff/transfer. Read-only SSM
+`536f0f66-83c5-449b-8e91-3b4df1ebc378` captured the three original metadata
+hashes now pinned in `OCT27_CAPTURE_FILES`. Binding-qualified read-only inspection
+`a07bdaf9-44da-4cb5-ada8-8a994cb06155` found the first referenced Local object
+absent. This is not the October 26 OOM, and its exhausted recovery helpers must
+not be invoked. #709 fixes the explicit incomplete-media capture path.
+
+The existing history reader now recognizes exactly two receipt-bound failures;
+the October 26 acknowledgment and evidence remain unchanged. October 27 needs
+its own exclusive root acknowledgment with the same closed fields above, but
+`day: 2026-10-27`, its own operation ID/prefix, and `OCT27_CAPTURE_FILES` evidence.
+Its only original entries are intent, snapshot-started and snapshot-unknown.
+Any additional handoff, output, transport or recovery entry refuses. The first
+negative original-prefix ListObjectVersions read was 2026-10-27T16:34:49.278933Z;
+an earlier acknowledgment cannot qualify. **Renew the complete listing directly
+before adoption**, not from this old receipt.
+
+Adoption is Tier2 and depends on one review of the #710 change plus Claude's qualified
+production promotion of #709. Under a new #193 release hold, repeat the zero-work
+release/image/source/helper/container CAS procedure above. Verify the deployed
+`backup.py` and `backup_missing.py` bytes against the reviewed fixed release;
+never acknowledge the failure while a later capture would still use the known
+broken reader. Reconcile the original automatic unit, require no writer or
+original-prefix transport, and hash/preserve the entire original partial at
+`/srv/sixnine/platform-data/business-backups/8e51de50-8b9d-4338-beda-c02b94d06aca`.
+Record both original days' unchanged evidence and the existing October 26 ack.
+
+CAS-install only the reviewed history helper with rollback kept outside dated
+history, then exclusively create/fsync root0600 October 27's
+`failed-capture-reconciled.json`. Read back helper/ack hashes, both originals,
+unchanged partial trees and runtime identities before clearing the hold. A
+changed release, nonempty/incomplete version listing, active writer, new evidence
+or unknown install outcome requires read-only reconciliation, never replay.
+
+This allows only a later normal daily-preserve to take its own fresh snapshot.
+It cannot rerun either failed date, produce `completed.json`, enable cleanup or
+prove a successful backup. Report October 27 as failed/preserved/reconciled,
+and report the next real S3 completion or exact refusal separately on #655.
