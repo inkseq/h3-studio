@@ -878,3 +878,6 @@ inventory.json
 !deploy/platform/operation_qualification.py
 !tests/test_operation_qualification.py
 !docs/DSTACK-NO-FLEET-EVIDENCE.md
+!studio_platform/capacity_lookahead.py
+!tests/test_capacity_lookahead.py
+!docs/CAPACITY-LOOKAHEAD.md
