@@ -2778,55 +2778,9 @@ class DstackOperator:
         return value, demand, profile
 
     def _admit_start_capacity(self, connection, owner, value, profile):
-        """Check the original test, supplier and fleet budgets before reservation."""
-        if value.get("group_id") is not None:
-            from .dstack_workspace import owned_group
+        from .capacity_lookahead_runtime import admit_capacity
 
-            owned_group(connection, self.settings, owner, value["group_id"])
-        now = self.repo.clock()
-        guard = value.get("lifecycle", {}).get("test_gpu_guard")
-        if guard is not None:
-            from .dstack_test_budget import (
-                projected_cost,
-                guard_limit,
-                limit_reason,
-                validate_guard,
-            )
-
-            try:
-                validate_guard(guard)
-            except ValueError:
-                raise OperatorError("dstack_test_guard_invalid", 422) from None
-            require(
-                guard["version"] == 2
-                and value["request"].get("test_task_id") == guard["task_id"],
-                "dstack_test_task_required",
-                422,
-            )
-            require(
-                projected_cost(connection, guard, now) + value["reservation_microusd"]
-                < guard_limit(guard),
-                limit_reason(guard),
-            )
-        from .supplier_spending import admit as admit_supplier_spending
-
-        capacity_snapshot = admit_supplier_spending(
-            connection,
-            self.settings.tenant_id,
-            now,
-            additional_microusd=value["reservation_microusd"],
-            reference_type="instance",
-            test_task=guard is not None,
-            policy=self._admin_limits(connection),
-        )
-        usage = self._limits(
-            connection,
-            profile["max_price_microusd"],
-            profile=profile,
-            request=value["request"],
-            capacity_snapshot=capacity_snapshot,
-        )
-        return now, capacity_snapshot, usage
+        return admit_capacity(self, connection, owner, value, profile)
 
     def _validate_start_hosts(self, connection, profile, original, now, demand_job_id):
         """Re-read exact Vast offer identities before reserving the original intent."""

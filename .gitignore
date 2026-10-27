@@ -921,6 +921,8 @@ inventory.json
 !docs/CAPACITY-LOOKAHEAD.md
 !studio_platform/capacity_start_rules.py
 !tests/test_capacity_start_rules.py
+!studio_platform/capacity_lookahead_runtime.py
+!tests/test_capacity_lookahead_runtime.py
 !deploy/modal/
 !deploy/modal/README.md
 !deploy/modal/h3_reference.py
