@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import insert, select, text, update
+from sqlalchemy import and_, case, func, insert, select, text, update
 
 from .repository import Conflict, Scope, documents, request_hash
 
@@ -70,26 +70,32 @@ class InkyBudget:
                     "allowed": False,
                     "reason": "inky_example_replay",
                 }
-            # Filter periods in SQL; old receipts remain immutable audit data.
-            rows = (
-                conn.execute(
-                    select(documents.c.payload).where(
-                        *self.where(), documents.c.payload["month"].as_string() == month
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            daily = sum(
-                1
-                for r in rows
-                if r["day"] == date and r["tenant"] == tenant and r["owner"] == owner
-            )
-            used = sum(
-                r["actual_micros"] if r["status"] == "settled" else r["reserved_micros"]
-                for r in rows
-            )
-            overrun = any(r.get("overrun") for r in rows)
+            # Aggregate in SQL; never deserialize the month's entire call history.
+            data = documents.c.payload
+            daily, used, overrun = conn.execute(
+                select(
+                    func.count().filter(
+                        and_(
+                            data["day"].as_string() == date,
+                            data["tenant"].as_string() == tenant,
+                            data["owner"].as_string() == owner,
+                        )
+                    ),
+                    func.coalesce(
+                        func.sum(
+                            case(
+                                (
+                                    data["status"].as_string() == "settled",
+                                    data["actual_micros"].as_integer(),
+                                ),
+                                else_=data["reserved_micros"].as_integer(),
+                            )
+                        ),
+                        0,
+                    ),
+                    func.count().filter(data["overrun"].as_boolean().is_(True)),
+                ).where(*self.where(), data["month"].as_string() == month)
+            ).one()
             if (
                 daily >= ACCOUNT_DAILY
                 or used + max_cost_micros > GLOBAL_MONTHLY_MICROS
