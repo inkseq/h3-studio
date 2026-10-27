@@ -679,8 +679,10 @@ inventory.json
 !docs/TAKE-SUGGESTIONS.md
 !tests/test_storyboard_versions.py
 !studio_platform/story_chat.py
+!studio_platform/story_chat_advice.py
 !studio_platform/story_chat_routes.py
 !tests/test_story_chat.py
+!tests/test_story_chat_advice.py
 !studio_platform/story_chat_images.py
 !studio_platform/story_chat_settings.py
 !studio_platform/story_chat_undo.py
