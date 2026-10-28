@@ -220,6 +220,49 @@ def host(root=ROOT, *, legacy=False):
     return selected
 
 
+def inky_environment(values):
+    """Existing staging credentials only; this grants no production authority."""
+    selected = values.get('INKSEQ_INKY_CONFIG_FILE', '')
+    if selected not in {'', '/run/sixnine-secrets/inky'} or (
+        selected and values.get('INKSEQ_DEPLOYMENT_TARGET') != 'staging'
+    ):
+        raise ValueError('migration_inky_configuration_invalid')
+
+
+def inky_mounts(document, *, target):
+    """Check references only, never read keys or execute an incoming helper."""
+    profile(target)
+    services = document['services']
+    secrets = document.get('secrets', {})
+    app = services['app']
+    selected = app.get('environment', {}).get('INKSEQ_INKY_CONFIG_FILE', '')
+    if selected not in {'', '/run/secrets/inky'} or selected and target != 'staging':
+        raise ValueError('migration_inky_configuration_invalid')
+    mounted = False
+    for name, service in services.items():
+        if name != 'app' and 'INKSEQ_INKY_CONFIG_FILE' in service.get('environment', {}):
+            raise ValueError('migration_inky_outside_app')
+        for mount in service.get('secrets', []):
+            source = mount.get('source') if isinstance(mount, dict) else mount
+            destination = mount.get('target', source) if isinstance(mount, dict) else source
+            if source == 'inky':
+                if name != 'app' or destination not in {'inky', '/run/secrets/inky'} or mounted:
+                    raise ValueError('migration_inky_mount_invalid')
+                mounted = True
+            elif destination in {'inky', '/run/secrets/inky'}:
+                raise ValueError('migration_inky_mount_alias')
+    configured = secrets.get('inky')
+    if configured is None:
+        if selected or mounted:
+            raise ValueError('migration_inky_configuration_invalid')
+        return  # Retained rollback releases need no new secret reference.
+    expected = '/run/sixnine-secrets/inky' if selected else secrets['execution_profiles']['file']
+    if (set(configured) - {'file', 'name'} or configured.get('file') != expected
+            or configured.get('name', 'sixnine-platform_inky') != 'sixnine-platform_inky'
+            or not mounted):
+        raise ValueError('migration_inky_configuration_invalid')
+
+
 def site_environment(root, values):
     selected = environment(values)
     sealed = host(root, legacy='INKSEQ_DEPLOYMENT_TARGET' not in values)
