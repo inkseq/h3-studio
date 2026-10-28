@@ -788,6 +788,31 @@ zero-work gates and Claude's production promotion/charging authority remain.
 - Record each slice separately with Refs #739 / #374. Code merge does not
   publish prices, enable subscriptions, mutate balances or turn charging ON.
 
+### 2026-10-28 reference-video addendum to CR-20261028-75
+
+Owner direction relayed by Claude on #739 in
+[6467342075](https://github.com/inkseq/h3-studio/issues/739#issuecomment-6467342075)
+supersedes the earlier benchmark pricing options. Retain every native reference
+slot, warn before submit, and charge a proportional video surcharge.
+
+- Credits = ceil(output seconds × base rate × (1 + k × used reference-video
+  seconds)). Standard base4/k0.10; Sharp base8/k0.25. Use compiled frames/24
+  after native trimming/caps. Count reference, in-context and excerpt videos;
+  exclude denoise controls and flag that unmeasured path. Images/audio have no
+  surcharge. Never reprice accepted jobs or rewrite their ledger.
+- At most one active Sharp reference-video job per user; later such jobs wait.
+  Other users and lighter work remain eligible; preserve uncertain originals.
+- Claude owns the pre-submit credit/wait estimate, reference complexity hint,
+  audio-without-dialogue hint, and Inky dialogue/language copy. User copy omits
+  model/step internals. Native image-reference cap9 is verified in #752 and
+  differs from the17-image resource envelope that also counts8 guide slots.
+- Measure Sharp15-second reference-video work on staging before production.
+  CR73's combined USD50 test ceiling and original evidence remain binding;
+  this is no new rental, credential or production-write permission.
+- Backend pricing/concurrency is a separate Tier2 slice: one Claude PR review,
+  audited adoption and existing zero-work gates. Production charging/promotion
+  remain Claude's gates; matching prices/terms must ship together.
+
 ## CR-20261028-76 — fair waiting and Modal-first bursts within a global ceiling
 
 Owner decisions relayed by Claude on #745 in

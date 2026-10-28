@@ -461,6 +461,7 @@ class FullCompilerTests(unittest.TestCase):
                 'reference_images': 9,
                 'reference_videos': 3,
                 'reference_audios': 0,
+                'reference_video_frames': 168,
             },
         )
         p, binding = prepare(r, m)

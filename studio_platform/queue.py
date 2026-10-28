@@ -152,6 +152,11 @@ class TaskQueue:
                     continue
                 if validator is not None and validator(selected) is not True:
                     continue
+                if purpose == "generate":
+                    from .queue_reference_guard import blocked_at_claim
+
+                    if blocked_at_claim(connection, candidate):
+                        continue
                 if purpose == "generate" and selected["current_attempt_id"]:
                     previous = connection.execute(
                         select(
@@ -294,8 +299,10 @@ class TaskQueue:
             "collect": ("collecting",),
             "reconcile": ("submission_unknown", "running", "cancel_requested"),
         }
+        from .queue_reference_guard import columns, eligible
+
         statement = select(
-            jobs.c.id, jobs.c.tenant_id, jobs.c.owner_id, jobs.c.created_at
+            jobs.c.id, jobs.c.tenant_id, jobs.c.owner_id, jobs.c.created_at, *columns()
         ).where(
             jobs.c.pool == pool,
             jobs.c.status.in_(states[purpose]),
@@ -316,6 +323,8 @@ class TaskQueue:
                 statement.order_by(jobs.c.created_at, jobs.c.id)
             ).mappings()
         ]
+        if purpose == "generate":
+            candidates = eligible(connection, candidates)
         if not candidates:
             return [], {}
         return self.schedule_order(connection, candidates, pool, purpose=purpose)
