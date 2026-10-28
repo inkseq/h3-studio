@@ -193,12 +193,17 @@ export function nextSettingsFor(capabilities, schema, { draft, session } = {}) {
     return defaultsFor(capabilities);
   return next;
 }
+// The generation model itself refuses more than 9 reference images (h3-studio#739), whatever
+// a policy advertises, so the editor never sends a tenth.
+const MODEL_MAX_REFERENCE_IMAGES = 9;
+const capImages = (value) => (value === null ? null : Math.min(value, MODEL_MAX_REFERENCE_IMAGES));
+
 export function effectiveLimits(recipe) {
   const base = recipe?.limits || {},
     envelope = recipe?.execution_support?.constraints || {},
     pool = envelope.input_limits || {};
   return {
-    max_images: minimum(base.max_images, pool.max_images),
+    max_images: capImages(minimum(base.max_images, pool.max_images)),
     max_videos: minimum(base.max_videos, pool.max_videos),
     max_audios: minimum(base.max_audios, pool.max_audios),
     max_total_files: minimum(base.max_total_files, envelope.max_reference_files),

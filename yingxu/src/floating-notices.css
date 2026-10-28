@@ -1,9 +1,13 @@
 /* Floating one-line feedback: never part of the page flow (owner, 2026-10-24). */
+/* Centred with left/right insets and a content-sized width, so a narrow window gives the
+   notice the whole width instead of the half to the right of a 50% anchor (owner 2026-10-28). */
 .floating-notices {
   position: fixed;
-  left: 50%;
+  left: 16px;
+  right: 16px;
   bottom: 28px;
-  transform: translateX(-50%);
+  width: fit-content;
+  margin: 0 auto;
   z-index: 200;
   display: flex;
   flex-direction: column;
@@ -66,7 +70,12 @@
   .floating-notices {
     bottom: calc(84px + env(safe-area-inset-bottom));
   }
+  .floating-notice {
+    border-radius: 16px;
+  }
   .floating-notice > span {
+    flex: 1;
+    min-width: 0;
     white-space: normal;
   }
 }

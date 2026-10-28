@@ -739,6 +739,7 @@ inventory.json
 # M1 customer credits; no runtime accounts or credential files.
 !studio_platform/credit_schema.py
 !studio_platform/credits.py
+!studio_platform/settings_inventory.py
 !studio_platform/credits_routes.py
 !studio_platform/generation_budget_binding.py
 !studio_platform/credits_pricing.py
@@ -988,3 +989,6 @@ inventory.json
 !studio_platform/modal_dispatch.py
 !tests/test_modal_dispatch.py
 !tests/test_modal_exit_capacity.py
+!studio_platform/queue_fairness.py
+!tests/test_queue_fairness.py
+!docs/QUEUE-FAIRNESS.md

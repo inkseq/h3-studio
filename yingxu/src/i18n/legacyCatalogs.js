@@ -705,6 +705,10 @@ export const legacyCatalogs = {
       'The {slot} image for “{character} / {look}” is missing. Upload it again or explicitly defer it.',
     'projection.missingLook': 'The saved look for “{name}” no longer exists. Choose another.',
     'projection.countLimit': 'Current model/API count limit ({kind}: {max}, total: {total})',
+    'hint.focusRefs':
+      'Lots of references, or reference videos, may only be partly used. A few focused references usually work better.',
+    'hint.writeLines':
+      'You added audio but no spoken lines. Write what is said, in quotes, so the voice says those words in your language.',
     'projection.limits':
       'Room for up to: images {images} · videos {videos} · audio {audios} · {total} in total',
     'projection.voice': 'Voice for {name}',
@@ -2103,6 +2107,10 @@ export const legacyCatalogs = {
     'legacy.lookImageMissing': '「{character} / {look}」的{slot}图缺失；补传或明确改为稍后补充。',
     'projection.missingLook': '保存的「{name}」造型不存在，请重新选择。',
     'projection.countLimit': '当前模型/API 数量上限（{kind} {max}，总计 {total}）',
+    'hint.focusRefs':
+      '参考素材很多或有参考视频时，模型可能只用上一部分。少而精的参考通常效果更好。',
+    'hint.writeLines':
+      '加了音频但还没写台词。把要说的话用引号写进动作描述，声音才会说这些话、用你要的语言。',
     'projection.limits': '最多可放：图片 {images} · 视频 {videos} · 声音 {audios} · 共 {total}',
     'projection.voice': '{name} 的声音',
     'projection.prop': '道具 · {name}',
