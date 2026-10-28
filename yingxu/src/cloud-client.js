@@ -147,14 +147,20 @@ function retryDelay(response) {
   return Number.isFinite(delay) && delay >= 0 && delay <= 30000 ? delay : null;
 }
 
+// Refusals shown in the page language instead of the server's text: the reviewed-terms gate
+// (its dialog opens too) and the generic not-found, whose server detail is Chinese-only.
+function specialRefusal(status, detail) {
+  if (termsRequired(status, detail)) return 'client.termsRequired';
+  return status === 404 ? 'client.notFound' : '';
+}
+
 // The words for a refused request: maintenance, budget limits, server detail or status.
 function refusalMessage(status, detail, expectedAccount, maintenance) {
   const reason =
     status === 409 && detail?.detail === 'capacity_drain_repreflight'
       ? ui('client.capacityDrain', expectedAccount)
-      : // The server's generic not-found text is Chinese-only; show it in the page language.
-        status === 404
-        ? ui('client.notFound', expectedAccount)
+      : specialRefusal(status, detail)
+        ? ui(specialRefusal(status, detail), expectedAccount)
         : String(detail?.code || '').startsWith('support_view_')
           ? ui(
               'client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()),
