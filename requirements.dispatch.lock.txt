@@ -200,6 +200,12 @@ attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309 \
     --hash=sha256:d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32
     # via aiohttp
+backoff==2.2.1 \
+    --hash=sha256:03f829f5bb1923180821643f8753b0502c3b682293992485b0eef2807afa5cba \
+    --hash=sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8
+    # via
+    #   -r requirements.lock.txt
+    #   posthog
 bcrypt==5.0.0 \
     --hash=sha256:046ad6db88edb3c5ece4369af997938fb1c19d6a699b9c1b27b0db432faae4c4 \
     --hash=sha256:0c418ca99fd47e9c59a301744d63328f17798b5947b0f791e9af3c1c499c2d0a \
@@ -722,6 +728,12 @@ disposable-email-domains==0.0.283 \
     --hash=sha256:31bb1abb8bbf48b14597bdd4df041006fbc9b6fa8ef6c4a915e54e1a5fdfb827 \
     --hash=sha256:de1449347a19e034d4436273c90d87ff925a703496d4a8dbf280f39f2a9078b7
     # via -r requirements.lock.txt
+distro==1.9.0 \
+    --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
+    --hash=sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2
+    # via
+    #   -r requirements.lock.txt
+    #   posthog
 fastapi==0.142.2 \
     --hash=sha256:06366626f2e70576367714d9ab2fe8472e6c8456dba69b399f9f797ab5e92570 \
     --hash=sha256:bd5f4d81f1e93a88bcd77caf4dfe3c2dbffc3805407a0007e9a114c18b3a670b
@@ -1484,6 +1496,10 @@ pillow==12.3.0 \
     --hash=sha256:fe3cca2e4e8a592be0f269a1ca4835c25199d9f3ce815c8491048f785b0a0198 \
     --hash=sha256:ffd0c5368496f41b0944be820fcb7a838aa6e623d250b01acf2643939c3f99d7
     # via -r requirements.lock.txt
+posthog==7.60.0 \
+    --hash=sha256:48ecc52c124d8262779bef4fd3dc268ef66a08905449700c4ddfe44f5b0027d1 \
+    --hash=sha256:6c1ab0f0d31c83b47a3cf6b6829d4ee83f250a4f8844c4c24adae329982d3f36
+    # via -r requirements.lock.txt
 propcache==0.5.4 \
     --hash=sha256:004e685b315646c410771836e72a44f143bbe624f29653a42687815069a303d5 \
     --hash=sha256:02c0a34f16889cf800f10f0247a564d8ce6eeab6ffcd7c87198f769067eb8432 \
@@ -1986,6 +2002,7 @@ requests==2.34.2 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed
     # via
     #   -r requirements.lock.txt
+    #   posthog
     #   stripe
 rich==15.0.0 \
     --hash=sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb \
@@ -2119,6 +2136,7 @@ typing-extensions==4.16.0 \
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
+    #   posthog
     #   psycopg
     #   pydantic
     #   pydantic-core
