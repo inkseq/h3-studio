@@ -165,6 +165,17 @@ This does not relax installed-helper hash checks or cancel queued acceptance job
    their previous bytes and metadata for rollback; no hot patch of app code.
    Add `INKSEQ_INKY_CONFIG_FILE=/run/sixnine-secrets/inky` only to the protected
    staging `migration/paths.json` environment under its existing validation/CAS.
+   The shared validator lives in the already root-installed `deployment_target.py`;
+   adopt it together with the maintenance/checker pair, never from incoming
+   artifact code. It rejects nonempty production configuration, alternate paths,
+   another service's mount, and another secret aliased onto the Inky target.
+   The exact retained staging current/previous helper pairs from SSM
+   `3dd45659-accb-4be9-afab-82600e38991a` are preserved for rollback. Before
+   merging this helper change, finish its single Tier2 review and fresh CAS
+   qualification/install; otherwise normal main deployment will correctly refuse
+   the changed pair. A changed current/previous tuple requires fresh reconciliation.
+   Do not replay the historical #705/#708 refusal/recovery or the completed SSM
+   imports. CPU adoption still waits for zero nonterminal jobs and leases.
 5. Existing secret hydration reads the protected deployment target, verifies the
    AWS account, fetches those exact parameters, validates both complete configs,
    and writes through the existing inode-preserving secret writer. The file is

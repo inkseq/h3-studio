@@ -40,6 +40,9 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # #684 SSM3dd45659: exact staging current/previous pair before Inky adoption.
+    '0c1dfeceb015f34f2593783953ef00f5aea00468': ('135cbf73dfd467ddd870197d650ff66514e17b0808f403623e26ac01a7bffbef', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'ff30d5aa9ceafc8693cf8a64fae92a8f8e35624a': ('135cbf73dfd467ddd870197d650ff66514e17b0808f403623e26ac01a7bffbef', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     # Current/rollback readback5be9e18b; no generic compatibility fallback.
     '6606164343b612d3c99acd6f688ad54dad0d49af': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     'e63e64f093bc2e343b8a4128e62de9cf68ae964f': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
@@ -167,7 +170,7 @@ PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAF
 OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_POSTGRES_VOLUME",
     "SIXNINE_HATCHET_CONFIG_VOLUME", "SIXNINE_MIGRATION_GENERATION_ENABLED",
     "SIXNINE_MIGRATION_EXECUTION_BACKEND", "SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"})
-OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE", "INKSEQ_STRIPE_CONFIG_FILE"})
+OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE", "INKSEQ_STRIPE_CONFIG_FILE", "INKSEQ_INKY_CONFIG_FILE"})
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
@@ -509,6 +512,7 @@ def settings_document(value):
         elif key.endswith("_VOLUME"):
             release.require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", text), "migration_volume_reference_invalid")
     env = value["environment"]
+    deployment_target.inky_environment(env)
     release.require(env.get('INKSEQ_SENTRY_DSN', '') in {'', release.SENTRY_DSN},
         'migration_api_error_monitoring_destination_invalid')
     release.require(not env.get('INKSEQ_SENTRY_DSN') or env.get('INKSEQ_DEPLOYMENT_TARGET') in {'staging', 'production'},

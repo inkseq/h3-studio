@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from tools.check_migration_deploy import ROOT, check
 from tools.inky_deploy_validation import validate_inky
@@ -71,6 +72,12 @@ class InkyDeploymentTests(unittest.TestCase):
 
         for selected in ('', '/run/sixnine-secrets/inky'):
             environment = fixture_environment()
+            environment.update(
+                INKSEQ_DEPLOYMENT_TARGET='staging',
+                INKSEQ_PUBLIC_ORIGIN='https://staging.inkseq.com',
+                INKSEQ_PUBLIC_ORIGIN_ALIASES='',
+                INKSEQ_CADDY_PROFILE='Caddyfile.staging',
+            )
             environment['INKSEQ_INKY_CONFIG_FILE'] = selected
             rendered = {}
 
@@ -101,10 +108,14 @@ class InkyDeploymentTests(unittest.TestCase):
                         'INKSEQ_INKY_CONFIG_FILE', service.get('environment', {})
                     )
 
-    def test_host_activation_is_deferred_until_qualified_helper_install(self):
+    def test_host_activation_requires_explicit_staging_and_exact_private_path(self):
         from test_migration_release import maintenance
 
-        with tempfile.TemporaryDirectory() as directory:
+        # The protected host paths are POSIX even when this pure check runs on Windows.
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(Path, 'is_absolute', return_value=True),
+        ):
             environment = {
                 key: str(Path(directory) / key) for key in maintenance.PATH_FIELDS
             }
@@ -120,16 +131,37 @@ class InkyDeploymentTests(unittest.TestCase):
                 'environment': environment,
             }
             self.assertEqual(maintenance.settings_document(candidate), candidate)
+            environment['INKSEQ_DEPLOYMENT_TARGET'] = 'staging'
+            for selected in ('', '/run/sixnine-secrets/inky'):
+                environment['INKSEQ_INKY_CONFIG_FILE'] = selected
+                self.assertEqual(maintenance.settings_document(candidate), candidate)
             for selected in (
-                '',
-                '/run/sixnine-secrets/inky',
                 '/run/sixnine-secrets/workos',
+                '/tmp/inky',
             ):
                 environment['INKSEQ_INKY_CONFIG_FILE'] = selected
-                with (
-                    self.subTest(selected=selected),
-                    self.assertRaisesRegex(
-                        maintenance.release.ReleaseError, 'migration_paths_invalid'
-                    ),
-                ):
+                with self.subTest(selected=selected), self.assertRaises(ValueError):
                     maintenance.settings_document(candidate)
+            environment['INKSEQ_INKY_CONFIG_FILE'] = '/run/sixnine-secrets/inky'
+            for target in (None, 'production'):
+                if target is None:
+                    environment.pop('INKSEQ_DEPLOYMENT_TARGET')
+                else:
+                    environment['INKSEQ_DEPLOYMENT_TARGET'] = target
+                with self.assertRaises(ValueError):
+                    maintenance.settings_document(candidate)
+
+    def test_root_mount_validator_refuses_production_and_aliases(self):
+        from deploy.platform.deployment_target import inky_mounts
+
+        inky_mounts(self.document(), target='staging')
+        inky_mounts(self.document(False), target='production')
+        with self.assertRaises(ValueError):
+            inky_mounts(self.document(), target='production')
+        for service in ('controller', 'app'):
+            document = self.document()
+            document['services'][service]['secrets'].append(
+                {'source': 'workos', 'target': '/run/secrets/inky'}
+            )
+            with self.subTest(service=service), self.assertRaises(ValueError):
+                inky_mounts(document, target='staging')

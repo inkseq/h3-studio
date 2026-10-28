@@ -938,6 +938,8 @@ class MigrationArtifacts(unittest.TestCase):
             'd67a76b70777874e74623f480d7ffbea9e3d3b88',
             'c08ea6d4595763195a3c9e15d428f93cf90e16c0',
             'f6c1972b904d6e0a4b9acccc405efb0d706c239e',
+            '0c1dfeceb015f34f2593783953ef00f5aea00468',
+            'ff30d5aa9ceafc8693cf8a64fae92a8f8e35624a',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
