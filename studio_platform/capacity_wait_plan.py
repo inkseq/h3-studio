@@ -132,6 +132,8 @@ class ModalOption:
         identity(self.group)
         number(self.boot_seconds)
         number(self.hourly_microusd, positive=True, integer=True)
+        if not 3_503_340 <= self.hourly_microusd <= 4_000_000:
+            raise ValueError("capacity_wait_modal_ceiling_invalid")
         if self.qualification is not None:
             identity(self.qualification)
 

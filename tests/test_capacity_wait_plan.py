@@ -197,6 +197,11 @@ class CapacityWaitPlanTests(unittest.TestCase):
         self.assertEqual(result["reason"], "admission_blocked")
         self.assertEqual(result["additional_modal"], 0)
 
+    def test_modal_proposal_requires_the_existing_full_resource_price_floor(self):
+        for price in (1, 3_503_339, 4_000_001):
+            with self.subTest(price=price), self.assertRaises(ValueError):
+                replace(self.option, hourly_microusd=price)
+
     def test_invalid_or_duplicate_inputs_are_not_partial_plans(self):
         for value in (True, -1, float("nan"), float("inf")):
             with self.subTest(value=value), self.assertRaises(ValueError):
