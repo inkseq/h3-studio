@@ -3,6 +3,7 @@ import { readLocale, translate } from './i18n/locale.js';
 import { currentSupportView } from './support-view.js';
 import { CREDITS_CHANGED, INSUFFICIENT_CREDITS, insufficientCredits } from './credits.js';
 import { MAINTENANCE_CHANGED, formatEnd, maintenanceRefusal } from './maintenance-notice.js';
+import { TERMS_REQUIRED, termsRequired } from './terms-gate.js';
 // The credits chip and the not-enough-credits prompt listen for these (h3-studio#306).
 function announce(type, detail) {
   if (typeof globalThis.dispatchEvent === 'function' && typeof CustomEvent === 'function')
@@ -338,6 +339,7 @@ export function createCloudClient({
           if (response.status === 401 && !anonymous) onUnauthorized();
           const short = insufficientCredits(response.status, detail);
           if (short) announce(INSUFFICIENT_CREDITS, short);
+          if (termsRequired(response.status, detail)) announce(TERMS_REQUIRED, null);
           // This closed response proves admission refused before a reservation.
           // Only the human's explicit approval permits one exact-key retry.
           if (

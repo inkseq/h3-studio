@@ -18,6 +18,12 @@ export const creditsCatalogs = {
     'pricing.point.caps': 'Set a daily limit for yourself and for each connected AI assistant.',
     'pricing.point.stripe':
       'Prices are in US dollars and exclude tax; any tax is added at checkout by Stripe. Payments from mainland China are not supported yet.',
+    'terms.gateTitle': 'Please accept our terms',
+    'terms.gateBody':
+      'Before your next generation or purchase, please read and accept the Terms of Service, Privacy Policy and Content Policy.',
+    'terms.gateAgree': 'I have read and agree to these terms (version {version})',
+    'terms.gateLater': 'Later',
+    'terms.gateAccept': 'Accept',
     'legal.footer': 'Site links',
     'legal.draft': 'Draft for review. This page is not yet in effect.',
     'legal.version': 'Version {version}',
@@ -116,6 +122,11 @@ export const creditsCatalogs = {
     'pricing.point.caps': '可以给自己和每个 AI 助手设每日上限。',
     'pricing.point.stripe':
       '价格以美元计，不含税；如有税费，由 Stripe 在结账时另加。暂时不支持中国大陆的付款。',
+    'terms.gateTitle': '请先同意服务条款',
+    'terms.gateBody': '下一次生成或购买前，请先阅读并同意《服务条款》《隐私政策》和《内容规范》。',
+    'terms.gateAgree': '我已阅读并同意以上条款（版本 {version}）',
+    'terms.gateLater': '稍后',
+    'terms.gateAccept': '同意',
     'legal.footer': '网站链接',
     'legal.draft': '草稿，待审阅。本页内容尚未生效。',
     'legal.version': '版本 {version}',
