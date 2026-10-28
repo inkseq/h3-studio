@@ -1000,3 +1000,6 @@ inventory.json
 !studio_platform/queue_fairness.py
 !tests/test_queue_fairness.py
 !docs/QUEUE-FAIRNESS.md
+!studio_platform/capacity_wait_plan.py
+!tests/test_capacity_wait_plan.py
+!docs/CAPACITY-WAIT-PLAN.md
