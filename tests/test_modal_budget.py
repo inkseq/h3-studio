@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 from studio_platform.dstack_test_budget import ACCOUNT, projected_cost
 from studio_platform.modal_budget import bind_test_guard
 from studio_platform.modal_host import HostSpec, ModalHosts
+from studio_platform.worker_admission import worker_window_reason
 from studio_platform import operator_capacity  # noqa: F401 -- register the original operator tables before fixture schema creation
 from studio_platform.repository import (
     BudgetExceeded,
@@ -66,6 +67,40 @@ class ModalBudgetTests(LedgerCase):
     def projection(self, guard=None):
         with self.repo.engine.connect() as c:
             return projected_cost(c, guard or GUARD, self.now)
+
+    def worker_reason(self, instance='sb-1', duration=120):
+        with self.repo.engine.connect() as c:
+            return worker_window_reason(
+                c,
+                {'provider': 'modal', 'instance_id': instance},
+                self.now,
+                expected_runtime_s=duration,
+            )
+
+    def test_new_claim_and_submit_require_original_funded_modal_binding(self):
+        self.assertEqual(self.worker_reason(), 'modal_test_budget_unconfirmed')
+        identity = self.reserve()
+        self.hosts.start(identity)
+        self.assertIsNone(self.worker_reason())
+        self.assertEqual(self.worker_reason(duration=480), 'job_exceeds_worker_window')
+        self.assertEqual(
+            self.worker_reason(duration=float('nan')), 'job_runtime_unconfirmed'
+        )
+        self.hosts.stop(identity)
+        self.assertEqual(self.worker_reason(), 'worker_capacity_stopping')
+
+    def test_late_shared_budget_limit_change_blocks_new_work(self):
+        from studio_platform.repository import budget_accounts
+
+        identity = self.reserve()
+        self.hosts.start(identity)
+        with self.repo.transaction() as c:
+            c.execute(
+                update(budget_accounts)
+                .where(budget_accounts.c.id == ACCOUNT)
+                .values(limit_microusd=1)
+            )
+        self.assertEqual(self.worker_reason(), 'modal_test_budget_unconfirmed')
 
     def test_bound_original_is_counted_once_and_rebinding_is_read_only(self):
         identity = self.reserve()

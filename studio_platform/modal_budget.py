@@ -14,12 +14,61 @@ from .dstack_test_budget import ACCOUNT, POOLS, finite, guard_limit, validate_gu
 from .modal_host import HostSpec
 from .repository import (
     BudgetExceeded,
+    budget_accounts,
     budget_reservations,
     instance_intents,
     scaler_receipts,
 )
 
 OPERATION = 'modal_test_budget_bound'
+
+
+def worker_reason(connection, worker, now, expected_runtime_s):
+    """Original readiness/claim/late-submit gate; never used to replay recovery."""
+    from .budget_policy import effective_budget_limit
+
+    try:
+        rows = list(
+            connection.execute(
+                select(instance_intents).where(
+                    instance_intents.c.provider == 'modal',
+                    instance_intents.c.provider_instance_id == worker['instance_id'],
+                )
+            ).mappings()
+        )
+        require(len(rows) == 1 and finite(now))
+        intent = rows[0]
+        if intent['state'] not in {'starting', 'ready', 'busy'}:
+            return 'worker_capacity_stopping'
+        _, value = binding(connection, intent['id'])
+        enforce(connection, intent['id'], value['spec'], now)
+        account = (
+            connection.execute(
+                select(budget_accounts).where(
+                    budget_accounts.c.id == ACCOUNT,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        require(
+            account is not None
+            and account['reserved_microusd'] >= intent['reserved_cost_microusd']
+        )
+        require(
+            account['spent_microusd'] + account['reserved_microusd']
+            <= effective_budget_limit(account)
+        )
+        if now >= intent['hard_deadline']:
+            return 'worker_capacity_stopping'
+        if expected_runtime_s is not None:
+            if not finite(expected_runtime_s) or expected_runtime_s <= 0:
+                return 'job_runtime_unconfirmed'
+            if now + expected_runtime_s + 120 >= intent['hard_deadline']:
+                return 'job_exceeds_worker_window'
+    except (BudgetExceeded, KeyError, TypeError, ValueError):
+        return 'modal_test_budget_unconfirmed'
+    return None
 
 
 def require(ok):

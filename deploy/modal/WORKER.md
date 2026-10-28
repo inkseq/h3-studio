@@ -101,6 +101,14 @@ so an unfunded intent cannot remain committed. Old daily guards cannot silently
 reinterpret a Modal task. This boundary is tested with fake clients; controller
 routing, real image qualification and activation remain unfinished above.
 
+Readiness, claim and the original late-submit guard recheck the same Modal
+binding, current shared account limit and task projection. A stopped, expired,
+unfunded or unattributed host cannot take new work. Existing recovery/collection
+retains its original attempt path. Within the existing DBOS slots, new work tries
+dedicated hosts first and falls back to Modal only when the original dedicated
+runner cannot claim it; existing attempts retain their original worker affinity.
+This preference creates no provider resource, alternate queue or new job.
+
 ## Primary implementation references
 
 - [Modal official examples](https://github.com/modal-labs/modal-examples)

@@ -509,6 +509,15 @@ class DurableSlots:
             }
         with self._lock:
             candidates = list(self._slots.values())
+        # Existing attempts stay with their original worker. New work tries
+        # dedicated capacity first; its original claim gates decide eligibility.
+        candidates.sort(
+            key=lambda slot: (
+                slot.spec.worker_id != job['lease_worker_id']
+                if job.get('lease_worker_id')
+                else slot.spec.provider == 'modal'
+            )
+        )
         for slot in candidates:
             if slot.spec.pool != job["pool"] or not slot.lock.acquire(blocking=False):
                 continue
