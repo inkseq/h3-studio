@@ -28,6 +28,7 @@ def fair_generation_order(connection, ordered, pool, active, owner_key):
         ).mappings()
         if adopted(row)
         and row["value"].get("per_user_machine_share_policy") == "equal_active_users"
+        and row["value"].get("fair_share", True) is True
     }
     if not enabled:
         return ordered
