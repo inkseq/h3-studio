@@ -151,3 +151,10 @@
     align-items: flex-start;
   }
 }
+.ui-settings .ui-settings-note {
+  margin: 0;
+  padding: 8px 16px 12px;
+  min-height: calc(3em + 20px);
+  font-size: 12px;
+  line-height: 1.5;
+}

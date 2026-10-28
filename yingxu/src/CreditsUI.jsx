@@ -356,7 +356,8 @@ export function CreditsPanel({ account, active }) {
   );
 }
 
-// An Inkseq receipt built from the original purchase; the browser prints it or saves a PDF.
+// An Inkseq purchase record from the original payment; Stripe, as reseller, issues the tax
+// receipt. The browser prints it or saves a PDF.
 function ReceiptDialog({ receipt, onClose }) {
   const { t, locale } = useI18n();
   const issuer = receipt.issuer || {};
@@ -367,6 +368,13 @@ function ReceiptDialog({ receipt, onClose }) {
       t('credits.receiptFor'),
       t('credits.receiptItem', { credits: formatCredits(receipt.credits, locale) }),
     ],
+    // Tax-exclusive packs (CR-74): the pack price, the tax Stripe added, and the amount paid.
+    ...(receipt.tax_cents > 0
+      ? [
+          [t('credits.receiptPack'), formatPrice(receipt.base_cents, receipt.currency)],
+          [t('credits.receiptTax'), formatPrice(receipt.tax_cents, receipt.currency)],
+        ]
+      : []),
     [t('credits.receiptAmount'), formatPrice(receipt.amount_cents, receipt.currency)],
     ...(receipt.refunded_cents > 0
       ? [[t('credits.status.refunded'), formatPrice(receipt.refunded_cents, receipt.currency)]]
@@ -376,7 +384,6 @@ function ReceiptDialog({ receipt, onClose }) {
     <Dialog title={t('credits.receiptTitle')} onClose={onClose} className="receipt-sheet">
       <p>
         <b>{issuer.name || 'Inkseq'}</b>
-        {issuer.abn && ' · ABN ' + issuer.abn}
         {issuer.support_email && ' · ' + issuer.support_email}
       </p>
       <dl className="receipt-rows">

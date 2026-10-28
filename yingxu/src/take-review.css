@@ -74,6 +74,10 @@
   background: color-mix(in srgb, var(--warn) 55%, transparent);
   pointer-events: none;
 }
+.take-review-bar .take-review-mark.editing {
+  outline: 2px solid var(--ink);
+  outline-offset: 1px;
+}
 .take-review-hint {
   font-size: var(--fs-xs);
 }

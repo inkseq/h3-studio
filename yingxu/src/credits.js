@@ -90,6 +90,11 @@ export function receiptList(body) {
       ...receipt,
       currency: String(receipt.currency || 'usd').toUpperCase(),
       refunded_cents: Number.isSafeInteger(receipt.refunded_cents) ? receipt.refunded_cents : 0,
+      // Present only when Stripe added tax to a tax-exclusive pack (h3-studio#727).
+      base_cents: Number.isSafeInteger(receipt.base_amount_cents)
+        ? receipt.base_amount_cents
+        : null,
+      tax_cents: Number.isSafeInteger(receipt.tax_amount_cents) ? receipt.tax_amount_cents : 0,
     }));
 }
 

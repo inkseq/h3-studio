@@ -1,21 +1,20 @@
-// Terms, Privacy and Content Policy (h3-studio#308). DRAFT text written by an agent for the
-// owner to review, ideally with a lawyer. While LEGAL_STATUS is 'draft', every page shows a
-// banner saying it is not yet in effect. Bump `version` on any material change; the backend
+// Terms, Privacy and Content Policy (h3-studio#308), owner-reviewed 2026-10-28 (h3-studio#374).
+// While LEGAL_STATUS is 'draft', every page shows a banner saying it is not yet in effect. Bump `version` on any material change; the backend
 // asks users to accept the new Terms version once (#305 terms_required).
 // Blocks: ['h', text] heading · ['p', text] paragraph · ['ul', [items]] list.
 
-export const LEGAL_STATUS = 'draft';
+export const LEGAL_STATUS = 'reviewed';
 export const SUPPORT_EMAIL = 'support@inkseq.com';
 
 export const LEGAL = {
   terms: {
-    version: '2026-10-draft',
+    version: '2026-10-28',
     en: {
       title: 'Terms of Service',
       blocks: [
         [
           'p',
-          'These terms are an agreement between you and Inkseq, a registered business in Victoria, Australia ("we", "us"), for the Inkseq video creation studio at inkseq.com, its API and its AI assistant connections (together, "the service"). By creating an account or using the service you agree to them.',
+          'These terms are an agreement between you and Inkseq ("we", "us"), for the Inkseq video creation studio at inkseq.com, its API and its AI assistant connections (together, "the service"). By creating an account or using the service you agree to them.',
         ],
         ['h', '1. Your account'],
         [
@@ -32,9 +31,11 @@ export const LEGAL = {
           'ul',
           [
             'Generation is paid with prepaid credits. We show the number of credits before you submit, and the price you were quoted is the price you pay.',
-            'Credits do not expire. They have no cash value outside the service and cannot be transferred or resold.',
+            'Credit pack prices are in US dollars and exclude tax. Any sales tax, VAT or GST that applies where you live is added at checkout.',
+            'Purchased credits do not expire. Credits have no cash value outside the service and cannot be transferred or resold.',
+            'Promotional credits, such as welcome credits, the bonus credits included in a pack or credits from a campaign, are free. They may come with their own conditions or expiry, which we show when you receive them, and they can be removed if they were obtained in breach of these terms.',
             'Generations that fail on our side are returned to your balance automatically.',
-            'You can ask for a refund of unused credits within 14 days of buying them. Credits you have already used are not refundable, except where the law requires.',
+            'Purchases are final and credits are not refundable, except where the law requires (for example under the Australian Consumer Law). If a purchase is refunded, the credits from it, including its bonus credits, are removed from your balance.',
             'Payments are processed by Stripe. For credit purchases Stripe acts as the reseller (merchant of record): it charges you, calculates any sales tax, VAT or GST, and issues your receipt, and its checkout terms also apply to the purchase. We never see or store your card number.',
             'We may change prices. A change applies to new quotes only, never to work you have already submitted.',
             'Payments from mainland China are not supported at the moment.',
@@ -90,7 +91,7 @@ export const LEGAL = {
       blocks: [
         [
           'p',
-          '本条款是你与映序 Inkseq（澳大利亚维多利亚州注册商号；下称「我们」）之间关于 inkseq.com 视频创作工作台、API 以及 AI 助手连接（合称「本服务」）的协议。创建账号或使用本服务，即表示你同意本条款。',
+          '本条款是你与映序 Inkseq（下称「我们」）之间关于 inkseq.com 视频创作工作台、API 以及 AI 助手连接（合称「本服务」）的协议。创建账号或使用本服务，即表示你同意本条款。',
         ],
         ['h', '1. 你的账号'],
         [
@@ -107,9 +108,11 @@ export const LEGAL = {
           'ul',
           [
             '生成使用预付积分。提交前我们会告诉你要用多少积分，按报价扣，不会多扣。',
-            '积分不会过期。积分不能在本服务以外兑现，也不能转让或转卖。',
+            '积分包价格以美元计，不含税。你所在地适用的销售税、增值税或 GST 会在结账时另加。',
+            '购买的积分不会过期。积分不能在本服务以外兑现，也不能转让或转卖。',
+            '赠送积分（例如新用户积分、积分包附赠的积分、活动积分）是免费的，可能有各自的使用条件或有效期，会在发放时告诉你；以违反本条款的方式获得的赠送积分可以被收回。',
             '因我们这边原因失败的生成，积分自动退回。',
-            '购买后 14 天内，可以申请退还未使用的积分。已经使用的积分不退，法律另有规定的除外。',
+            '购买后不退款，积分不能退，法律另有规定的除外（例如《澳大利亚消费者法》）。如果某笔购买被退款，这笔购买得到的积分（包括附赠积分）会从余额中扣回。',
             '付款由 Stripe 处理。购买积分时，Stripe 作为转售方（merchant of record）向你收款、计算适用的销售税／增值税／GST 并开具收据，这次购买也适用 Stripe 的结账条款。我们看不到也不保存你的卡号。',
             '我们可能调整价格。调价只影响新的报价，不影响你已经提交的任务。',
             '暂时不支持中国大陆的付款。',
@@ -162,13 +165,13 @@ export const LEGAL = {
     },
   },
   privacy: {
-    version: '2026-10-draft',
+    version: '2026-10-28',
     en: {
       title: 'Privacy Policy',
       blocks: [
         [
           'p',
-          'Inkseq is a registered business in Victoria, Australia. This policy explains what personal information Inkseq collects, why, who processes it for us, and the choices you have. We collect only what we need to run the service.',
+          'This policy explains what personal information Inkseq collects, why, who processes it for us, and the choices you have. We collect only what we need to run the service.',
         ],
         ['h', 'What we collect'],
         [
@@ -176,7 +179,7 @@ export const LEGAL = {
           [
             'Account: your email address, display name, and the identifier from the sign-in provider you use (Google, GitHub or email).',
             'Your content: prompts, stories, scripts, and the images, audio and video you upload or generate.',
-            'Payments: the pack, amount, status and receipt of each purchase. Your card details go to Stripe and never reach us.',
+            'Payments: the pack, amount, status and receipt of each purchase. Your card details go to our payment provider and never reach us.',
             'Usage and technical data: generation jobs and their cost in credits, request logs, IP address, browser type and error reports, used to run, secure and fix the service.',
             'Browser storage: a sign-in session cookie, plus settings such as your language kept in your browser. We do not use advertising or cross-site tracking cookies.',
           ],
@@ -196,20 +199,16 @@ export const LEGAL = {
         [
           'ul',
           [
-            'Amazon Web Services: hosting, database and email (Singapore region).',
-            'Cloudflare R2: storage for your media files.',
-            'WorkOS: sign-in and account security.',
-            'Stripe: payments, tax and receipts.',
-            'PostHog: anonymous product analytics (which pages and steps are used) and, for some visits, a replay of page interactions with all typed text masked. We do not send prompts or story text, and IP addresses are discarded.',
-            'Sentry: error reports from the website (where it broke and which page), without your typed text or request contents.',
-            'Grafana Cloud: service logs and metrics.',
-            'GPU cloud providers (currently Vast.ai and RunPod): your inputs are copied to a rented GPU machine while your generation runs. Inputs can stay in that machine’s temporary cache until the machine is shut down; machines are rented for generation only and are shut down when idle. Your works are stored in our own storage, not on these machines.',
-            'Large language model providers: when you use story import or an AI assistant feature, the relevant text is sent to the model provider to produce a response.',
+            'Infrastructure providers for hosting, databases, email and file storage.',
+            'A sign-in provider for account security, and our payment provider for purchases and tax.',
+            'Product analytics and error monitoring. Analytics may replay some page visits with all typed text masked; we do not send prompts or story text, and error reports do not include what you type.',
+            'Rented GPU machines that run your generations. Your inputs are copied to the machine while it works and can stay in its temporary cache until it shuts down; machines are shut down when idle, and your works are kept in our own storage.',
+            'AI model providers, when you use story import or an AI assistant feature: the relevant text is sent to produce a response.',
           ],
         ],
         [
           'p',
-          'These providers may process data outside your country, including in Singapore and the United States. They may use it only to provide their service to us.',
+          'These providers may process data outside your country. They may use it only to provide their service to us.',
         ],
         ['h', 'How long we keep it'],
         [
@@ -247,7 +246,7 @@ export const LEGAL = {
       blocks: [
         [
           'p',
-          '映序（Inkseq）是在澳大利亚维多利亚州注册的商号。本政策说明映序收集哪些个人信息、为什么收集、由谁替我们处理，以及你有哪些选择。我们只收集运行服务所需的信息。',
+          '本政策说明映序（Inkseq）收集哪些个人信息、为什么收集、由谁替我们处理，以及你有哪些选择。我们只收集运行服务所需的信息。',
         ],
         ['h', '我们收集什么'],
         [
@@ -255,7 +254,7 @@ export const LEGAL = {
           [
             '账号：邮箱、显示名字，以及你所用登录方式（Google、GitHub 或邮箱）提供的标识。',
             '你的内容：提示词、故事、剧本，以及你上传或生成的图片、音频和视频。',
-            '付款：每次购买的积分包、金额、状态和收据。卡号由 Stripe 处理，不经过我们。',
+            '付款：每次购买的积分包、金额、状态和收据。卡号由付款服务商处理，不经过我们。',
             '使用和技术数据：生成任务及其积分花费、请求日志、IP 地址、浏览器类型和错误报告，用于运行、保护和修复服务。',
             '浏览器存储：登录会话 cookie，以及保存在你浏览器里的语言等设置。我们不使用广告或跨站追踪 cookie。',
           ],
@@ -275,21 +274,14 @@ export const LEGAL = {
         [
           'ul',
           [
-            'Amazon Web Services：托管、数据库和邮件（新加坡区域）。',
-            'Cloudflare R2：存储你的媒体文件。',
-            'WorkOS：登录和账号安全。',
-            'Stripe：付款、税务和收据。',
-            'PostHog：匿名的产品使用统计（用了哪些页面和步骤），以及部分访问的页面操作回放，所有输入的文字都会被遮挡。我们不发送提示词或故事内容，IP 地址会被丢弃。',
-            'Sentry：网站的错误报告（哪里出错、在哪个页面），不包含你输入的文字或请求内容。',
-            'Grafana Cloud：服务日志和指标。',
-            'GPU 云服务商（目前是 Vast.ai 和 RunPod）：生成运行期间，你的输入会被复制到租用的 GPU 机器上。输入可能留在这台机器的临时缓存里，直到机器关机；这些机器只为生成而租用，空闲时会关机。你的作品保存在我们自己的存储里，不在这些机器上。',
-            '大语言模型服务商：使用故事导入或 AI 助手功能时，相关文字会发送给模型服务商以生成回复。',
+            '基础设施服务商：托管、数据库、邮件和文件存储。',
+            '登录服务商负责账号安全；付款服务商负责购买和税务。',
+            '产品使用统计和错误监控。统计可能回放部分页面操作，所有输入的文字都会被遮挡；我们不发送提示词或故事内容，错误报告也不包含你输入的文字。',
+            '运行生成的租用 GPU 机器。生成期间你的输入会被复制到这台机器上，可能留在临时缓存里直到机器关机；机器空闲时会关机，你的作品保存在我们自己的存储里。',
+            'AI 模型服务商：使用故事导入或 AI 助手功能时，相关文字会发送给模型服务商以生成回复。',
           ],
         ],
-        [
-          'p',
-          '这些服务商可能在你所在国家以外处理数据，包括新加坡和美国。它们只能为向我们提供服务而使用这些数据。',
-        ],
+        ['p', '这些服务商可能在你所在国家以外处理数据。它们只能为向我们提供服务而使用这些数据。'],
         ['h', '保留多久'],
         [
           'ul',
@@ -320,7 +312,7 @@ export const LEGAL = {
     },
   },
   content: {
-    version: '2026-10-draft',
+    version: '2026-10-28',
     en: {
       title: 'Content Policy',
       blocks: [
