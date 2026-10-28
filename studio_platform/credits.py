@@ -173,7 +173,7 @@ def _account(connection, tenant, user_id, *, now, create=False, lock=True):
     )
     if row is not None and row["tenant"] != tenant:
         raise CreditError("credit_account_not_found", 404)
-    return (
+    result = (
         dict(row)
         if row is not None
         else dict(
@@ -186,6 +186,11 @@ def _account(connection, tenant, user_id, *, now, create=False, lock=True):
             updated_at=now,
         )
     )
+    if lock and row is not None:
+        from .credit_expiry import safe, expire_due
+
+        result = safe(expire_due, connection, result, now, create=True)
+    return result
 
 
 def _public_account(row):
@@ -213,7 +218,17 @@ def account(connection, tenant, owner, *, now):
     from .spending_limits import credit_settings
 
     limit = credit_settings(connection, tenant, owner)["value"]["daily_limit_credits"]
-    return {**_public_account(row), "today_used": used, "daily_limit": limit}
+    result = {**_public_account(row), "today_used": used, "daily_limit": limit}
+    from .credit_expiry import safe, public_projection
+
+    projected = safe(public_projection, connection, row, now)
+    if projected is not None:
+        result.update(
+            expiry=projected,
+            balance=result["balance"] - projected["expired_unspent"],
+            available=result["available"] - projected["expired_unspent"],
+        )
+    return result
 
 
 def daily_projection(connection, tenant, owner, now, actor_id=None):
@@ -274,11 +289,15 @@ def _change(
     origin=None,
     receipt_url=None,
     fingerprint=None,
+    issued_at=None,
 ):
     amount, held_delta = (
         _integer(amount, signed=True),
         _integer(held_delta, signed=True),
     )
+    if issued_at is not None:
+        if kind not in {"grant", "purchase"} or _clock(issued_at) > _clock(now):
+            raise CreditError("credit_clock_invalid", 422)
     for value, maximum, empty in (
         (reference_type, 32, False),
         (reference_id, 200, False),
@@ -302,6 +321,7 @@ def _change(
             "price_revision": price_revision,
             "origin": origin,
             "receipt_url": receipt_url,
+            **({"issued_at": issued_at} if issued_at is not None else {}),
         }
     )
     prior = (
@@ -355,6 +375,11 @@ def _change(
     )
     connection.execute(insert(credit_entries).values(**entry))
     current = dict(row, balance=balance, held=held, version=row["version"] + 1)
+    from .credit_expiry import safe, record, expire_due
+
+    safe(record, connection, row, entry, issued_at=issued_at)
+    if kind != "expire":
+        current = safe(expire_due, connection, current, now)
     return {"account": _public_account(current), "entry": entry, "created": True}
 
 
@@ -395,6 +420,7 @@ def grant(
     price_revision=None,
     origin=None,
     receipt_url=None,
+    issued_at=None,
 ):
     if kind not in {"grant", "purchase", "refund", "waive"}:
         raise CreditError("credit_kind_invalid", 422)
@@ -416,6 +442,7 @@ def grant(
         price_revision=price_revision,
         origin=origin,
         receipt_url=receipt_url,
+        issued_at=issued_at,
     )
 
 

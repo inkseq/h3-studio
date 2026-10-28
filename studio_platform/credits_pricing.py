@@ -70,7 +70,7 @@ def configuration(value):
         or not set(DEFAULT_CONFIGURATION) <= set(value)
         or set(value)
         - set(DEFAULT_CONFIGURATION)
-        - {"image_credits", "resolution_multipliers"}
+        - {"image_credits", "resolution_multipliers", "expiry_policy"}
         or (
             "image_credits" in value
             and (
@@ -101,6 +101,17 @@ def configuration(value):
         ):
             raise PricingError(
                 "credit_prices_invalid", "Resolution prices are invalid."
+            )
+    if "expiry_policy" in value:
+        from .credit_lots import POLICY
+
+        if (
+            type(value["expiry_policy"]) is not dict
+            or value["expiry_policy"] != POLICY
+            or any(type(n) is not int for n in value["expiry_policy"].values())
+        ):
+            raise PricingError(
+                "credit_prices_invalid", "Credit expiry policy is invalid."
             )
     return copy.deepcopy(value)
 
@@ -168,6 +179,8 @@ def public_prices(connection, tenant):
         result["resolution_multipliers"] = copy.deepcopy(
             value["configuration"]["resolution_multipliers"]
         )
+    if "expiry_policy" in value["configuration"]:
+        result["expiry_policy"] = copy.deepcopy(value["configuration"]["expiry_policy"])
     return result
 
 

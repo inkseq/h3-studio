@@ -1461,3 +1461,15 @@ body.sb-resizing-y video {
   font-size: 12px;
   line-height: 1.5;
 }
+/* Phones (owner 2026-10-28): Generate gets its own full row and the other two share the
+   next one, instead of three buttons squeezed off the edge. */
+@media (max-width: 560px) {
+  .editor .ed-footer .ed-actions > * {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .editor .ed-footer .ed-actions .primary {
+    flex: 1 1 100%;
+    order: -1;
+  }
+}
