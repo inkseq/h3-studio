@@ -387,7 +387,6 @@ export default function AssistantConnections({
           {!codeAvailable ? (
             <form onSubmit={issue} className="ui-form">
               <SettingsSection
-                help={target === 'telegram' ? t('telegram.explain') : null}
                 actions={
                   <Button
                     variant="primary"
@@ -419,6 +418,10 @@ export default function AssistantConnections({
                     />
                   </div>
                 )}
+                {/* Below the switch, one note per target, so switching never moves the tabs. */}
+                <p className="ui-settings-note muted">
+                  {t(target === 'telegram' ? 'telegram.explain' : 'telegram.agentExplain')}
+                </p>
                 <fieldset disabled={busy || !profile}>
                   {target === 'telegram' ? (
                     <SettingRow as="div" label={t('assistants.scope')}>

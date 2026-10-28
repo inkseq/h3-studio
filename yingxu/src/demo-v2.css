@@ -852,7 +852,8 @@ small {
   flex-wrap: wrap;
   gap: 6px;
 }
-.ref {
+/* Reference chips only; the REF mode panel (.modepanel.ref) shares the class name. */
+span.ref {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2036,7 +2037,7 @@ pre {
   color: rgba(116, 173, 255, 0.75);
 }
 
-.ref img {
+span.ref img {
   width: 22px;
   height: 22px;
   border-radius: 5px;
@@ -2656,18 +2657,6 @@ pre {
 .take-top em.cmp-n {
   background: var(--fl);
   color: var(--white);
-}
-.take-star {
-  border: 0;
-  padding: 3px;
-  border-radius: 6px;
-  background: rgba(0, 0, 0, 0.5);
-  color: var(--white);
-  opacity: 0.75;
-}
-.take-star.on {
-  color: var(--warn);
-  opacity: 1;
 }
 .take-info {
   padding: 6px 8px 8px;

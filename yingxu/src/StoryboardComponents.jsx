@@ -2312,7 +2312,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                   min={durationRange?.minimum}
                   max={durationRange?.maximum}
                   step={durationRange?.step || 'any'}
-                  value={shot.duration}
+                  value={Math.round(shot.duration * 100) / 100}
                   disabled={!durationRange}
                   onChange={(event) => {
                     const n = Number(event.target.value);

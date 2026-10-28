@@ -523,9 +523,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         gridTemplateColumns: theater
           ? 'minmax(0,1fr)'
           : railed
-            ? '44px minmax(0,1fr)'
+            ? '52px minmax(0,1fr)'
             : `${library.size}px 8px minmax(0,1fr)`,
-        '--libw': (railed ? 44 : library.size) + 'px',
+        '--libw': (railed ? 52 : library.size) + 'px',
       }}
     >
       {!railed && (

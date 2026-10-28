@@ -114,8 +114,36 @@ test('receipts come only from Inkseq receipt objects, never a provider receipt l
     ],
   });
   assert.deepEqual(list, [
-    { payment_id: 'b', amount_cents: 2000, credits: 2100, currency: 'USD', refunded_cents: 0 },
+    {
+      payment_id: 'b',
+      amount_cents: 2000,
+      credits: 2100,
+      currency: 'USD',
+      refunded_cents: 0,
+      base_cents: null,
+      tax_cents: 0,
+    },
   ]);
   assert.equal(JSON.stringify(list).includes('stripe'), false);
   assert.deepEqual(receiptList(null), []);
+});
+
+test('a taxed receipt keeps the pack price and the tax Stripe added (CR-74)', () => {
+  const [row] = receiptList({
+    payments: [
+      {
+        receipt: {
+          payment_id: 'p',
+          amount_cents: 550,
+          base_amount_cents: 500,
+          tax_amount_cents: 50,
+          credits: 500,
+          currency: 'usd',
+        },
+      },
+    ],
+  });
+  assert.equal(row.amount_cents, 550);
+  assert.equal(row.base_cents, 500);
+  assert.equal(row.tax_cents, 50);
 });

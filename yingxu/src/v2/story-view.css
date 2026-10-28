@@ -480,6 +480,10 @@
   flex-direction: row;
   flex-wrap: nowrap;
   padding-block: 0;
+  /* The base .modetabs .mt stacks label and note at the top; one-line tabs centre it. */
+  align-items: center;
+  justify-content: center;
+  text-align: center;
 }
 .sb-workspace .mode-help {
   font-size: 11px;
@@ -1192,10 +1196,11 @@ body.sb-resizing-y video {
   height: 100%;
   object-fit: cover;
 }
-/* #232 (#46, #56): the expanded editor covers the window; the picture keeps 16:9 at about
+/* #232 (#46, #56): the expanded editor covers the window beside the story library (owner
+   2026-10-28: keep the library so material can be dragged into the shot); the picture keeps 16:9 at about
    40% of the height (no black band), so takes, parts and tools fit beside the form. */
 .drawer.workbench-expanded {
-  left: 0 !important;
+  left: calc(var(--libw, 260px) + 8px) !important;
   z-index: 30;
 }
 .drawer.wide .editor.wide {
@@ -1222,6 +1227,7 @@ body.sb-resizing-y video {
 /* #232 (#47, #48): segmented choices size to their words in both languages; small numbers
    get small inputs. */
 .sb-workspace .quality-row .seg > button,
+.sb-workspace .ed-gen-options .seg > button,
 .sb-workspace .modetabs > button {
   flex: 0 0 auto;
   padding-inline: 12px;
@@ -1419,4 +1425,29 @@ body.sb-resizing-y video {
 .take-marks {
   background: var(--surface-3);
   color: var(--ink-2);
+}
+/* Take card (owner 2026-10-28): a radio picks the take in use, a pencil renames it beside the
+   name, and delete shows on hover. */
+.sb-workspace .storyboard-takes .take-name {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.sb-workspace .storyboard-takes .take-acts > label.take-use {
+  font-size: 12px;
+  cursor: pointer;
+}
+.storyboard-takes .take-delete {
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.storyboard-takes .take:hover .take-delete,
+.storyboard-takes .take:focus-within .take-delete {
+  opacity: 1;
+}
+@media (hover: none) {
+  .storyboard-takes .take-delete {
+    opacity: 1;
+  }
 }

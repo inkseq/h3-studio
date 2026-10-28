@@ -12,6 +12,7 @@ from .auth import Principal
 from .identity import account_identity, lock_account_gate
 from .identity_schema import admin_audit, users
 from .repository import documents, request_hash
+from .payment_tax import receipt_money
 from .stripe_client import (
     MAX_BODY,
     StripeGateway,
@@ -28,7 +29,7 @@ PACK_SCOPE = {
 MAX_CREDITS = (1 << 63) - 1
 
 
-def customer_receipt(row):
+def customer_receipt(row, *, money=None):
     """Project original paid facts, never provider contact details or URLs."""
     if row["paid_at"] is None or row["status"] not in {"paid", "refunded", "disputed"}:
         return None
@@ -45,6 +46,7 @@ def customer_receipt(row):
                 "refunded_cents",
             )
         },
+        **(money or {}),
         "paid_at": datetime.fromtimestamp(row["paid_at"], timezone.utc).isoformat(),
         "issuer": {
             "name": "Inkseq",
@@ -58,6 +60,17 @@ class BillingError(Exception):
     def __init__(self, code, detail, status=409):
         self.code, self.detail, self.status = code, detail, status
         super().__init__(code)
+
+
+def _receipt_money(connection, row):
+    if row["paid_at"] is None:
+        return None
+    try:
+        return receipt_money(connection, row)
+    except ValueError:
+        raise BillingError(
+            "billing_receipt_unavailable", "Receipt unavailable.", 503
+        ) from None
 
 
 def current_packs(connection, tenant):
@@ -513,6 +526,7 @@ class PaymentAPI:
                     ).limit(limit + 1)
                 ).mappings()
             )
+            money = {row["id"]: _receipt_money(connection, row) for row in rows[:limit]}
         result = []
         for row in rows[:limit]:
             item = {
@@ -534,8 +548,9 @@ class PaymentAPI:
                 if row["paid_at"] is not None
                 else None,
                 receipt_url=None,
-                receipt=customer_receipt(row),
+                receipt=customer_receipt(row, money=money[row["id"]]),
             )
+            item.update(money[row["id"]] or {})
             result.append(item)
         return {
             "payments": result,
@@ -565,7 +580,8 @@ class PaymentAPI:
                 .mappings()
                 .first()
             )
-        receipt = customer_receipt(row) if row is not None else None
+            money = _receipt_money(connection, row) if row is not None else None
+        receipt = customer_receipt(row, money=money) if row is not None else None
         if receipt is None:
             raise BillingError("billing_receipt_not_found", "Receipt unavailable.", 404)
         return {"receipt": receipt}
