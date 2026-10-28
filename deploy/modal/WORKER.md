@@ -88,9 +88,11 @@ original scaler receipts, in the same capacity-locked transaction as the
 original instance reservation. It must be called before committing a new Modal
 intent. It creates no table, budget account, rental or job. Both providers use
 `dstack_test_budget.projected_cost`: the shared-account layer is counted once,
-including Modal commitments and authoritative settlements. Unknown billing and
-confirmed process exit retain the original commitment; an unconfirmed running
-host beyond its expected lifetime increases the conservative projection.
+including Modal commitments and authoritative settlements. A matching original
+provider-exit receipt bounds the projection by observed lifetime plus stop margin;
+the full reservation and invoice hold remain unchanged until actual settlement.
+Unconfirmed stops retain the commitment, and an unconfirmed running host beyond
+its expected lifetime increases the conservative projection.
 
 ModalHosts rechecks this binding and the combined task projection before its
 sole create when the shared staging account funds the intent. An unattributed
@@ -113,7 +115,9 @@ This preference creates no provider resource, alternate queue or new job.
 It repeats the existing demand validation under the same capacity lock, reserves
 the original layered accounts, and binds a single original demand job in scaler
 receipts before provider I/O. It admits at most two unresolved Modal intents;
-compatible ready dedicated workers suppress fallback. Repeated observations,
+compatible ready dedicated workers suppress fallback. Compatible starting and
+live ready-idle Modal hosts cover one queued input each before another reservation;
+bound queued inputs consume their original host first. Repeated observations,
 response loss and terminal hosts cannot allocate a replacement for the same job.
 A crash between reservation and create leaves the original reserved intent for
 explicit reconciliation, not an automatic create on the next tick. This component

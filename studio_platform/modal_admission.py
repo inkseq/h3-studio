@@ -55,6 +55,56 @@ def dedicated_ready(connection, job, now):
     )
 
 
+def available_modal(connection, job, now, selections):
+    """Count compatible original starts and live idle hosts, once per input."""
+    result = set()
+    expected = job['execution_plan'].get('expected_runtime_s')
+    if not finite(expected) or expected <= 0:
+        return result
+    for intent in connection.execute(
+        select(instance_intents).where(
+            instance_intents.c.provider == 'modal',
+            instance_intents.c.pool == job['pool'],
+            instance_intents.c.state.in_(
+                ('reserved', 'creating', 'creation_unknown', 'starting', 'ready')
+            ),
+        )
+    ).mappings():
+        selection = selections.get(intent['id'], {})
+        if (
+            selection.get('configuration_id')
+            != job['execution_plan'].get('configuration_id')
+            or selection.get('manifest_digest')
+            != job['execution_plan'].get('engine_manifest_digest')
+            or not finite(intent['hard_deadline'])
+            or now + expected + 120 >= intent['hard_deadline']
+        ):
+            continue
+        if intent['state'] != 'ready':
+            result.add(intent['id'])
+            continue
+        workers = connection.execute(
+            select(registered_workers).where(
+                registered_workers.c.provider == 'modal',
+                registered_workers.c.instance_id == intent['provider_instance_id'],
+                registered_workers.c.state == 'ready',
+                registered_workers.c.current_job_id.is_(None),
+                registered_workers.c.expires_at > now,
+            )
+        ).mappings()
+        if any(
+            not worker['drain_requested']
+            and WorkerControl.matches(worker, job)
+            and worker_window_reason(
+                connection, worker, now, expected_runtime_s=expected
+            )
+            is None
+            for worker in workers
+        ):
+            result.add(intent['id'])
+    return result
+
+
 class ModalAdmission:
     def __init__(self, service, hosts, *, environment=None, enabled=False):
         self.service, self.hosts, self.repo = service, hosts, service.repo
@@ -141,7 +191,7 @@ class ModalAdmission:
         self.repo._lock_capacity(c)
         now = self.repo.clock()
         work = eligible_jobs(self.service, c, now)
-        bindings = {}
+        bindings, selections = {}, {}
         for receipt in c.execute(
             select(scaler_receipts).where(
                 scaler_receipts.c.operation == OPERATION,
@@ -150,6 +200,8 @@ class ModalAdmission:
             job_id = receipt['facts']['job_id']
             require(job_id not in bindings)
             bindings[job_id] = receipt['intent_id']
+            require(receipt['intent_id'] not in selections)
+            selections[receipt['intent_id']] = receipt['facts']
         active = list(
             c.execute(
                 select(instance_intents.c.id).where(
@@ -159,11 +211,18 @@ class ModalAdmission:
             ).scalars()
         )
         original = None
+        # Bound queued inputs already consume their original starting/idle slot.
+        # Remaining compatible slots each cover at most one unbound input.
+        consumed = {bindings[job['id']] for job, _ in work if job['id'] in bindings}
         for job, profile in work:
             if dedicated_ready(c, job, now):
                 continue
             if job['id'] in bindings:
                 original = original or bindings[job['id']]
+                continue
+            spare = available_modal(c, job, now, selections) - consumed
+            if spare:
+                consumed.add(sorted(spare)[0])
                 continue
             if len(active) >= self.hosts.spec.max_containers:
                 return {

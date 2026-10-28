@@ -204,7 +204,32 @@ def projected_reservation(connection, row, guard, now):
         )
         return actual
     require(row['state'] in {'reserved', 'invoice_pending'} and actual is None)
-    if intent['state'] in {'destroyed', 'not_created'}:
-        return amount
+    if intent['state'] == 'destroyed':
+        # Only the original provider-exit receipt bounds the lifetime. A stop
+        # acknowledgment or edited intent status is not removal evidence. Keep
+        # the reservation/invoice untouched; this is a conservative projection.
+        exits = []
+        for receipt in connection.execute(
+            select(scaler_receipts).where(
+                scaler_receipts.c.intent_id == intent['id'],
+                scaler_receipts.c.operation == 'observed',
+            )
+        ).mappings():
+            facts, stamp = receipt['facts'], receipt['observed_at']
+            if (
+                isinstance(facts, dict)
+                and facts.get('id') == intent['provider_instance_id']
+                and type(facts.get('exit_code')) is int
+                and finite(stamp)
+                and intent['created_at'] <= stamp <= now
+            ):
+                exits.append(stamp)
+        if exits:
+            elapsed = (
+                min(exits)
+                - intent['created_at']
+                + value['guard']['stop_margin_seconds']
+            )
+            return math.ceil(value['spec']['max_hourly_microusd'] * elapsed / 3600)
     elapsed = now - intent['created_at'] + value['guard']['stop_margin_seconds']
     return max(amount, math.ceil(value['spec']['max_hourly_microusd'] * elapsed / 3600))

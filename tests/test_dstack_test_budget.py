@@ -163,7 +163,7 @@ class DailyTestBudgetTests(LedgerCase):
                 'modal-same-task',
                 provider='modal',
                 hard_deadline=self.now + 600,
-                reserved_cost_microusd=750_000,
+                reserved_cost_microusd=1_000_000,
                 budget_account_ids=(ACCOUNT,),
                 dry_run=False,
                 connection=connection,
@@ -173,10 +173,10 @@ class DailyTestBudgetTests(LedgerCase):
                 connection,
                 modal['id'],
                 guard,
-                asdict(HostSpec('ap-test', 'im-test', 'vo-test', 3_000_000)),
+                asdict(HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000)),
             )
             self.assertEqual(
-                projected_cost(connection, guard, self.now), before + 750_000
+                projected_cost(connection, guard, self.now), before + 1_000_000
             )
 
     def test_explicit_test_capacity_one_and_ten_preserve_original_task_guards(self):

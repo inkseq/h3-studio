@@ -4,11 +4,11 @@ import copy
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from sqlalchemy import select
+from sqlalchemy import insert, select
 
 from studio_platform.modal_admission import ModalAdmission
 from studio_platform.modal_host import HostSpec, ModalHosts
-from studio_platform.repository import Scope, instance_intents
+from studio_platform.repository import Scope, instance_intents, registered_workers
 from studio_platform.runtime_catalog import engine_manifest
 from test_modal_budget import GUARD
 from test_modal_host import FakeModal
@@ -139,6 +139,59 @@ class ModalAdmissionTests(LedgerCase):
         self.admission.tick()
         self.admission.tick()
         self.assertEqual(self.admission.tick()['reason_code'], 'modal_container_limit')
+        self.assertEqual(len(self.client.created), 2)
+
+    def test_starting_host_covers_one_new_input_after_original_leaves_queue(self):
+        self.accepted('one')
+        self.admission.tick()
+        self.work.clear()
+        self.accepted('two')
+        self.assertEqual(self.admission.tick()['state'], 'idle')
+        self.assertEqual(len(self.client.created), 1)
+        self.accepted('three')
+        self.assertEqual(self.admission.tick()['state'], 'starting')
+        self.assertEqual(len(self.client.created), 2)
+
+    def test_incompatible_start_does_not_cover_other_configuration(self):
+        self.accepted('one')
+        self.admission.tick()
+        self.work.clear()
+        job = self.accepted('two')
+        job['execution_plan']['configuration_id'] = 'other-qualified-configuration'
+        self.assertEqual(self.admission.tick()['state'], 'starting')
+        self.assertEqual(len(self.client.created), 2)
+
+    def test_ready_idle_host_is_reused_but_expired_host_is_not(self):
+        self.accepted('one')
+        original = self.admission.tick()['intent_id']
+        self.repo.update_instance(original, 'ready')
+        self.work.clear()
+        self.accepted('two')
+        with self.repo.transaction() as c:
+            c.execute(
+                insert(registered_workers).values(
+                    id='modal-worker',
+                    pool=self.pool,
+                    provider='modal',
+                    instance_id='sb-1',
+                    spec={},
+                    spec_hash='test',
+                    state='ready',
+                    current_job_id=None,
+                    fence=1,
+                    expires_at=self.now + 30,
+                    updated_at=self.now,
+                )
+            )
+        # Compatibility has its own original contract tests; exercise the real
+        # worker-window/funding and idle/expiry predicates here.
+        with patch(
+            'studio_platform.modal_admission.WorkerControl.matches', return_value=True
+        ):
+            self.assertEqual(self.admission.tick()['state'], 'idle')
+            self.assertEqual(len(self.client.created), 1)
+            self.now += 31
+            self.assertEqual(self.admission.tick()['state'], 'starting')
         self.assertEqual(len(self.client.created), 2)
 
     def test_ready_dedicated_blocks_modal_without_changing_the_vast_planner(self):

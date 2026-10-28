@@ -125,9 +125,10 @@ class ModalBudgetTests(ModalBudgetCase):
             self.projection()
         self.assertEqual(self.client.created, [])
 
-    def test_exit_and_invoice_pending_keep_original_commitment(self):
+    def test_exit_projects_bounded_lifetime_but_keeps_invoice_reservation(self):
         identity = self.reserve()
         self.hosts.start(identity)
+        self.now += 120
         self.hosts.stop(identity)
         self.hosts.observe(identity)
         with self.repo.transaction() as c:
@@ -136,7 +137,20 @@ class ModalBudgetTests(ModalBudgetCase):
                 .where(budget_reservations.c.reference_id == identity)
                 .values(state='invoice_pending')
             )
-        self.assertEqual(self.projection(), 1_000_000)
+        self.assertEqual(self.projection(), 466_667)
+        with self.repo.engine.connect() as c:
+            row = (
+                c.execute(
+                    select(budget_reservations).where(
+                        budget_reservations.c.reference_id == identity
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            self.assertEqual(row['amount_microusd'], 1_000_000)
+            self.assertIsNone(row['actual_cost_microusd'])
+            self.assertEqual(row['state'], 'invoice_pending')
         self.repo.settle_instance_cost(identity, actual_cost_microusd=125_000)
         self.assertEqual(self.projection(), 125_000)
 
@@ -178,6 +192,31 @@ class ModalBudgetTests(ModalBudgetCase):
         self.hosts.stop(identity)
         self.hosts.observe(identity)
         self.now += 10000
+        self.hosts.observe(identity)
+        self.assertEqual(self.projection(), 333_334)
+
+    def test_stop_ack_without_provider_exit_keeps_full_obligation(self):
+        identity = self.reserve()
+        self.hosts.start(identity)
+        self.client.terminate = lambda _: None
+        self.hosts.stop(identity)
+        self.hosts.observe(identity)
+        self.assertEqual(self.projection(), 1_000_000)
+
+    def test_exit_for_foreign_provider_identity_cannot_reduce_projection(self):
+        identity = self.reserve()
+        self.hosts.start(identity)
+        self.hosts.stop(identity)
+        self.hosts.observe(identity)
+        with self.repo.transaction() as c:
+            c.execute(
+                update(scaler_receipts)
+                .where(
+                    scaler_receipts.c.intent_id == identity,
+                    scaler_receipts.c.operation == 'observed',
+                )
+                .values(facts={'id': 'sb-foreign', 'exit_code': 0})
+            )
         self.assertEqual(self.projection(), 1_000_000)
 
     def test_unconfirmed_running_beyond_deadline_grows_projection(self):
