@@ -148,6 +148,12 @@ class ModalHosts:
             )
         ):
             raise Conflict('modal_funding_unconfirmed')
+        from .dstack_test_budget import ACCOUNT
+
+        if any(row['account_id'] == ACCOUNT for row in rows):
+            from .modal_budget import enforce
+
+            enforce(c, intent['id'], asdict(self.spec), self.repo.clock())
         for row in rows:
             account = self.repo._locked(
                 c,

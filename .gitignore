@@ -953,3 +953,5 @@ inventory.json
 !tests/test_modal_entry.py
 !tests/test_modal_launch.py
 !studio_platform/modal_launch.py
+!studio_platform/modal_budget.py
+!tests/test_modal_budget.py

@@ -81,6 +81,26 @@ Existing staging credential: `/sixnine/staging/modal`, loaded only by the
 existing authorized role. Never import the obsolete secret-drop file or pass
 provider/database credentials into the GPU image. Production remains OFF.
 
+## Shared test-budget admission
+
+`modal_budget.bind_test_guard` records the immutable task/spec binding in the
+original scaler receipts, in the same capacity-locked transaction as the
+original instance reservation. It must be called before committing a new Modal
+intent. It creates no table, budget account, rental or job. Both providers use
+`dstack_test_budget.projected_cost`: the shared-account layer is counted once,
+including Modal commitments and authoritative settlements. Unknown billing and
+confirmed process exit retain the original commitment; an unconfirmed running
+host beyond its expected lifetime increases the conservative projection.
+
+ModalHosts rechecks this binding and the combined task projection before its
+sole create when the shared staging account funds the intent. An unattributed
+or changed binding refuses; repeated binding only observes identical evidence.
+The task ceiling cannot exceed CR73's USD50, and original account/pool limits
+still apply. The caller must catch refusal outside the reservation transaction
+so an unfunded intent cannot remain committed. Old daily guards cannot silently
+reinterpret a Modal task. This boundary is tested with fake clients; controller
+routing, real image qualification and activation remain unfinished above.
+
 ## Primary implementation references
 
 - [Modal official examples](https://github.com/modal-labs/modal-examples)
