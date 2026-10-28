@@ -854,3 +854,6 @@ and reference-heavy concurrency guards. Modal absorbs bursts, dedicated hosts
 serve sustained demand, always within the global hourly and original task caps.
 Measure actual first-video/interval p50 and p95 separately for #725; a prediction
 or CPU simulation is not an observed service-level receipt.
+
+## 2026-10-29 — Early-stage operating mode; AI layer and Modal to Claude
+Owner: Codex is too conservative for a product with almost no users. Until 100 paying users: staging changes need no proofs/receipts/approvals; production needs one zero-job check and one read-back; approvals only for spend > USD 50, user-data deletion, price changes or charging users; a Claude-assigned task within those limits is owner-authorized; prove the smallest end-to-end first; updates ≤ 5 lines; deploy-helper/server-config changes count only when live on both hosts. Claude owns the AI layer (backend included) and Modal (#688). See AGENTS.md.
