@@ -56,7 +56,7 @@ class CreditAPI:
     def balance(self, principal):
         from .credits import account
 
-        with self.repo.engine.connect() as connection:
+        with self.repo._budget_read() as connection:
             require_ready(connection)
             value = account(
                 connection,
@@ -64,10 +64,13 @@ class CreditAPI:
                 principal.owner,
                 now=self.repo.clock(),
             )
-        return {
+        result = {
             key: value[key]
             for key in ("balance", "held", "available", "today_used", "daily_limit")
         }
+        if "expiry" in value:
+            result["expiry"] = value["expiry"]
+        return result
 
     def history(self, principal, *, cursor=None, limit=50):
         from .credits import entries
@@ -302,6 +305,7 @@ class CreditAPI:
                 "welcome_credits",
                 "image_credits",
                 "resolution_multipliers",
+                "expiry_policy",
                 "fee_rate",
                 "reason",
             }
@@ -338,10 +342,20 @@ class CreditAPI:
                             "fee_rate",
                             "image_credits",
                             "resolution_multipliers",
+                            "expiry_policy",
                         )
                         if key in body
                     },
                 }
+            )
+            from .credit_expiry import check_adoption
+
+            check_adoption(
+                connection,
+                self.settings.tenant_id,
+                old["configuration"],
+                config,
+                self.repo.clock(),
             )
             if (
                 old["revision"]
