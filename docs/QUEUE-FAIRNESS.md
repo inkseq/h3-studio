@@ -38,3 +38,24 @@ a queue framework. No upstream code is copied.
 CR76/77's target/ETA projection, hourly spend-bound Modal expansion, admission
 caps and measured latency percentiles remain separate work. This change alone
 does not establish a five-minute service guarantee or enable a provider.
+
+## Optional administrator controls
+
+The existing spending-settings preview/confirm API accepts `fair_share` (boolean)
+and three wait targets: `first_video_max_seconds` (recommended 300),
+`next_video_interval_seconds` (120), and `modal_trigger_seconds` (180).
+All four changes require a reason, the original profile snapshot, confirmation
+digest and settings-version CAS; the existing settings event records history.
+The wait targets remain pending implementation and the inventory reports them
+as ineffective until an execution slice connects them. They do not enable Modal,
+start hosts, change hourly limits or promise an ETA.
+
+Old policies and accepted authority snapshots may omit all four fields. Reads,
+previews and unrelated writes never inject them. Administrators must explicitly
+save each optional value to adopt it. With `fair_share` absent, adopted policies
+retain the fair ordering described above; explicitly saving `false` restores
+legacy candidate ordering. It does not cancel/preempt work or change claims,
+fences, settlement or recovery. Turning it on again resumes fair ordering with
+the original durable cursor. The three target values may be stored independently;
+when both first-video and Modal-trigger targets are present, trigger cannot
+exceed the first-video target.
