@@ -200,10 +200,12 @@ class DeliveryTests(unittest.TestCase):
         self.assertEqual(values[0]['objects'], {})
 
     def test_put_intent_then_both_roles_uploaded_without_url_persistence(self):
+        self.assertTrue(self.journal.has_pending_delivery())
         value = self.prepare()
         targets = self.targets(value)
         result = self.host.upload_delivery(self.identity, value['fingerprint'], targets)
         self.assertEqual(result['state'], 'uploaded')
+        self.assertFalse(self.journal.has_pending_delivery())
         self.assertEqual(self.puts, ['video', 'audio'])
         self.assertTrue(all(v['stop_proven'] for v in result['objects'].values()))
         db = sqlite3.connect(self.journal.path)

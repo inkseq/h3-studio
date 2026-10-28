@@ -1099,7 +1099,9 @@ class PinnedWanGPSession:
                 self.device_lock.close()
 
 
-def create_session(runtime_root, config_path, output_dir, *, manifest=None):
+def create_session(
+    runtime_root, config_path, output_dir, *, manifest=None, modal_l40s=False
+):
     """Call only after verify_runtime on an isolated, authorized engine process."""
     root = Path(runtime_root).resolve(strict=True)
     profile = None
@@ -1107,6 +1109,12 @@ def create_session(runtime_root, config_path, output_dir, *, manifest=None):
         from ..runtime_catalog import validate_manifest
 
         profile = validate_manifest(manifest)
+    if modal_l40s:
+        from ..modal_runtime import device_profile
+
+        if profile is None:
+            raise ValueError('modal_v7_profile_required')
+        profile = device_profile(profile)
     config = _check_config(
         config_path, deployment_profile_id=profile['id'] if profile else None
     )

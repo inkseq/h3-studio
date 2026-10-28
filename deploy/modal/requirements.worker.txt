@@ -1,0 +1,2 @@
+# CPU controller SDK contract; import/authentication are explicit, never global.
+modal==1.6.3

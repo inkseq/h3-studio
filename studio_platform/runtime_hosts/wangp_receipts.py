@@ -616,3 +616,31 @@ No request settings, prompts, credentials or runtime error strings are persisted
                 ).fetchone()
                 is not None
             )
+
+    def has_pending_delivery(self):
+        """Successful local output is not disposable until its frozen upload.
+
+        CPU collection records descriptors/keys before upload and can verify
+        original objects after a lost response. No new receipt or acknowledgment
+        is invented here, and failures/malformed receipts cannot prove delivery.
+        """
+        from ..inference.wangp_delivery import validate_delivery_receipt
+
+        with self._connection() as db:
+            for op, raw in db.execute(
+                "SELECT operation_id,receipt FROM operations WHERE state='succeeded'"
+            ):
+                original = self._get(db, op)
+                value = json.loads(raw).get('_delivery')
+                if value is None:
+                    return True
+                value = validate_delivery_receipt(value)
+                if (
+                    value['state'] != 'uploaded'
+                    or value['identity']
+                    != {name: getattr(original, name) for name in value['identity']}
+                    or original.hold_reason
+                    or not original.stop_proven
+                ):
+                    return True
+        return False

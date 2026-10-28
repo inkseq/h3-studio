@@ -46,6 +46,7 @@ PRIVATE_FILES = (
     "studio_platform/inference/wangp_profile_dispatch.py", "studio_platform/inference/wangp_full_compiler.py",
     "studio_platform/runtime_hosts/wangp_media_tools.py",
     "studio_platform/runtime_hosts/wangp_profile_bootstrap.py",
+    "studio_platform/modal_runtime.py",
     "deploy/wangp/profiles/h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-lowram-v1.json",
     "deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-lowram-v1.json",
     "deploy/wangp/profiles/h3-unpruned33b-bf16-qwenbf16-vaefp16-sdpa-p3-splitqkv-v2.json",
