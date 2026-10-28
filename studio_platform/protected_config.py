@@ -6,7 +6,7 @@ from pathlib import Path
 import stat
 
 
-def read_protected_json(filename, error, *, pairs=None, limit=8192):
+def read_protected_json(filename, error, *, pairs=None, limit=8192, check_file=None):
     """The file's JSON, or `error()` for any path, ownership, mode, size or parse problem."""
     try:
         path = Path(filename)
@@ -31,6 +31,8 @@ def read_protected_json(filename, error, *, pairs=None, limit=8192):
                     )
                 )
             ):
+                raise error()
+            if check_file is not None and not check_file(info):
                 raise error()
             raw = handle.read(limit + 1)
         if len(raw) != info.st_size:
