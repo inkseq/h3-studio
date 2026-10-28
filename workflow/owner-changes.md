@@ -723,3 +723,38 @@ Owner, in the Claude session: "Spend money to test the queue's automatic GPU ren
   The owner waives the pre-launch real-card loop and will do one real purchase as a post-launch check.
 - **Then production auto-start ON** after Claude's staging acceptance of the capacity rule. Verify on production with one real queued job: a machine (or Modal) starts by itself and the job completes.
 - Still forbidden: other new credentials, deleting user data, changing pack prices or welcome credits, and any budget beyond the USD 50 above. Rollback must stay one switch away: Stripe mode off and charging off.
+
+## CR-20261028-74 — reviewed legal policy and tax-exclusive credit packs
+
+Owner decision recorded on #374 in
+[6459750785](https://github.com/inkseq/h3-studio/issues/374#issuecomment-6459750785),
+confirmed in this Codex session on 2026-10-28. This supersedes CR-73 only where
+the tax behavior or legal policy below differs; the CR-73 combined USD 50
+capacity-testing ceiling and existing credentials remain unchanged.
+
+- Stripe Managed Payments remains the merchant of record. Credit pack prices
+  become tax-exclusive, with tax added at Checkout. Base USD amounts and total
+  credits stay starter 500 cents/500, creator 2000/2100, studio 5000/5500 and
+  pro 10000/11500. Welcome credits remain unchanged.
+- Credit purchases are non-refundable except where the law requires, including
+  the ACL. Remove the 14-day unused-credit refund promise. Promotional credits
+  are free, may have their own conditions/expiry, and are clawed back with a
+  refunded purchase. Existing legally required refund processing remains intact.
+- Terms, Privacy and Content use version `2026-10-28`, status `reviewed`.
+  Privacy names categories rather than vendors/regions; Terms omit the business
+  location and use support@inkseq.com as the contact. Claude owns design#314
+  and its frontend synchronization.
+- Codex changes the backend Price contract to `tax_behavior=exclusive` and
+  uses a zero consumer-tax deduction in the tax-exclusive admin margin estimate.
+  This money change receives one Claude Tier2 PR review and green CI.
+- New exclusive Prices replace the four original inclusive Prices through the
+  existing audited catalog revision/CAS path, staging TEST first. Archive the
+  superseded Prices after the replacement is published and read back. LIVE
+  replacement is authorized only after the backend PR is merged and green;
+  no credential or webhook recreation is authorized.
+- At zero staging work, after design#314 is synced and deployed with the matching
+  page version, adopt Stripe TEST mode and publish the reviewed content policy
+  through `/v1/admin/content-policy`. Read back both, then hand Claude the TEST
+  loop; the owner enters the test card.
+- Production Stripe mode, charging and production policy publication remain
+  at Claude's existing charging-ON gate. This decision does not enable them.

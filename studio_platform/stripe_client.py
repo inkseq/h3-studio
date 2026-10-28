@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 import uuid
 
 from .stripe_config import load_credentials
+from .payment_tax import session_basis
 
 API_VERSION = "2026-09-30.endive"
 ORIGIN = "https://staging.inkseq.com"
@@ -266,7 +267,7 @@ class StripeGateway:
                 or _get(price, "type") != "one_time"
                 or _get(price, "unit_amount") != payment["amount_cents"]
                 or _get(price, "currency") != payment["currency"]
-                or _get(price, "tax_behavior") != "inclusive"
+                or _get(price, "tax_behavior") != "exclusive"
             ):
                 raise StripeGatewayError("billing_price_mismatch", 409)
             metadata = {
@@ -296,6 +297,15 @@ class StripeGateway:
                 ) from None
             result = _session(session, livemode=live)
             result["price_id"] = payment["price_id"]
+            if result.get("amount_cents", 0) < payment["amount_cents"]:
+                raise StripeGatewayError(
+                    "billing_provider_response_invalid", 502, unknown=True
+                )
+            result.update(
+                base_amount_cents=payment["amount_cents"],
+                tax_behavior="exclusive",
+                tax_amount_cents=result["amount_cents"] - payment["amount_cents"],
+            )
             if not result.get("checkout_url"):
                 raise StripeGatewayError(
                     "billing_provider_response_invalid", 502, unknown=True
@@ -375,6 +385,53 @@ class StripeGateway:
             "object": value,
         }
 
+    def _charge_basis(self, client, value, *, live):
+        """Read the original Session for gross refunds/disputes; never create."""
+        pi = _id(value.get("payment_intent_id"), "pi_")
+        listing = client.v1.checkout.sessions.list(
+            params={"payment_intent": pi, "limit": 2}
+        )
+        items = _get(listing, "data", [])
+        if (
+            _get(listing, "has_more") is not False
+            or not isinstance(items, list)
+            or len(items) != 1
+        ):
+            raise StripeGatewayError("billing_provider_response_invalid", 502)
+        session_id = _id(_get(items[0], "id"), "cs_live_" if live else "cs_test_")
+        session = client.v1.checkout.sessions.retrieve(
+            session_id,
+            params={
+                "expand": ["line_items.data.price", "payment_intent.latest_charge"]
+            },
+        )
+        resolved = _session(session, livemode=live)
+        line = _get(_get(session, "line_items", {}), "data", [])
+        try:
+            basis = session_basis(session)
+        except ValueError:
+            raise StripeGatewayError("billing_provider_response_invalid", 502) from None
+        price = _get(line[0], "price", {})
+        charge = _get(_get(session, "payment_intent", {}), "latest_charge")
+        charge_id = charge if isinstance(charge, str) else _get(charge, "id")
+        if (
+            resolved["session_id"] != session_id
+            or resolved.get("payment_intent_id") != pi
+            or resolved.get("payment_status") != "paid"
+            or _get(price, "livemode") is not live
+            or charge_id != value["charge_id"]
+            or any(
+                key in resolved and resolved[key] != item for key, item in value.items()
+            )
+        ):
+            raise StripeGatewayError("billing_provider_response_invalid", 502)
+        return {
+            **resolved,
+            **value,
+            **basis,
+            "price_id": _id(_get(price, "id"), "price_"),
+        }
+
     def resolve_event(self, verified):
         """Existing DBOS worker calls this outside ledger transactions, never webhook."""
         config = self.configuration()
@@ -416,9 +473,15 @@ class StripeGateway:
                 if (
                     _get(price, "livemode") is not live
                     or _get(price, "currency") != "usd"
-                    or _get(price, "tax_behavior") != "inclusive"
+                    or _get(price, "tax_behavior") not in {"inclusive", "exclusive"}
                 ):
                     raise StripeGatewayError("billing_provider_response_invalid", 502)
+                try:
+                    resolved.update(session_basis(session))
+                except ValueError:
+                    raise StripeGatewayError(
+                        "billing_provider_response_invalid", 502
+                    ) from None
                 resolved["price_id"] = _id(_get(price, "id"), "price_")
                 pi = _get(session, "payment_intent")
                 charge = _get(pi, "latest_charge") if not isinstance(pi, str) else None
@@ -445,7 +508,9 @@ class StripeGateway:
                 )
                 if charge["charge_id"] != value["charge_id"]:
                     raise StripeGatewayError("billing_provider_response_invalid", 502)
-                value = {**charge, **value}
+                value = self._charge_basis(client, {**charge, **value}, live=live)
+            elif verified["type"] == "charge.refunded":
+                value = self._charge_basis(client, value, live=live)
             return {**verified, "object": value}
         except stripe.StripeError:
             raise StripeGatewayError("billing_provider_unavailable") from None

@@ -153,14 +153,14 @@ def image_price(connection, tenant):
 
 
 def admin_margin_estimate(price, catalog):
-    """Tax-inclusive estimate, never a fee invoice or a customer charge.
+    """Tax-exclusive pack estimate, never a fee invoice or customer charge.
 
     Pack credits already INCLUDE the published bonus. Existing immutable price
     configurations and accepted quotes are not rewritten by this projection.
     Missing measured GPU prices remain unknown, with useful break-even bounds.
     """
     config = price["configuration"]
-    tax = Fraction(1, 4)
+    tax = Fraction(0)
     fee = max(Fraction(7, 100), Fraction(str(config["fee_rate"])))
     fixed_fee = Fraction(1, 5)
     packs = []
@@ -234,11 +234,11 @@ def admin_margin_estimate(price, catalog):
         "currency": "usd",
         "pack_revision": catalog["revision"],
         "assumptions": {
-            "tax_inclusive": True,
+            "tax_inclusive": False,
             "consumer_tax_rate": float(tax),
             "processing_and_mor_fee_rate": float(fee),
             "fixed_fee_usd_per_pack": float(fixed_fee),
-            "source": "owner_20261020_estimated_ceiling_not_actual_invoice",
+            "source": "owner_CR74_exclusive_estimated_fees_not_actual_invoice",
             "pack_credits_include_bonus": True,
         },
         "packs": packs,

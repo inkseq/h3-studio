@@ -491,14 +491,15 @@ class CreditsRouteTests(LedgerCase):
         margin = value["margin_estimate"]
         self.assertEqual(margin["pack_revision"], "catalog-one")
         self.assertEqual(margin["worst_case_pack_id"], "pro")
-        # $100 / 1.25 - $7 - $0.20, divided by all 11,500 credited units.
-        self.assertAlmostEqual(margin["worst_case_net_usd_per_credit"], 72.8 / 11500)
+        # Tax is added at Checkout: $100 - $7 - $0.20 over all 11,500 credits.
+        self.assertAlmostEqual(margin["worst_case_net_usd_per_credit"], 92.8 / 11500)
         self.assertEqual(margin["assumptions"]["processing_and_mor_fee_rate"], 0.07)
-        self.assertTrue(margin["assumptions"]["tax_inclusive"])
+        self.assertFalse(margin["assumptions"]["tax_inclusive"])
+        self.assertEqual(margin["assumptions"]["consumer_tax_rate"], 0)
         self.assertTrue(margin["assumptions"]["pack_credits_include_bonus"])
         refine = margin["tiers"]["refine"]
         self.assertAlmostEqual(
-            refine["estimated_net_usd_per_5s_clip"], 60 * 72.8 / 11500
+            refine["estimated_net_usd_per_5s_clip"], 60 * 92.8 / 11500
         )
         self.assertEqual(refine["status"], "gpu_cost_unmeasured")
         self.assertIsNone(refine["estimated_margin"])

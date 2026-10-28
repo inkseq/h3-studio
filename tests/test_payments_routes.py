@@ -612,6 +612,8 @@ class PaymentRouteTests(LedgerCase):
                             "livemode": False,
                             "currency": "usd",
                             "tax_behavior": "inclusive",
+                            "unit_amount": 500,
+                            "type": "one_time",
                         },
                     }
                 ],

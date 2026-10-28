@@ -942,6 +942,8 @@ inventory.json
 !tools/prepare_taomate_bindings.py
 !tests/test_taomate_production_bindings.py
 !docs/TAOMATE-PRODUCTION-BINDING.md
+!studio_platform/payment_tax.py
+!tests/test_payment_tax.py
 !studio_platform/modal_host.py
 !studio_platform/modal_client.py
 !tests/test_modal_host.py
