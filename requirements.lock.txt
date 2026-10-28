@@ -2,6 +2,7 @@ alembic==1.20.0
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
+backoff==2.2.1
 bcrypt==5.0.0
 boto3==1.43.108
 botocore==1.43.108
@@ -13,6 +14,7 @@ croniter==6.2.4
 cryptography==50.0.2
 dbos==3.3.0
 disposable-email-domains==0.0.283
+distro==1.9.0
 fastapi==0.142.2
 greenlet==3.5.6
 h11==0.16.0
@@ -28,6 +30,8 @@ markupsafe==3.0.4
 opentelemetry-api==1.45.0
 paramiko==5.0.0
 pillow==12.3.0
+# Official SDK PyPI 2026-09-23; mature synchronous capture, no consumer/poller.
+posthog==7.60.0
 psycopg==3.3.6
 psycopg-binary==3.3.6
 pycparser==3.0
