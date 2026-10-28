@@ -1472,10 +1472,11 @@ function Inventory({ profiles, controller, onStart, testTaskRequired = false }) 
   }
   return (
     <>
-      {testTaskRequired && (
-        <TestTaskField value={taskId} onChange={(value) => change(() => setTaskId(value))} />
-      )}
+      {/* The task id is one of the search inputs, so it sits in the same bar (owner 2026-10-28). */}
       <section className="p4-panel p4-inventorybar">
+        {testTaskRequired && (
+          <TestTaskField value={taskId} onChange={(value) => change(() => setTaskId(value))} />
+        )}
         <label>
           {t('operator.copy100')}
           <select
@@ -1483,6 +1484,7 @@ function Inventory({ profiles, controller, onStart, testTaskRequired = false }) 
             value={model}
             onChange={(event) => change(() => setModel(event.target.value))}
           >
+            {!models.length && <option value="">{t('operator.noModels')}</option>}
             {models.map((value) => (
               <option key={value} value={value}>
                 {value}
@@ -1685,6 +1687,31 @@ function AdminView({ snapshot, profiles, onDetail, onStop }) {
   );
 }
 const LegacyOperator = React.lazy(() => import('./OperatorConsole.jsx'));
+function ConsoleNotices({ state, stale, onRecover }) {
+  const { t } = useI18n();
+  const pending = state.pending,
+    cancel = pending?.method === 'cancelJobs';
+  return (
+    <>
+      {state.error && !state.denied && <p role="alert">{state.error}</p>}
+      {stale && (
+        <p className="ops-warning" role="status">
+          {t('operator.copy134')}
+        </p>
+      )}
+      {pending && (
+        <section className="card-box ops-warning" role="alert">
+          <b>{t(cancel ? 'operator.status50' : 'operator.status51')}</b>
+          <p>{t(cancel ? 'operator.status52' : 'operator.status53')}</p>
+          <Button disabled={state.busy} onClick={onRecover}>
+            {t('operator.copy135')}
+          </Button>
+        </section>
+      )}
+    </>
+  );
+}
+
 export default function P4OperatorConsole() {
   const { t, locale } = useI18n();
   const pageActive = usePageActive(),
@@ -1839,6 +1866,11 @@ export default function P4OperatorConsole() {
             <RefreshCw size={13} />
             {t('operator.status118')}
           </Button>
+          {admin && !adminNodes && snapshot && (
+            <Button variant="ghost" size="sm" className="p4-page-refresh" onClick={showAdmin}>
+              {t('operator.fleet.load')}
+            </Button>
+          )}
           <div className="spacer" />
           <Button
             variant="primary"
@@ -1850,29 +1882,7 @@ export default function P4OperatorConsole() {
             {t('operator.copy132')}
           </Button>
         </div>
-        {state.error && !state.denied && <p role="alert">{state.error}</p>}
-        {stale && (
-          <p className="ops-warning" role="status">
-            {t('operator.copy134')}
-          </p>
-        )}
-        {state.pending && (
-          <section className="card-box ops-warning" role="alert">
-            <b>
-              {state.pending.method === 'cancelJobs'
-                ? t('operator.status50')
-                : t('operator.status51')}
-            </b>
-            <p>
-              {state.pending.method === 'cancelJobs'
-                ? t('operator.status52')
-                : t('operator.status53')}
-            </p>
-            <Button disabled={state.busy} onClick={() => quiet(controller.recover())}>
-              {t('operator.copy135')}
-            </Button>
-          </section>
-        )}
+        {!snapshot && state.error && !state.denied && <p role="alert">{state.error}</p>}
         {!c.account ? (
           <Login />
         ) : state.denied ? (
@@ -1917,37 +1927,29 @@ export default function P4OperatorConsole() {
                 </Button>
               )}
             </nav>
-            <div className="stats five">
+            {/* While a refresh is due the last totals stay, muted, instead of turning into dashes. */}
+            <div className={'stats five' + (stale ? ' stale' : '')}>
               <div>
                 <small>{t('operator.status56')}</small>
-                <b>
-                  {stale
-                    ? '—'
-                    : fleetLive.filter((node) => phase(node, locale).id === 'ready').length}
-                </b>
+                <b>{fleetLive.filter((node) => phase(node, locale).id === 'ready').length}</b>
               </div>
               <div>
                 <small>{t('operator.status58')}</small>
-                <b>
-                  {stale
-                    ? '—'
-                    : fleetLive.filter((node) => phase(node, locale).id === 'running').length}
-                </b>
+                <b>{fleetLive.filter((node) => phase(node, locale).id === 'running').length}</b>
               </div>
               <div>
                 <small>{t('operator.status57')}</small>
                 <b>
-                  {stale
-                    ? '—'
-                    : fleetLive.filter(
-                        (node) =>
-                          !['ready', 'running', 'stopping'].includes(phase(node, locale).id),
-                      ).length}
+                  {
+                    fleetLive.filter(
+                      (node) => !['ready', 'running', 'stopping'].includes(phase(node, locale).id),
+                    ).length
+                  }
                 </b>
               </div>
               <div>
                 <small>{t('operator.status59')}</small>
-                <b>{stale ? '—' : money(totalHourly)}</b>
+                <b>{money(totalHourly)}</b>
                 <small className="muted">{t('operator.status60')}</small>
               </div>
               <div>
@@ -1962,13 +1964,6 @@ export default function P4OperatorConsole() {
                 </Button>
               </div>
             </div>
-            {admin && !adminNodes && (
-              <p className="p4-fleet-note muted">
-                <Button variant="link" onClick={showAdmin}>
-                  {t('operator.fleet.load')}
-                </Button>
-              </p>
-            )}
             {admin && othersLive.length > 0 && (
               <p className="p4-fleet-note" role="status">
                 {t('operator.fleet.others', {
@@ -1980,6 +1975,12 @@ export default function P4OperatorConsole() {
                 </Button>
               </p>
             )}
+            {/* Notices sit below the tabs and totals, so those never move (owner 2026-10-28). */}
+            <ConsoleNotices
+              state={state}
+              stale={stale}
+              onRecover={() => quiet(controller.recover())}
+            />
             {view === 'machines' && (
               <>
                 <div className="queues">

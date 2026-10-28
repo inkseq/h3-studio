@@ -461,9 +461,9 @@ test('admin diagnostics retain original execution and notification identities wi
   assert.equal(jobStatus(row.status), '原执行待核对');
   assert.equal(jobStatus('submission_unknown'), '提交结果待核对');
   assert.deepEqual(jobDiagnostics(row), [
-    '保留原执行，等待核对',
+    '保留执行，等待核对',
     '距最近任务更新 3 分钟',
-    '原执行 #2 · 12345678',
+    '执行 #2 · 12345678',
     '派发 abcdef12 · 通知结果待核对',
   ]);
   assert.deepEqual(jobDiagnostics(job()), []); // Compatible with an older server during rollout.

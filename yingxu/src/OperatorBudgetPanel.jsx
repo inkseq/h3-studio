@@ -17,7 +17,8 @@ import OperatorBillingPanel from './OperatorBillingPanel.jsx';
 import { Consequences } from './CapacitySettings.jsx';
 import { Button } from './ui/Button.jsx';
 
-export function BudgetAccounts({ budgets = [], compact = false }) {
+// `untitled`: the surrounding section already names the account, so the card doesn't repeat it.
+export function BudgetAccounts({ budgets = [], compact = false, untitled = false }) {
   const { t, locale } = useI18n();
   return (
     <div className={'budget-accounts' + (compact ? ' compact' : '')}>
@@ -51,7 +52,7 @@ export function BudgetAccounts({ budgets = [], compact = false }) {
             aria-label={budgetLabel(budget, locale)}
           >
             <header>
-              <b>{budgetLabel(budget, locale)}</b>
+              {!untitled && <b>{budgetLabel(budget, locale)}</b>}
               {status !== 'ok' && (
                 <span role="status">
                   {status === 'exhausted' ? t('operator.status95') : t('operator.status96')}
@@ -254,7 +255,11 @@ export default function OperatorBudgetPanel({ account, compact = false }) {
       </header>
       {value ? (
         <>
-          <BudgetAccounts budgets={value.budgets} compact={compact} />
+          <BudgetAccounts
+            budgets={value.budgets}
+            compact={compact}
+            untitled={value.budgets.length === 1}
+          />
           <small>{t('operatorPanel.readBudget', { time: time(value.as_of, locale) })}</small>
           {!value.budgets.length && <p>{t('operator.copy7')}</p>}
           {value.next_after_id && (
@@ -287,7 +292,7 @@ function BudgetEditor({ row, busy, onSave }) {
       <Disclosure summary={t('operatorPanel.accountIdentity')}>
         <small>{row.id}</small>
       </Disclosure>
-      <BudgetAccounts budgets={[row]} compact />
+      <BudgetAccounts budgets={[row]} compact untitled />
       <form
         onSubmit={async (event) => {
           event.preventDefault();

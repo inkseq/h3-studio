@@ -1129,13 +1129,12 @@
 /* An admin must see other accounts' live machines, not only their own (owner, 2026-10-22). */
 .ops-adapter .p4-fleet-note {
   margin: 10px 0 0;
-  padding: 9px 14px;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
   font-size: 13px;
+  color: var(--ink-2);
 }
-.ops-adapter .p4-fleet-note[role='status'] {
-  border-color: var(--accent);
+/* While a refresh is due the last totals stay visible, muted (owner 2026-10-28). */
+.ops-adapter .stats.stale b {
+  opacity: 0.45;
 }
 
 /* #232 (#34): one line per assistant; cost breakdown, cap and IDs live under Details. */
@@ -1279,4 +1278,27 @@
 }
 .assistant-connections .assistant-defaults[open] > summary {
   margin-bottom: 12px;
+}
+
+/* Host history cards (owner 2026-10-28): six facts in one row of three, tighter boxes, and
+   the run/failure counts as a compact line, so each host fits on about half a screen. */
+.ops-adapter .p4-host-record .p4-kv {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.ops-adapter .p4-host-record .p4-kv > div {
+  padding: 8px 10px;
+  gap: 2px;
+}
+.ops-adapter .p4-host-record .p4-host-summary {
+  grid-template-columns: repeat(4, minmax(0, max-content));
+  gap: 4px 20px;
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .ops-adapter .p4-host-record .p4-kv,
+  .ops-adapter .p4-host-record .p4-host-summary {
+    grid-template-columns: 1fr 1fr;
+  }
 }
