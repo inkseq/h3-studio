@@ -787,3 +787,45 @@ zero-work gates and Claude's production promotion/charging authority remain.
   expiry in the credits page. Do not infer a new reviewed policy version.
 - Record each slice separately with Refs #739 / #374. Code merge does not
   publish prices, enable subscriptions, mutate balances or turn charging ON.
+
+## CR-20261028-76 — fair waiting and Modal-first bursts within a global ceiling
+
+Owner decisions relayed by Claude on #745 in
+[6465171149](https://github.com/inkseq/h3-studio/issues/745#issuecomment-6465171149)
+and [6465218341](https://github.com/inkseq/h3-studio/issues/745#issuecomment-6465218341).
+The service target replaces a fixed two-container product rule; it does not
+silently change an existing deployment or authorize unbounded capacity.
+
+- Interleave customers' first pending shots before their later shots, retaining
+  per-customer order and the original queue, claims, fences and receipts.
+- Prefer ready dedicated capacity. Use Modal for bursts whose first-completion
+  projection exceeds180s, targeting first video within300s. For sustained work
+  beyond roughly15minutes, bring up cheaper dedicated capacity in parallel.
+- Global committed GPU capacity is bounded by20USD/hour across Modal and
+  dedicated hosts, including starting, unknown and stopping obligations.
+  Missing prices or uncertain removal cannot create headroom. Retain lower
+  adopted limits until an audited reviewed adoption; report honest ETA when
+  the cap binds. No always-on warm floor now; revisit near50daily active users.
+- The proposed Modal120s startup and40s/125s generation timings remain
+  unmeasured assumptions pending #688 qualification. They must not establish
+  guaranteed latency or substitute for measured capacity evidence.
+- CR73's combined50USD staging test ceiling, existing credentials, idle stop,
+  production gates and Claude promotion authority remain unchanged. Tier2
+  review covers paid-start planning/integration; source merge alone enables
+  no rollout, provider, capacity increase or customer charge.
+
+## CR-20261028-77 — first-completion and subsequent-completion targets
+
+Owner decision relayed on #745 in
+[6466418139](https://github.com/inkseq/h3-studio/issues/745#issuecomment-6466418139).
+`first_video_max_seconds` defaults to300 and measures the longest customer wait
+from submission to their first completed video, not a mean. While shots remain
+queued, `next_video_interval_seconds` defaults to120 between completions.
+Both are admin-tunable through the existing audited settings path.
+
+Project individual customer completions from compatible slots and tier/reference
+durations. Parallel shots may help the cadence, subject to existing admission
+and reference-heavy concurrency guards. Modal absorbs bursts, dedicated hosts
+serve sustained demand, always within the global hourly and original task caps.
+Measure actual first-video/interval p50 and p95 separately for #725; a prediction
+or CPU simulation is not an observed service-level receipt.
