@@ -55,6 +55,7 @@ class ModalWorkerBindings:
         initializer=initialize,
         observer=observe,
         readiness=None,
+        capacity_usage=None,
     ):
         self.repo, self.root, self.connect = repo, Path(root), connect
         require(self.root.is_absolute())
@@ -63,6 +64,7 @@ class ModalWorkerBindings:
         self.stderr_sink = stderr_sink
         self.initializer, self.observer = initializer, observer
         self.readiness = readiness or self._readiness
+        self.capacity_usage = capacity_usage
 
     def _receipts(self, c, identity, operation):
         return list(
@@ -243,6 +245,7 @@ class ModalWorkerBindings:
         slot = config.slot(worker_id)
         if slot.spec.provider != 'modal':
             return slot_runner(config, worker_id, settings, repository=repository)
+        require(callable(self.capacity_usage))
 
         def factory(selected, directory):
             sandbox = self.connect(selected.spec.instance_id)
@@ -256,5 +259,10 @@ class ModalWorkerBindings:
             )
 
         return slot_runner(
-            config, worker_id, settings, repository=repository, backend_factory=factory
+            config,
+            worker_id,
+            settings,
+            repository=repository,
+            backend_factory=factory,
+            capacity_usage=self.capacity_usage,
         )

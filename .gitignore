@@ -982,3 +982,9 @@ inventory.json
 !tests/test_payment_alert_conditions.py
 !tests/test_payment_monitor_reader.py
 !docs/PAYMENT-MONITORING.md
+!studio_platform/modal_capacity.py
+!tests/test_modal_capacity.py
+!studio_platform/native_capacity_inventory.py
+!studio_platform/modal_dispatch.py
+!tests/test_modal_dispatch.py
+!tests/test_modal_exit_capacity.py

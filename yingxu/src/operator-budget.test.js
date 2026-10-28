@@ -656,7 +656,7 @@ test('actual budget cards show sparse recorded dates and legacy uncertainty with
     module,
     React.createElement(module.exports.BudgetAccounts, { budgets: [retiredRow], compact: true }),
   );
-  assert.match(retired, /原固定额度已停用/);
+  assert.match(retired, /固定额度已停用/);
   assert.match(retired, /待核账单预估.*\$2\.00/);
   assert.match(retired, /实际费用尚未确认/);
   assert.doesNotMatch(retired, /额度不足|<progress|剩余额度/);
@@ -731,7 +731,7 @@ test('actual budget cards show sparse recorded dates and legacy uncertainty with
   assert.match(pendingEnglish, /Actual charges are unknown/);
   assert.match(pendingEnglish, /Confirmed GPU rental invoices/);
   assert.doesNotMatch(pendingEnglish, /operatorPanel\./);
-  assert.match(english, /original fixed cap is retired/);
+  assert.match(english, /fixed cap is retired/);
   assert.match(english, /Pending invoice estimate/);
   assert.doesNotMatch(english, /原固定额度|operatorPanel\./);
 });

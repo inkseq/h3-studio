@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import uuid
 
 from sqlalchemy import insert, select
@@ -10,7 +10,7 @@ from sqlalchemy import insert, select
 from studio_platform.modal_admission import OPERATION
 from studio_platform.modal_worker_binding import ModalWorkerBindings
 from studio_platform.modal_runtime import PROFILE
-from studio_platform.repository import scaler_receipts
+from studio_platform.repository import BudgetExceeded, scaler_receipts
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.runtime_catalog import engine_manifest
 from test_modal_budget import ModalBudgetCase
@@ -68,6 +68,29 @@ class WorkerBindingTests(ModalBudgetCase):
             facts = list(c.execute(select(scaler_receipts.c.facts)).scalars())
         value = self.initialize.call_args.args[1]
         self.assertNotIn(value['token'], str(facts))
+
+    def test_worker_runner_uses_the_same_guarded_capacity_reader(self):
+        slot = self.bindings.slot(self.identity)
+        config, reader = Mock(), Mock()
+        config.slot.return_value = slot
+        self.bindings.capacity_usage = reader
+        with patch('studio_platform.modal_worker_binding.slot_runner') as runner:
+            self.bindings.runner_context(
+                config, slot.spec.worker_id, Mock(), repository=self.repo
+            )
+        self.assertIs(runner.call_args.kwargs['capacity_usage'], reader)
+        self.assertTrue(callable(runner.call_args.kwargs['backend_factory']))
+
+    def test_missing_capacity_reader_cannot_fall_back_to_unqualified_registration(self):
+        slot = self.bindings.slot(self.identity)
+        config = Mock()
+        config.slot.return_value = slot
+        with patch('studio_platform.modal_worker_binding.slot_runner') as runner:
+            with self.assertRaises(BudgetExceeded):
+                self.bindings.runner_context(
+                    config, slot.spec.worker_id, Mock(), repository=self.repo
+                )
+        runner.assert_not_called()
 
     def test_unknown_initialize_reads_original_and_never_executes_again(self):
         self.initialize.side_effect = ValueError('private-value')
