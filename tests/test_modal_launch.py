@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock
 
 from studio_platform.modal_entry import install_launch, launch_document
-from studio_platform.modal_launch import initialize
+from studio_platform.modal_launch import initialize, observe
 from studio_platform.modal_runtime import PROFILE
 from studio_platform.runtime_catalog import engine_manifest
 
@@ -74,3 +74,20 @@ class LaunchTests(unittest.TestCase):
                 sandbox, {**self.value, 'api_key': 'forbidden'}, stderr_sink=object()
             )
         sandbox.exec.assert_not_called()
+
+    def test_observation_after_unknown_install_is_read_only_and_bounded(self):
+        stream = io.BytesIO()
+        stream.drain = Mock()
+        stream.write_eof = Mock()
+        process = SimpleNamespace(
+            stdin=stream, stdout=io.BytesIO(b'observed\n'), wait=Mock(return_value=0)
+        )
+        sandbox = SimpleNamespace(exec=Mock(return_value=process))
+        self.assertTrue(observe(sandbox, self.value, stderr_sink=object()))
+        command = sandbox.exec.call_args.args
+        self.assertNotIn('install_launch', command[2])
+        self.assertNotIn(self.value['token'], str(command))
+        self.assertEqual(json.loads(stream.getvalue()), self.value)
+        sandbox.exec.side_effect = TimeoutError('private-response')
+        self.assertFalse(observe(sandbox, self.value, stderr_sink=object()))
+        self.assertEqual(sandbox.exec.call_count, 2)

@@ -121,6 +121,17 @@ is not yet wired into the production entrypoint. Private CPU slot installation,
 all-host lifecycle reconciliation, image/Volume qualification and full staging
 acceptance are still required before activation.
 
+`ModalWorkerBindings` prepares a private CPU transport identity for an already
+funded, journaled Sandbox. The initialization marker commits in scaler receipts
+before SDK exec. After response loss, only a read-only comparison of the original
+remote launch document is allowed; missing/changed local identity never mints a
+replacement token. The native manifest, slot and runtime incarnation must match
+before producing the original `SlotConfig`. Its runner context injects only the
+private HTTP transport into `fleet.slot_runner`, retaining WorkerRunner, claims,
+fences and settlement. No API token is persisted in SQL or passed in argv. This
+is tested offline; all-host lifecycle/entrypoint wiring and real qualification
+remain prerequisites to enable it.
+
 ## Primary implementation references
 
 - [Modal official examples](https://github.com/modal-labs/modal-examples)

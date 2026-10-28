@@ -30,7 +30,7 @@ GUARD = {
 }
 
 
-class ModalBudgetTests(LedgerCase):
+class ModalBudgetCase(LedgerCase):
     def setUp(self):
         super().setUp()
         self.scope = Scope('sixnine', 'superdan', 'project-inkseq-staging-superdan')
@@ -77,6 +77,8 @@ class ModalBudgetTests(LedgerCase):
                 expected_runtime_s=duration,
             )
 
+
+class ModalBudgetTests(ModalBudgetCase):
     def test_new_claim_and_submit_require_original_funded_modal_binding(self):
         self.assertEqual(self.worker_reason(), 'modal_test_budget_unconfirmed')
         identity = self.reserve()
