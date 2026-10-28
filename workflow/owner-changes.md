@@ -758,3 +758,32 @@ capacity-testing ceiling and existing credentials remain unchanged.
   loop; the owner enters the test card.
 - Production Stripe mode, charging and production policy publication remain
   at Claude's existing charging-ON gate. This decision does not enable them.
+
+## CR-20261028-75 — membership prices, resolution pricing and credit expiry
+
+Owner confirmation relayed on #739 in
+[6463314183](https://github.com/inkseq/h3-studio/issues/739#issuecomment-6463314183).
+This supersedes prior never-expire and pack-price directions only as stated
+below. Tier2 review, existing credentials, CR73's combined USD50 test ceiling,
+zero-work gates and Claude's production promotion/charging authority remain.
+
+- Starter membership: USD12/month,960 credits/month; Creator: USD29/month,
+  2,400 credits/month with priority queue. The main non-member pack is USD29
+  once for2,200 credits. Other non-member packs are USD6.50/65/130 (+30%);
+  members retain member pack prices. Use real amounts on the pricing page.
+- The founding offer applies during the first four weeks after memberships
+  launch: first three months USD6 for Starter or USD14.50 for Creator.
+- Standard480P remains4 credits/second; Sharp768P becomes8 credits/second.
+  Publish the resolution factor through the existing audited price revision
+  path. Never reprice an accepted quote or edit its original ledger history.
+- Purchased packs expire12 months after purchase; welcome/campaign credits
+  expire30 days after grant. Membership credits roll over at most one month.
+  Spend the earliest-expiring credits first, using the existing `expire`
+  ledger kind. No silent retroactive balance deletion is authorized.
+- Expiry and Sharp pricing must be adopted before the first LIVE purchase.
+  The initial charging gate remains packs-only; membership execution follows.
+  Claude updates Terms and bumps the version before production publication,
+  removes obsolete never-expire/no-subscription copy, and displays upcoming
+  expiry in the credits page. Do not infer a new reviewed policy version.
+- Record each slice separately with Refs #739 / #374. Code merge does not
+  publish prices, enable subscriptions, mutate balances or turn charging ON.
