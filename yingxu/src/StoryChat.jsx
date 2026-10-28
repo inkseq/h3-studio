@@ -459,13 +459,19 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   const story = useRef(projectId);
   const [session, setSession] = useState(0);
   const pending = useRef(null);
-  const [stories, setStories] = useState(null);
+  // The list panel is part of the page layout: it shows at once and the list fills in, so the
+  // chat never jumps sideways when the read returns (or fails).
+  const [stories, setStories] = useState(live ? [] : null);
+  const [storiesRead, setStoriesRead] = useState(false);
   const refreshStories = () =>
     live &&
     api
       .request('/v1/story-chats')
-      .then((value) => setStories(value.story_chats || []))
-      .catch(() => setStories(null));
+      .then((value) => {
+        setStories(value.story_chats || []);
+        setStoriesRead(true);
+      })
+      .catch(() => {});
   // Open another story (or a new one, optionally starting with an idea) without a reload.
   const openStory = (ident, firstMessage = null) => {
     story.current = ident;
@@ -732,7 +738,9 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               {!railed && t('storyChat.newStory')}
             </Button>
             <h3>{t('storyChat.myStories')}</h3>
-            {stories.length === 0 && <p className="sc-stories-empty">{t('storyChat.noStories')}</p>}
+            {storiesRead && stories.length === 0 && (
+              <p className="sc-stories-empty">{t('storyChat.noStories')}</p>
+            )}
             <ul>
               {(stories || []).map((item) => (
                 <li key={item.project_id}>

@@ -4,6 +4,8 @@ export const assistantCatalogs = {
     'telegram.agentTab': 'AI assistant',
     'telegram.tab': 'Telegram',
     'telegram.claimedBy': 'Linked to Telegram {name}',
+    'telegram.agentExplain':
+      'Connect an AI assistant such as Codex or Claude with a one-time code. It works on what you choose below and uses credits within its daily limit. Disconnect any time here.',
     'telegram.explain':
       'Link the Inkseq Telegram bot to this account. It saves stories to your Works and uses credits within your daily limit. Disconnect any time here.',
     'telegram.connect': 'Connect Telegram',
@@ -127,6 +129,8 @@ export const assistantCatalogs = {
     'telegram.agentTab': 'AI 助手',
     'telegram.tab': 'Telegram',
     'telegram.claimedBy': '已绑定 Telegram {name}',
+    'telegram.agentExplain':
+      '用一次性代码连接 Codex、Claude 等 AI 助手。它只处理你在下面选的范围，在每日上限内用积分。随时可以在这里断开。',
     'telegram.explain':
       '把映序的 Telegram 机器人连到这个账号。它会把故事存进你的作品，在你设的每日上限内用积分。随时可以在这里断开。',
     'telegram.connect': '连接 Telegram',

@@ -15,7 +15,7 @@ import ThemeToggle from './ThemeToggle.jsx';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { currentSupportView, endSupportView } from './support-view.js';
-import { accountLabel, readAccess, readAccessFor } from './account-access.js';
+import { accountLabel, readAccess, readAccessFor, rememberedAccess } from './account-access.js';
 import { CreditsChip } from './CreditsUI.jsx';
 import AccountMenu from './AccountMenu.jsx';
 import InkMark from './InkMark.jsx';
@@ -32,7 +32,7 @@ function loadAccess(account, apply) {
 
 // What the signed-in account may see (role, sign-in method, credits); re-read when it changes.
 export function useAccess(account) {
-  const [access, setAccess] = useState(null);
+  const [access, setAccess] = useState(() => rememberedAccess(account));
   useEffect(() => {
     let live = true;
     loadAccess(account, (value) => live && setAccess(value));
@@ -46,7 +46,7 @@ export function useAccess(account) {
 // Name shown for the signed-in account: display name or email, never an internal user id.
 export function useAccountLabel(account) {
   const { t } = useI18n();
-  const [access, setAccess] = useState(null);
+  const [access, setAccess] = useState(() => rememberedAccess(account));
   useEffect(() => {
     let live = true;
     if (!account) {
@@ -71,7 +71,7 @@ export default function StudioHeader({
 }) {
   const { t } = useI18n();
   // GPUs only for accounts the backend lets view capacity (#304); regular users never run machines.
-  const [access, setAccess] = useState(null);
+  const [access, setAccess] = useState(() => rememberedAccess(account));
   useEffect(() => {
     let live = true;
     readAccess().then((value) => live && setAccess(value));

@@ -151,7 +151,11 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
         {marks.map((mark) => (
           <Button
             key={mark.id}
-            className={'take-review-mark ' + mark.verdict}
+            className={
+              'take-review-mark ' +
+              mark.verdict +
+              (editing && !editing.isNew && editing.mark.id === mark.id ? ' editing' : '')
+            }
             style={{ left: pct(mark.start_s), width: pct(mark.end_s - mark.start_s) }}
             aria-label={t('review.markLabel', {
               from: fmtSeconds(mark.start_s),
@@ -165,15 +169,21 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
             }}
           />
         ))}
-        {drag && (
+        {/* The range stays on the bar while it is dragged and while its note is open. */}
+        {(drag || editing?.isNew) && (
           <span
             className="take-review-mark draft"
-            style={{ left: pct(drag.start_s), width: pct(drag.end_s - drag.start_s) }}
+            style={{
+              left: pct((drag || draft).start_s),
+              width: pct((drag || draft).end_s - (drag || draft).start_s),
+            }}
           />
         )}
       </div>
       <small className="take-review-hint muted">
-        {t(duration ? (marks.length ? 'review.hintMore' : 'review.hint') : 'review.waiting')}
+        {drag
+          ? fmtSeconds(drag.start_s) + ' – ' + fmtSeconds(drag.end_s)
+          : t(duration ? (marks.length ? 'review.hintMore' : 'review.hint') : 'review.waiting')}
       </small>
 
       {draft && (

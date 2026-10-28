@@ -2,9 +2,32 @@ import { asPreviewed, previewingAsUser } from './preview-as-user.js';
 // What the signed-in account may see in the shared header (h3-studio#304 / #328).
 // The backend still enforces every route; this only hides navigation the account cannot use.
 // One cached /api/auth/me read per page load; a failed or anonymous read shows nothing privileged.
+// The last good read is also kept in this browser so the header draws its final layout at once
+// instead of adding GPUs/Admin when the read returns.
 
 let pending = null,
   pendingAccount;
+const REMEMBERED = 'inkseq.access:';
+
+function remember(record) {
+  if (!pendingAccount || !record) return;
+  try {
+    localStorage.setItem(REMEMBERED + pendingAccount, JSON.stringify(record));
+  } catch {
+    // Storage blocked or full: the header just waits for the live read.
+  }
+}
+
+/** The last access read for this account in this browser, or null. */
+export function rememberedAccess(account) {
+  if (!account) return null;
+  try {
+    const raw = localStorage.getItem(REMEMBERED + account);
+    return raw ? accessFrom(JSON.parse(raw)) : null;
+  } catch {
+    return null;
+  }
+}
 
 export function readAccess(fetcher = globalThis.fetch) {
   if (!pending) {
@@ -18,7 +41,10 @@ export function readAccess(fetcher = globalThis.fetch) {
         if (!response.ok) throw Error('access');
         return response.json();
       })
-      .then(accessFrom)
+      .then((record) => {
+        remember(record);
+        return accessFrom(record);
+      })
       .catch(() => {
         if (pending === read) pending = null;
         return accessFrom(null);
@@ -57,6 +83,12 @@ export function accessFrom(record) {
 // Tests and sign-out reset the cache.
 export function resetAccess() {
   pending = null;
+  try {
+    for (const key of Object.keys(localStorage))
+      if (key.startsWith(REMEMBERED)) localStorage.removeItem(key);
+  } catch {
+    // Nothing remembered.
+  }
 }
 
 // WorkOS AuthKit sign-in (#305), enabled by /api/auth/config.

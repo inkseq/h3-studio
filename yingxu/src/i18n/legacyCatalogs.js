@@ -705,7 +705,8 @@ export const legacyCatalogs = {
       'The {slot} image for “{character} / {look}” is missing. Upload it again or explicitly defer it.',
     'projection.missingLook': 'The saved look for “{name}” no longer exists. Choose another.',
     'projection.countLimit': 'Current model/API count limit ({kind}: {max}, total: {total})',
-    'projection.limits': 'Images {images} · Videos {videos} · Audio {audios} · Total {total}',
+    'projection.limits':
+      'Room for up to: images {images} · videos {videos} · audio {audios} · {total} in total',
     'projection.voice': 'Voice for {name}',
     'projection.prop': 'Prop · {name}',
     'projection.noModel': 'No model selected',
@@ -2102,7 +2103,7 @@ export const legacyCatalogs = {
     'legacy.lookImageMissing': '「{character} / {look}」的{slot}图缺失；补传或明确改为稍后补充。',
     'projection.missingLook': '保存的「{name}」造型不存在，请重新选择。',
     'projection.countLimit': '当前模型/API 数量上限（{kind} {max}，总计 {total}）',
-    'projection.limits': '图片 {images} · 视频 {videos} · 声音 {audios} · 总计 {total}',
+    'projection.limits': '最多可放：图片 {images} · 视频 {videos} · 声音 {audios} · 共 {total}',
     'projection.voice': '{name} 的声音',
     'projection.prop': '道具 · {name}',
     'projection.noModel': '未选择模型',
