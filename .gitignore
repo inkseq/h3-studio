@@ -934,6 +934,7 @@ inventory.json
 !tests/test_staging_intent_reconcile.py
 !docs/STAGING-INTENT-707.md
 !tools/inky_deploy_validation.py
+!deploy/platform/inky-staging-read-policy.json
 !deploy/platform/business_backup_ack.py
 !tests/test_business_backup_ack.py
 !docs/BACKUP-FAILURE-ACK.md

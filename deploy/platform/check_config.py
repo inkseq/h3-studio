@@ -164,7 +164,14 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
     for setting in ("password_encryption=scram-sha-256", "log_statement=none", "log_min_error_statement=panic",
                     "log_parameter_max_length=0", "log_parameter_max_length_on_error=0", "max_connections=64"):
         expected_db_command.extend(["-c", setting])
-    require(db.get("command") == expected_db_command, "PostgreSQL security/logging/connection arguments differ")
+    legacy_db_command = list(expected_db_command)
+    for setting in ("tcp_keepalives_idle=60", "tcp_keepalives_interval=10", "tcp_keepalives_count=3",
+                    "tcp_user_timeout=90000", "client_connection_check_interval=10000"):
+        expected_db_command.extend(["-c", setting])
+    # Retain the exact old tuple for reviewed rollback; never admit a partial or
+    # operator-selected timeout override. New bundles carry the complete tuple.
+    require(db.get("command") in (expected_db_command, legacy_db_command),
+            "PostgreSQL security/logging/connection arguments differ")
     def secret_names(service):
         return {item["source"] if isinstance(item, dict) else item for item in service.get("secrets", [])}
     require(secret_names(app) == ({"app_database_url", "google_titles"} if titles else {"app_database_url"}) and secret_names(db) == {"db_admin_password"}
