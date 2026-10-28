@@ -823,6 +823,131 @@ class ControlTests(LedgerCase):
         self.control.register(self.spec("replacement"))
         self.assertEqual(self.control.capacity(), {"instances": 1, "physical_gpus": 1})
 
+    def test_legacy_retirement_keeps_gpu_lock_stop_proof_and_original_history(self):
+        from sqlalchemy import insert, select, update
+        from studio_platform.repository import (
+            attempts,
+            budget_accounts,
+            budget_reservations,
+            cpu_slots,
+            jobs,
+            registered_devices,
+            registered_workers,
+            request_hash,
+        )
+
+        self.ready(self.spec())
+        job = self.controlled_job()
+        claim = self.control.claim("worker", "control-test")
+        self.control.queue.begin_submission(claim.lease)
+        self.control.queue.record_submitted(claim.lease, "original-upstream")
+        self.control.queue.fail(
+            claim.lease,
+            "original-terminal-failure",
+            upstream_stopped=True,
+            actual_cost_microusd=None,
+        )
+        legacy_spec = self.control.get("worker")["spec"]
+        del legacy_spec["backend"]
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == "worker")
+                .values(
+                    state="unknown",
+                    spec=legacy_spec,
+                    spec_hash=request_hash(legacy_spec),
+                )
+            )
+            connection.execute(
+                insert(cpu_slots).values(
+                    instance_id="original-cpu-slot", worker_id="worker", state="owned"
+                )
+            )
+        tables = (jobs, attempts, budget_accounts, budget_reservations)
+        with self.repo.engine.connect() as connection:
+            history = [
+                [dict(row) for row in connection.execute(select(table)).mappings()]
+                for table in tables
+            ]
+        original_worker = self.control.get("worker")
+        with self.assertRaisesRegex(Conflict, "upstream_still_unconfirmed"):
+            self.control.retire("worker")
+        self.assertEqual(self.control.get("worker"), original_worker)
+        with patch.object(
+            self.repo, "_lock_capacity", wraps=self.repo._lock_capacity
+        ) as lock:
+            retired = self.control.retire("worker", upstream_idle_confirmed=True)
+        lock.assert_called_once()
+        self.assertEqual(retired["state"], "retired")
+        self.assertIsNone(retired["current_job_id"])
+        self.assertEqual(retired["fence"], original_worker["fence"] + 1)
+        self.assertEqual(retired["spec"], legacy_spec)
+        self.assertEqual(
+            self.control.retire("worker", upstream_idle_confirmed=True), retired
+        )
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                history,
+                [
+                    [dict(row) for row in connection.execute(select(table)).mappings()]
+                    for table in tables
+                ],
+            )
+            self.assertEqual(
+                list(connection.execute(select(registered_devices.c.state)).scalars()),
+                ["released"],
+            )
+            self.assertEqual(
+                list(connection.execute(select(cpu_slots.c.state)).scalars()),
+                ["released"],
+            )
+        self.assertEqual(self.repo.get_job(self.scope, job["id"])["status"], "failed")
+
+    def test_legacy_retirement_still_refuses_an_unresolved_current_attempt(self):
+        from sqlalchemy import select, update
+        from studio_platform.repository import (
+            attempts,
+            jobs,
+            registered_devices,
+            registered_workers,
+            request_hash,
+        )
+
+        self.ready(self.spec())
+        self.controlled_job()
+        claim = self.control.claim("worker", "control-test")
+        self.control.queue.begin_submission(claim.lease)
+        self.control.queue.record_submitted(claim.lease, "unresolved-upstream")
+        legacy_spec = self.control.get("worker")["spec"]
+        del legacy_spec["backend"]
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == "worker")
+                .values(spec=legacy_spec, spec_hash=request_hash(legacy_spec))
+            )
+        tables = (jobs, attempts, registered_workers, registered_devices)
+        with self.repo.engine.connect() as connection:
+            before = [
+                [dict(row) for row in connection.execute(select(table)).mappings()]
+                for table in tables
+            ]
+        with patch.object(
+            self.repo, "_lock_capacity", wraps=self.repo._lock_capacity
+        ) as lock:
+            with self.assertRaisesRegex(Conflict, "current_attempt_still_unresolved"):
+                self.control.retire("worker", upstream_idle_confirmed=True)
+        lock.assert_called_once()
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                before,
+                [
+                    [dict(row) for row in connection.execute(select(table)).mappings()]
+                    for table in tables
+                ],
+            )
+
     def test_concurrent_register_two_names_same_device_only_one_wins(self):
         def register(i):
             try:

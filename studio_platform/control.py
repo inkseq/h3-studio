@@ -1259,7 +1259,7 @@ class WorkerControl:
         with self.repo.transaction() as connection:
             # CPU rendering is not a GPU lease and needs no cloud capacity gate.
             peek = self._worker(connection, worker_id)
-            if peek["spec"]["backend"] != "cpu-render":
+            if peek["spec"].get("backend") != "cpu-render":
                 self.repo._lock_capacity(connection)
             worker = self._worker(connection, worker_id, lock=True)
             if worker["current_job_id"]:
