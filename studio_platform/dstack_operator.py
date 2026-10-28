@@ -2369,22 +2369,9 @@ class DstackOperator:
 
     def prelaunch_capacity_usage(self, connection):
         """Use the same global overlay as registration under the capacity lock."""
-        nodes = [
-            dict(node)
-            for node in connection.execute(select(operator_nodes)).mappings()
-            if node["payload"].get("capacity_backend") == BACKEND_MARKER
-        ]
-        intents = {
-            row["id"]: dict(row)
-            for row in connection.execute(select(instance_intents)).mappings()
-        }
-        usage, observed_runs = self._observed_registration_usage(nodes)
-        return {
-            **usage,
-            **self._registration_resource_overlay(
-                connection, nodes, intents, usage, observed_runs
-            ),
-        }
+        from .native_capacity_inventory import prelaunch_usage
+
+        return prelaunch_usage(self, connection)
 
     def _registration_resource_overlay(
         self, connection, nodes, intents, usage, observed_runs
@@ -2440,7 +2427,7 @@ class DstackOperator:
         # The same fresh owned native GET may know a provider identity before
         # observe() journals it. Normalize only a non-conflicting active identity;
         # otherwise an intent key and its known allocation would count twice.
-        active_keys = {}
+        active_keys, unconfirmed_allocations = {}, []
         for observation in usage["observations"]:
             if observation["reason_code"] != "dstack_capacity_active":
                 continue
@@ -2467,7 +2454,14 @@ class DstackOperator:
                 and original["backend"] + ":" + instance in usage["resources"]
             ):
                 active_keys[intent["id"]] = (intent["provider"], instance)
-        resources = {}
+            gpus = (jpd.get("instance_type") or {}).get("resources", {}).get("gpus")
+            if (
+                node["intent_id"] not in active_keys
+                or not isinstance(gpus, list)
+                or not 1 <= len(gpus) <= 128
+            ):
+                unconfirmed_allocations.append(node["intent_id"])
+        resources, active_intents = {}, []
         for intent in intents.values():
             if (
                 intent["state"] == "destroyed"
@@ -2475,6 +2469,7 @@ class DstackOperator:
                 or manually_reviewed_inactive(connection, intent)
             ):
                 continue
+            active_intents.append(intent["id"])
             key = active_keys.get(
                 intent["id"],
                 (
@@ -2517,6 +2512,9 @@ class DstackOperator:
             "resources": resources,
             "instances": len(resources),
             "physical_gpus": sum(resources.values()),
+            "active_instance_ids": tuple(active_intents),
+            "native_resources": tuple(live_keys),
+            "unconfirmed_allocation_ids": tuple(unconfirmed_allocations),
         }
 
     def registration_capacity_usage(self, connection, spec):
@@ -2598,8 +2596,10 @@ class DstackOperator:
             and usage["resources"].get(resource_key) == 1,
             "dstack_registration_allocation_unconfirmed",
         )
-        result = self._registration_resource_overlay(
-            connection, nodes, intents, usage, observed_runs
+        from .native_capacity_inventory import resource_overlay
+
+        result = resource_overlay(
+            self, connection, nodes, intents, usage, observed_runs
         )
         resources = result["resources"]
         original = matching[0]["payload"]

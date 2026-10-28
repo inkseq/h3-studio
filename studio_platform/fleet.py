@@ -530,6 +530,7 @@ def slot_runner(
     backend_factory=None,
     runner_factory=WorkerRunner,
     selected_job_id=None,
+    capacity_usage=None,
 ):
     """Explicit CPU worker child; injectable factories permit fully offline tests."""
     slot = config.slot(worker_id)
@@ -554,7 +555,7 @@ def slot_runner(
     backend = None
     try:
         repo.create_schema()
-        control = WorkerControl(repo)
+        control = WorkerControl(repo, capacity_usage=capacity_usage)
         if slot.spec.backend == "mock":
             from .repository import capacity_gate
 

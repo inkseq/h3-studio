@@ -87,6 +87,7 @@ class ModalHosts:
     def __init__(self, repo, client, spec, *, environment=None, enabled=False):
         self.repo, self.client, self.spec = repo, client, spec
         self.enabled = enabled is True and environment == 'staging'
+        self.capacity_check = None
 
     def _intent(self, c, identity):
         row = self.repo._locked(
@@ -209,6 +210,16 @@ class ModalHosts:
                 )
                 if len(active) >= self.spec.max_containers:
                     raise Conflict('modal_container_limit')
+                bound = c.execute(
+                    select(scaler_receipts.c.id).where(
+                        scaler_receipts.c.intent_id == identity,
+                        scaler_receipts.c.operation == 'modal_demand_bound',
+                    )
+                ).first()
+                if bound is not None:
+                    if self.capacity_check is None:
+                        raise Conflict('modal_capacity_witness_unavailable')
+                    self.capacity_check(c, intent)
                 self._funding(c, intent, timeout)
                 c.execute(
                     insert(scaler_actions).values(

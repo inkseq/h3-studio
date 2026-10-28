@@ -6,9 +6,8 @@ import copy
 from sqlalchemy import select, update
 
 from studio_platform.dstack_test_budget import ACCOUNT, projected_cost
-from studio_platform.modal_budget import bind_test_guard
+from studio_platform.modal_budget import bind_test_guard, worker_reason
 from studio_platform.modal_host import HostSpec, ModalHosts
-from studio_platform.worker_admission import worker_window_reason
 from studio_platform import operator_capacity  # noqa: F401 -- register the original operator tables before fixture schema creation
 from studio_platform.repository import (
     BudgetExceeded,
@@ -70,16 +69,18 @@ class ModalBudgetCase(LedgerCase):
 
     def worker_reason(self, instance='sb-1', duration=120):
         with self.repo.engine.connect() as c:
-            return worker_window_reason(
+            # This fixture supplies only the financial window identity. Full
+            # worker/consumer claim guards run in test_modal_dispatch.
+            return worker_reason(
                 c,
                 {'provider': 'modal', 'instance_id': instance},
                 self.now,
-                expected_runtime_s=duration,
+                duration,
             )
 
 
 class ModalBudgetTests(ModalBudgetCase):
-    def test_new_claim_and_submit_require_original_funded_modal_binding(self):
+    def test_funded_window_requires_original_modal_binding(self):
         self.assertEqual(self.worker_reason(), 'modal_test_budget_unconfirmed')
         identity = self.reserve()
         self.hosts.start(identity)

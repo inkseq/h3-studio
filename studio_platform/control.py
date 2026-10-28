@@ -583,7 +583,12 @@ class WorkerControl:
                             "pool",
                             "capacity_policy_snapshot",
                         }
-                        or admission["capacity_backend"] != "dstack-v1"
+                        or (admission["capacity_backend"], spec.provider)
+                        not in {
+                            ("dstack-v1", "vast"),
+                            ("dstack-v1", "runpod"),
+                            ("modal-v1", "modal"),
+                        }
                         or type(admission["lifecycle_version"]) is not int
                         or admission["lifecycle_version"] != 2
                         or admission["worker_id"] != spec.worker_id
@@ -594,7 +599,6 @@ class WorkerControl:
                         or not admission["intent_id"]
                         or spec.backend != "wangp-worker"
                         or spec.dispatch_backend != "hatchet-v1"
-                        or spec.provider not in {"vast", "runpod"}
                         or len(spec.physical_gpu_ids) != 1
                     ):
                         raise ValueError("invalid_registration_capacity_admission")

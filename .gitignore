@@ -971,3 +971,9 @@ inventory.json
 !tests/test_modal_lifecycle.py
 !studio_platform/modal_controller.py
 !tests/test_modal_controller.py
+!studio_platform/modal_capacity.py
+!tests/test_modal_capacity.py
+!studio_platform/native_capacity_inventory.py
+!studio_platform/modal_dispatch.py
+!tests/test_modal_dispatch.py
+!tests/test_modal_exit_capacity.py
