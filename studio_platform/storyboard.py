@@ -518,7 +518,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
     )
     if location:
         description = location["description"]
-        if location_version:
+        if location_version and location_version.get("description", "").strip():
             description += (
                 "；"
                 + location_version["name"]
@@ -547,7 +547,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             "defaultLookId",
         )
         text = character["title"] + "：" + character["description"]
-        if look:
+        if look and look.get("description", "").strip():
             text += "；" + look["name"] + "：" + look.get("description", "")
         parts.append(
             {"kind": "cast", "label": "人物", "entity_id": ident, "text": text}

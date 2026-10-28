@@ -629,3 +629,46 @@ changed-body replay409. Trash/purge blocks even replay. Reviews follow the
 artifact, not current selection. Never fabricate a human verdict from a star,
 pick, export or automated mark; PAT writes are server-labelled agent. Notes stay
 in product data and are redacted on permanent purge, never copied to analytics.
+
+## Inky suggestions
+
+Discover `inky` in `/v1/guided-schema` or `/v1/agent-guide` on the actual origin.
+The reader may be deployed with the evaluator disabled. An empty response does
+not mean the shot passed a quality assessment. Never submit a save or preflight
+solely to force optional advice, and never retry an uncertain evaluation.
+
+`GET /v1/inky/suggestions?project_id=PROJECT` requires `projects:read` and returns
+`{"items":[]}` or at most three current, account-scoped items. Each has `id`,
+`kind`, `shot_id`, `field`, `base_version` (shot version), `tip_key`, `lang`, and
+optionally `example`. The fixed localized tip is selected by `tip_key`; examples
+are advice, not accepted shot text. No provider call or cache write occurs on GET.
+
+Text kinds are `vague_action`, `needs_keyframe`, `emotion_not_shown`,
+`multiple_camera_moves`, and `action_too_long`. `needs_keyframe` targets `frames`;
+the other text kinds target `action`. `upload_card` targets `cast`, includes
+`card_name`, and only evaluates uploads already attached to that shot. It does
+not assign the image automatically. Do not invent a shot for a library upload.
+
+Re-read the target before an authorized edit. `base_version` is not the project
+CAS version: normal `/actions` still requires the actual current project version.
+Shared scene/card changes can also invalidate advice. An item never authorizes
+generation, a paid operation, or an explicit human usable/redo verdict.
+
+For an explicit user dismissal, call
+`POST /v1/inky/suggestions/RETURNED_ID/ignore?project_id=PROJECT` (no JSON body).
+It requires project read and write scopes and returns `{id,ignored:true}`.
+The preference follows that target/kind across revisions; no shot is edited.
+The same valid ID can be dismissed idempotently. A stale/unknown cached ID may
+refuse409; re-read rather than fabricate an ID or dismiss another suggestion.
+
+`GET /v1/inky/settings?project_id=PROJECT` returns `{revision,muted}`, initially
+0/false. Explicitly mute/unmute with PATCH on the same URL:
+
+```json
+{"expected_revision":0,"muted":true}
+```
+
+PATCH requires project read and write scopes. On CAS409, reload and resolve the
+user's intent; after an unknown response, read the original settings before any
+new write. Muting hides advice and suppresses new claims, without modifying shots
+or cancelling an already accepted external call. Views use `Cache-Control:no-store`.

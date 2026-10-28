@@ -180,7 +180,7 @@ class CandidateTests(LedgerCase):
         )
         self.publish('lium', [offer('smaller', ram_gib=35)])
         result = self.project()
-        self.assertEqual(len(result['candidates']), 5)
+        self.assertEqual(len(result['candidates']), 4)
         self.assertEqual(
             {row['selection']['runtime_profile_id'] for row in result['candidates']},
             {
@@ -188,7 +188,6 @@ class CandidateTests(LedgerCase):
                 PROFILE_IDS[5],
                 PROFILE_IDS[6],
                 PROFILE_IDS[10],
-                PROFILE_IDS[16],
             },
         )
         self.assertEqual(self.registry.bindings[historical.binding_id], historical)
@@ -208,6 +207,14 @@ class CandidateTests(LedgerCase):
         self.assertEqual(floors[PROFILE_IDS[4]], 29)
         self.assertEqual(floors[PROFILE_IDS[5]], 29)
         self.assertEqual(floors[PROFILE_IDS[6]], 29)
+        self.assertEqual(floors[PROFILE_IDS[16]], 41)
+        self.assertTrue(
+            any(
+                row['runtime_profile_id'] == PROFILE_IDS[16]
+                and 'inventory_ram_below_minimum' in row['blockers']
+                for row in result['excluded']
+            )
+        )
         self.assertTrue(
             any(
                 row['runtime_profile_id'] == PROFILE_IDS[0]

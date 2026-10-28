@@ -18,13 +18,16 @@ export function readAgentLink(search) {
     projectId: params.get('project'),
     entityId: params.get('entity') || null,
     activity: params.get('panel') === 'activity',
+    // Opens the generate confirmation for shots without video; the user still confirms.
+    generate: params.get('panel') === 'generate',
   };
 }
-export function agentLinkSearch({ projectId, entityId, activity = false } = {}) {
+export function agentLinkSearch({ projectId, entityId, activity = false, generate = false } = {}) {
   if (!validId(projectId) || (entityId != null && !validId(entityId))) return '';
   const params = new URLSearchParams({ project: projectId });
   if (entityId) params.set('entity', entityId);
   if (activity) params.set('panel', 'activity');
+  else if (generate) params.set('panel', 'generate');
   return '?' + params.toString();
 }
 // A reference shared by multiple shots has no unambiguous single-shot destination.

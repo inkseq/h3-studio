@@ -1,8 +1,8 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
+import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import { usePageActive } from './AppRouteCache.jsx';
 import React, { useEffect, useRef, useState, useEffectEvent } from 'react';
 import {
   failureLabel,
@@ -354,56 +354,25 @@ export function OfferHostHistory({ members = [], profileId, now = Date.now() }) 
 }
 function PolicyReview({ host, selection, current, busy, onClose, onConfirm }) {
   const { t } = useI18n();
-  const active = usePageActive(),
-    ref = useRef(),
-    opener = useRef(globalThis.document?.activeElement);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!active) {
-      dialog.close();
-      return;
-    }
-    dialog.showModal();
-    const openerRef = opener;
-    return () => {
-      dialog.close();
-      if (openerRef.current?.isConnected && !openerRef.current.closest('[inert]'))
-        openerRef.current.focus();
-    };
-  }, [active]);
   return (
-    <dialog
-      ref={ref}
-      className="p4-dialog"
-      aria-label={t('operator.status125')}
-      onCancel={(event) => {
-        event.preventDefault();
-        if (!busy) onClose();
-      }}
+    <Dialog
+      title={t('operatorPanel.confirmPolicy', { id: host.machine_id })}
+      subtitle={localizedPolicy(host.policy.manual, t) + ' → ' + localizedPolicy(selection, t)}
+      busy={busy}
+      onClose={onClose}
     >
-      <header>
-        <div>
-          <h2>{t('operatorPanel.confirmPolicy', { id: host.machine_id })}</h2>
-          <p>
-            {localizedPolicy(host.policy.manual, t)} → {localizedPolicy(selection, t)}
-          </p>
-        </div>
-        <Button disabled={busy} onClick={onClose}>
-          {t('operator.copy32')}
-        </Button>
-      </header>
       <p>{t('operator.copy172')}</p>
       {selection === 'prefer' && <p className="p4-meta">{t('operator.copy173')}</p>}
       {!current && <p role="alert">{t('operator.copy174')}</p>}
-      <footer>
+      <DialogActions>
         <Button disabled={busy} onClick={onClose}>
           {t('operator.copy175')}
         </Button>
-        <Button className="p4-primary" disabled={busy || !current} onClick={onConfirm}>
+        <Button variant="primary" disabled={busy || !current} onClick={onConfirm}>
           {busy ? t('operator.status83') : t('operator.status84')}
         </Button>
-      </footer>
-    </dialog>
+      </DialogActions>
+    </Dialog>
   );
 }
 function HostEditor({ host, busy, onSave }) {

@@ -446,16 +446,8 @@ class StoryChatTests(unittest.TestCase):
         value = response.json()
         self.assertEqual([c["name"] for c in value["cards"]["characters"]], ["Mia"])
         self.assertTrue(all(zib not in s["cast"] for s in value["cards"]["shots"]))
-        self.assertEqual(
-            {k: v for k, v in value["turn"]["proposal"].items() if k != "risk_review"},
-            {
-                "kind": "generate",
-                "shot_ids": [s["id"] for s in value["cards"]["shots"]],
-            },
-        )
-        self.assertEqual(
-            value["turn"]["proposal"]["risk_review"]["status"], "incomplete"
-        )
+        self.assertIsNone(value["turn"]["proposal"])
+        self.assertIn("references", value["messages"][-1]["text"])
         self.assertEqual(self.jobs(), before)
 
     def test_reply_format_is_enforced_and_picture_is_only_proposed(self):
@@ -475,8 +467,8 @@ class StoryChatTests(unittest.TestCase):
             chat, "redraw zib and make it", turn_id="turn-0020", plan=plan
         ).json()
         proposal = value["turn"]["proposal"]
-        self.assertEqual(proposal["picture_card_ids"], [zib])
-        self.assertEqual(len(proposal["shot_ids"]), 3)
+        self.assertIsNone(proposal)
+        self.assertIn("Picture generation is off", value["messages"][-1]["text"])
         self.assertEqual(self.jobs(), before)
         project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
             "project"

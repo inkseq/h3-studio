@@ -6,13 +6,18 @@ export const isLocale = (value) => Object.hasOwn(catalogs, value);
 export const localeStorageKey = (account) =>
   account ? `${LOCALE_STORAGE_KEY}:account:${encodeURIComponent(account)}` : LOCALE_STORAGE_KEY;
 
+// First visit: English, unless the browser's first language is Chinese. A choice made with
+// the header switch always wins.
+export const firstVisitLocale = (languages = globalThis.navigator?.languages) =>
+  /^zh(-|$)/i.test(String(languages?.[0] || '')) ? 'zh' : DEFAULT_LOCALE;
+
 export function readLocale(storage, account = '') {
   try {
     const value =
       storage?.getItem(localeStorageKey(account)) ?? storage?.getItem(LOCALE_STORAGE_KEY);
-    return isLocale(value) ? value : DEFAULT_LOCALE;
+    return isLocale(value) ? value : firstVisitLocale();
   } catch {
-    return DEFAULT_LOCALE;
+    return firstVisitLocale();
   }
 }
 

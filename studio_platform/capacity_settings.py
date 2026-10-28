@@ -40,7 +40,7 @@ FIELD_BOUNDS = {
     "max_machines": (1, 10),
     "idle_shutdown_seconds": (1, 86400),
     "max_runtime_seconds": (300, 14400),
-    "test_task_limit_microusd": (1_000_000, 20_000_000),
+    "test_task_limit_microusd": (1_000_000, 50_000_000),
     "idle_active_seconds": (60, 3600),
     "idle_quiet_seconds": (60, 1800),
     "interactive_activity_window_seconds": (60, 7200),

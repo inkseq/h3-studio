@@ -60,6 +60,7 @@ from .shot_segments import (
     validate_segments_data,
     validate_segments_transition,
 )
+from .inky_hooks import queue_refresh
 
 metadata = MetaData()
 receipts = Table(
@@ -431,6 +432,7 @@ class Guided:
                 after=project,
                 event_type="project.saved",
             )
+            queue_refresh(principal, project_id)
             return self.envelope({"document_id": project_id, **values})
 
     def mutate(self, principal, project_id, body, key=None, *, create=False):
@@ -733,6 +735,7 @@ class Guided:
                             created_at=self.repo.clock(),
                         )
                     )
+                queue_refresh(principal, project_id)
                 return response
         except IntegrityError:
             if key:

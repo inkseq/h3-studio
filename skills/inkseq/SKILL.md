@@ -105,3 +105,5 @@ Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-wi
 [Redo diff preview](reference/api.md#redo-from-marks).
 
 [Feedback](reference/api.md#feedback).
+
+[Inky advice](reference/api.md#inky-suggestions) never authorizes edits or generation; empty advice is not a quality verdict.

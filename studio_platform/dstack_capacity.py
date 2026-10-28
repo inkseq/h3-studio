@@ -26,6 +26,7 @@ from uuid import UUID
 import httpx
 
 from .inference.wangp_contract import HostReadiness, safe_model_progress
+from .capacity_memory import vast_ram_floor
 
 DSTACK_VERSION = "0.22.5"
 BACKENDS = frozenset({"vastai", "runpod"})
@@ -748,7 +749,7 @@ class DstackClient:
             "rented": {"eq": False},
             "num_gpus": {"eq": 1},
             "cpu_cores": {"gte": request.cpu_count},
-            "cpu_ram": {"gte": request.memory_gib * 1000},
+            "cpu_ram": {"gte": vast_ram_floor(request)},
             "gpu_ram": {"gte": request.gpu_memory_gib * 1024 * 0.93},
             "disk_space": {"gte": request.disk_gib},
             "dph_total": {"lte": request.max_price_microusd / 1_000_000},
@@ -1124,11 +1125,11 @@ class DstackClient:
             raise DstackError("dstack_provider_inventory_unavailable") from None
 
     def plan(self, spec):
-        # 0.22.5 ordinary planning selects an existing fleet. This endpoint is
-        # our advisory global stock query; it does not create a fleet or run.
+        # Use the same fleet selection as apply. Global stock browsing can
+        # offer machines that the configured native fleet cannot place (#659).
         return self._post(
             f"/api/project/{self.project}/runs/get_plan",
-            {"run_spec": spec, "max_offers": 100, "for_offers_only": True},
+            {"run_spec": spec, "max_offers": 100, "for_offers_only": False},
         )
 
     def apply(self, spec):

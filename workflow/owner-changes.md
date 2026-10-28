@@ -640,3 +640,86 @@ Owner, 2026-10-27 (to Claude): too much time went to approvals and queues for sm
   (backup recovery, helper installs) posts a hold on #193; the promoter respects open holds.
 - Unchanged hard limits: ask the owner for budget overrun, permanent user-data deletion,
   credential/provider-account changes and charging/Checkout changes.
+
+## CR-20261027-71 — Xiaomo advises and navigates; contextual examples are bounded
+
+Owner directions recorded on #679:
+[6433837121](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433837121),
+[6433894374](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433894374),
+[6433915423](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433915423),
+and [6433954470](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433954470).
+These supersede the issue body's v1 batch-edit proposal. Timing remains after the
+current batch ships; this record does not start or activate the feature.
+
+- Xiaomo v1 only advises and guides. Each item has a typed navigation target
+  `{project_id, step: story|storyboard|film, entity_id?, field?}`. Open/select/
+  focus/highlight take the user to the field; the user edits it. No mutation,
+  generation or spend tool is granted to Xiaomo. Agent editing is deferred.
+- Free code pre-checks precede batched Jev judgements on save and before generation.
+  V1 judgements cover description specificity, keyframe need and upload-to-card
+  suitability. Do not use Jev for likeness, identity/reference fidelity or
+  message-to-card targeting. Consistency checks compare structured fields.
+- Tip wording uses fixed zh/en templates; a matching scene-script quotation is
+  the free example path. The later contextual-guidance direction permits an LLM
+  only for Jev-flagged items: the top 1–3 per save, other items on click. Use minimal
+  shot fields, scene excerpt, card names and step; cache by target/version. A slow
+  or failed LLM falls back to the template/script quote. A per-story daily budget
+  applies; unrestricted background generation is not authorized.
+- The selected contextual model is GPT-6.1 Terra, configured server-side as
+  `gpt-6.1-terra`, with low reasoning effort; never show model controls/names to
+  creators. Resolve the exact upstream identifier and authorized existing registry
+  profile before implementation. A provider-qualified model identifier is not
+  interchangeable with the direct API identifier, and an evaluation receipt is
+  not deployment or credential authority. No new key, profile, payment or budget
+  increase is authorized by this documentation change.
+- At most three open items, per-target ignored-kind suppression and a mute switch.
+  Claude owns the navigation/moving mascot UI, reduced-motion behavior, mobile
+  placement, staging acceptance and production promotion. Codex owns the later
+  backend contract. No frontend or runtime change is included here.
+
+Claude's [evaluation6434231644](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6434231644)
+is implementation evidence, not a broader owner decision: it recommends fixed
+tips with cast/script-bound examples and an explicit language field after one
+English input received a Chinese example. Verify those constraints in the feature
+tests; the evaluation does not establish universal accuracy or production readiness.
+
+## CR-20261027-72 — single priority queue (owner 2026-10-27)
+
+Owner instruction in the Claude session: keep the big plan moving. After each slice is **done** (merged, deployed or adopted, and read-back posted), take the next highest item without waiting for a prompt. Stop only for a hard owner limit or a needed Tier2 review; while waiting, work the next independent item. This queue supersedes #580 section 2. Unfinished #580 items fall under P3.
+
+- **P0 (interrupts anything):** #655 daily backup with S3 proof; #193 production health (no idle paid nodes or stuck jobs).
+- **P1 auto capacity:**
+  - #686 adoption → staging serves the #659 jobs (Claude accepts and does the production TaoMate switch);
+  - #688/#689 lookahead rule with a one-machine floor and keep-alive = t_boot;
+  - #688 Modal worker host running the existing worker loop (reference #690; spend cap; max 2 on staging);
+  - admin settings API for the start rules (preview, confirm, reason, history, measured p90); Claude builds the panel;
+  - production auto-start ON.
+- **P1 paid launch #374, in order:**
+  - 006 livemode schema → LIVE prices for the four packs ($5/$20/$50/$100) → LIVE webhook;
+  - our own Inkseq receipts (never send Stripe `receipt_url`). Public identity is Inkseq only, ABN 68 442 632 833, not GST-registered, support@inkseq.com;
+  - Claude staging acceptance → owner real-card loop → Stripe mode and credit charging ON.
+- **P2 Inky #684/#685:** staging SSM hydration, evaluator ON in staging only, fixtures #687; Claude accepts. Production needs a separate owner OK.
+- **P3:** #592 zero-job window, dependabot, #580 leftovers.
+
+Owner approvals dated 2026-10-27, and only these:
+- Inky credentials from the existing central profiles into SSM SecureString on staging;
+- Modal as a capped worker host, staging first;
+- the #374 Stripe LIVE preparation steps above, each external write with owner OK. Checkout and charging stay OFF until the final gate.
+
+All other no-new-credential, no-budget-increase and no-paid-infrastructure limits remain. Codex's watcher must match the real `→` (U+2192) or `->`, and comments whose first line is a heading, bold or plain text.
+
+## CR-20261027-73 — overnight launch authority (owner 2026-10-27, before sleeping)
+
+Owner, in the Claude session: "Spend money to test the queue's automatic GPU rental. Stripe can be turned on. When everything is ready, switch it on directly, then test the automatic machine start. Get it working as soon as possible so users can start using it."
+
+- **Auto-capacity testing budget:** up to **USD 50 in total tonight** for staging tests of demand-start, lookahead, floor and the Modal worker host. This replaces the USD 20 per-task line for these tests only. max_price, idle stop and stop-after-test still apply. Reconcile unknown reservations against original billing; never replay.
+- **Stripe LIVE prep (#374 steps 1–3) is pre-approved:** 006 livemode schema, the four LIVE pack prices ($5/$20/$50/$100), and the LIVE webhook with its secret into `/sixnine/platform/stripe`. No further per-step owner OK is needed tonight. Tier2 Claude review still applies to code and schema.
+- **Turn on payments and credit charging in production** as soon as all of these hold:
+  1. steps 1–3 are adopted with read-back;
+  2. our own Inkseq receipts are live (no Stripe `receipt_url`; public identity Inkseq, ABN 68 442 632 833, no GST);
+  3. Claude accepts an end-to-end TEST-mode loop on staging: checkout → webhook → credits granted → a generation deducts credits → refund path;
+  4. production has zero running jobs at the switch.
+
+  The owner waives the pre-launch real-card loop and will do one real purchase as a post-launch check.
+- **Then production auto-start ON** after Claude's staging acceptance of the capacity rule. Verify on production with one real queued job: a machine (or Modal) starts by itself and the job completes.
+- Still forbidden: other new credentials, deleting user data, changing pack prices or welcome credits, and any budget beyond the USD 50 above. Rollback must stay one switch away: Stripe mode off and charging off.

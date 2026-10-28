@@ -37,7 +37,12 @@ def demand_configuration(config, *, now):
         return None
     selected = demand.get("profile_ids")
     if (
-        set(demand) - {"profile_ids", "test_task_id"}
+        set(demand) - {"profile_ids", "test_task_id", "lookahead_version"}
+        or "lookahead_version" in demand
+        and (
+            type(demand["lookahead_version"]) is not int
+            or demand["lookahead_version"] != 1
+        )
         or policy.get("enabled") is not True
         or policy.get("lifecycle_version") != 2
         or not _open(policy.get("expires_at", 0), now)
@@ -357,7 +362,7 @@ def validate_start(service, connection, job_id, profile_id):
         == "active",
         "dstack_demand_changed",
     )
-    return {
+    result = {
         "job_id": job_id,
         "plan_id": job["plan_id"],
         "request_hash": job["request_hash"],
@@ -367,6 +372,11 @@ def validate_start(service, connection, job_id, profile_id):
         "policy_hash": job["execution_plan"]["policy_hash"],
         "runtime_revision": runtime["revision"],
     }
+    from .capacity_lookahead_runtime import enabled, rules
+
+    if enabled(service):
+        result["start_rules_revision"] = rules(service, connection, profile)["revision"]
+    return result
 
 
 def _nodes(connection, tenant):
@@ -468,6 +478,57 @@ def job_wait_stage(connection, job, now):
     return 'machine_starting' if replacing else "queued_no_machine"
 
 
+def _recorded_start_blocker(service, connection, job, profile, nodes):
+    """Explain the original decision without retrying or settling its allocation."""
+    from .dstack_demand_start import (
+        download_journal,
+        _start_key,
+        _start_command,
+        _ended_for_replacement,
+    )
+
+    row = download_journal(connection, service.settings.tenant_id, job['id'])
+    if row is None:
+        return None
+    identity = request_hash(
+        {
+            'tenant': service.settings.tenant_id,
+            'job_id': job['id'],
+            'profile_hash': profile_hash(service.config, profile),
+        }
+    )
+    if row['request_hash'] != identity:
+        return 'policy_changed'
+    payload = row['payload']
+    original = _start_command(
+        connection, service, profile, _start_key(identity, payload['cycle'])
+    )
+    if original is not None:
+        node = nodes.get(original['payload']['node_id'])
+        if node is None or (
+            node['runtime_state'] == 'stopped'
+            and not _ended_for_replacement(connection, node)
+        ):
+            return 'allocation_uncertain'
+        return None
+    reason = payload.get('reason_code')
+    # Closed public codes only; these are last recorded refusals, not a new
+    # live budget/provider assessment or permission to retry a previous start.
+    if payload['phase'] in {'backoff', 'blocked', 'starting'} and reason in {
+        'budget_limit',
+        'capacity_limit',
+        'allocation_uncertain',
+        'tenant_daily_limit_reached',
+        'tenant_daily_usage_unconfirmed',
+        'authority_unavailable',
+        'policy_changed',
+        'offer_unavailable',
+        'download_retry_limit',
+    }:
+        return reason
+    return None
+
+
 def summary(service, connection, now):
     from .dstack_demand_policy import read_runtime
 
@@ -528,6 +589,21 @@ def summary(service, connection, now):
         for job, _ in work
     )
     machine_limit, _ = service.machine_limits(connection, for_demand=True)
+    blockers = {}
+    by_id = {node['intent_id']: node for node in nodes}
+    for job, profile in work:
+        blocker = _recorded_start_blocker(service, connection, job, profile, by_id)
+        if blocker:
+            blockers[blocker] = blockers.get(blocker, 0) + 1
+    recorded_reason = (
+        (
+            'allocation_uncertain'
+            if 'allocation_uncertain' in blockers
+            else sorted(blockers)[0]
+        )
+        if blockers and sum(blockers.values()) == len(work) and not running + starting
+        else None
+    )
     reason = (
         "disabled"
         if not runtime["enabled"]
@@ -543,7 +619,7 @@ def summary(service, connection, now):
         if retry_limited
         else "machine_limit"
         if running + starting >= machine_limit
-        else None
+        else recorded_reason
     )
     return {
         **runtime,
@@ -554,4 +630,5 @@ def summary(service, connection, now):
         "queued_generation_jobs": sum(counts.values()),
         "queued_by_mode": counts,
         "blocked_reason": reason,
+        "last_start_blockers": blockers,
     }

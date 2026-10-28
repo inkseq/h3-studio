@@ -12,6 +12,7 @@ import math
 from sqlalchemy import select
 
 from .capacity_inventory import allocation_resources
+from .capacity_memory import planning_ram_gib
 from .capacity_market import (
     FRESH_SECONDS,
     PROVIDERS,
@@ -105,7 +106,9 @@ def _observations(connection, now):
 
 def _physical_limits(profile):
     return {
-        "min_ram_gib": math.ceil(profile["minimum_ram_bytes"] / 1024**3),
+        "min_ram_gib": planning_ram_gib(
+            profile.get("id"), math.ceil(profile["minimum_ram_bytes"] / 1024**3)
+        ),
         "min_disk_gib": math.ceil(profile["minimum_disk_bytes"] / 1024**3),
         "min_cpu_cores": profile["hardware_filters"]["minimum_cpu_cores"],
     }

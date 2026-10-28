@@ -9,7 +9,6 @@ from contextlib import contextmanager
 import fcntl
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import re
@@ -216,10 +215,28 @@ FAILED_CAPTURE_FILES = {
     'oom-recovery/phase-snapshot-started.json': 'a02f58d178ba67a38a36b9cc6bcefb01f60305e94ccba9b10018d7e64b3194d8',
     'oom-recovery/phase-snapshot-unknown.json': 'e41a9635c09e4fd29f7033ecfc54073b0f6558b7462f830f0c599b1f4d9643e4',
 }
+OCT27_CAPTURE_NONCE = '8e51de50-8b9d-4338-beda-c02b94d06aca'
+# Original terminal metadata from SSM536f0f66 (#655); no handoff or transfer.
+OCT27_CAPTURE_FILES = {
+    'intent.json': 'b1ec9657af4f0f837868394ba7525643cd3ffac62ccb24fc455a2582140213a6',
+    'phase-snapshot-started.json': 'd23070d558a96f3aa8a7f00d6bcaa06a3e7be900ec81553f8f638c8ecbca7fd7',
+    'phase-snapshot-unknown.json': 'f92196675d0a7dd6651e0b7e43d105ba6a030c3ade5b846ad4fedde41c7eb0e7',
+}
+
+
+def failed_capture_spec(day):
+    # Closed receipt registry, not an operator-supplied skip/history policy.
+    if day == FAILED_CAPTURE_DAY:
+        return (FAILED_CAPTURE_NONCE, FAILED_CAPTURE_FILES, {'oom-recovery'},
+                datetime(2026,10,26,21,50,tzinfo=timezone.utc))
+    if day == '2026-10-27':
+        return (OCT27_CAPTURE_NONCE, OCT27_CAPTURE_FILES, set(),
+                datetime(2026,10,27,16,34,49,278933,tzinfo=timezone.utc))
+    return None
 
 
 def reconciled_failed_capture(prior, day, config):
-    """One root-attested capture-only failure; not completion or replay authority.
+    """Exact root-attested capture-only failures; not completion/replay authority.
 
     The acknowledgement is installed separately under the reviewed zero-work CAS
     procedure, after proving no writer/transport and no original-prefix versions.
@@ -228,8 +245,13 @@ def reconciled_failed_capture(prior, day, config):
     ack = prior/FAILED_CAPTURE_ACK
     if not ack.exists() and not ack.is_symlink():
         return False
-    require(prior.name == FAILED_CAPTURE_DAY and re.fullmatch(r'\d{4}-\d{2}-\d{2}', day)
-        and day > FAILED_CAPTURE_DAY, 'backup_failed_capture_day_refused')
+    value = read(ack)
+    if type(value.get('version')) is int and value['version'] == 2:
+        return reconciled_capture_v2(prior, day, config, value)
+    spec = failed_capture_spec(prior.name)
+    require(spec is not None and re.fullmatch(r'\d{4}-\d{2}-\d{2}', day)
+        and day > prior.name, 'backup_failed_capture_day_refused')
+    nonce, files, directories, not_before = spec
     require(config is not None and config.get('environment') == 'production'
         and config.get('instance_id') == HOSTS['production'], 'backup_failed_capture_host_refused')
     bucket = 'sixnine-business-backup-829135631045-ap-southeast-1'
@@ -240,9 +262,9 @@ def reconciled_failed_capture(prior, day, config):
         'zero_work', 'no_writer_or_transport', 'partials_preserved', 'automatic_retry'}
     require(set(value) == fields and type(value['version']) is int and value['version'] == 1
         and value['state'] == 'failed_capture_reconciled_not_completed'
-        and value['day'] == FAILED_CAPTURE_DAY and value['operation_id'] == FAILED_CAPTURE_NONCE
-        and value['evidence'] == FAILED_CAPTURE_FILES and value['bucket'] == bucket
-        and value['prefix'] == 'business-backups/'+FAILED_CAPTURE_NONCE+'/'
+        and value['day'] == prior.name and value['operation_id'] == nonce
+        and value['evidence'] == files and value['bucket'] == bucket
+        and value['prefix'] == 'business-backups/'+nonce+'/'
         and type(value['versions']) is int and value['versions'] == 0
         and type(value['delete_markers']) is int and value['delete_markers'] == 0
         and value['zero_work'] is True and value['no_writer_or_transport'] is True
@@ -252,21 +274,108 @@ def reconciled_failed_capture(prior, day, config):
         and isinstance(value['image'], str) and re.fullmatch('sha256:[0-9a-f]{64}', value['image'])
         and isinstance(value['checked_at'], str), 'backup_failed_capture_pin_invalid')
     checked = datetime.fromisoformat(value['checked_at'].replace('Z', '+00:00'))
-    require(checked.tzinfo is not None and checked >= datetime(2026,10,26,21,50,tzinfo=timezone.utc)
+    require(checked.tzinfo is not None and checked >= not_before
         and checked <= datetime.now(timezone.utc), 'backup_failed_capture_time_invalid')
     # Extra handoff/output/transfer files invalidate the capture-only conclusion.
-    expected = set(FAILED_CAPTURE_FILES) | {FAILED_CAPTURE_ACK, 'oom-recovery'}
+    expected = set(files) | {FAILED_CAPTURE_ACK} | directories
     actual = set()
     for path in prior.rglob('*'):
         name = path.relative_to(prior).as_posix()
         require(name in expected, 'backup_failed_capture_evidence_changed')
-        protected(path, name == 'oom-recovery')
+        protected(path, name in directories)
         actual.add(name)
     require(actual == expected, 'backup_failed_capture_evidence_changed')
-    for name, digest in FAILED_CAPTURE_FILES.items():
+    for name, digest in files.items():
         path = protected(prior/name)
         require(path.stat().st_size <= 65536 and hashlib.sha256(path.read_bytes()).hexdigest() == digest,
             'backup_failed_capture_evidence_changed')
+    return True
+
+
+def capture_timestamp(value):
+    require(type(value) is str, 'backup_capture_time_invalid')
+    stamp = datetime.fromisoformat(value.replace('Z', '+00:00'))
+    require(stamp.tzinfo is not None, 'backup_capture_time_invalid')
+    return stamp
+
+
+def capture_evidence(prior, *, acknowledged=False):
+    """Only the ordinary three-file capture failure; no transport/recovery waiver."""
+    protected(prior, True)
+    require(stat.S_IMODE(prior.stat().st_mode) == 0o700, 'backup_operation_not_private')
+    names = {'intent.json', 'phase-snapshot-started.json', 'phase-snapshot-unknown.json'}
+    require(set(p.name for p in prior.iterdir()) == names | ({FAILED_CAPTURE_ACK} if acknowledged else set()),
+            'backup_capture_inventory_refused')
+    evidence, values = {}, {}
+    for name in sorted(names):
+        path = protected(prior/name)
+        before = path.lstat()
+        require(before.st_size <= 65536, 'backup_json_oversize')
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            require(identity(os.fstat(stream.fileno())) == identity(before), 'backup_capture_evidence_changed')
+            raw = stream.read(65537)
+            require(len(raw) <= 65536 and identity(os.fstat(stream.fileno())) == identity(before)
+                    and identity(path.lstat()) == identity(before), 'backup_capture_evidence_changed')
+        values[name] = unique_json(raw)
+        evidence[name] = hashlib.sha256(raw).hexdigest()
+    intent = values['intent.json']
+    require(type(intent) is dict and set(intent) == {'version','day','commit','image','operation_id','automatic_retry'}
+            and type(intent['version']) is int and intent['version'] in (1,2,3)
+            and intent['day'] == prior.name and intent['automatic_retry'] is False,
+            'backup_capture_intent_invalid')
+    require(type(intent['operation_id']) is str and str(uuid.UUID(intent['operation_id'], version=4)) == intent['operation_id']
+            and type(intent['commit']) is str and re.fullmatch('[0-9a-f]{40}', intent['commit'])
+            and type(intent['image']) is str and re.fullmatch('sha256:[0-9a-f]{64}', intent['image']),
+            'backup_capture_intent_invalid')
+    stamps = []
+    for name in ('phase-snapshot-started.json', 'phase-snapshot-unknown.json'):
+        value = values[name]
+        fields = {'version','phase','observed_at','automatic_retry'}
+        if name.endswith('unknown.json'): fields.add('code')
+        require(type(value) is dict and set(value) == fields and type(value['version']) is int
+                and value['version'] == 1 and value['phase'] == 'snapshot'
+                and value['automatic_retry'] is False, 'backup_capture_phase_invalid')
+        if 'code' in value:
+            require(value['code'] in DIAGNOSTIC_CODES | {'backup_phase_timeout_outcome_unknown','backup_failed_or_unknown'},
+                    'backup_capture_phase_invalid')
+        stamps.append(capture_timestamp(value['observed_at']))
+    require(stamps[0] <= stamps[1] <= datetime.now(timezone.utc)
+            and stamps[0].date().isoformat() == prior.name, 'backup_capture_time_invalid')
+    return intent, evidence, stamps[1]
+
+
+def reconciled_capture_v2(prior, day, config, value):
+    """Read a separately adopted root attestation; never create or replay one."""
+    require(datetime.strptime(day, '%Y-%m-%d').date().isoformat() == day and day > prior.name,
+            'backup_failed_capture_day_refused')
+    require(config is not None and config.get('environment') == 'production'
+            and config.get('instance_id') == HOSTS['production']
+            and config.get('target', {}).get('bucket') == 'sixnine-business-backup-829135631045-ap-southeast-1',
+            'backup_failed_capture_host_refused')
+    require(stat.S_IMODE(protected(prior/FAILED_CAPTURE_ACK).stat().st_mode) == 0o600,
+            'backup_capture_ack_not_private')
+    intent, evidence, failed_at = capture_evidence(prior, acknowledged=True)
+    fields = {'version','state','day','operation_id','evidence','bucket','prefix','versions','delete_markers',
+        'listing_started_at','checked_at','acknowledged_at','listing_complete','release','image',
+        'config_sha256','release_state_sha256','helper_sha256','operator_sha256',
+        'zero_work','no_writer_or_transport','partials_preserved','automatic_retry'}
+    require(set(value) == fields and type(value['version']) is int and value['version'] == 2
+            and value['state'] == 'failed_capture_reconciled_not_completed'
+            and value['day'] == prior.name and value['operation_id'] == intent['operation_id']
+            and value['evidence'] == evidence and value['bucket'] == config['target']['bucket']
+            and value['prefix'] == 'business-backups/'+intent['operation_id']+'/'
+            and all(type(value[k]) is int and value[k] == 0 for k in ('versions','delete_markers'))
+            and all(value[k] is True for k in ('listing_complete','zero_work','no_writer_or_transport','partials_preserved'))
+            and value['automatic_retry'] is False, 'backup_failed_capture_ack_invalid')
+    require(type(value['release']) is str and re.fullmatch('[0-9a-f]{40}', value['release'])
+            and type(value['image']) is str and re.fullmatch('sha256:[0-9a-f]{64}', value['image'])
+            and all(type(value[k]) is str and re.fullmatch('[0-9a-f]{64}', value[k])
+                    for k in ('config_sha256','release_state_sha256','helper_sha256','operator_sha256')),
+            'backup_failed_capture_pin_invalid')
+    started, checked, adopted = (capture_timestamp(value[k]) for k in ('listing_started_at','checked_at','acknowledged_at'))
+    require(failed_at <= started <= checked <= adopted <= datetime.now(timezone.utc)
+            and (adopted-started).total_seconds() <= 300, 'backup_failed_capture_time_invalid')
     return True
 
 

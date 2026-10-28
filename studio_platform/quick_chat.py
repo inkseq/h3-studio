@@ -37,6 +37,7 @@ from .auth import Principal
 from .capabilities import RECIPES, VERSION, version_matches
 from .content_policy import ContentPolicyError
 from .credits import CreditError
+from .creator_controls import default_chat_profile
 from .generation_draft import (
     input_entries,
     prepare_patch,
@@ -72,8 +73,6 @@ from .content_lifecycle import (
     assert_project_writable,
     assert_reference_payload,
 )
-
-
 from .assistant_models import DEFAULT_MODEL, resolve as resolve_assistant
 
 EMPTY_INPUTS = {
@@ -1088,6 +1087,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
         }
 
     def _card_snapshot(self, principal, session, body):
+        body = default_chat_profile(self.settings, body)
         settings_check(
             {
                 k: body[k]

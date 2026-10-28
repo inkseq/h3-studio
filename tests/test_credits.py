@@ -713,6 +713,9 @@ class CreditTests(LedgerCase):
     def test_history_is_bounded_iso_and_cursor_is_owner_bound(self):
         for index in range(5):
             self.seed(1, key="history-" + str(index))
+        private_url = "https://pay.stripe.com/receipts/private-contact-details"
+        with self.repo.transaction() as connection:
+            connection.execute(update(entries).values(receipt_url=private_url))
         with self.repo.engine.connect() as connection:
             first = credits.entries(
                 connection, self.scope.tenant_id, "superdan", limit=2
@@ -732,6 +735,10 @@ class CreditTests(LedgerCase):
                 all(row["created_at"].endswith("+00:00") for row in first["entries"])
             )
             self.assertNotIn("fingerprint", json.dumps(first))
+            self.assertNotIn("receipt_url", json.dumps(first))
+            self.assertEqual(
+                set(connection.scalars(select(entries.c.receipt_url))), {private_url}
+            )
             with self.assertRaisesRegex(credits.CreditError, "credit_cursor_invalid"):
                 credits.entries(
                     connection,
