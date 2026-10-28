@@ -108,6 +108,28 @@ const KIND = {
   expire: ShieldCheck,
 };
 
+// The line under the balance: what it buys, when the soonest credits expire, what is held.
+function BalanceNote({ credits, standard, n }) {
+  const { t, locale } = useI18n();
+  const expiry = credits?.expiry;
+  return (
+    <small className="muted">
+      {credits && standard
+        ? t('credits.enoughFor', { count: Math.floor(credits.available / standard.perClip) })
+        : ''}
+      {expiry
+        ? t('credits.expiresOn', {
+            count: n(expiry.credits),
+            date: new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-AU', {
+              dateStyle: 'medium',
+            }).format(expiry.at),
+          })
+        : t('credits.noExpiry')}
+      {credits?.held ? ' · ' + t('credits.held', { count: n(credits.held) }) : ''}
+    </small>
+  );
+}
+
 export function CreditsPanel({ account, active }) {
   const { t, locale } = useI18n();
   const api = useClient(account);
@@ -219,13 +241,7 @@ export function CreditsPanel({ account, active }) {
             {credits ? n(credits.available) : '—'}
             <span>{t('credits.word')}</span>
           </div>
-          <small className="muted">
-            {credits && standard
-              ? t('credits.enoughFor', { count: Math.floor(credits.available / standard.perClip) })
-              : ''}
-            {t('credits.noExpiry')}
-            {credits?.held ? ' · ' + t('credits.held', { count: n(credits.held) }) : ''}
-          </small>
+          <BalanceNote credits={credits} standard={standard} n={n} />
         </div>
         <div className="credits-today">
           <small className="muted">{t('credits.today')}</small>

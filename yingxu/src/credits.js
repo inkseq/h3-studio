@@ -19,7 +19,15 @@ export function creditSummary(body) {
     available: count(body.available) ?? Math.max(0, balance - held),
     todayUsed: count(body.today_used) ?? 0,
     dailyLimit: count(body.daily_limit) ?? 0,
+    expiry: expirySummary(body.expiry),
   };
+}
+
+// h3-studio#749: the soonest batch of unspent credits that will expire, if any.
+function expirySummary(value) {
+  const at = apiDate(value?.next_at);
+  const credits = count(value?.next_credits);
+  return at && credits ? { at, credits } : null;
 }
 
 export function packList(body) {
