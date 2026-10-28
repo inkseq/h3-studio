@@ -260,7 +260,37 @@ def oneshot_failed(unit, *, runner=subprocess.run):
     return None
 
 
-def backup_copy_missing(*, now, root=BACKUP_STATE):
+def backup_coverage_loss(completed, receipt):
+    """Classify only the hash-bound coverage; legacy unclassified misses alert."""
+    version = completed['version']
+    if version == 1:
+        require('coverage' not in completed and 'coverage' not in receipt, 'alert_backup_coverage_invalid')
+        return False  # v1 only allowed complete media copies.
+    coverage = completed.get('coverage')
+    fields = {'status', 'referenced_objects', 'available_objects', 'missing_objects',
+        'referenced_bytes', 'available_bytes', 'missing_bytes'}
+    if version == 3:
+        fields |= {'expected_missing_objects', 'expected_missing_bytes',
+            'unexpected_missing_objects', 'unexpected_missing_bytes', 'loss_alert_required'}
+    require(type(coverage) is dict and set(coverage) == fields and encode(coverage) == encode(receipt.get('coverage'))
+        and all(type(coverage[key]) is int and coverage[key] >= 0
+            for key in fields - {'status', 'loss_alert_required'}), 'alert_backup_coverage_invalid')
+    require(coverage['status'] == ('incomplete' if coverage['missing_objects'] else 'complete')
+        and (coverage['missing_objects'] == 0) == (coverage['missing_bytes'] == 0)
+        and all(coverage['referenced_' + suffix] == coverage['available_' + suffix]
+            + coverage['missing_' + suffix] for suffix in ('objects', 'bytes')), 'alert_backup_coverage_invalid')
+    if version == 2:
+        return coverage['missing_objects'] > 0
+    require(type(coverage['loss_alert_required']) is bool
+        and coverage['loss_alert_required'] == (coverage['unexpected_missing_objects'] > 0)
+        and all(coverage['missing_' + suffix] == coverage['expected_missing_' + suffix]
+            + coverage['unexpected_missing_' + suffix] for suffix in ('objects', 'bytes'))
+        and all((coverage[kind + '_objects'] == 0) == (coverage[kind + '_bytes'] == 0)
+            for kind in ('expected_missing', 'unexpected_missing')), 'alert_backup_coverage_invalid')
+    return coverage['loss_alert_required']
+
+
+def backup_copy_observation(*, now, root=BACKUP_STATE):
     """Check at most two daily receipts, not media or S3. None means unobservable.
 
     Root-pinned completion plus receipt hash is copy evidence, never restore proof.
@@ -296,17 +326,22 @@ def backup_copy_missing(*, now, root=BACKUP_STATE):
                 and 1 <= len(value['completion_version_id']) <= 1024
                 and receipt.get('completion_version_id') == value['completion_version_id'],
                 'alert_backup_receipt_invalid')
-            return False
-        return True
+            return {'missing': False, 'loss': backup_coverage_loss(value, receipt)}
+        return {'missing': True, 'loss': None}
     except (OSError, ValueError, TypeError, OverflowError):
-        return None
+        return {'missing': None, 'loss': None}
+
+
+def backup_copy_missing(*, now, root=BACKUP_STATE):
+    return backup_copy_observation(now=now, root=root)['missing']
 
 
 def backup_observation(*, now, runner=subprocess.run):
     failed = oneshot_failed('inkseq-business-backup.service', runner=runner)
-    missing = backup_copy_missing(now=now)
+    observed = backup_copy_observation(now=now)
+    missing = observed['missing']
     return {'business_backup_failed': failed, 'business_backup_missing': missing,
-        'business_backup_unobservable': missing is None}
+        'business_backup_unobservable': missing is None, 'business_backup_loss': observed['loss']}
 
 
 def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_window_seconds=300):
@@ -380,7 +415,7 @@ def notification(value, environment):
     # The core evaluator owns this finite code list. Keep a second boundary at SNS.
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
             'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained', 'host_disk_80', 'host_disk_90',
-            'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed',
+            'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed', 'business_backup_loss',
             'payment_fulfillment_stalled', 'payment_processing_stalled', 'payment_failed',
             'payment_refunded', 'payment_disputed', 'payment_monitor_unavailable',
             'payment_webhook_signature_failed', 'payment_webhook_receipt_failed',
