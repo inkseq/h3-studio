@@ -151,21 +151,27 @@ function refusalMessage(status, detail, expectedAccount, maintenance) {
   const reason =
     status === 409 && detail?.detail === 'capacity_drain_repreflight'
       ? ui('client.capacityDrain', expectedAccount)
-      : String(detail?.code || '').startsWith('support_view_')
-        ? ui('client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()), expectedAccount)
-        : typeof detail?.detail === 'string'
-          ? detail.detail
-          : typeof detail?.message === 'string'
-            ? detail.message
-            : status === 409
-              ? ui('client.versionChanged', expectedAccount)
-              : status === 404
-                ? ui('client.notFound', expectedAccount)
-                : status === 401
-                  ? ui('client.login', expectedAccount)
-                  : status >= 500
-                    ? ui('client.unavailable', expectedAccount)
-                    : ui('client.status', expectedAccount, { status });
+      : // The server's generic not-found text is Chinese-only; show it in the page language.
+        status === 404
+        ? ui('client.notFound', expectedAccount)
+        : String(detail?.code || '').startsWith('support_view_')
+          ? ui(
+              'client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()),
+              expectedAccount,
+            )
+          : typeof detail?.detail === 'string'
+            ? detail.detail
+            : typeof detail?.message === 'string'
+              ? detail.message
+              : status === 409
+                ? ui('client.versionChanged', expectedAccount)
+                : status === 404
+                  ? ui('client.notFound', expectedAccount)
+                  : status === 401
+                    ? ui('client.login', expectedAccount)
+                    : status >= 500
+                      ? ui('client.unavailable', expectedAccount)
+                      : ui('client.status', expectedAccount, { status });
   const budgetKey = [
     'user_daily_limit_reached',
     'connection_daily_limit_reached',

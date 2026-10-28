@@ -47,6 +47,28 @@ export function safeProperties(properties = {}) {
   );
 }
 
+// The anonymous PostHog id, for server events that close the checkout funnel (h3-studio#725).
+// Only when analytics is running on this site and the visitor hasn't opted out or set Do Not
+// Track; it is a random UUID, never an email, account or owner id.
+export function checkoutAnalytics(dnt = globalThis.navigator?.doNotTrack) {
+  if (!ready || dnt === '1' || dnt === 'yes') return undefined;
+  try {
+    if (posthog.has_opted_out_capturing()) return undefined;
+    const id = posthog.get_distinct_id();
+    return anonymousId(id) ? { consent: true, distinct_id: id } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** A PostHog anonymous id: a UUID (v4 or v7), nothing that could name a person. */
+export function anonymousId(id) {
+  return (
+    typeof id === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+  );
+}
+
 /** Record one product step, e.g. track('story_chat_message', { turn: 3 }). */
 export function track(event, properties) {
   if (!ready) return;
