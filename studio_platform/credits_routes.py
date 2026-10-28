@@ -301,6 +301,7 @@ class CreditAPI:
                 "cost_multiplier",
                 "welcome_credits",
                 "image_credits",
+                "resolution_multipliers",
                 "fee_rate",
                 "reason",
             }
@@ -336,6 +337,7 @@ class CreditAPI:
                             "welcome_credits",
                             "fee_rate",
                             "image_credits",
+                            "resolution_multipliers",
                         )
                         if key in body
                     },

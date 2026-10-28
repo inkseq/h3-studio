@@ -19,6 +19,7 @@ from studio_platform.credits_pricing import (
     PricingError,
     admin_margin_estimate,
     hide_dollar_estimate,
+    public_prices,
     public_quote,
     quote,
     user_estimate,
@@ -340,6 +341,104 @@ class CreditsRouteTests(LedgerCase):
                             PricingError, "credit_quote_invalid"
                         ):
                             self.get_quote(changed, execution=execution)
+
+    def test_resolution_revision_uses_compiled_dimensions_and_preserves_old_quote(self):
+        revision = self.enable()
+        compiled = self.compiled()
+        compiled['output_spec'].update(frames=120, fps=24, width=1344, height=768)
+        compiled['request'].update(resolution='480P', quality_tier='fast', steps=5)
+        compiled['deployment_profile_id'] = (
+            'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
+        )
+        frozen = self.get_quote(compiled)
+        self.assertEqual(frozen['credits'], 20)
+        body = {
+            'expected_revision': revision,
+            'rates': dict(DEFAULT_RATES),
+            'resolution_multipliers': {'480P': 1, '768P': 2},
+            'image_credits': 5,
+            'reason': 'Disposable CR75 acceptance',
+        }
+        published = self.service.publish(self.admin, body, key='resolution-prices')
+        self.assertNotEqual(published['revision'], revision)
+        self.assertEqual(
+            self.service.publish(self.admin, body, key='resolution-prices'), published
+        )
+        sharp = self.get_quote(compiled)
+        self.assertEqual(
+            (sharp['credits'], sharp['resolution'], sharp['breakdown'][0]['rate']),
+            (40, '768P', 8),
+        )
+        compiled['output_spec'].update(width=768, height=1344)
+        self.assertEqual(self.get_quote(compiled)['credits'], 40)
+        compiled['output_spec'].update(width=480, height=832)
+        self.assertEqual(self.get_quote(compiled)['credits'], 20)
+        self.assertEqual(public_quote({'credit_quote': frozen})['credits'], 20)
+        self.assertNotIn('resolution_multiplier', frozen)
+        with self.repo.engine.connect() as connection:
+            old = connection.execute(
+                select(prices.c.configuration).where(prices.c.revision == revision)
+            ).scalar_one()
+            new = connection.execute(
+                select(prices.c.configuration).where(
+                    prices.c.revision == published['revision']
+                )
+            ).scalar_one()
+        self.assertNotIn('resolution_multipliers', old)
+        self.assertEqual(new['image_credits'], 5)
+        self.assertEqual(new['resolution_multipliers'], {'480P': 1, '768P': 2})
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                public_prices(connection, "sixnine")["resolution_multipliers"],
+                {"480P": 1, "768P": 2},
+            )
+        compiled['output_spec'].update(frames=124, width=1344, height=768)
+        self.assertEqual(self.get_quote(compiled)['credits'], 42)
+        with self.assertRaisesRegex(PricingError, 'credit_prices_changed'):
+            self.service.publish(self.admin, body, key='stale-resolution-revision')
+
+    def test_resolution_pricing_rejects_invalid_adoption_and_unpriced_dimensions(self):
+        revision = self.enable()
+        for invalid in (
+            {'480P': True, '768P': 2},
+            {'480P': 1, '768P': 0},
+            {'480P': 1},
+            {'480P': 1, '768P': 2, '1080P': 3},
+            {'480P': 2, '768P': 1},
+            {'480P': 1, '768P': 1.5},
+        ):
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaisesRegex(PricingError, 'credit_prices_invalid'),
+            ):
+                self.service.publish(
+                    self.admin,
+                    {
+                        'expected_revision': revision,
+                        'rates': dict(DEFAULT_RATES),
+                        'resolution_multipliers': invalid,
+                    },
+                )
+        self.service.publish(
+            self.admin,
+            {
+                'expected_revision': revision,
+                'rates': dict(DEFAULT_RATES),
+                'resolution_multipliers': {'480P': 1, '768P': 2},
+            },
+        )
+        for width, height in ((1920, 1080), (None, 480), (True, 480), (0, 768)):
+            compiled = self.compiled()
+            compiled['output_spec'].update(width=width, height=height)
+            with (
+                self.subTest(width=width, height=height),
+                self.assertRaisesRegex(PricingError, 'credit_quote_invalid'),
+            ):
+                self.get_quote(compiled)
+        rendered = self.render_compiled()
+        quote = self.get_quote(rendered, execution={"backend": "cpu-render"})
+        self.assertEqual((quote["tier"], quote["credits"]), ("render", 0))
+        self.assertNotIn("resolution_multiplier", quote)
 
     def test_new_price_does_not_reprice_frozen_plan_and_projection_is_read_only(self):
         revision = self.enable()
