@@ -5,10 +5,6 @@ hydration lane. This module neither provisions it nor changes rollout settings.
 """
 
 from dataclasses import dataclass, field
-import json
-import os
-from pathlib import Path
-import stat
 
 PROFILES = {
     "typesafe": ("typesafe--avatar-user-20261008", "https://api.typesafe.ai/v1"),
@@ -67,35 +63,6 @@ def validate(value):
 
 
 def runtime_config(filename):
-    try:
-        path = Path(filename)
-        if not path.is_absolute() or ".." in path.parts:
-            raise InkyConfigError()
-        original = path.lstat()
-        if not stat.S_ISREG(original.st_mode):
-            raise InkyConfigError()
-        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
-        with os.fdopen(fd, "rb") as handle:
-            info = os.fstat(handle.fileno())
-            if (
-                not stat.S_ISREG(info.st_mode)
-                or info.st_nlink != 1
-                or info.st_size > 8192
-                or (original.st_dev, original.st_ino) != (info.st_dev, info.st_ino)
-                or (
-                    os.name != "nt"
-                    and (
-                        info.st_uid != 0
-                        or stat.S_IMODE(info.st_mode) not in {0o400, 0o440}
-                    )
-                )
-            ):
-                raise InkyConfigError()
-            raw = handle.read(8193)
-        if len(raw) != info.st_size:
-            raise InkyConfigError()
-        return validate(json.loads(raw, object_pairs_hook=unique))
-    except InkyConfigError:
-        raise
-    except Exception:
-        raise InkyConfigError() from None
+    from .protected_config import read_protected_json
+
+    return validate(read_protected_json(filename, InkyConfigError, pairs=unique))

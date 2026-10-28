@@ -62,6 +62,19 @@ class GeminiImageClient:
         self.timeout = timeout or httpx.Timeout(120, connect=15)
 
     def generate(self, prompt, aspect="1:1"):
+        from .llm_tracing import clip, generation
+
+        with generation(
+            "gemini-picture",
+            model=MODEL,
+            input=clip(prompt, 2000),
+            model_parameters={"aspect": aspect},
+        ) as traced:
+            mime, data = self._generate(prompt, aspect)
+            traced.update(output={"mime": mime, "bytes": len(data)})
+        return mime, data
+
+    def _generate(self, prompt, aspect):
         config = self.loader()
         if config.base_url != ORIGIN or not config.api_key:
             raise ImageError("image_profile_mismatch", 503)
