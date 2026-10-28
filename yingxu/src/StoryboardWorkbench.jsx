@@ -74,6 +74,19 @@ function isLocked(state) {
   return state.busy || !!state.workbenchPending;
 }
 
+// A shot with exactly one take uses it (owner 2026-10-28): choose it once, after the list is read
+// and nothing else is pending. Never re-chooses after the person picks or removes takes.
+function useOnlyTakeChosen(versions, data, locked, choose) {
+  const done = useRef('');
+  const only = data && versions.length === 1 && !versions[0].selected ? versions[0] : null;
+  const pick = useEffectEvent((row) => choose(row));
+  useEffect(() => {
+    if (!only || locked || done.current === only.id) return;
+    done.current = only.id;
+    pick(only);
+  }, [only, locked]);
+}
+
 // The shot's take ids and chosen take: the only shot fields the takes list depends on.
 function takesKeyOf(shot) {
   return (
@@ -225,6 +238,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
   const [confirmTake, setConfirmTake] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const locked = isLocked(state);
+  useOnlyTakeChosen(versions, data, locked, (row) => choose(row));
   function choose(row) {
     const select = { op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id };
     if (shot.segments?.length && row.id !== shot.chosen) setConfirmTake(row);
