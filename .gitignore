@@ -938,3 +938,7 @@ inventory.json
 !deploy/platform/business_backup_ack.py
 !tests/test_business_backup_ack.py
 !docs/BACKUP-FAILURE-ACK.md
+!deploy/dstack/taomate-v7.production-bindings.json
+!tools/prepare_taomate_bindings.py
+!tests/test_taomate_production_bindings.py
+!docs/TAOMATE-PRODUCTION-BINDING.md
