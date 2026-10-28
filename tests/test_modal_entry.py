@@ -7,7 +7,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+from studio_platform import modal_entry
 from studio_platform.modal_entry import launch_document, prepare_files
+from studio_platform.runtime_hosts.wangp_session import _check_config
 from studio_platform.modal_runtime import PROFILE
 from studio_platform.runtime_catalog import engine_manifest
 from tools.build_modal_sources import build
@@ -39,8 +41,37 @@ class EntryTests(unittest.TestCase):
         manifest = json.loads((self.root / 'manifest.json').read_text())
         self.assertEqual(manifest, engine_manifest(PROFILE, 'fl').document)
         self.assertEqual((self.root / 'token').read_text(), 'a' * 64)
+        _check_config(self.root / 'wgp_config.json', models, PROFILE)
         with self.assertRaises(FileExistsError):
             prepare_files(value, self.root, models)
+
+    def test_entry_passes_the_real_native_config_contract(self):
+        models = self.root / 'models'
+        models.mkdir()
+        state = self.root / 'private'
+        observed = {}
+
+        def install_original_launch(_seconds):
+            modal_entry.install_launch(self.value, state)
+
+        def native_main(argv, **_kwargs):
+            config = Path(argv[argv.index('--config') + 1])
+            observed.update(_check_config(config, models, PROFILE))
+            return 0
+
+        with (
+            patch.object(modal_entry, 'STATE', state),
+            patch.object(modal_entry, 'MODELS', models),
+            patch.object(
+                modal_entry.time, 'sleep', side_effect=install_original_launch
+            ),
+            patch(
+                'studio_platform.runtime_hosts.wangp_launcher.main',
+                side_effect=native_main,
+            ),
+        ):
+            self.assertEqual(modal_entry.main([]), 0)
+        self.assertEqual(observed['checkpoints_paths'], [str(models.resolve())])
 
     def test_changed_manifest_or_extra_credentials_refuse(self):
         for changed in (

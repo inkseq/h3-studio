@@ -97,7 +97,9 @@ def prepare_files(value, state, models):
         raise ValueError('modal_launch_binding_invalid')
     _write(state / 'manifest.json', json.dumps(manifest.document).encode())
     _write(state / 'token', value['token'].encode())
-    _write(state / 'config.json', json.dumps(runtime_config(PROFILE, models)).encode())
+    _write(
+        state / 'wgp_config.json', json.dumps(runtime_config(PROFILE, models)).encode()
+    )
     return manifest
 
 
@@ -129,7 +131,7 @@ def main(argv=None):
                 '--runtime-root',
                 str(RUNTIME),
                 '--config',
-                str(STATE / 'config.json'),
+                str(STATE / 'wgp_config.json'),
                 '--manifest',
                 str(STATE / 'manifest.json'),
                 '--model-root',
