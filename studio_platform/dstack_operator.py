@@ -2512,7 +2512,7 @@ class DstackOperator:
             "resources": resources,
             "instances": len(resources),
             "physical_gpus": sum(resources.values()),
-            "active_instance_ids": tuple(active_intents),
+            "all_resource_intent_ids": tuple(active_intents),
             "native_resources": tuple(live_keys),
             "unconfirmed_allocation_ids": tuple(unconfirmed_allocations),
         }

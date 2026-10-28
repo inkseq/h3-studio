@@ -140,7 +140,9 @@ def _exclude_exited_modal_devices(connection, intents, usage, now):
     removable = Counter()
     active_keys = {
         (row['provider'], row['provider_instance_id'])
-        for identity in usage['active_instance_ids']
+        for identity in usage.get(
+            'all_resource_intent_ids', usage['active_instance_ids']
+        )
         if (row := intents.get(identity)) is not None
     }
     for intent in intents.values():

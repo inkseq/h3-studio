@@ -42,7 +42,7 @@ def usage(service, c):
     value = service.prelaunch_capacity_usage(c)
     registration_capacity_projection(value)
     observations = value.get('observations')
-    active = value.get('active_instance_ids')
+    active = value.get('all_resource_intent_ids', value.get('active_instance_ids'))
     require(isinstance(observations, list) and isinstance(active, (tuple, list)))
     require(
         all(
@@ -77,7 +77,7 @@ def usage(service, c):
     native_resources = value.get('native_resources')
     require(isinstance(native_resources, (tuple, list)))
     require(set(value['resources']).issubset(represented | set(native_resources)))
-    return {**value, 'hourly_cost_microusd': hourly}
+    return {**value, 'active_instance_ids': active, 'hourly_cost_microusd': hourly}
 
 
 def admission(service, c, profile, spec, *, identity=None, expected_snapshot=None):
