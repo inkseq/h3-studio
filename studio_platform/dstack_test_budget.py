@@ -192,6 +192,7 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
         select(
             budget_reservations,
             instance_intents.c.pool,
+            instance_intents.c.provider.label("instance_provider"),
             instance_intents.c.state.label("instance_state"),
             instance_intents.c.created_at.label("intent_created_at"),
             instance_intents.c.updated_at.label("intent_updated_at"),
@@ -215,6 +216,11 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
     )
     total = 0
     for row in connection.execute(statement).mappings():
+        if row["instance_provider"] == "modal":
+            from .modal_budget import projected_reservation
+
+            total += projected_reservation(connection, row, guard, now)
+            continue
         if guard["version"] == 2:
             payload = row["payload"]
             lifecycle = payload.get("lifecycle") if isinstance(payload, dict) else None

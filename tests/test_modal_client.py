@@ -15,7 +15,7 @@ class ModalClientTests(unittest.TestCase):
             __version__='1.6.3', App=Mock(), Image=Mock(), Volume=Mock(), Sandbox=Mock()
         )
         self.client = object()
-        self.spec = HostSpec('ap-test', 'im-test', 'vo-test', 3_000_000)
+        self.spec = HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000)
         self.adapter = ModalSandboxClient(self.sdk, self.client, self.spec)
         self.sdk.App.lookup.return_value.app_id = 'ap-test'
         self.request = {

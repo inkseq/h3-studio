@@ -81,7 +81,96 @@ Existing staging credential: `/sixnine/staging/modal`, loaded only by the
 existing authorized role. Never import the obsolete secret-drop file or pass
 provider/database credentials into the GPU image. Production remains OFF.
 
+## Shared test-budget admission
+
+`modal_budget.bind_test_guard` records the immutable task/spec binding in the
+original scaler receipts, in the same capacity-locked transaction as the
+original instance reservation. It must be called before committing a new Modal
+intent. It creates no table, budget account, rental or job. Both providers use
+`dstack_test_budget.projected_cost`: the shared-account layer is counted once,
+including Modal commitments and authoritative settlements. A matching original
+provider-exit receipt bounds the projection by observed lifetime plus stop margin;
+the full reservation and invoice hold remain unchanged until actual settlement.
+Unconfirmed stops retain the commitment, and an unconfirmed running host beyond
+its expected lifetime increases the conservative projection.
+
+ModalHosts rechecks this binding and the combined task projection before its
+sole create when the shared staging account funds the intent. An unattributed
+or changed binding refuses; repeated binding only observes identical evidence.
+The task ceiling cannot exceed CR73's USD50, and original account/pool limits
+still apply. The caller must catch refusal outside the reservation transaction
+so an unfunded intent cannot remain committed. Old daily guards cannot silently
+reinterpret a Modal task. This boundary is tested with fake clients; controller
+routing, real image qualification and activation remain unfinished above.
+
+Readiness, claim and the original late-submit guard recheck the same Modal
+binding, current shared account limit and task projection. A stopped, expired,
+unfunded or unattributed host cannot take new work. Existing recovery/collection
+retains its original attempt path. Within the existing DBOS slots, new work tries
+dedicated hosts first and falls back to Modal only when the original dedicated
+runner cannot claim it; existing attempts retain their original worker affinity.
+This preference creates no provider resource, alternate queue or new job.
+
+`ModalAdmission` is an explicit, default-OFF staging component for the controller.
+It repeats the existing demand validation under the same capacity lock, reserves
+the original layered accounts, and binds a single original demand job in scaler
+receipts before provider I/O. It admits at most two unresolved Modal intents;
+compatible ready dedicated workers suppress fallback. Compatible starting and
+live ready-idle Modal hosts cover one queued input each before another reservation;
+bound queued inputs consume their original host first. Repeated observations,
+response loss and terminal hosts cannot allocate a replacement for the same job.
+A crash between reservation and create leaves the original reserved intent for
+explicit reconciliation, not an automatic create on the next tick. This component
+is not yet wired into the production entrypoint. Private CPU slot installation,
+all-host lifecycle reconciliation, image/Volume qualification and full staging
+acceptance are still required before activation.
+
+`ModalWorkerBindings` prepares a private CPU transport identity for an already
+funded, journaled Sandbox. The initialization marker commits in scaler receipts
+before SDK exec. After response loss, only a read-only comparison of the original
+remote launch document is allowed; missing/changed local identity never mints a
+replacement token. The native manifest, slot and runtime incarnation must match
+before producing the original `SlotConfig`. Its runner context injects only the
+private HTTP transport into `fleet.slot_runner`, retaining WorkerRunner, claims,
+fences and settlement. No API token is persisted in SQL or passed in argv. This
+is tested offline. The existing controller now loads an optional protected
+`modal.json` from its existing runtime work directory. No file means OFF with
+no credential or SDK access; a historical Modal intent requires retaining the
+configuration for original reconciliation, including exit and alert receipts.
+The complete document is `{version: 1, enabled: false, host: <all HostSpec fields>}`.
+Qualified existing `ap-`, `im-`, `vo-` IDs and an all-resource price ceiling are
+required; it does not create an App or Volume. Only the staging origin with DBOS
+is permitted. Enabling the reviewed configuration is a separate zero-work
+adoption, not a consequence of merging this code.
+
+The CPU dispatch image pins Modal SDK 1.6.3 and its hashed dependencies. Once
+explicitly configured, the existing role reads AWSCURRENT of the existing
+`/sixnine/staging/modal` Secrets Manager secret in ap-southeast-1; credentials
+are supplied to `Client.from_credentials`, never to a GPU or process environment.
+SDK endpoint configuration must match the pinned public Modal endpoints.
+
+The same controller loop reconciles all original hosts before fallback admission,
+then runs the original Vast planner. No additional listener, queue, timer or
+generation function is introduced. The original DBOS slot factory receives only
+the private transport adapter. Startup timeout uses the existing 20-minute
+setting; attempts use original silence/runtime settings and same-job reclaim
+fences. Reclaim commits precede stop; enabled Grafana/Sentry exporters acknowledge
+original event IDs, with retry of unacknowledged alerts only. Process exit never
+settles a supplier invoice. Native receipt-aware idle exit remains 60 seconds,
+and the original finite host deadline cannot be extended. Real image/Volume
+qualification and one staging E2E job remain required before claiming readiness.
+
 ## Primary implementation references
+
+Price qualification on 2026-10-28 found that Sandbox CPU/memory have a 3x
+non-preemptible surcharge. The [public price](https://modal.com/pricing) for
+L40S + 4 physical cores + 41 GiB is
+`(0.000542 + 4 * 0.00003942 + 41 * 0.00000667) * 3600 = 3.50334 USD/h`.
+Host quotes below that floor or above USD4/h refuse; activation must still
+qualify the all-resource quote and reserve the full window plus stop margin.
+This is not an increase in the combined CR73 USD50 cap. Image preparation,
+storage/egress and any other confirmed test charges must also fit that same cap;
+no build or rental has been submitted by this implementation slice.
 
 - [Modal official examples](https://github.com/modal-labs/modal-examples)
 - [Function crash/retry semantics](https://modal.com/docs/guide/retries)

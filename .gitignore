@@ -960,3 +960,14 @@ inventory.json
 !tests/test_modal_entry.py
 !tests/test_modal_launch.py
 !studio_platform/modal_launch.py
+!studio_platform/modal_budget.py
+!tests/test_modal_budget.py
+!tests/test_modal_routing.py
+!tests/test_modal_admission.py
+!studio_platform/modal_admission.py
+!studio_platform/modal_worker_binding.py
+!tests/test_modal_worker_binding.py
+!studio_platform/modal_lifecycle.py
+!tests/test_modal_lifecycle.py
+!studio_platform/modal_controller.py
+!tests/test_modal_controller.py

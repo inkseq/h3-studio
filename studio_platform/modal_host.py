@@ -48,8 +48,11 @@ class HostSpec:
             ):
                 raise ValueError('modal_qualified_resource_required')
         if (
+            # 2026-10-28 public Sandbox rates: GPU + four physical CPU cores
+            # and 41 GiB at non-preemptible memory/CPU rates. A qualified quote
+            # must cover this floor; the shared USD50 task ceiling is unchanged.
             type(self.max_hourly_microusd) is not int
-            or not 0 < self.max_hourly_microusd <= 3_000_000
+            or not 3_503_340 <= self.max_hourly_microusd <= 4_000_000
             or self.gpu != 'L40S'
             or self.memory_mib != 41 * 1024
             or self.cpu_limit != 4
@@ -148,6 +151,12 @@ class ModalHosts:
             )
         ):
             raise Conflict('modal_funding_unconfirmed')
+        from .dstack_test_budget import ACCOUNT
+
+        if any(row['account_id'] == ACCOUNT for row in rows):
+            from .modal_budget import enforce
+
+            enforce(c, intent['id'], asdict(self.spec), self.repo.clock())
         for row in rows:
             account = self.repo._locked(
                 c,
