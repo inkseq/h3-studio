@@ -35,12 +35,30 @@ importing them. `h3_reference.py` is a benchmark, not an application worker.
   manifests are unchanged. This is a candidate needing real GPU acceptance,
   not a claim of inference qualification.
 
+## Native entrypoint and image context (not an image-build receipt)
+
+`tools/build_modal_sources.py --output NEW_DIRECTORY` copies only the finite
+existing private-runtime allowlist plus the Modal entrypoint into a clean build
+context. It preserves `deploy/dstack/Dockerfile.wangp`'s pinned public native
+image and v7 dependency checks. The benchmark's Python 3.11 plus unconstrained
+requirements resolver is not substituted for the accepted native environment.
+The Volume model-cache pattern is retained; journals and outputs are private.
+
+The image CMD waits at most 60 seconds for the CPU controller's one private
+launch document, bound to original intent, mode, manifest and protocol token.
+No business request or provider credential is accepted there. The entrypoint
+uses the normal full source/dependency/weight verification before loading and
+then the receipt-aware idle hooks. Missing/mismatched cache bytes refuse; live
+containers never concurrently download/write the shared model cache. A restart
+with an existing private state directory refuses rather than replaying work.
+
 ## Remaining activation slice (do not enable this boundary alone)
 
-Build and verify a native image using `deploy/modal/h3_reference.py`'s CUDA
-12.8/Python 3.11/WanGP revision and Volume pattern, the exact v7 dependencies and
-hashed model files. Keep SQLite operation journals private to each container;
-the shared Volume is a model cache, not a concurrent receipt database.
+Build and pin the image, qualify/populate the existing Volume with the exact
+hashed v7 model files under one recorded preparation operation, and verify GPU
+startup. The context receipt is only local source evidence, not a built image
+or runtime qualification. Keep SQLite operation journals private to each
+container; the shared Volume is a model cache, not a concurrent receipt database.
 
 Wire the existing CPU WorkerRunner and DBOS registry, original budgets and the
 CR73 combined-task projection. Freeze the configured profile and funded intent
