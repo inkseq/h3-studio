@@ -1,4 +1,4 @@
 # Developer/CI tooling only; never included in application or controller images.
 # Official release metadata: https://pypi.org/pypi/ruff/0.17.0/json
-ruff==0.17.0
-coverage==7.10.7
+ruff==0.17.2
+coverage==7.17.0
