@@ -11,6 +11,9 @@ import time
 
 import httpx
 
+# The qualified image has no `python` on PATH; its CMD uses this venv (build_modal_sources.py).
+PYTHON = '/venv/main/bin/python'
+
 MAX_BODY = 512 * 1024 * 1024
 MAX_HEADER = 16384
 CHUNK = 64 * 1024
@@ -139,7 +142,7 @@ class ModalHTTPTransport(httpx.BaseTransport):
                 raise ValueError()
             deadline = time.monotonic() + timeout
             process = self.sandbox.exec(
-                'python',
+                PYTHON,
                 '-c',
                 BRIDGE,
                 text=False,
