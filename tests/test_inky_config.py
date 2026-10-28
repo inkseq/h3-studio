@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from studio_platform import inky_config as config
+from studio_platform import inky_config as config, protected_config
 from studio_platform.inky_runtime import configure
 from studio_platform.settings import Settings
 
@@ -71,7 +71,7 @@ class InkyConfigTests(unittest.TestCase):
                 st_dev=real.st_dev,
                 st_ino=real.st_ino,
             )
-            with patch.object(config.os, "fstat", return_value=protected):
+            with patch.object(protected_config.os, "fstat", return_value=protected):
                 self.assertEqual(set(config.runtime_config(path)), set(config.PROFILES))
                 protected.st_nlink = 2
                 with self.assertRaises(config.InkyConfigError):

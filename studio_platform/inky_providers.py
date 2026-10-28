@@ -36,6 +36,36 @@ class Client:
         self.service, self.loader, self.transport = service, loader, transport
 
     def post(self, path, body, *, images=False):
+        from .llm_tracing import clip, generation
+
+        model = body.get("model") if isinstance(body, dict) else None
+        with generation(
+            "inky-" + ("jev" if self.service == "typesafe" else "terra"),
+            model=model or self.service,
+            # Upload judgements carry a picture: record that one was sent, never the bytes.
+            input={"images": True} if images else clip(body),
+        ) as traced:
+            value = self._post(path, body, images=images)
+            usage = value.get("usage") if isinstance(value.get("usage"), dict) else {}
+            traced.update(
+                output=clip(value, 4000),
+                usage_details={
+                    k: v
+                    for k, v in {
+                        "input": usage.get("prompt_tokens"),
+                        "output": usage.get("completion_tokens"),
+                    }.items()
+                    if isinstance(v, int)
+                },
+                cost_details=(
+                    {"total": float(usage["cost"])}
+                    if isinstance(usage.get("cost"), (int, float))
+                    else None
+                ),
+            )
+        return value
+
+    def _post(self, path, body, *, images=False):
         try:
             cfg = self.loader(self.service)
             origin = TYPE_ORIGIN if self.service == "typesafe" else OPEN_ORIGIN

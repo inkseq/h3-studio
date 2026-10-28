@@ -263,6 +263,48 @@ def inky_mounts(document, *, target):
         raise ValueError('migration_inky_configuration_invalid')
 
 
+def langfuse_environment(values):
+    """Tracing credentials (#770): one exact private path, staging or production."""
+    selected = values.get('INKSEQ_LANGFUSE_CONFIG_FILE', '')
+    if selected not in {'', '/run/sixnine-secrets/langfuse'} or (
+        selected and values.get('INKSEQ_DEPLOYMENT_TARGET') not in {'staging', 'production'}
+    ):
+        raise ValueError('migration_langfuse_configuration_invalid')
+
+
+def langfuse_mounts(document, *, target):
+    """The tracing credential reaches only the app service, at one path."""
+    profile(target)
+    services = document['services']
+    secrets = document.get('secrets', {})
+    selected = services['app'].get('environment', {}).get('INKSEQ_LANGFUSE_CONFIG_FILE', '')
+    if selected not in {'', '/run/secrets/langfuse'}:
+        raise ValueError('migration_langfuse_configuration_invalid')
+    mounted = False
+    for name, service in services.items():
+        if name != 'app' and 'INKSEQ_LANGFUSE_CONFIG_FILE' in service.get('environment', {}):
+            raise ValueError('migration_langfuse_outside_app')
+        for mount in service.get('secrets', []):
+            source = mount.get('source') if isinstance(mount, dict) else mount
+            destination = mount.get('target', source) if isinstance(mount, dict) else source
+            if source == 'langfuse':
+                if name != 'app' or destination not in {'langfuse', '/run/secrets/langfuse'} or mounted:
+                    raise ValueError('migration_langfuse_mount_invalid')
+                mounted = True
+            elif destination in {'langfuse', '/run/secrets/langfuse'}:
+                raise ValueError('migration_langfuse_mount_alias')
+    configured = secrets.get('langfuse')
+    if configured is None:
+        if selected or mounted:
+            raise ValueError('migration_langfuse_configuration_invalid')
+        return  # Retained rollback releases need no new secret reference.
+    expected = '/run/sixnine-secrets/langfuse' if selected else secrets['execution_profiles']['file']
+    if (set(configured) - {'file', 'name'} or configured.get('file') != expected
+            or configured.get('name', 'sixnine-platform_langfuse') != 'sixnine-platform_langfuse'
+            or not mounted):
+        raise ValueError('migration_langfuse_configuration_invalid')
+
+
 def site_environment(root, values):
     selected = environment(values)
     sealed = host(root, legacy='INKSEQ_DEPLOYMENT_TARGET' not in values)

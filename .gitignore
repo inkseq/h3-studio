@@ -1003,3 +1003,12 @@ inventory.json
 !studio_platform/capacity_wait_plan.py
 !tests/test_capacity_wait_plan.py
 !docs/CAPACITY-WAIT-PLAN.md
+!studio_platform/protected_config.py
+!studio_platform/langfuse_config.py
+!studio_platform/llm_tracing.py
+!deploy/platform/langfuse_credentials.py
+!tools/import_langfuse_credentials.py
+!tests/test_llm_tracing.py
+!tests/test_langfuse_deployment.py
+!deploy/platform/langfuse-staging-read-policy.json
+!deploy/platform/langfuse-production-read-policy.json
