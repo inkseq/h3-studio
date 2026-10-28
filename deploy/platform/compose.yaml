@@ -41,6 +41,16 @@ services:
       - log_parameter_max_length_on_error=0
       - -c
       - max_connections=64
+      - -c
+      - tcp_keepalives_idle=60
+      - -c
+      - tcp_keepalives_interval=10
+      - -c
+      - tcp_keepalives_count=3
+      - -c
+      - tcp_user_timeout=90000
+      - -c
+      - client_connection_check_interval=10000
     secrets: [db_admin_password]
     volumes:
       - type: bind

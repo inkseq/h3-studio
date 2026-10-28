@@ -92,6 +92,33 @@ class DeploymentPolicyTests(unittest.TestCase):
         if hasattr(cls, "temp"):
             cls.temp.cleanup()
 
+    def test_tcp_liveness_settings_are_exact_without_idle_session_eviction(self):
+        command = self.rendered["services"]["db"]["command"]
+        self.assertNotIn("idle_session_timeout", " ".join(command))
+        self.assertIn("max_connections=64", command)
+        legacy = copy.deepcopy(self.rendered)
+        legacy["services"]["db"]["command"] = command[
+            : command.index("max_connections=64") + 1
+        ]
+        self.assertTrue(policy.validate(legacy, compose_version=self.compose_version))
+        for setting in (
+            "tcp_keepalives_idle=60",
+            "tcp_keepalives_interval=10",
+            "tcp_keepalives_count=3",
+            "tcp_user_timeout=90000",
+            "client_connection_check_interval=10000",
+        ):
+            self.assertIn(setting, command)
+            for replacement in (
+                setting.split("=")[0] + "=0",
+                setting.split("=")[0] + "=999999",
+            ):
+                candidate = copy.deepcopy(self.rendered)
+                changed = candidate["services"]["db"]["command"]
+                changed[changed.index(setting)] = replacement
+                with self.assertRaises(policy.ConfigurationError):
+                    policy.validate(candidate, compose_version=self.compose_version)
+
     def test_rendered_compose_has_strict_production_policy(self):
         self.assertTrue(
             policy.validate(self.rendered, compose_version=self.compose_version)
@@ -607,6 +634,108 @@ class BootstrapInputTests(unittest.TestCase):
     "Ephemeral DB integration is explicit opt-in",
 )
 class LocalDockerDatabaseTests(unittest.TestCase):
+    def test_tcp_liveness_real_postgres17_keeps_live_idle_client(self):
+        image = "postgres@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24"
+        if docker("image", "inspect", image, check=False).returncode:
+            self.skipTest("Pinned local PostgreSQL17 unavailable; no pull")
+        name = "inkseq-db-hygiene-test-" + uuid.uuid4().hex
+        # Isolated tmpfs database, no host path/port/network/credential reuse.
+        options = [
+            "tcp_keepalives_idle=60",
+            "tcp_keepalives_interval=10",
+            "tcp_keepalives_count=3",
+            "tcp_user_timeout=90000",
+            "client_connection_check_interval=10000",
+        ]
+        args = [arg for setting in options for arg in ("-c", setting)]
+        try:
+            docker(
+                "run",
+                "-d",
+                "--pull=never",
+                "--name",
+                name,
+                "--network",
+                "none",
+                "--memory",
+                "512m",
+                "--tmpfs",
+                "/var/lib/postgresql/data",
+                "--env",
+                "POSTGRES_HOST_AUTH_METHOD=trust",
+                image,
+                "postgres",
+                *args,
+            )
+            for _ in range(40):
+                if (
+                    docker(
+                        "exec",
+                        name,
+                        "pg_isready",
+                        "-h",
+                        "127.0.0.1",
+                        "-U",
+                        "postgres",
+                        check=False,
+                    ).returncode
+                    == 0
+                ):
+                    break
+                time.sleep(0.25)
+            else:
+                self.fail("Disposable PostgreSQL not ready")
+            sql = (
+                "SELECT json_object_agg(name,setting) FROM pg_settings WHERE name IN ("
+                + ",".join("'" + s.split("=")[0] + "'" for s in options)
+                + ",'idle_session_timeout');"
+            )
+            actual = json.loads(
+                docker(
+                    "exec",
+                    name,
+                    "psql",
+                    "-h",
+                    "127.0.0.1",
+                    "-U",
+                    "postgres",
+                    "-At",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-c",
+                    sql,
+                ).stdout
+            )
+            self.assertEqual(
+                actual,
+                {**dict(s.split("=") for s in options), "idle_session_timeout": "0"},
+            )
+            # The server sees an idle TCP client across keepalive probes. The
+            # kernel still acknowledges: healthy idle is not a dead connection.
+            started = time.monotonic()
+            output = docker(
+                "exec",
+                "-i",
+                name,
+                "psql",
+                "-h",
+                "127.0.0.1",
+                "-U",
+                "postgres",
+                "-At",
+                "-v",
+                "ON_ERROR_STOP=1",
+                input=r"""SELECT 'before_idle';
+\! sleep 95 # CRLF-safe shell comment
+SELECT 'healthy_after_idle';
+""",
+                timeout=120,
+            ).stdout
+            self.assertGreaterEqual(time.monotonic() - started, 90)
+            self.assertEqual(output.splitlines(), ["before_idle", "healthy_after_idle"])
+        finally:
+            docker("rm", "-f", name, check=False)
+
     def test_private_role_bootstrap_is_idempotent_and_uses_protected_files(self):
         application, postgres = (
             "sixnine-platform:local-validation",
