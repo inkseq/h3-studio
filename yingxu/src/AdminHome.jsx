@@ -10,6 +10,7 @@ import {
   ListChecks,
   RefreshCw,
   ShieldCheck,
+  SlidersHorizontal,
   TrendingUp,
   Users,
 } from 'lucide-react';
@@ -20,6 +21,7 @@ import { AdminBudgetPanel } from './OperatorBudgetPanel.jsx';
 import { createP4OperatorController } from './p4-operator-controller.js';
 import { readBrowserLocale } from './i18n/locale.js';
 import StoryChatAdminSwitch from './StoryChatAdminSwitch.jsx';
+import AllSettings from './AllSettings.jsx';
 import { AdminAudit, AdminPricing, AdminUsers, useClient } from './AdminConsole.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
@@ -47,6 +49,7 @@ const SECTIONS = [
   ['overview', 'adminHome.overview', LayoutDashboard],
   ['jobs', 'adminHome.jobs', ListChecks],
   ['limits', 'adminHome.limits', ShieldCheck],
+  ['settings', 'adminHome.settings', SlidersHorizontal],
   ['users', 'adminHome.users', Users],
   ['pricing', 'adminHome.pricing', TrendingUp],
   ['log', 'adminHome.log', History],
@@ -687,6 +690,7 @@ export default function AdminHome({ account }) {
                 </section>
               ))}
             {section === 'limits' && <Limits api={api} active={active} account={account} />}
+            {section === 'settings' && <AllSettings api={api} active={active} />}
             {section === 'users' && <AdminUsers api={api} active={active} />}
             {section === 'pricing' && (
               <>
