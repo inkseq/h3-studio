@@ -726,7 +726,14 @@ class PaymentCore:
             now=self.repo.clock(),
             create=True,
         )
-        actual = min(credits, account["balance"] - account["held"])
+        from .credit_expiry import safe, refundable_purchase
+
+        actual = min(
+            credits,
+            safe(
+                refundable_purchase, connection, account, row["id"], self.repo.clock()
+            ),
+        )
         if actual:
             _change(
                 connection,
@@ -933,6 +940,7 @@ class PaymentCore:
                         idempotency_key="stripe-purchase:" + obj["session_id"],
                         now=now,
                         kind="purchase",
+                        issued_at=value["created"],
                         reference_type="payment",
                         reference_id=row["id"],
                         origin="stripe-live" if row["livemode"] else "stripe-test",
