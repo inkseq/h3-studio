@@ -129,8 +129,32 @@ replacement token. The native manifest, slot and runtime incarnation must match
 before producing the original `SlotConfig`. Its runner context injects only the
 private HTTP transport into `fleet.slot_runner`, retaining WorkerRunner, claims,
 fences and settlement. No API token is persisted in SQL or passed in argv. This
-is tested offline; all-host lifecycle/entrypoint wiring and real qualification
-remain prerequisites to enable it.
+is tested offline. The existing controller now loads an optional protected
+`modal.json` from its existing runtime work directory. No file means OFF with
+no credential or SDK access; a historical Modal intent requires retaining the
+configuration for original reconciliation, including exit and alert receipts.
+The complete document is `{version: 1, enabled: false, host: <all HostSpec fields>}`.
+Qualified existing `ap-`, `im-`, `vo-` IDs and an all-resource price ceiling are
+required; it does not create an App or Volume. Only the staging origin with DBOS
+is permitted. Enabling the reviewed configuration is a separate zero-work
+adoption, not a consequence of merging this code.
+
+The CPU dispatch image pins Modal SDK 1.6.3 and its hashed dependencies. Once
+explicitly configured, the existing role reads AWSCURRENT of the existing
+`/sixnine/staging/modal` Secrets Manager secret in ap-southeast-1; credentials
+are supplied to `Client.from_credentials`, never to a GPU or process environment.
+SDK endpoint configuration must match the pinned public Modal endpoints.
+
+The same controller loop reconciles all original hosts before fallback admission,
+then runs the original Vast planner. No additional listener, queue, timer or
+generation function is introduced. The original DBOS slot factory receives only
+the private transport adapter. Startup timeout uses the existing 20-minute
+setting; attempts use original silence/runtime settings and same-job reclaim
+fences. Reclaim commits precede stop; enabled Grafana/Sentry exporters acknowledge
+original event IDs, with retry of unacknowledged alerts only. Process exit never
+settles a supplier invoice. Native receipt-aware idle exit remains 60 seconds,
+and the original finite host deadline cannot be extended. Real image/Volume
+qualification and one staging E2E job remain required before claiming readiness.
 
 ## Primary implementation references
 

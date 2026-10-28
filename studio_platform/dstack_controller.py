@@ -1369,7 +1369,6 @@ class SlotProcesses:
 
 
 def main(argv=None):
-    """CPU-only supervisor; construction never creates schemas or budgets."""
     parser = argparse.ArgumentParser(
         description="Original-ledger dstack reconciliation and native slot supervisor"
     )
@@ -1381,7 +1380,7 @@ def main(argv=None):
     from .repository import Repository
     from .dstack_operator import from_environment
     from .dstack_factory import create_runtime
-
+    from .modal_controller import load_extension
     settings = Settings.from_environment()
     repo = Repository(settings.database_url)
     from .controller_liveness import Progress
@@ -1399,17 +1398,18 @@ def main(argv=None):
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
         runtime, work_dir = create_runtime(repo, service.capacity.store)
+        modal_extension = load_extension(service, work_dir)
         if settings.generation_queue == "dbos":
             from .dbos_transport import DurableExecutor
             from .api import create_app
             from .film_workflows import setup_controller_film
 
             film_app = create_app(settings, repository=repo, dstack_operator=service)
-
             durable_executor = DurableExecutor(
                 repo,
                 settings,
                 work_dir,
+                runner_context=modal_extension.bindings.runner_context if modal_extension else None,
                 film_setup=lambda DBOS, turns: setup_controller_film(
                     DBOS, turns, repo, film_app
                 ),
@@ -1444,6 +1444,7 @@ def main(argv=None):
             if error_client.dsn
             else None,
         )
+        controller = modal_extension.wrap(controller) if modal_extension else controller
         stop = threading.Event()
         if threading.current_thread() is threading.main_thread():
             for signum in (signal.SIGINT, signal.SIGTERM):
@@ -1477,8 +1478,7 @@ def main(argv=None):
     finally:
         if error_client is not None:
             error_client.close()
-        # Closing local tunnels is safe; durable original attempts remain
-        # recoverable. Do not translate process shutdown into paid-host stop.
+        # Close CPU transports; original paid work remains durable on shutdown.
         try:
             if durable_executor:
                 durable_executor.close()
