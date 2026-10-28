@@ -146,6 +146,39 @@ class DailyTestBudgetTests(LedgerCase):
             )
         return node_id
 
+    def test_same_task_modal_commitment_is_visible_to_vast_admission(self):
+        from dataclasses import asdict
+        from studio_platform.modal_budget import bind_test_guard
+        from studio_platform.modal_host import HostSpec
+
+        self.start()
+        intent, node = self.rows()
+        guard = node['payload']['lifecycle']['test_gpu_guard']
+        self.repo.configure_pool(intent['pool'], max_instances=10, max_physical_gpus=10)
+        with self.repo.transaction() as connection:
+            before = projected_cost(connection, guard, self.now)
+            modal = self.repo.reserve_instance_intent(
+                self.scope,
+                intent['pool'],
+                'modal-same-task',
+                provider='modal',
+                hard_deadline=self.now + 600,
+                reserved_cost_microusd=1_000_000,
+                budget_account_ids=(ACCOUNT,),
+                dry_run=False,
+                connection=connection,
+            )
+            bind_test_guard(
+                self.repo,
+                connection,
+                modal['id'],
+                guard,
+                asdict(HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000)),
+            )
+            self.assertEqual(
+                projected_cost(connection, guard, self.now), before + 1_000_000
+            )
+
     def test_explicit_test_capacity_one_and_ten_preserve_original_task_guards(self):
         for maximum in (1, 10):
             with self.subTest(maximum=maximum):

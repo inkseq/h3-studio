@@ -509,6 +509,15 @@ class DurableSlots:
             }
         with self._lock:
             candidates = list(self._slots.values())
+        # Existing attempts stay with their original worker. New work tries
+        # dedicated capacity first; its original claim gates decide eligibility.
+        candidates.sort(
+            key=lambda slot: (
+                slot.spec.worker_id != job['lease_worker_id']
+                if job.get('lease_worker_id')
+                else slot.spec.provider == 'modal'
+            )
+        )
         for slot in candidates:
             if slot.spec.pool != job["pool"] or not slot.lock.acquire(blocking=False):
                 continue
@@ -624,10 +633,19 @@ class DurableExecutor:
     """One existing-controller executor. Shutdown leaves native work untouched."""
 
     def __init__(
-        self, repo, settings, work_dir, *, film_setup=None, account_services=None
+        self,
+        repo,
+        settings,
+        work_dir,
+        *,
+        film_setup=None,
+        account_services=None,
+        runner_context=None,
     ):
         self.repo, self.settings = repo, settings
-        self.slots = DurableSlots(repo, settings, work_dir)
+        self.slots = DurableSlots(
+            repo, settings, work_dir, runner_context=runner_context
+        )
         self.film_setup = film_setup
         self.account_services = account_services
         self.domain_turns = DomainTurns()
