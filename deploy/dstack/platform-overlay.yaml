@@ -65,8 +65,7 @@ services:
       SIXNINE_STORAGE_CREDENTIAL_FILE: ${SIXNINE_STORAGE_CREDENTIAL_FILE:+/run/secrets/r2_storage}
       INKSEQ_WORKOS_CONFIG_FILE: ${INKSEQ_WORKOS_CONFIG_FILE:+/run/secrets/workos}
       INKSEQ_INKY_CONFIG_FILE: ${INKSEQ_INKY_CONFIG_FILE:+/run/secrets/inky}
-      INKSEQ_LANGFUSE_CONFIG_FILE: ${INKSEQ_LANGFUSE_CONFIG_FILE:+/run/secrets/langfuse}
-    secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key, workos, stripe, inky, langfuse]
+    secrets: [execution_profiles, grafana_cloud, stage_query, r2_storage, dstack_operator_config, dstack_api_token, dstack_ssh_public_key, workos, stripe, inky]
     healthcheck:
       test: [CMD, python, -c, "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and h['render_enabled']==('${INKSEQ_FILM_ENABLED:-0}'=='1') and not h['cloud_creation_enabled']"]
 
@@ -200,9 +199,6 @@ secrets:
   # The inactive alias uses already-mounted recipe metadata, never another key.
   inky:
     file: ${INKSEQ_INKY_CONFIG_FILE:-${SIXNINE_EXECUTION_PROFILES_SECRET_FILE}}
-  # Model-call tracing (#770): off unless opted in; the fallback is noncredential metadata.
-  langfuse:
-    file: ${INKSEQ_LANGFUSE_CONFIG_FILE:-${SIXNINE_EXECUTION_PROFILES_SECRET_FILE}}
   # Default OFF leaves the alias unread; test opt-in uses one protected tmpfs file.
   stripe:
     file: ${INKSEQ_STRIPE_CONFIG_FILE:-${SIXNINE_EXECUTION_PROFILES_SECRET_FILE}}

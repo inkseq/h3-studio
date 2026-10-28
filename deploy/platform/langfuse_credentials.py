@@ -1,7 +1,8 @@
 """Langfuse tracing credential transport over SSM (h3-studio#770).
 
 One SecureString parameter per deployment target holds the validated JSON contract
-from studio_platform.langfuse_config. No key creation, rotation or provider calls.
+from studio_platform.langfuse_config. The host installs it into the app's data
+volume (`install`), outside the release helpers. No key creation or rotation.
 """
 
 import json
@@ -98,9 +99,31 @@ def import_existing(api, loader, target):
     return {k: row[k] for k in ("Name", "Type", "Version")}
 
 
-def hydrate(api, write_runtime, *, target):
+def install(api, *, target, data_root="/srv/sixnine/platform-data", app_gid=10001):
+    """Write the app's tracing credential into its data volume, root:app 0440.
+
+    The app (uid/gid 10001) can read it but not replace it: the directory is
+    root-owned 0750. Same bytes are a no-op; nothing is printed but metadata.
+    """
+    import os
+    from pathlib import Path
+
     row = read(api, target)
     if row is None:
         raise ValueError("langfuse_parameter_missing")
-    write_runtime("langfuse", row["Value"])
-    return {k: row[k] for k in ("Name", "Type", "Version")}
+    directory = Path(data_root) / "runtime-secrets"
+    directory.mkdir(mode=0o750, exist_ok=True)
+    os.chown(directory, 0, app_gid)
+    os.chmod(directory, 0o750)
+    path = directory / "langfuse.json"
+    raw = row["Value"].encode()
+    if path.exists() and path.read_bytes() == raw:
+        return {"path": str(path), "changed": False, "version": row["Version"]}
+    temporary = directory / ".langfuse.json.tmp"
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(raw)
+    os.chown(temporary, 0, app_gid)
+    os.chmod(temporary, 0o440)
+    os.replace(temporary, path)
+    return {"path": str(path), "changed": True, "version": row["Version"]}

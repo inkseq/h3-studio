@@ -9,6 +9,7 @@ import contextlib
 import hashlib
 import json
 import logging
+from pathlib import Path
 
 LOG = logging.getLogger(__name__)
 TEXT_LIMIT = 6000
@@ -19,13 +20,18 @@ def configure(settings):
     """Start the Langfuse client for this process, or leave tracing off."""
     global _client
     _client = None
-    if settings.langfuse_config_file is None:
+    path = settings.langfuse_config_file
+    if path is None:
+        # Installed by the host from SSM into the app's data volume, root-owned 0440.
+        default = Path(settings.data_dir) / "runtime-secrets" / "langfuse.json"
+        path = default if default.exists() else None
+    if path is None:
         return
     try:
         from langfuse import Langfuse
         from .langfuse_config import runtime_config
 
-        credential = runtime_config(settings.langfuse_config_file)
+        credential = runtime_config(path)
         _client = Langfuse(
             public_key=credential.public_key,
             secret_key=credential.secret_key,

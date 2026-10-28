@@ -296,7 +296,6 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
     validate_error_monitoring(document, target=target)
     validate_stripe(document, target=target)
     deployment_target.inky_mounts(document, target=target)
-    deployment_target.langfuse_mounts(document, target=target)
     controller = services["controller"]
     targets = {volume["target"] for volume in controller.get("volumes", [])}
     require({"/dstack-runtime", "/dstack-sources"} <= targets and

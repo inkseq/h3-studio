@@ -50,7 +50,10 @@ class TracingTests(unittest.TestCase):
         llm_tracing._client = None
 
     def test_off_without_configuration_and_body_still_runs(self):
-        llm_tracing.configure(SimpleNamespace(langfuse_config_file=None))
+        with tempfile.TemporaryDirectory() as directory:
+            llm_tracing.configure(
+                SimpleNamespace(langfuse_config_file=None, data_dir=directory)
+            )
         self.assertFalse(llm_tracing.enabled())
         with llm_tracing.generation("x", model="m", input="hi") as traced:
             traced.update(output="ignored")

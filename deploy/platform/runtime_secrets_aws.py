@@ -69,7 +69,7 @@ def value(api, name, initialize=False, *, target='production'):
 
 
 def write_runtime(name, content):
-    if name not in {"db_admin_password", "app_database_url", "google_titles", "workos", "stripe", "inky", "langfuse"}:
+    if name not in {"db_admin_password", "app_database_url", "google_titles", "workos", "stripe", "inky"}:
         raise RuntimeError("Unexpected runtime secret")
     ROOT.mkdir(mode=0o700, exist_ok=True)
     info = ROOT.lstat()
@@ -143,7 +143,7 @@ def hydrate_titles(api, *, target='production'):
 
 def workos_requested(*, target, root=Path('/srv/sixnine'), service='workos'):
     """Use the existing root-owned rollout config, not a new enablement store."""
-    if service not in {'workos', 'inky', 'langfuse'}:
+    if service not in {'workos', 'inky'}:
         raise RuntimeError('Unknown optional runtime secret')
     path = root / 'migration' / 'paths.json'
     try:
@@ -304,13 +304,6 @@ def hydrate(initialize=False):
             except ImportError:
                 import inky_credentials
             inky_credentials.hydrate(inky_credentials.client(), write_runtime, target=target)
-        if workos_requested(target=target, service='langfuse'):
-            try:
-                from . import langfuse_credentials
-            except ImportError:
-                import langfuse_credentials
-            langfuse_credentials.hydrate(
-                langfuse_credentials.client(), write_runtime, target=target)
 
 
 if __name__ == "__main__":
