@@ -10,6 +10,7 @@ import AccountMenu from './AccountMenu.jsx';
 import { Menu, MenuItem } from './ui/Menu.jsx';
 import { Popover } from './ui/Popover.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
+import { TermsGate } from './TermsGate.jsx';
 import { LegalPage, PricingPage } from './PublicPages.jsx';
 import Landing from './Landing.jsx';
 import { CloudSaveStatus, useCloudAutosave } from './CloudAutosave.jsx';
@@ -1331,6 +1332,7 @@ function AppContent() {
           <AppRouteCache location={location} routes={routes} />
         </PageErrorBoundary>
         <LowCreditsDialog />
+        <TermsGate account={account} />
         <FloatingNotices />
       </TrashProvider>
     </div>
