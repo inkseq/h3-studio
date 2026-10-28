@@ -773,6 +773,17 @@ def _normalize(
         'reference_videos': effective_videos,
         'reference_audios': audio_count,
     }
+    if return_usage:
+        # Reuse the native normalization above: excerpts are already aligned
+        # and trimmed, guide video identities are deduplicated, and denoise
+        # controls are deliberately outside reference-video pricing.
+        usage['reference_video_frames'] = (
+            sum(round(entry['duration_seconds'] * 24) for entry in video_excerpts)
+            if video_excerpts
+            else sum(metadata[identity]['frame_count'] for identity in videos)
+            if conditioning in {'reference', 'in_context'}
+            else 0
+        )
     return (value, usage) if return_usage else value
 
 

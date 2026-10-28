@@ -70,7 +70,12 @@ def configuration(value):
         or not set(DEFAULT_CONFIGURATION) <= set(value)
         or set(value)
         - set(DEFAULT_CONFIGURATION)
-        - {"image_credits", "resolution_multipliers", "expiry_policy"}
+        - {
+            "image_credits",
+            "resolution_multipliers",
+            "expiry_policy",
+            "reference_video_surcharge_bps_per_second",
+        }
         or (
             "image_credits" in value
             and (
@@ -113,6 +118,9 @@ def configuration(value):
             raise PricingError(
                 "credit_prices_invalid", "Credit expiry policy is invalid."
             )
+    from .reference_video_pricing import validate
+
+    validate(value)
     return copy.deepcopy(value)
 
 
@@ -181,6 +189,10 @@ def public_prices(connection, tenant):
         )
     if "expiry_policy" in value["configuration"]:
         result["expiry_policy"] = copy.deepcopy(value["configuration"]["expiry_policy"])
+    from .reference_video_pricing import FIELD
+
+    if FIELD in value["configuration"]:
+        result[FIELD] = copy.deepcopy(value["configuration"][FIELD])
     return result
 
 
@@ -414,7 +426,18 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         (1, {}) if render else resolution_price(price["configuration"], output)
     )
     rate = 0 if render else price["rates"][tier] * multiplier
-    amount = math.ceil(Fraction(rate * frames, fps))
+    from .reference_video_pricing import price as reference_price
+
+    amount, reference = (
+        (0, {})
+        if render
+        else reference_price(
+            price["configuration"],
+            compiled,
+            Fraction(rate * frames, fps),
+            resolution.get("resolution"),
+        )
+    )
     seconds = frames / fps
     result = {
         "version": 1,
@@ -428,6 +451,7 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         "fps": fps,
         "takes": 1,
         **resolution,
+        **reference,
         "breakdown": [
             {
                 "tier": tier,
@@ -437,6 +461,7 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
                 "fps": fps,
                 "credits": amount,
                 **resolution,
+                **reference,
             }
         ],
     }
