@@ -433,6 +433,21 @@ def register_routes(app):
                 }
             )
 
+    @app.get("/v1/admin/settings-inventory")
+    def settings_inventory(request: Request):
+        human(request, admin=True)
+        from .settings_inventory import build
+
+        with repo._budget_read() as connection:
+            return response(
+                build(
+                    app,
+                    connection,
+                    admin_stored(connection),
+                    latest_capacity_changes(connection),
+                )
+            )
+
     @app.post("/v1/operator/admin/spending-settings/preview")
     def preview_admin(request: Request, body: dict):
         return response(capacity_preview(human(request, admin=True), body))
