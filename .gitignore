@@ -746,6 +746,10 @@ inventory.json
 !studio_platform/credits_routes.py
 !studio_platform/generation_budget_binding.py
 !studio_platform/credits_pricing.py
+!studio_platform/reference_video_pricing.py
+!studio_platform/queue_reference_guard.py
+!tests/test_reference_video_pricing.py
+!docs/REFERENCE-VIDEO-PRICING.md
 !studio_platform/migrations/versions/v20261019_0004_customer_credits.py
 !tests/test_credit_admission.py
 !tests/test_credit_identity_billing.py

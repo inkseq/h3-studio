@@ -306,6 +306,7 @@ class CreditAPI:
                 "image_credits",
                 "resolution_multipliers",
                 "expiry_policy",
+                "reference_video_surcharge_bps_per_second",
                 "fee_rate",
                 "reason",
             }
@@ -343,6 +344,7 @@ class CreditAPI:
                             "image_credits",
                             "resolution_multipliers",
                             "expiry_policy",
+                            "reference_video_surcharge_bps_per_second",
                         )
                         if key in body
                     },
