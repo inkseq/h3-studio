@@ -579,6 +579,19 @@ function generationKind(shot) {
   return '文字生成';
 }
 
+// Always-on advice before generating (owner decision on h3-studio#739): many or video
+// references are only partly used, and audio without written lines makes the model invent
+// speech. Inky adds to this; it is not the only safeguard.
+const DIALOGUE = /[“”"「」『』]|[：:]\s*\S/;
+export function submitHints(shot, items, t) {
+  const sent = items.filter((item) => item.sent),
+    hints = [];
+  if (sent.some((item) => item.kind === '视频') || sent.length > 6) hints.push(t('hint.focusRefs'));
+  if (sent.some((item) => item.kind === '声音') && !DIALOGUE.test(shot.prompt || ''))
+    hints.push(t('hint.writeLines'));
+  return hints;
+}
+
 function limitsLabel(limits, t) {
   if (!limits) return '能力尚未读取';
   const known = (value) => (Number.isFinite(value) ? value : '—');
@@ -657,6 +670,7 @@ export function expandStoryboard(
     notes: ctx.notes,
     durationRange: durationRange(schema),
     limitsLabel: limitsLabel(limits, t),
+    hints: submitHints(shot, ctx.items, t),
   };
 }
 // Dropping a profile: its main image as a frame, or the person, place or prop in the cast.
