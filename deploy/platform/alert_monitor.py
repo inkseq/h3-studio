@@ -291,7 +291,7 @@ def backup_coverage_loss(completed, receipt):
 
 
 def backup_copy_observation(*, now, root=BACKUP_STATE):
-    """Check at most two daily receipts, not media or S3. None means unobservable.
+    """Check at most two receipts, not media/S3; None fields mean unobservable.
 
     Root-pinned completion plus receipt hash is copy evidence, never restore proof.
     Before today's deadline, yesterday is still the most recent due copy.
