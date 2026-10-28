@@ -36,6 +36,10 @@ def launch_document(path):
         ):
             raise ValueError('modal_launch_file_invalid')
         value = json.loads(stream.read(4097))
+    return validate_launch(value)
+
+
+def validate_launch(value):
     if (
         not isinstance(value, dict)
         or set(value) != {'intent_id', 'mode', 'manifest_digest', 'token'}
@@ -60,6 +64,29 @@ def _write(path, data):
         os.fsync(stream.fileno())
 
 
+def install_launch(value, state=STATE):
+    """Publish a complete directory once; interrupted writes remain evidence."""
+    validate_launch(value)
+    state = Path(state)
+    info = state.lstat()
+    if not stat.S_ISDIR(info.st_mode) or (
+        os.name == 'posix' and (info.st_uid != os.getuid() or info.st_mode & 0o077)
+    ):
+        raise ValueError('modal_launch_directory_invalid')
+    target = state / 'launch'
+    if target.exists() or target.is_symlink():
+        if target.is_symlink() or launch_document(target / 'value.json') != value:
+            raise ValueError('modal_launch_binding_changed')
+        return 'observed'
+    pending = state / 'launch.pending'
+    pending.mkdir(mode=0o700, exist_ok=False)
+    _write(pending / 'value.json', json.dumps(value, separators=(',', ':')).encode())
+    # Both directories are on the private ephemeral filesystem. A nonempty
+    # existing target cannot be replaced; no partial file becomes visible.
+    pending.rename(target)
+    return 'installed'
+
+
 def prepare_files(value, state, models):
     """Local configuration only; never download, rent, submit or rewrite a job."""
     state, models = Path(state), Path(models)
@@ -81,7 +108,7 @@ def main(argv=None):
         # This directory is ephemeral and never mounted on the model Volume.
         STATE.mkdir(mode=0o700, exist_ok=False)
         deadline = time.monotonic() + 60
-        launch = STATE / 'launch.json'
+        launch = STATE / 'launch' / 'value.json'
         while not launch.exists():
             if time.monotonic() >= deadline:
                 raise ValueError('modal_launch_not_installed')

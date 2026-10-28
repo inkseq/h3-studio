@@ -52,6 +52,15 @@ then the receipt-aware idle hooks. Missing/mismatched cache bytes refuse; live
 containers never concurrently download/write the shared model cache. A restart
 with an existing private state directory refuses rather than replaying work.
 
+`modal_launch.initialize` installs the launch binding on an already journaled
+Sandbox via private stdin. The native installer publishes a complete private
+directory atomically; the same binding is read back without rewriting, changed
+bindings or interrupted partial installs refuse. No provider credentials or
+business input are included. A missing SDK response stays unknown and is never
+retried automatically. The existing CPU backend factory can accept this private
+HTTP transport while retaining its original manifest, profile, token and runtime
+incarnation checks; that injection does not change worker claim/settlement logic.
+
 ## Remaining activation slice (do not enable this boundary alone)
 
 Build and pin the image, qualify/populate the existing Volume with the exact
