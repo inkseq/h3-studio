@@ -189,3 +189,35 @@ This does not relax installed-helper hash checks or cancel queued acceptance job
 7. Rollback removes the optional path from the protected rollout environment
    and restores the original app tuple through existing gates. Keep original
    SSM parameters and financial/evaluation receipts; do not rotate/delete/replay.
+
+### Existing staging role: parameter-read permission
+
+The actual EC2-role read in SSM `cd729422-3535-42a0-ba71-4258b707f14b`
+returned `AccessDeniedException`; importing the two parameters as an operator
+did not grant the host access. The existing role is
+`arn:aws:iam::829135631045:role/inkseq/staging/sixnine-staging-ec2`.
+`deploy/platform/inky-staging-read-policy.json` is the complete proposed inline
+policy `InkseqStagingInky684Read`. It permits only `ssm:GetParameters` for the
+two exact existing staging ARNs in ap-southeast-1. No path/list/history/write,
+production resource, wildcard, new credential, trust-policy or other-role change.
+Existing parameters use `alias/aws/ssm`; this slice adds no KMS grant.
+See the AWS [parameter-policy examples](https://docs.aws.amazon.com/systems-manager/latest/userguide/security_iam_id-based-policy-examples.html)
+and [default-key note](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-policy-template-list.html).
+
+After one Tier2 PR review and exact-head green CI, adopt this policy only on
+that existing role. First re-read the role ARN, tags, trust policy, boundary,
+inline policies and attachments; refuse unexpected ownership or scope changes.
+Record the canonical policy digest and original absence of that policy name.
+Use one `PutRolePolicy` with the exact reviewed document, then read back the
+original role/name with `GetRolePolicy`. Unknown results require read-only
+reconciliation; never overwrite a differing policy or issue a second put.
+An identical existing policy is an observation, not a new apply.
+
+Validate the actual host read of both parameters with decryption, emitting only
+names/types/versions. Denial or malformed parameters blocks hydration; do not
+broaden the grant. This read does not turn on the evaluator or call providers.
+Hydration/application adoption still use the zero-work gates above. Retain the
+prior helper, SSM and operation receipts. Rollback disables the Inky path using
+the existing host gate and removes only this exact inline policy after its
+original digest is verified; it must not delete either parameter or alter any
+other role policy. Production permission remains outside this approval.
