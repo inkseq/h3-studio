@@ -92,3 +92,11 @@
 .public-footer a:hover {
   color: var(--accent);
 }
+/* Inside a pricing/legal page the footer spans the text column and sits at the bottom of
+   the window when the page is short (owner 2026-10-28). */
+.public-page > .public-footer {
+  width: 100%;
+  max-width: none;
+  margin: auto 0 0;
+  padding: 18px 0 24px;
+}
