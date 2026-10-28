@@ -34,7 +34,9 @@ BACKUP_STATE = Path('/var/lib/inkseq-business-backup')
 BACKUP_DEADLINE_MINUTE = 18 * 60 + 30
 THRESHOLD_FIELDS = frozenset({'gpu_max_seconds', 'stuck_seconds', 'wake_count', 'cpu_percent',
     'memory_percent', 'host_sustain_seconds', 'health_down_seconds', 'http_5xx_min',
-    'http_5xx_ratio', 'max_sample_gap_seconds', 'terminal_reservation_seconds'})
+    'http_5xx_ratio', 'max_sample_gap_seconds', 'terminal_reservation_seconds',
+    'payment_fulfillment_seconds', 'payment_processing_seconds', 'payment_window_seconds',
+    'payment_failure_count'})
 HTTP_PROBE = """import json,urllib.request
 result={'health_ok':False,'http_requests':None,'http_5xx':None}
 try:
@@ -46,6 +48,17 @@ try:
   c=json.loads(r.read(16384))
  if set(c)=={'epoch','window_seconds','requests','server_errors'} and c['window_seconds']==300 and type(c['requests']) is int and type(c['server_errors']) is int and 0<=c['server_errors']<=c['requests']:
   result.update(http_requests=c['requests'],http_5xx=c['server_errors'])
+except Exception: pass
+print(json.dumps(result))
+"""
+PAYMENT_HTTP_PROBE = """import json,urllib.request,sys
+result={'payment_signature_failures':None,'payment_receipt_failures':None}
+try:
+ w=int(sys.argv[1])
+ with urllib.request.urlopen('http://127.0.0.1:8845/internal/payment-alert-counters?window_seconds='+str(w),timeout=3) as r:
+  c=json.loads(r.read(16384))
+ if set(c)=={'epoch','window_seconds','signature_failures','processing_failures'} and c['window_seconds']==w and all(type(c[k]) is int and c[k]>=0 for k in ('signature_failures','processing_failures')):
+  result.update(payment_signature_failures=c['signature_failures'],payment_receipt_failures=c['processing_failures'])
 except Exception: pass
 print(json.dumps(result))
 """
@@ -142,6 +155,8 @@ def config(value, target):
         and all(thresholds.get(key, 1) <= limit for key, limit in
                 (('cpu_percent', 100), ('memory_percent', 100), ('http_5xx_ratio', 1))),
         'alert_thresholds_invalid')
+    window = thresholds.get('payment_window_seconds', 300)
+    require(type(window) is int and 60 <= window <= 3600, 'alert_thresholds_invalid')
     return value
 
 
@@ -294,7 +309,7 @@ def backup_observation(*, now, runner=subprocess.run):
         'business_backup_unobservable': missing is None}
 
 
-def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
+def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_window_seconds=300):
     sample = proc_sample(proc=proc)
     cpu = None
     if previous_cpu is not None:
@@ -310,6 +325,7 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
     except (OSError, ValueError, AttributeError):
         pass  # An unknown disk observation never resolves an active alarm.
     snapshot = None
+    app = None
     try:
         found = containers(runner=runner)
         host['processes_ok'] = all(value is not None and value['ok'] for value in found.values())
@@ -324,10 +340,37 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
                 host.update(probe)
             except (OSError, subprocess.SubprocessError, ValueError):
                 host['health_ok'] = False
-            snapshot = json.loads(docker(['exec', app['id'], 'python', '-B', '-m', 'studio_platform.alert_snapshot'], runner=runner))
+            snapshot = json.loads(docker(['exec', app['id'], 'python', '-B', '-m',
+                'studio_platform.alert_snapshot'], runner=runner))
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         # Unknown ledger state never fabricates a healthy observation or recovery.
         snapshot = None
+    if isinstance(snapshot, dict):
+        # Optional payment calls have independent subprocess deadlines. A slow
+        # payment DB/query or unavailable module cannot discard the GPU ledger.
+        snapshot['payments'] = {'complete': False}
+        try:
+            payment = json.loads(docker(['exec', app['id'], 'python', '-B', '-m',
+                'studio_platform.payment_alerts', '--window-seconds',
+                str(payment_window_seconds)], runner=runner))
+            require(type(payment) is dict
+                and set(payment) == {'complete', 'fulfillment', 'processing', 'activity', 'window_seconds'}
+                and type(payment['complete']) is bool
+                and payment['window_seconds'] == payment_window_seconds,
+                'payment_snapshot_invalid')
+            snapshot['payments'] = payment
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            pass
+    if app is not None:
+        try:
+            payment = json.loads(docker(['exec', app['id'], 'python', '-B', '-c',
+                PAYMENT_HTTP_PROBE, str(payment_window_seconds)], runner=runner))
+            require(type(payment) is dict and set(payment) == {'payment_signature_failures', 'payment_receipt_failures'}
+                and all(value is None or type(value) is int and value >= 0 for value in payment.values()),
+                'payment_counter_probe_invalid')
+            host.update(payment)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass  # Unknown payment counters must not change legacy host observations.
     return snapshot, host, {'total': sample['total'], 'idle': sample['idle']}
 
 
@@ -338,6 +381,9 @@ def notification(value, environment):
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
             'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained', 'host_disk_80', 'host_disk_90',
             'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed',
+            'payment_fulfillment_stalled', 'payment_processing_stalled', 'payment_failed',
+            'payment_refunded', 'payment_disputed', 'payment_monitor_unavailable',
+            'payment_webhook_signature_failed', 'payment_webhook_receipt_failed',
             'business_backup_missing', 'business_backup_unobservable', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
             and value['environment'] == environment and value['transition'] in {'firing', 'resolved'}
             and (value['resource_id'] is None or type(value['resource_id']) is str
@@ -445,7 +491,8 @@ def main():
             if state is None:
                 state = initial_state(settings['environment'])
             validate_state(state, settings['environment'])
-            snapshot, host, cpu = observe(state['cpu'])
+            snapshot, host, cpu = observe(state['cpu'],
+                payment_window_seconds=settings['thresholds'].get('payment_window_seconds', 300))
             sns, cloudwatch = clients()
             tick(settings, state, snapshot, host, cpu, evaluator=evaluate, sns=sns, cloudwatch=cloudwatch,
                  save=lambda value: atomic(STATE, value), now=time.time())

@@ -509,7 +509,7 @@ class MonitorTests(unittest.TestCase):
             (proc / 'stat').write_text('cpu 100 0 100 800 0 0 0 0 0 0\n')
             (proc / 'meminfo').write_text('MemTotal: 1000 kB\nMemAvailable: 400 kB\n')
             observed, host, _ = monitor.observe(None, runner=runner, proc=proc)
-            self.assertEqual(observed, snapshot)
+            self.assertEqual(observed, {**snapshot, 'payments': {'complete': False}})
             self.assertTrue(host['processes_ok'])
             for service in ('app', 'db', 'dstack'):
                 with self.subTest(missing_required_health=service):
