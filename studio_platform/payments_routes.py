@@ -13,6 +13,8 @@ from .identity import account_identity, lock_account_gate
 from .identity_schema import admin_audit, users
 from .repository import documents, request_hash
 from .payment_tax import receipt_money
+from .payment_analytics import remember as remember_analytics
+from .payment_http import PaymentAlertCounters, receive_webhook
 from .stripe_client import (
     MAX_BODY,
     StripeGateway,
@@ -162,6 +164,7 @@ def validate_packs(packs):
 class PaymentAPI:
     def __init__(self, repo, settings, *, terms_check=None, core=None, gateway=None):
         self.repo, self.settings, self.terms_check = repo, settings, terms_check
+        self.payment_alert_counters = PaymentAlertCounters()
         self.gateway = gateway or StripeGateway(settings)
         if core is None:
             from .payments import PaymentCore
@@ -383,7 +386,7 @@ class PaymentAPI:
         _key(key)
         if (
             type(body) is not dict
-            or set(body) != {"pack_id"}
+            or not {'pack_id'} <= set(body) <= {'pack_id', 'analytics'}
             or not isinstance(body["pack_id"], str)
         ):
             raise BillingError("billing_pack_required", "Choose a credit pack.", 422)
@@ -446,6 +449,10 @@ class PaymentAPI:
             livemode=config.mode == 'live',
         )
         payment = prepared["payment"]
+        if original is None:
+            remember_analytics(
+                self.repo, self.settings, principal, payment, body.get('analytics')
+            )
         if not prepared["dispatch"]:
             if not payment.get("checkout_url"):
                 raise BillingError(
@@ -469,10 +476,7 @@ class PaymentAPI:
         return {"url": provider_url(result["checkout_url"])}
 
     def receive_webhook(self, raw, signature):
-        event = self.gateway.verify_event(raw, signature)
-        if event is not None:
-            self.core.receive_event(event)
-        return {"received": True}
+        return receive_webhook(self, raw, signature)
 
     def history(self, principal, *, before=None, limit=50):
         from .payment_schema import PaymentSchemaError, payments, ready

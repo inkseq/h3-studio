@@ -10,6 +10,7 @@ import json
 
 from .payments import PaymentCore
 from .domain_turns import DomainTurns
+from .payment_analytics import observe as observe_analytics
 
 PAYMENT_WORKFLOW = "inkseq.payment.event.v1"
 
@@ -34,6 +35,7 @@ def register_payment_workflows(
         try:
             original = core.event_for_processing(tenant, event_id)
             if original is None:
+                observe_analytics(repo, settings, tenant, event_id)
                 return {"done": True, "state": "complete"}
             if gateway_factory is None:
                 from .stripe_client import StripeGateway
@@ -42,7 +44,9 @@ def register_payment_workflows(
             else:
                 gateway = gateway_factory(settings)
             proof = gateway.resolve_event(original)
-            return core.process_event(tenant, event_id, proof=proof)
+            result = core.process_event(tenant, event_id, proof=proof)
+            observe_analytics(repo, settings, tenant, event_id)
+            return result
         except Exception:
             # The SDK may contain request/secret-bearing exception objects.
             # Persist only one finite diagnostic and retain the original event.
