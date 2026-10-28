@@ -280,7 +280,7 @@ def resolve_inputs(prepared, inputs, manifest=None, model_root=None):
     return settings
 
 
-def main(argv=None):
+def main(argv=None, *, host_factory=None, session_factory=None, serve=None):
     parser = argparse.ArgumentParser(description="Explicit pinned private WanGP slot")
     for name in (
         "runtime-root",
@@ -381,7 +381,7 @@ def main(argv=None):
         # Acquire durable host ownership BEFORE importing/loading the upstream
         # runtime; a competing process cannot load a second copy into this slot.
         phase = "runtime_host"
-        host = WanGPHost(
+        host = (host_factory or WanGPHost)(
             session=pending,
             journal=journal,
             manifest=manifest,
@@ -409,25 +409,29 @@ def main(argv=None):
             phase = "runtime_session_initialization"
             session_initialization_started = True
             if manifest.document.get('deployment_profile_id') is not None:
-                pending.delegate = create_session(
+                pending.delegate = (session_factory or create_session)(
                     args.runtime_root, args.config, output, manifest=manifest
                 )
             else:
-                pending.delegate = create_session(
+                pending.delegate = (session_factory or create_session)(
                     args.runtime_root, args.config, output
                 )
             phase = "runtime_http_service"
             import uvicorn
 
-            uvicorn.run(
-                create_app(host, inputs, token=token),
-                host="127.0.0.1",
-                port=args.port,
-                workers=1,
-                access_log=False,
-                log_level="critical",
-                proxy_headers=False,
-            )
+            app = create_app(host, inputs, token=token)
+            if serve is not None:
+                serve(app, host, args.port)
+            else:
+                uvicorn.run(
+                    app,
+                    host="127.0.0.1",
+                    port=args.port,
+                    workers=1,
+                    access_log=False,
+                    log_level="critical",
+                    proxy_headers=False,
+                )
         return 0
     except Exception as error:
         if args.startup_status_file is not None:

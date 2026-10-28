@@ -147,6 +147,17 @@ assert callable(read_verification_receipt)
             self.assertNotIn(TEST_TOKEN, repr(backend))
             backend.close()
 
+    def test_factory_accepts_private_process_transport_without_changing_binding(self):
+        _, _, slot = self.runtime_document()
+        process_transport = object()
+        backend = wangp_factory.create_backend(
+            slot, self.root, http_transport=process_transport
+        )
+        self.assertIs(backend.transport._transport, process_transport)
+        self.assertEqual(backend.manifest.digest, self.manifest.digest)
+        self.assertIsNone(backend.transport._client)
+        backend.close()
+
     def test_factory_requires_configuration_manifest_and_private_endpoint(self):
         path, value, slot = self.runtime_document()
         for invalid in (

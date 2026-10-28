@@ -33,7 +33,7 @@ def read_document(path, *, maximum=1024 * 1024):
     return value
 
 
-def create_backend(slot, directory):
+def create_backend(slot, directory, *, http_transport=None):
     # fmt: off
     """Called only by explicitly enabled fleet execution; no provider access.
 
@@ -88,6 +88,7 @@ the transport; they are never serialized into fleet/config/manifest identities.
     transport = HTTPWanGPTransport(
         slot.endpoint,
         private_token_file(value["token_file"]),
+        transport=http_transport,
         expected_incarnation=value['runtime_incarnation'],
     )
     return WanGPBackend(
