@@ -364,6 +364,7 @@ def build(app, connection, stored, changes):
         found, missing = read()
         rows.extend(found)
         unavailable.extend(missing)
+    present = {row["id"] for row in rows}
     unavailable.extend(
         "pending:" + field
         for field in (
@@ -378,6 +379,7 @@ def build(app, connection, stored, changes):
             "busy_mode",
             "assistant_daily_limits",
         )
+        if "capacity." + field not in present
     )
     return {
         "observed_at": app.state.repository.clock(),

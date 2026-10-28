@@ -809,6 +809,7 @@ inventory.json
 !studio_platform/capacity_settings.py
 !studio_platform/supplier_spending.py
 !tests/test_capacity_settings.py
+!tests/test_capacity_wait_settings.py
 !tests/test_supplier_spending.py
 !tests/test_capacity_admission.py
 !tests/test_capacity_test_continuation.py
