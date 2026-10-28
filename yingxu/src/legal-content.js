@@ -8,7 +8,7 @@ export const SUPPORT_EMAIL = 'support@inkseq.com';
 
 export const LEGAL = {
   terms: {
-    version: '2026-10-28',
+    version: '2026-10-29',
     en: {
       title: 'Terms of Service',
       blocks: [
@@ -32,8 +32,8 @@ export const LEGAL = {
           [
             'Generation is paid with prepaid credits. We show the number of credits before you submit, and the price you were quoted is the price you pay.',
             'Credit pack prices are in US dollars and exclude tax. Any sales tax, VAT or GST that applies where you live is added at checkout.',
-            'Purchased credits do not expire. Credits have no cash value outside the service and cannot be transferred or resold.',
-            'Promotional credits, such as welcome credits, the bonus credits included in a pack or credits from a campaign, are free. They may come with their own conditions or expiry, which we show when you receive them, and they can be removed if they were obtained in breach of these terms.',
+            'Purchased credits are valid for 12 months from the date of purchase; unused credits expire after that. Credits have no cash value outside the service and cannot be transferred or resold. When you generate, credits that expire soonest are used first.',
+            'Promotional credits, such as welcome credits or credits from a campaign, are free and valid for 30 days unless we say otherwise when you receive them. Bonus credits included in a pack are valid as long as the pack. Promotional credits can be removed if they were obtained in breach of these terms.',
             'Generations that fail on our side are returned to your balance automatically.',
             'Purchases are final and credits are not refundable, except where the law requires (for example under the Australian Consumer Law). If a purchase is refunded, the credits from it, including its bonus credits, are removed from your balance.',
             'Payments are processed by Stripe. For credit purchases Stripe acts as the reseller (merchant of record): it charges you, calculates any sales tax, VAT or GST, and issues your receipt, and its checkout terms also apply to the purchase. We never see or store your card number.',
@@ -109,8 +109,8 @@ export const LEGAL = {
           [
             '生成使用预付积分。提交前我们会告诉你要用多少积分，按报价扣，不会多扣。',
             '积分包价格以美元计，不含税。你所在地适用的销售税、增值税或 GST 会在结账时另加。',
-            '购买的积分不会过期。积分不能在本服务以外兑现，也不能转让或转卖。',
-            '赠送积分（例如新用户积分、积分包附赠的积分、活动积分）是免费的，可能有各自的使用条件或有效期，会在发放时告诉你；以违反本条款的方式获得的赠送积分可以被收回。',
+            '购买的积分自购买之日起 12 个月内有效，到期未用的积分失效。积分不能在本服务以外兑现，也不能转让或转卖。生成时优先使用最早到期的积分。',
+            '赠送积分（例如新用户积分、活动积分）是免费的，除发放时另有说明外，有效期为 30 天；积分包附赠的积分与该积分包同样有效期。以违反本条款的方式获得的赠送积分可以被收回。',
             '因我们这边原因失败的生成，积分自动退回。',
             '购买后不退款，积分不能退，法律另有规定的除外（例如《澳大利亚消费者法》）。如果某笔购买被退款，这笔购买得到的积分（包括附赠积分）会从余额中扣回。',
             '付款由 Stripe 处理。购买积分时，Stripe 作为转售方（merchant of record）向你收款、计算适用的销售税／增值税／GST 并开具收据，这次购买也适用 Stripe 的结账条款。我们看不到也不保存你的卡号。',
@@ -165,7 +165,7 @@ export const LEGAL = {
     },
   },
   privacy: {
-    version: '2026-10-28',
+    version: '2026-10-29',
     en: {
       title: 'Privacy Policy',
       blocks: [
@@ -312,7 +312,7 @@ export const LEGAL = {
     },
   },
   content: {
-    version: '2026-10-28',
+    version: '2026-10-29',
     en: {
       title: 'Content Policy',
       blocks: [

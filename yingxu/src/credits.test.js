@@ -21,7 +21,21 @@ test('credit summary needs a balance and derives available from held', () => {
     available: 440,
     todayUsed: 0,
     dailyLimit: 0,
+    expiry: null,
   });
+});
+
+test('credit summary reads the soonest expiry and ignores an empty one', () => {
+  const summary = creditSummary({
+    balance: 500,
+    expiry: { next_at: 1800000000, next_credits: 120, upcoming: [] },
+  });
+  assert.equal(summary.expiry.credits, 120);
+  assert.equal(summary.expiry.at.getTime(), 1800000000 * 1000);
+  assert.equal(
+    creditSummary({ balance: 5, expiry: { next_at: null, next_credits: 0 } }).expiry,
+    null,
+  );
 });
 
 test('packs accept either shape and drop incomplete rows', () => {
