@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from studio_platform import langfuse_config, llm_tracing
+from studio_platform import langfuse_config, llm_tracing, protected_config
 
 
 def valid():
@@ -130,18 +130,31 @@ class LangfuseConfigTests(unittest.TestCase):
             langfuse_config.validate({**valid(), "extra": 1})
 
     def test_reads_a_protected_file_and_refuses_duplicates(self):
+        def protected(path):
+            real = path.stat()
+            return SimpleNamespace(
+                st_mode=0o100440,
+                st_uid=0,
+                st_nlink=1,
+                st_size=real.st_size,
+                st_dev=real.st_dev,
+                st_ino=real.st_ino,
+            )
+
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "langfuse"
             path.write_text(json.dumps(valid()))
-            with (
-                patch("studio_platform.protected_config.os.name", "nt"),
-                patch.object(Path, "is_absolute", return_value=True),
+            with patch.object(
+                protected_config.os, "fstat", return_value=protected(path)
             ):
                 self.assertEqual(
                     langfuse_config.runtime_config(path).base_url,
                     "https://us.cloud.langfuse.com",
                 )
-                path.write_text('{"profile": 1, "profile": 2}')
+            path.write_text('{"profile": 1, "profile": 2}')
+            with patch.object(
+                protected_config.os, "fstat", return_value=protected(path)
+            ):
                 with self.assertRaises(langfuse_config.LangfuseConfigError):
                     langfuse_config.runtime_config(path)
         with self.assertRaises(langfuse_config.LangfuseConfigError):
