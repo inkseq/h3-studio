@@ -3,6 +3,7 @@
 // state with the server's view. Paid generation is never started here: a proposal hands the
 // story to Works, where the existing preflight, quote and confirmation run.
 import { track } from './analytics.js';
+import { attachActions, attachmentNote, uploadReady } from './story-chat-attach.js';
 
 const KIND = { characters: 'character', places: 'place', props: 'prop' };
 
@@ -186,6 +187,30 @@ export function createLiveChat({
     onProject?.(project);
     return project;
   }
+  // Upload every file, then add them to the story (and photos to their chosen cards) in one
+  // ordinary project write. Returns what went where, for the message note.
+  async function attach(ident, attachments) {
+    const uploaded = [];
+    for (const item of attachments)
+      uploaded.push({ ...item, assetId: await uploadReady(api, item.file, ident) });
+    const path = `/v1/projects/${encodeURIComponent(ident)}`;
+    const current = await api.request(path);
+    const actions = uploaded.flatMap((item) =>
+      attachActions(current.project, {
+        assetId: item.assetId,
+        title: item.name,
+        cardId: item.cardId,
+      }),
+    );
+    await api.request(path + '/actions', {
+      method: 'POST',
+      body: { expected_version: current.version, actions },
+    });
+    const names = Object.fromEntries(
+      fromServer(view || {}, labels).cards.map((card) => [card.id, card.name]),
+    );
+    return uploaded.map((item) => ({ ...item, cardName: names[item.cardId] || '' }));
+  }
   return {
     live: true,
     balance: Number.NaN,
@@ -211,15 +236,17 @@ export function createLiveChat({
         load(await api.request(path + '/open', { method: 'POST', body: { language } }), emit);
       }
     },
-    async send({ text }, emit) {
+    async send({ text, attachments = [] }, emit) {
       const id = turnId();
-      emit({ type: 'user.message', id: id + '-u', text });
+      emit({ type: 'user.message', id: id + '-u', text, attachments });
       emit({ type: 'turn.started' });
       try {
         const ident = await ensure();
+        const added = attachments.length ? await attach(ident, attachments) : [];
+        const note = attachmentNote(added, labels.t);
         const value = await api.request(`/v1/story-chats/${encodeURIComponent(ident)}/turns`, {
           method: 'POST',
-          body: { turn_id: id, text },
+          body: { turn_id: id, text: [text, note].filter(Boolean).join('\n\n') },
           // A model turn can take 10–30 s; never give up before the server does.
           timeoutMs: 120000,
         });
@@ -293,6 +320,22 @@ export function createLiveChat({
         credits: imageCredits,
         label: labels.picture?.(card.name) || card.name,
       });
+    },
+    // A photo chosen in a card's drawer goes straight onto that card.
+    async attachPhoto(cardId, file, emit) {
+      if (!project) return;
+      emit({ type: 'card.status', id: cardId, status: 'generating' });
+      try {
+        await attach(project, [{ file, kind: 'image', name: file.name, cardId }]);
+      } catch (failure) {
+        emit({
+          type: 'assistant.message',
+          id: 'photo-' + turnId().slice(5) + '-error',
+          text: labels.failed?.(failure) || failure.message,
+          chips: [],
+        });
+      }
+      load(await api.request(`/v1/story-chats/${encodeURIComponent(project)}`), emit, [cardId]);
     },
     // A card edit from the drawer goes through the ordinary project actions API.
     // Rename the story itself through the ordinary project actions.

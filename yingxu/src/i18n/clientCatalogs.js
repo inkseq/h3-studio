@@ -1,5 +1,7 @@
 export const clientCatalogs = {
   en: {
+    'client.refVideoTooLong':
+      'Sharp with a reference video is limited to 5 seconds for now. Shorten the shot to 5 s or use Standard.',
     'client.newVersion': 'A newer version of Inkseq is available.',
     'client.supportViewReadOnly': 'Read-only support view: changes are not allowed.',
     'client.supportViewPathBlocked': 'Not available in a support view.',
@@ -88,6 +90,8 @@ export const clientCatalogs = {
       'This approval has already been used. Recover the original submission instead of approving it again.',
   },
   zh: {
+    'client.refVideoTooLong':
+      '清晰画质配参考视频目前最长 5 秒。请把镜头缩短到 5 秒，或改用普通画质。',
     'client.newVersion': '映序有新版本了。',
     'client.supportViewReadOnly': '只读查看中，不能修改。',
     'client.supportViewPathBlocked': '只读查看时不能打开这里。',
