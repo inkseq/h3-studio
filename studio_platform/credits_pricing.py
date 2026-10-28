@@ -67,11 +67,10 @@ def _number(value, minimum, maximum):
 def configuration(value):
     if (
         type(value) is not dict
+        or not set(DEFAULT_CONFIGURATION) <= set(value)
         or set(value)
-        not in (
-            set(DEFAULT_CONFIGURATION),
-            set(DEFAULT_CONFIGURATION) | {"image_credits"},
-        )
+        - set(DEFAULT_CONFIGURATION)
+        - {"image_credits", "resolution_multipliers"}
         or (
             "image_credits" in value
             and (
@@ -90,7 +89,40 @@ def configuration(value):
         raise PricingError(
             "credit_prices_invalid", "Credit price configuration is invalid."
         )
+    if "resolution_multipliers" in value:
+        multipliers = value["resolution_multipliers"]
+        if (
+            type(multipliers) is not dict
+            or set(multipliers) != {"480P", "768P"}
+            or any(
+                type(n) is not int or not 1 <= n <= 100 for n in multipliers.values()
+            )
+            or multipliers["768P"] < multipliers["480P"]
+        ):
+            raise PricingError(
+                "credit_prices_invalid", "Resolution prices are invalid."
+            )
     return copy.deepcopy(value)
+
+
+def resolution_price(config, output):
+    """Apply only an adopted revision to trusted compiled dimensions, not labels."""
+    multipliers = config.get("resolution_multipliers")
+    if multipliers is None:
+        return 1, {}
+    width, height = output.get("width"), output.get("height")
+    if (
+        type(width) is not int
+        or type(height) is not int
+        or min(width, height) <= 0
+        or min(width, height) > 768
+    ):
+        raise PricingError(
+            "credit_quote_invalid", "Compiled resolution is unavailable."
+        )
+    resolution = "480P" if min(width, height) <= 480 else "768P"
+    multiplier = multipliers[resolution]
+    return multiplier, {"resolution": resolution, "resolution_multiplier": multiplier}
 
 
 def current(connection, tenant):
@@ -131,7 +163,12 @@ def current(connection, tenant):
 
 def public_prices(connection, tenant):
     value = current(connection, tenant)
-    return {key: value[key] for key in ("revision", "rates")}
+    result = {key: value[key] for key in ("revision", "rates")}
+    if "resolution_multipliers" in value["configuration"]:
+        result["resolution_multipliers"] = copy.deepcopy(
+            value["configuration"]["resolution_multipliers"]
+        )
+    return result
 
 
 def image_price(connection, tenant):
@@ -360,7 +397,10 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
             "credit_quote_invalid", "Compiled output duration is unavailable."
         )
     tier = get_tier(compiled, execution=execution)
-    rate = 0 if render else price["rates"][tier]
+    multiplier, resolution = (
+        (1, {}) if render else resolution_price(price["configuration"], output)
+    )
+    rate = 0 if render else price["rates"][tier] * multiplier
     amount = math.ceil(Fraction(rate * frames, fps))
     seconds = frames / fps
     result = {
@@ -374,6 +414,7 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         "frames": frames,
         "fps": fps,
         "takes": 1,
+        **resolution,
         "breakdown": [
             {
                 "tier": tier,
@@ -382,6 +423,7 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
                 "frames": frames,
                 "fps": fps,
                 "credits": amount,
+                **resolution,
             }
         ],
     }
