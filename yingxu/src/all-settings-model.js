@@ -83,3 +83,89 @@ export const NOT_STORED = [
 ];
 
 export const NOT_STORED_GROUPS = ['speed', 'cost', 'price', 'limits', 'assistant', 'switches'];
+
+// h3-studio#746 backend inventory: one allowlisted list of every stored number. The page
+// prefers it; the per-endpoint reads above remain the fallback for an older server.
+const EDIT_PAGES = {
+  '/v1/operator/admin/spending-settings': '/admin?section=limits',
+  '/v1/operator/dstack/admin/start-rules': '/admin?section=limits',
+  '/v1/admin/credits/prices': '/admin?section=pricing',
+  '/v1/admin/story-chat/settings': '/admin?section=pricing',
+};
+export const editPage = (path) => EDIT_PAGES[path] || null;
+
+export function inventoryGroups(inventory) {
+  const groups = new Map();
+  for (const row of inventory?.items || []) {
+    if (!groups.has(row.group)) groups.set(row.group, []);
+    groups.get(row.group).push(row);
+  }
+  return [...groups.entries()];
+}
+
+// Server ids look like "capacity.max_machines" or "start.<profile>.job_seconds"; the last
+// part names the setting.
+export const settingKey = (row) => String(row.id).split('.').at(-1);
+
+export function displayValue(row) {
+  const value = row.value;
+  if (value === null || value === undefined) return '—';
+  if (row.unit === 'micro_usd' && Number.isFinite(value)) return '$' + +(value / 1e6).toFixed(2);
+  if (row.unit === 'usd_cents' && Number.isFinite(value)) return '$' + (value / 100).toFixed(2);
+  if (row.unit === 'seconds' && Number.isFinite(value))
+    return value >= 120 && value % 60 === 0 ? value / 60 + ' min' : value + ' s';
+  if (row.unit === 'boolean') return value ? 'on' : 'off';
+  if (typeof value === 'object') return JSON.stringify(value).slice(0, 120);
+  return String(value);
+}
+
+// Decided items the server still reports as pending ("pending:<field>").
+export function pendingFields(inventory) {
+  return new Set(
+    (inventory?.unavailable || [])
+      .filter((entry) => String(entry).startsWith('pending:'))
+      .map((entry) => entry.slice('pending:'.length)),
+  );
+}
+
+export const INVENTORY_ORDER = [
+  'capacity',
+  'start_rules',
+  'credits',
+  'packs',
+  'model_limits',
+  'runtime',
+  'modal_defaults',
+  'story_chat',
+  'content',
+];
+
+// Where a NOT_STORED row now lives in the inventory; once the server lists it, the row leaves
+// the "not adjustable yet" list.
+const COVERED_BY = {
+  startupTimeout: 'runtime.startup_timeout_seconds',
+  modalContainers: 'modal_defaults.max_containers',
+  modalIdle: 'modal_defaults.idle_timeout',
+  packExpiry: 'credits.expiry_policy',
+  welcomeExpiry: 'credits.expiry_policy',
+};
+
+export function stillNotStored(inventory) {
+  if (!inventory) return NOT_STORED;
+  const ids = new Set((inventory.items || []).map((row) => row.id));
+  return NOT_STORED.filter((row) => !ids.has(COVERED_BY[row.id]));
+}
+
+// Translation keys to try for a row's label, most specific first.
+export function labelKeys(row) {
+  const key = settingKey(row);
+  if (row.group === 'capacity') return ['capacity.field.' + key];
+  if (row.group === 'start_rules') return ['rules.field.' + key];
+  return ['allSettings.key.' + row.group + '.' + key, 'allSettings.key.' + key];
+}
+
+export const humanize = (key) => key.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+
+// Which profile, mode or pack a row belongs to.
+export const rowScope = (row) =>
+  [row.profile_id, row.mode, row.pack_id].filter(Boolean).join(' · ');
