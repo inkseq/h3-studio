@@ -56,7 +56,7 @@ class BackupLossTests(unittest.TestCase):
             completed['coverage'] = copy.deepcopy(receipt['coverage'])
         return completed, receipt
 
-    def observe(self, completed, receipt, *, tamper_hash=False):
+    def observe(self, completed, receipt, *, tamper_hash=False, day=28):
         raw = json.dumps(receipt).encode()
         completed['receipt_sha256'] = (
             'b' * 64 if tamper_hash else hashlib.sha256(raw).hexdigest()
@@ -67,7 +67,7 @@ class BackupLossTests(unittest.TestCase):
             patch.object(monitor, 'read_protected_bytes', return_value=raw),
         ):
             return monitor.backup_copy_observation(
-                now=datetime(2026, 10, 28, 19, tzinfo=timezone.utc).timestamp(),
+                now=datetime(2026, 10, day, 19, tzinfo=timezone.utc).timestamp(),
                 root=Path('/synthetic-backup'),
             )
 
@@ -139,6 +139,30 @@ class BackupLossTests(unittest.TestCase):
                 monitor.backup_copy_observation(now=1800000000),
                 {'missing': True, 'loss': None},
             )
+
+    def test_new_daily_receipts_do_not_repeat_the_same_active_loss_incident(self):
+        state = None
+        notifications = []
+        for day in (28, 29, 30):
+            completed, receipt = self.evidence()
+            completed['day'] = f'2026-10-{day}'
+            completed['completion_version_id'] = f'synthetic-day-{day}'
+            receipt['completion_version_id'] = completed['completion_version_id']
+            observed = self.observe(completed, receipt, day=day)
+            self.assertEqual(observed, {'missing': False, 'loss': True})
+            result = evaluate(
+                None,
+                state,
+                environment='production',
+                now=datetime(2026, 10, day, 19, tzinfo=timezone.utc).timestamp(),
+                host={'business_backup_loss': observed['loss']},
+            )
+            notifications.extend(result['notifications'])
+            state = json.loads(json.dumps(result['state']))
+        self.assertEqual(
+            [(item['code'], item['transition']) for item in notifications],
+            [('business_backup_loss', 'firing')],
+        )
 
     def test_unknown_does_not_clear_and_restart_does_not_duplicate_loss(self):
         sns, cloud = Mock(), Mock()
