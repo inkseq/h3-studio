@@ -4,7 +4,7 @@ export const landingCatalogs = {
     'landing.pricing': 'Pricing',
     'landing.signIn': 'Log in',
     'landing.signInTitle': 'Log in to Inkseq',
-    'landing.signInLead': 'Use the account your team gave you.',
+    'landing.signInLead': 'Welcome back.',
     'landing.start': 'Get started',
     'landing.v2.title': 'You bring the idea. Inky does the legwork.',
     'landing.v2.lede':
@@ -81,8 +81,6 @@ export const landingCatalogs = {
     'landing.title': 'From one line to a short film',
     'landing.lede':
       'Write your story. Inkseq breaks it into a storyboard, generates each shot, and cuts them into a film you can export.',
-    'landing.noAccount': 'Sign up with email or Google. Your work is saved to your account.',
-    'landing.passwordSignIn': 'Have a username? Sign in with password',
     'landing.howTitle': 'How it works',
     'landing.step1Title': 'Write the story',
     'landing.step1Body':
@@ -112,7 +110,7 @@ export const landingCatalogs = {
     'landing.pricing': '价格',
     'landing.signIn': '登录',
     'landing.signInTitle': '登录映序',
-    'landing.signInLead': '使用为你开通的账号登录。',
+    'landing.signInLead': '欢迎回来。',
     'landing.start': '开始使用',
     'landing.v2.title': '你出主意，小墨滴跑腿',
     'landing.v2.lede': '它帮你写好分镜、一镜一镜拍出来。你看片时指出哪一秒不对，它就只改那一秒。',
@@ -187,8 +185,6 @@ export const landingCatalogs = {
     'landing.v2.pricingLink': '看价格',
     'landing.title': '一句话，变成一部短片',
     'landing.lede': '写下你的故事，映序帮你拆成分镜、生成每个镜头，再剪成可以导出的成片。',
-    'landing.noAccount': '用邮箱或 Google 账号注册，作品都保存在你的账户里。',
-    'landing.passwordSignIn': '已有用户名账号？用密码登录',
     'landing.howTitle': '怎么用',
     'landing.step1Title': '写故事',
     'landing.step1Body': '从一句话开始，或者贴一段剧本，自动分出章节和场景。',

@@ -109,9 +109,19 @@
   .landing-lede {
     font-size: 16px;
   }
-  .landing-ctas .landing-big {
-    flex: 1;
+  /* Phones: the two actions stack at full width, so neither label is squeezed (owner 10-29). */
+  .landing-ctas {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    max-width: 360px;
+    margin-inline: auto;
+  }
+  .landing-ctas .landing-big,
+  .landing-ctas .landing-secondary {
     justify-content: center;
+    min-height: 48px;
+    white-space: nowrap;
   }
 }
 
