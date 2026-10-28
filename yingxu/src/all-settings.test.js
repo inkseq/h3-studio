@@ -37,3 +37,53 @@ test('price rows list tier rates, welcome credits and packs', () => {
 test('every not-yet-stored number says where it lives today', () => {
   for (const row of NOT_STORED) assert.ok(['code', 'hostFile', 'planned'].includes(row.where));
 });
+
+test('inventory rows group, format and link to the editing page', async () => {
+  const { inventoryGroups, displayValue, editPage, pendingFields, settingKey } =
+    await import('./all-settings-model.js');
+  const inventory = {
+    items: [
+      {
+        id: 'capacity.fleet_hourly_limit_microusd',
+        group: 'capacity',
+        value: 20_000_000,
+        unit: 'micro_usd',
+      },
+      { id: 'capacity.idle_shutdown_seconds', group: 'capacity', value: 600, unit: 'seconds' },
+      { id: 'switches.modal', group: 'switches', value: false, unit: 'boolean' },
+    ],
+    unavailable: ['pending:busy_mode', 'other'],
+  };
+  assert.deepEqual(
+    inventoryGroups(inventory).map(([group, rows]) => [group, rows.length]),
+    [
+      ['capacity', 2],
+      ['switches', 1],
+    ],
+  );
+  assert.equal(displayValue(inventory.items[0]), '$20');
+  assert.equal(displayValue(inventory.items[1]), '10 min');
+  assert.equal(displayValue(inventory.items[2]), 'off');
+  assert.equal(settingKey(inventory.items[0]), 'fleet_hourly_limit_microusd');
+  assert.equal(editPage('/v1/operator/admin/spending-settings'), '/admin?section=limits');
+  assert.deepEqual([...pendingFields(inventory)], ['busy_mode']);
+});
+
+test('inventory hides covered rows and picks label keys', async () => {
+  const { stillNotStored, labelKeys, humanize, rowScope, NOT_STORED } =
+    await import('./all-settings-model.js');
+  const inventory = { items: [{ id: 'runtime.startup_timeout_seconds', group: 'runtime' }] };
+  const left = stillNotStored(inventory).map((row) => row.id);
+  assert.equal(left.includes('startupTimeout'), false);
+  assert.equal(left.length, NOT_STORED.length - 1);
+  assert.equal(stillNotStored(null), NOT_STORED);
+  assert.deepEqual(labelKeys({ id: 'start_rules.p.job_seconds', group: 'start_rules' }), [
+    'rules.field.job_seconds',
+  ]);
+  assert.deepEqual(labelKeys({ id: 'packs.p1.credits', group: 'packs' }), [
+    'allSettings.key.packs.credits',
+    'allSettings.key.credits',
+  ]);
+  assert.equal(humanize('max_containers'), 'Max containers');
+  assert.equal(rowScope({ profile_id: 'v7', mode: 'ref' }), 'v7 · ref');
+});

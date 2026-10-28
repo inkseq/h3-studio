@@ -1342,6 +1342,26 @@
     padding-top: 64px;
   }
 }
+/* Phones: the 1120px stage must fit the column (width − 32px), or its ends are cut off
+   (owner 2026-10-28). margin-bottom gives back the height the scale removes. */
+@media (max-width: 470px) {
+  .lp-stage {
+    transform: scale(0.33);
+    margin-bottom: -322px;
+  }
+}
+@media (max-width: 400px) {
+  .lp-stage {
+    transform: scale(0.3);
+    margin-bottom: -336px;
+  }
+}
+@media (max-width: 360px) {
+  .lp-stage {
+    transform: scale(0.27);
+    margin-bottom: -350px;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .lp-ani,
   .lp-cl,

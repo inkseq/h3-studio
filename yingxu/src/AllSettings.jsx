@@ -6,11 +6,45 @@ import { Button } from './ui/Button.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
-import { NOT_STORED, NOT_STORED_GROUPS, capacityRows, priceRows } from './all-settings-model.js';
+import {
+  INVENTORY_ORDER,
+  NOT_STORED_GROUPS,
+  capacityRows,
+  displayValue,
+  editPage,
+  humanize,
+  inventoryGroups,
+  labelKeys,
+  priceRows,
+  rowScope,
+  settingKey,
+  stillNotStored,
+} from './all-settings-model.js';
 import { ruleTargets, targetLabels } from './start-rules-model.js';
 
 const SPENDING = '/v1/operator/admin/spending-settings';
 const RULES = '/v1/operator/dstack/admin/start-rules';
+
+// Older servers without the inventory endpoint: read each store separately.
+async function readEach(read) {
+  const [spending, prices, packs, policy, catalog] = await Promise.all([
+    read(SPENDING),
+    read('/v1/admin/credits/prices'),
+    read('/v1/billing/packs'),
+    read('/v1/legal/policy'),
+    read('/v1/operator/dstack/catalog'),
+  ]);
+  const targets = ruleTargets(catalog?.profiles);
+  const rules = await Promise.all(
+    targets.map((target) =>
+      read(RULES + '?profile_id=' + encodeURIComponent(target.id)).then((body) => ({
+        target,
+        value: body?.value || null,
+      })),
+    ),
+  );
+  return { spending, prices, packs, policy, rules, targets };
+}
 
 function useInventory(api, active) {
   const [data, setData] = useState(null);
@@ -19,23 +53,12 @@ function useInventory(api, active) {
     let live = true;
     const read = (path) => api.request(path).catch(() => null);
     (async () => {
-      const [spending, prices, packs, policy, catalog] = await Promise.all([
-        read(SPENDING),
-        read('/v1/admin/credits/prices'),
-        read('/v1/billing/packs'),
+      const [inventory, policy] = await Promise.all([
+        read('/v1/admin/settings-inventory'),
         read('/v1/legal/policy'),
-        read('/v1/operator/dstack/catalog'),
       ]);
-      const targets = ruleTargets(catalog?.profiles);
-      const rules = await Promise.all(
-        targets.map((target) =>
-          read(RULES + '?profile_id=' + encodeURIComponent(target.id)).then((body) => ({
-            target,
-            value: body?.value || null,
-          })),
-        ),
-      );
-      if (live) setData({ spending, prices, packs, policy, rules, targets });
+      const next = inventory?.items ? { inventory, policy } : await readEach(read);
+      if (live) setData(next);
     })();
     return () => {
       live = false;
@@ -69,14 +92,126 @@ function capacityLabel(t, id) {
   return t('capacity.field.' + key) + (sub ? ' · ' + sub : '');
 }
 
+function tryLabel(t, row) {
+  for (const key of labelKeys(row)) {
+    try {
+      return t(key);
+    } catch {
+      // Not every stored key has a friendly name yet; fall through.
+    }
+  }
+  return humanize(settingKey(row));
+}
+
+function InventoryRow({ row }) {
+  const { t } = useI18n();
+  const meta = [
+    rowScope(row),
+    row.effective ? '' : t('allSettings.notEffective'),
+    row.source,
+  ].filter(Boolean);
+  return (
+    <SettingRow
+      as="div"
+      label={tryLabel(t, row)}
+      meta={
+        <>
+          {meta.join(' · ')}
+          {row.latest_change ? <br /> : null}
+          <Changed change={row.latest_change} />
+        </>
+      }
+    >
+      <b>{displayValue(row)}</b>
+    </SettingRow>
+  );
+}
+
+function InventoryView({ inventory }) {
+  const { t } = useI18n();
+  const order = (group) => INVENTORY_ORDER.indexOf(group) + 1 || 99;
+  const groups = inventoryGroups(inventory)
+    .filter(([group]) => INVENTORY_ORDER.includes(group))
+    .sort(([a], [b]) => order(a) - order(b));
+  return groups.map(([group, rows]) => {
+    const page = editPage(rows.find((row) => row.edit_path)?.edit_path);
+    return (
+      <SettingsSection
+        key={group}
+        title={t('allSettings.inv.' + group)}
+        actions={page ? <EditLink path={page} /> : null}
+      >
+        {rows.map((row) => (
+          <InventoryRow key={row.id} row={row} />
+        ))}
+      </SettingsSection>
+    );
+  });
+}
+
+function NotStored({ rows }) {
+  const { t } = useI18n();
+  return NOT_STORED_GROUPS.filter((group) => rows.some((row) => row.group === group)).map(
+    (group, index) => (
+      <SettingsSection
+        key={group}
+        title={t('allSettings.notStored') + ' · ' + t('allSettings.group.' + group)}
+        help={index === 0 ? t('allSettings.notStoredHelp') : undefined}
+      >
+        {rows
+          .filter((row) => row.group === group)
+          .map((row) => (
+            <SettingRow
+              as="div"
+              key={row.id}
+              label={t('allSettings.item.' + row.id)}
+              meta={t('allSettings.where.' + row.where)}
+              unit={t('allSettings.unit.' + row.unit)}
+            >
+              <b>{row.value}</b>
+            </SettingRow>
+          ))}
+      </SettingsSection>
+    ),
+  );
+}
+
+function Terms({ policy }) {
+  const { t } = useI18n();
+  return (
+    <SettingRow as="div" label={t('allSettings.terms')}>
+      <b>{policy ? policy.version + ' · ' + policy.status : '—'}</b>
+    </SettingRow>
+  );
+}
+
 export default function AllSettings({ api, active }) {
   const { t } = useI18n();
   const data = useInventory(api, active);
   if (!data) return <Spinner />;
-  const { labels } = targetLabels(data.targets);
   return (
     <div className="all-settings">
       <p className="muted">{t('allSettings.intro')}</p>
+      {data.inventory ? (
+        <>
+          <InventoryView inventory={data.inventory} />
+          <SettingsSection title={t('allSettings.prices')}>
+            <Terms policy={data.policy} />
+          </SettingsSection>
+        </>
+      ) : (
+        <LegacyView data={data} />
+      )}
+      <NotStored rows={stillNotStored(data.inventory)} />
+    </div>
+  );
+}
+
+function LegacyView({ data }) {
+  const { t } = useI18n();
+  const { labels } = targetLabels(data.targets);
+  return (
+    <>
       <SettingsSection
         title={t('allSettings.capacity')}
         help={t('allSettings.storedDb')}
@@ -134,29 +269,8 @@ export default function AllSettings({ api, active }) {
             <b>{row.value}</b>
           </SettingRow>
         ))}
-        <SettingRow as="div" label={t('allSettings.terms')}>
-          <b>{data.policy ? data.policy.version + ' · ' + data.policy.status : '—'}</b>
-        </SettingRow>
+        <Terms policy={data.policy} />
       </SettingsSection>
-      {NOT_STORED_GROUPS.map((group) => (
-        <SettingsSection
-          key={group}
-          title={t('allSettings.notStored') + ' · ' + t('allSettings.group.' + group)}
-          help={group === NOT_STORED_GROUPS[0] ? t('allSettings.notStoredHelp') : undefined}
-        >
-          {NOT_STORED.filter((row) => row.group === group).map((row) => (
-            <SettingRow
-              as="div"
-              key={row.id}
-              label={t('allSettings.item.' + row.id)}
-              meta={t('allSettings.where.' + row.where)}
-              unit={t('allSettings.unit.' + row.unit)}
-            >
-              <b>{row.value}</b>
-            </SettingRow>
-          ))}
-        </SettingsSection>
-      ))}
-    </div>
+    </>
   );
 }
