@@ -93,8 +93,9 @@ class TaskQueue:
         """Claim one task; returns Claim or None. Collection reuses its original attempt.
 
         Per-pool row locking serializes short scheduling transactions on PostgreSQL.
-        Eligible tasks waiting at least 15 minutes are FIFO before newer work.
-        Newer work favors less occupied owners, then estimated cumulative work.
+        Adopted equal_active_users policies rotate owners, FIFO within each.
+        Legacy policy ages tasks into FIFO after 15 minutes, and otherwise
+        favors less occupied owners, then estimated cumulative work.
         Aging is a priority, not a start-time guarantee or permission to release
         held attempts, budgets or physical slots. Running work is not preempted.
         """
@@ -210,6 +211,11 @@ class TaskQueue:
             )
             if purpose == "generate":
                 attempt_id = str(uuid.uuid4())
+                connection.execute(
+                    update(scheduler_state)
+                    .where(scheduler_state.c.pool == pool)
+                    .values(last_owner=self._owner_key(job))
+                )
                 values.update(
                     status="claimed",
                     current_attempt_id=attempt_id,
@@ -356,7 +362,14 @@ class TaskQueue:
                 job["id"],
             )
 
-        return sorted(candidates, key=priority), usage
+        ordered = sorted(candidates, key=priority)
+        if purpose == "generate":
+            from .queue_fairness import fair_generation_order
+
+            ordered = fair_generation_order(
+                connection, ordered, pool, active, self._owner_key
+            )
+        return ordered, usage
 
     @staticmethod
     def _owner_key(row):

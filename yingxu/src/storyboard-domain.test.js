@@ -657,3 +657,21 @@ test('creator shape, keep-sound and another-version patches touch only their con
     false,
   );
 });
+
+test('submit hints: video or many references, and audio without written lines', async () => {
+  const { submitHints } = await import('./storyboard-domain.js');
+  const t = (key) => key;
+  const item = (kind) => ({ kind, sent: true });
+  assert.deepEqual(submitHints({ prompt: 'a cat' }, [item('图片')], t), []);
+  assert.deepEqual(submitHints({ prompt: 'a cat' }, [item('视频')], t), ['hint.focusRefs']);
+  assert.deepEqual(
+    submitHints(
+      { prompt: 'x' },
+      Array.from({ length: 7 }, () => item('图片')),
+      t,
+    ),
+    ['hint.focusRefs'],
+  );
+  assert.deepEqual(submitHints({ prompt: 'she sings' }, [item('声音')], t), ['hint.writeLines']);
+  assert.deepEqual(submitHints({ prompt: '她说：“我们走吧”' }, [item('声音')], t), []);
+});

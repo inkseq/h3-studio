@@ -6,7 +6,7 @@ import { Button } from './ui/Button.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
-import { NOT_STORED, capacityRows, priceRows } from './all-settings-model.js';
+import { NOT_STORED, NOT_STORED_GROUPS, capacityRows, priceRows } from './all-settings-model.js';
 import { ruleTargets, targetLabels } from './start-rules-model.js';
 
 const SPENDING = '/v1/operator/admin/spending-settings';
@@ -138,19 +138,25 @@ export default function AllSettings({ api, active }) {
           <b>{data.policy ? data.policy.version + ' · ' + data.policy.status : '—'}</b>
         </SettingRow>
       </SettingsSection>
-      <SettingsSection title={t('allSettings.notStored')} help={t('allSettings.notStoredHelp')}>
-        {NOT_STORED.map((row) => (
-          <SettingRow
-            as="div"
-            key={row.id}
-            label={t('allSettings.item.' + row.id)}
-            meta={t('allSettings.where.' + row.where)}
-            unit={t('allSettings.unit.' + row.unit)}
-          >
-            <b>{row.value}</b>
-          </SettingRow>
-        ))}
-      </SettingsSection>
+      {NOT_STORED_GROUPS.map((group) => (
+        <SettingsSection
+          key={group}
+          title={t('allSettings.notStored') + ' · ' + t('allSettings.group.' + group)}
+          help={group === NOT_STORED_GROUPS[0] ? t('allSettings.notStoredHelp') : undefined}
+        >
+          {NOT_STORED.filter((row) => row.group === group).map((row) => (
+            <SettingRow
+              as="div"
+              key={row.id}
+              label={t('allSettings.item.' + row.id)}
+              meta={t('allSettings.where.' + row.where)}
+              unit={t('allSettings.unit.' + row.unit)}
+            >
+              <b>{row.value}</b>
+            </SettingRow>
+          ))}
+        </SettingsSection>
+      ))}
     </div>
   );
 }

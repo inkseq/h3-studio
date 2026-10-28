@@ -65,7 +65,6 @@ PENDING_FIELDS = frozenset(
         "interactive_wait_target_seconds",
         "batch_start_target_seconds",
         "batch_guaranteed_share_slots",
-        "per_user_machine_share_policy",
         "per_user_minimum_machine_share",
     }
 )
