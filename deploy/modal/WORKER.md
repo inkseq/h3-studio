@@ -109,6 +109,18 @@ dedicated hosts first and falls back to Modal only when the original dedicated
 runner cannot claim it; existing attempts retain their original worker affinity.
 This preference creates no provider resource, alternate queue or new job.
 
+`ModalAdmission` is an explicit, default-OFF staging component for the controller.
+It repeats the existing demand validation under the same capacity lock, reserves
+the original layered accounts, and binds a single original demand job in scaler
+receipts before provider I/O. It admits at most two unresolved Modal intents;
+compatible ready dedicated workers suppress fallback. Repeated observations,
+response loss and terminal hosts cannot allocate a replacement for the same job.
+A crash between reservation and create leaves the original reserved intent for
+explicit reconciliation, not an automatic create on the next tick. This component
+is not yet wired into the production entrypoint. Private CPU slot installation,
+all-host lifecycle reconciliation, image/Volume qualification and full staging
+acceptance are still required before activation.
+
 ## Primary implementation references
 
 - [Modal official examples](https://github.com/modal-labs/modal-examples)
