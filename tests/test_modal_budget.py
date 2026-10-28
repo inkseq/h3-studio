@@ -39,7 +39,7 @@ class ModalBudgetCase(LedgerCase):
         self.repo.configure_budget(
             ACCOUNT, tenant_id='sixnine', limit_microusd=50_000_000
         )
-        self.spec = HostSpec('ap-test', 'im-test', 'vo-test', 3_000_000)
+        self.spec = HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000)
         self.client = FakeModal()
         self.hosts = ModalHosts(
             self.repo, self.client, self.spec, environment='staging', enabled=True
@@ -53,7 +53,7 @@ class ModalBudgetCase(LedgerCase):
                 key,
                 provider='modal',
                 hard_deadline=self.now + 600,
-                reserved_cost_microusd=750_000,
+                reserved_cost_microusd=1_000_000,
                 budget_account_ids=(ACCOUNT,),
                 dry_run=False,
                 connection=c,
@@ -109,11 +109,11 @@ class ModalBudgetTests(ModalBudgetCase):
         with self.repo.transaction() as c:
             bind_test_guard(self.repo, c, identity, GUARD, asdict(self.spec))
             self.assertEqual(len(c.execute(select(scaler_receipts)).all()), 1)
-        self.assertEqual(self.projection(), 750_000)
+        self.assertEqual(self.projection(), 1_000_000)
         self.hosts.start(identity)
         self.hosts.start(identity)
         self.assertEqual(len(self.client.created), 1)
-        self.assertEqual(self.projection(), 750_000)
+        self.assertEqual(self.projection(), 1_000_000)
 
     def test_unattributed_shared_intent_cannot_create_or_disappear_from_projection(
         self,
@@ -136,7 +136,7 @@ class ModalBudgetTests(ModalBudgetCase):
                 .where(budget_reservations.c.reference_id == identity)
                 .values(state='invoice_pending')
             )
-        self.assertEqual(self.projection(), 750_000)
+        self.assertEqual(self.projection(), 1_000_000)
         self.repo.settle_instance_cost(identity, actual_cost_microusd=125_000)
         self.assertEqual(self.projection(), 125_000)
 
@@ -165,7 +165,7 @@ class ModalBudgetTests(ModalBudgetCase):
         self.hosts.start(first)
         with self.assertRaises(BudgetExceeded):
             self.reserve('second', guard)
-        self.assertEqual(self.projection(guard), 750_000)
+        self.assertEqual(self.projection(guard), 1_000_000)
         self.assertEqual(len(self.client.created), 1)
 
     def test_different_valid_task_does_not_change_original_task(self):
@@ -178,10 +178,10 @@ class ModalBudgetTests(ModalBudgetCase):
         self.hosts.stop(identity)
         self.hosts.observe(identity)
         self.now += 10000
-        self.assertEqual(self.projection(), 750_000)
+        self.assertEqual(self.projection(), 1_000_000)
 
     def test_unconfirmed_running_beyond_deadline_grows_projection(self):
         identity = self.reserve()
         self.hosts.start(identity)
         self.now += 900
-        self.assertEqual(self.projection(), 1_000_000)
+        self.assertEqual(self.projection(), 1_333_334)

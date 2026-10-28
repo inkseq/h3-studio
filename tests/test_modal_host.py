@@ -42,7 +42,7 @@ class ModalHostTests(LedgerCase):
         super().setUp()
         self.repo.configure_pool('test-pool', max_instances=10, max_physical_gpus=10)
         self.client = FakeModal()
-        self.spec = HostSpec('ap-test', 'im-test', 'vo-test', 3_000_000)
+        self.spec = HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000)
         self.hosts = ModalHosts(
             self.repo, self.client, self.spec, environment='staging', enabled=True
         )
@@ -78,6 +78,15 @@ class ModalHostTests(LedgerCase):
             with self.assertRaisesRegex(Conflict, 'modal_staging_disabled'):
                 service.start(intent)
         self.assertEqual(self.client.created, [])
+
+    def test_cpu_memory_sandbox_surcharge_cannot_be_underquoted(self):
+        for quote in (1, 3_000_000, 3_503_339, 4_000_001):
+            with self.assertRaises(ValueError):
+                replace(self.spec, max_hourly_microusd=quote)
+        self.assertEqual(
+            replace(self.spec, max_hourly_microusd=3_503_340).max_hourly_microusd,
+            3_503_340,
+        )
 
     def test_create_uses_existing_funding_and_finite_single_input_host(self):
         intent = self.intent()

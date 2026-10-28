@@ -29,7 +29,7 @@ class ModalAdmissionTests(LedgerCase):
         self.hosts = ModalHosts(
             self.repo,
             self.client,
-            HostSpec('ap-test', 'im-test', 'vo-test', 3_000_000),
+            HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000),
             environment='staging',
             enabled=True,
         )

@@ -1381,6 +1381,7 @@ def main(argv=None):
     from .dstack_operator import from_environment
     from .dstack_factory import create_runtime
     from .modal_controller import load_extension
+
     settings = Settings.from_environment()
     repo = Repository(settings.database_url)
     from .controller_liveness import Progress
@@ -1409,7 +1410,9 @@ def main(argv=None):
                 repo,
                 settings,
                 work_dir,
-                runner_context=modal_extension.bindings.runner_context if modal_extension else None,
+                runner_context=modal_extension.bindings.runner_context
+                if modal_extension
+                else None,
                 film_setup=lambda DBOS, turns: setup_controller_film(
                     DBOS, turns, repo, film_app
                 ),

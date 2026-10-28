@@ -633,11 +633,19 @@ class DurableExecutor:
     """One existing-controller executor. Shutdown leaves native work untouched."""
 
     def __init__(
-        self, repo, settings, work_dir, *, film_setup=None, account_services=None,
+        self,
+        repo,
+        settings,
+        work_dir,
+        *,
+        film_setup=None,
+        account_services=None,
         runner_context=None,
     ):
         self.repo, self.settings = repo, settings
-        self.slots = DurableSlots(repo, settings, work_dir, runner_context=runner_context)
+        self.slots = DurableSlots(
+            repo, settings, work_dir, runner_context=runner_context
+        )
         self.film_setup = film_setup
         self.account_services = account_services
         self.domain_turns = DomainTurns()

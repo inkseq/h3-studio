@@ -158,6 +158,16 @@ qualification and one staging E2E job remain required before claiming readiness.
 
 ## Primary implementation references
 
+Price qualification on 2026-10-28 found that Sandbox CPU/memory have a 3x
+non-preemptible surcharge. The [public price](https://modal.com/pricing) for
+L40S + 4 physical cores + 41 GiB is
+`(0.000542 + 4 * 0.00003942 + 41 * 0.00000667) * 3600 = 3.50334 USD/h`.
+Host quotes below that floor or above USD4/h refuse; activation must still
+qualify the all-resource quote and reserve the full window plus stop margin.
+This is not an increase in the combined CR73 USD50 cap. Image preparation,
+storage/egress and any other confirmed test charges must also fit that same cap;
+no build or rental has been submitted by this implementation slice.
+
 - [Modal official examples](https://github.com/modal-labs/modal-examples)
 - [Function crash/retry semantics](https://modal.com/docs/guide/retries)
 - [Sandbox lifetime and activity definition](https://modal.com/docs/guide/sandboxes)
