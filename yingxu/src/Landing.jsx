@@ -26,8 +26,7 @@ function retryAllowed() {
 export default function Landing() {
   const { t } = useI18n();
   const active = usePageActive(),
-    [login, setLogin] = useState(false),
-    [passwordFirst, setPasswordFirst] = useState(false);
+    [login, setLogin] = useState(false);
   useEffect(() => {
     if (active) document.title = t('landing.pageTitle');
   }, [active, t]);
@@ -91,7 +90,7 @@ export default function Landing() {
           {t('landing.pricing')}
         </a>
         <LanguageSwitcher />
-        <Button className="landing-link" disabled={opening} onClick={() => start('sign-in')}>
+        <Button className="landing-link" disabled={opening} onClick={() => setLogin(true)}>
           {t('landing.signIn')}
         </Button>
         <Button
@@ -125,20 +124,6 @@ export default function Landing() {
               {t('landing.v2.howLink')}
             </a>
           </div>
-          {hostedSignInEnabled(c.auth) && (
-            <small className="muted">
-              {t('landing.noAccount')}{' '}
-              <Button
-                variant="link"
-                onClick={() => {
-                  setPasswordFirst(true);
-                  setLogin(true);
-                }}
-              >
-                {t('landing.passwordSignIn')}
-              </Button>
-            </small>
-          )}
         </section>
         <LandingStage />
         <section id="demo" className="lp-section">
@@ -189,7 +174,6 @@ export default function Landing() {
         <Login
           title={t('landing.signInTitle')}
           lead={t('landing.signInLead')}
-          passwordFirst={passwordFirst}
           onClose={() => setLogin(false)}
           onDone={() => setLogin(false)}
         />
