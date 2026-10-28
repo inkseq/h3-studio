@@ -1,0 +1,276 @@
+{
+  "version": 1,
+  "source_receipts": {
+    "execution_profiles_ssm": "9b41fca1-a855-4eae-bb86-eba1d03b6f84",
+    "operator_profiles_ssm": "732951a1-c0d8-4fe3-a20d-a057e3905870",
+    "production_execution_sha256": "bbfd98e60635e45903a23eb7fdf88a32f2fcead9860d24abceb948d9bfe0cae7",
+    "production_operator_sha256": "8b23606e7df0fa9a3c7d5d38bc5dce273cce339c13fc934b590840e5298dee65",
+    "staging_acceptance": "https://github.com/inkseq/h3-studio/issues/659#issuecomment-6458516320"
+  },
+  "execution_policies": [
+    {
+      "backend": "wangp-worker",
+      "budget_accounts": [
+        "demand-job-total-20261004",
+        "demand-job-owner-{owner_id}-20261004"
+      ],
+      "configuration_id": "sixnine-h3-pruned-taomate5-v7-fl-20261028",
+      "deployment_profile_id": "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7",
+      "dispatch_backend": "hatchet-v1",
+      "enabled": true,
+      "engine_manifest_digest": "1560231493e4224f857d21b2546647ca515721e5b9b598e6d0219a20997b0389",
+      "envelope": {
+        "allow_audio": true,
+        "allow_first_last": true,
+        "controls": {
+          "audio_decode": [
+            "normal"
+          ],
+          "encoder_device": [
+            "default"
+          ],
+          "sampler_name": [
+            "euler"
+          ],
+          "scheduler": [
+            "auto"
+          ],
+          "video_decode": [
+            "tiled"
+          ]
+        },
+        "input_limits": {
+          "allow_video_audio": true,
+          "guide_kinds": [
+            "image",
+            "video",
+            "audio"
+          ],
+          "guide_recipe_ids": [
+            "h3-base-fl2va-v1"
+          ],
+          "max_audio_duration_seconds": 15,
+          "max_audios": 1,
+          "max_guide_time_seconds": 15.083333333333334,
+          "max_image_pixels": 33177600,
+          "max_images": 8,
+          "max_video_duration_seconds": 15.083333333333334,
+          "max_video_pixels": 33177600,
+          "max_videos": 1
+        },
+        "max_duration_seconds": 15.083333333333334,
+        "max_guides": 8,
+        "max_pixels": 1032192,
+        "max_reference_files": 12,
+        "max_steps": 5
+      },
+      "id": "self-hosted-default",
+      "model_id": "MiniMax-H3-Pruned-Rank8-INT8",
+      "output_delivery": "native-frames-r2-v1",
+      "pool": "sixnine-dstack-controls126-v6-fl-20261015",
+      "qualification": {
+        "evidence_id": "claude-cr65-659-6458516320",
+        "expires_at": null,
+        "profile": "queued-task-first-v1",
+        "status": "runtime_required",
+        "verified_at": 1793152310
+      },
+      "recipe_ids": [
+        "h3-base-fl2va-v1"
+      ],
+      "reservation": {
+        "cost_microusd": 800000,
+        "expected_runtime_s": 1800,
+        "expires_at": null,
+        "source_id": "native-cgroups-v4-pending-20261014"
+      },
+      "revision": "production-taomate659-20261028-fl"
+    },
+    {
+      "backend": "wangp-worker",
+      "budget_accounts": [
+        "demand-job-total-20261004",
+        "demand-job-owner-{owner_id}-20261004"
+      ],
+      "configuration_id": "sixnine-h3-pruned-taomate5-v7-ref-20261028",
+      "deployment_profile_id": "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7",
+      "dispatch_backend": "hatchet-v1",
+      "enabled": true,
+      "engine_manifest_digest": "171376d7d8e5d42810b1ac92b75522df5b9816cd19232bd5932538a8f6e7a533",
+      "envelope": {
+        "allow_audio": true,
+        "allow_first_last": true,
+        "controls": {
+          "audio_decode": [
+            "normal"
+          ],
+          "encoder_device": [
+            "default"
+          ],
+          "sampler_name": [
+            "euler"
+          ],
+          "scheduler": [
+            "auto"
+          ],
+          "video_decode": [
+            "tiled"
+          ]
+        },
+        "input_limits": {
+          "allow_video_audio": true,
+          "guide_kinds": [
+            "image",
+            "video",
+            "audio"
+          ],
+          "guide_recipe_ids": [
+            "h3-base-ref2va-v1"
+          ],
+          "max_audio_duration_seconds": 15,
+          "max_audios": 3,
+          "max_guide_time_seconds": 15.083333333333334,
+          "max_image_pixels": 33177600,
+          "max_images": 17,
+          "max_video_duration_seconds": 15.083333333333334,
+          "max_video_pixels": 33177600,
+          "max_videos": 3
+        },
+        "max_duration_seconds": 15.083333333333334,
+        "max_guides": 8,
+        "max_pixels": 1032192,
+        "max_reference_files": 12,
+        "max_steps": 5
+      },
+      "id": "self-hosted-default",
+      "model_id": "MiniMax-H3-Pruned-Rank8-INT8",
+      "output_delivery": "native-frames-r2-v1",
+      "pool": "sixnine-dstack-controls126-v6-ref-20261015",
+      "qualification": {
+        "evidence_id": "claude-cr65-659-6458516320",
+        "expires_at": null,
+        "profile": "queued-task-first-v1",
+        "status": "runtime_required",
+        "verified_at": 1793152310
+      },
+      "recipe_ids": [
+        "h3-base-ref2va-v1"
+      ],
+      "reservation": {
+        "cost_microusd": 800000,
+        "expected_runtime_s": 1800,
+        "expires_at": null,
+        "source_id": "p2-v3-20261011"
+      },
+      "revision": "production-taomate659-20261028-ref"
+    }
+  ],
+  "operator_profiles": [
+    {
+      "backend": "vastai",
+      "budget_account_ids": [
+        "demand-gpu-remaining-20261004",
+        "demand-job-owner-superdan-20261004"
+      ],
+      "configuration_id": "sixnine-h3-pruned-taomate5-v7-fl-20261028",
+      "cpu_count": 4,
+      "disk_gib": 128,
+      "extra_reservation_microusd": 0,
+      "gpu_memory_gib": 30,
+      "gpu_names": [
+        "RTX5090"
+      ],
+      "id": "vast-taomate5-v7-fl-superdan",
+      "image": "public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:5985c4f46c342cb552dae39925f656684c87eb755c39f9393aec8d7f05503c4f",
+      "max_price_microusd": 850000,
+      "max_ttl_seconds": 7200,
+      "memory_gib": 41,
+      "mode": "fl",
+      "owner_id": "superdan",
+      "pool": "sixnine-dstack-controls126-v6-fl-20261015",
+      "project_id": "production-h3-acceptance-20261004",
+      "runtime_profile_id": "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
+    },
+    {
+      "backend": "vastai",
+      "budget_account_ids": [
+        "demand-gpu-remaining-20261004",
+        "demand-job-owner-supervan-20261004"
+      ],
+      "configuration_id": "sixnine-h3-pruned-taomate5-v7-fl-20261028",
+      "cpu_count": 4,
+      "disk_gib": 128,
+      "extra_reservation_microusd": 0,
+      "gpu_memory_gib": 30,
+      "gpu_names": [
+        "RTX5090"
+      ],
+      "id": "vast-taomate5-v7-fl-supervan",
+      "image": "public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:5985c4f46c342cb552dae39925f656684c87eb755c39f9393aec8d7f05503c4f",
+      "max_price_microusd": 850000,
+      "max_ttl_seconds": 7200,
+      "memory_gib": 41,
+      "mode": "fl",
+      "owner_id": "supervan",
+      "pool": "sixnine-dstack-controls126-v6-fl-20261015",
+      "project_id": "project-39ee4572c09d5a97834cbf983e828c38",
+      "runtime_profile_id": "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
+    },
+    {
+      "backend": "vastai",
+      "budget_account_ids": [
+        "demand-gpu-remaining-20261004",
+        "demand-job-owner-superdan-20261004"
+      ],
+      "configuration_id": "sixnine-h3-pruned-taomate5-v7-ref-20261028",
+      "cpu_count": 4,
+      "disk_gib": 128,
+      "extra_reservation_microusd": 0,
+      "gpu_memory_gib": 30,
+      "gpu_names": [
+        "RTX5090"
+      ],
+      "id": "vast-taomate5-v7-ref-superdan",
+      "image": "public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:5985c4f46c342cb552dae39925f656684c87eb755c39f9393aec8d7f05503c4f",
+      "max_price_microusd": 850000,
+      "max_ttl_seconds": 7200,
+      "memory_gib": 41,
+      "mode": "ref",
+      "owner_id": "superdan",
+      "pool": "sixnine-dstack-controls126-v6-ref-20261015",
+      "project_id": "production-h3-acceptance-20261004",
+      "runtime_profile_id": "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
+    },
+    {
+      "backend": "vastai",
+      "budget_account_ids": [
+        "demand-gpu-remaining-20261004",
+        "demand-job-owner-supervan-20261004"
+      ],
+      "configuration_id": "sixnine-h3-pruned-taomate5-v7-ref-20261028",
+      "cpu_count": 4,
+      "disk_gib": 128,
+      "extra_reservation_microusd": 0,
+      "gpu_memory_gib": 30,
+      "gpu_names": [
+        "RTX5090"
+      ],
+      "id": "vast-taomate5-v7-ref-supervan",
+      "image": "public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:5985c4f46c342cb552dae39925f656684c87eb755c39f9393aec8d7f05503c4f",
+      "max_price_microusd": 850000,
+      "max_ttl_seconds": 7200,
+      "memory_gib": 41,
+      "mode": "ref",
+      "owner_id": "supervan",
+      "pool": "sixnine-dstack-controls126-v6-ref-20261015",
+      "project_id": "project-39ee4572c09d5a97834cbf983e828c38",
+      "runtime_profile_id": "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
+    }
+  ],
+  "demand_profile_ids": [
+    "vast-taomate5-v7-fl-superdan",
+    "vast-taomate5-v7-fl-supervan",
+    "vast-taomate5-v7-ref-superdan",
+    "vast-taomate5-v7-ref-supervan"
+  ]
+}
