@@ -151,6 +151,8 @@ function retryDelay(response) {
 // (its dialog opens too) and the generic not-found, whose server detail is Chinese-only.
 function specialRefusal(status, detail) {
   if (termsRequired(status, detail)) return 'client.termsRequired';
+  // inkseq/h3-studio#760: Sharp with a reference video is limited to 5 s until measured.
+  if (detail?.code === 'reference_video_duration_unqualified') return 'client.refVideoTooLong';
   return status === 404 ? 'client.notFound' : '';
 }
 

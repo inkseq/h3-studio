@@ -14,6 +14,7 @@ import {
   Plus,
   Sparkles,
   Undo2,
+  Upload,
   X,
 } from 'lucide-react';
 import StudioHeader from './StudioHeader.jsx';
@@ -39,6 +40,8 @@ import {
 } from './story-chat-model.js';
 import { createPreviewChat } from './story-chat-preview.js';
 import { createLiveChat } from './story-chat-client.js';
+import { ACCEPT } from './story-chat-attach.js';
+import { AttachedFiles, PendingFiles, useAttachments } from './StoryChatAttachments.jsx';
 import { createCloudClient } from './cloud-client.js';
 import { agentLinkSearch } from './agent-navigation.js';
 import './story-chat.css';
@@ -179,9 +182,11 @@ function CardDetail({
   onPicture,
   onShot,
   onAsk,
+  onUpload,
   onClose,
 }) {
   const { t } = useI18n();
+  const photo = useRef(null);
   const [name, setName] = useState(card.name || '');
   const [text, setText] = useState(card.text || '');
   useEffect(() => {
@@ -289,6 +294,29 @@ function CardDetail({
             {card.image ? t('storyChat.redrawPicture') : t('storyChat.makePicture')}
           </Button>
         ) : null}
+        {!shot && onUpload && (
+          <>
+            <Button
+              className="keep-label"
+              disabled={busy || card.status === 'generating'}
+              onClick={() => photo.current?.click()}
+            >
+              <Upload size={15} aria-hidden="true" />
+              {t('storyChat.uploadPhoto')}
+            </Button>
+            <input
+              ref={photo}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) onUpload(card, file);
+              }}
+            />
+          </>
+        )}
         <Button
           className="keep-label"
           onClick={() => {
@@ -499,7 +527,6 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   const [state, dispatch] = useReducer(reducer, null, () => emptyChat());
   const [balance, setBalance] = useState(live ? Number.NaN : 0);
   const [text, setText] = useState('');
-  const [files, setFiles] = useState([]);
   const [tab, setTab] = useState('chat');
   const [openId, setOpenId] = useState(null);
   // Desktop layout (owner, 2026-10-24): drag the story list and the card panel wider or
@@ -519,6 +546,8 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   };
   const [fresh, setFresh] = useState([]);
   const [notice, setNotice] = useState('');
+  const attachments = useAttachments({ live, maxChars: 4000, setText, onNotice: setNotice });
+  const files = attachments.files;
   const chat = useRef(null);
   const thread = useRef(null);
   const input = useRef(null);
@@ -542,6 +571,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
       language: locale === 'zh' ? 'zh' : 'en',
       projectId: story.current,
       labels: {
+        t,
         generate: (count) =>
           t(count === 1 ? 'storyChat.liveQuote.one' : 'storyChat.liveQuote', { count }),
         failed: (failure) => {
@@ -638,7 +668,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
     chat.current.send({ text: message, attachments: files }, emit);
     track('story_chat_message', { live, attachments: files.length });
     setText('');
-    setFiles([]);
+    attachments.clear();
     setTab('chat');
   };
   const settle = (quote, accepted) => {
@@ -659,13 +689,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
     setText(t('storyChat.askPrefix', { name: cardName(card, t) }));
     setTimeout(() => input.current?.focus(), 0);
   };
-  const addFiles = (list) =>
-    setFiles((current) => [
-      ...current,
-      ...[...list]
-        .filter((file) => file.type.startsWith('image/'))
-        .map((file) => ({ name: file.name, url: URL.createObjectURL(file) })),
-    ]);
+  const addFiles = attachments.add;
 
   const works = () =>
     live && chat.current?.projectId
@@ -819,13 +843,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               if (message.role === 'user')
                 return (
                   <div key={message.id} className="sc-msg user">
-                    {message.attachments.length > 0 && (
-                      <div className="sc-attached">
-                        {message.attachments.map((file) => (
-                          <img key={file.url} src={file.url} alt={file.name} />
-                        ))}
-                      </div>
-                    )}
+                    <AttachedFiles files={message.attachments} />
                     {message.text && <p>{message.text}</p>}
                   </div>
                 );
@@ -924,35 +942,15 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               addFiles(event.dataTransfer.files);
             }}
           >
-            {files.length > 0 && (
-              <div className="sc-pending">
-                {files.map((file) => (
-                  <span key={file.url}>
-                    <img src={file.url} alt={file.name} />
-                    <IconButton
-                      variant="on-media"
-                      size="xs"
-                      label={t('storyChat.close')}
-                      onClick={() => setFiles((current) => current.filter((item) => item !== file))}
-                    >
-                      <X size={12} />
-                    </IconButton>
-                  </span>
-                ))}
-              </div>
-            )}
+            <PendingFiles attachments={attachments} cards={state.cards} />
             <div className="sc-compose-row">
-              <IconButton
-                hidden={live}
-                label={t('storyChat.attach')}
-                onClick={() => fileInput.current?.click()}
-              >
+              <IconButton label={t('storyChat.attach')} onClick={() => fileInput.current?.click()}>
                 <Paperclip size={17} />
               </IconButton>
               <input
                 ref={fileInput}
                 type="file"
-                accept="image/*"
+                accept={live ? ACCEPT : 'image/*'}
                 multiple
                 hidden
                 onChange={(event) => {
@@ -1044,6 +1042,9 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
                 chat.current.propose({ kind: 'generate', cards: [card.id] }, card, emit);
               }}
               onAsk={ask}
+              onUpload={
+                live ? (card, file) => void chat.current.attachPhoto(card.id, file, emit) : null
+              }
               onClose={() => setOpenId(null)}
             />
           )}

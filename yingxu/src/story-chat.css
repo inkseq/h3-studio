@@ -286,11 +286,53 @@ div.sc-tabs {
 }
 .sc-pending {
   display: flex;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 10px;
   padding: 2px 2px 8px;
 }
-.sc-pending span {
+.sc-pending-item {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 96px;
+}
+.sc-pending-item img,
+.sc-pending-item .sc-file {
+  width: 96px;
+  height: 56px;
+}
+.sc-pending-target {
+  width: 100%;
+  min-height: 26px;
+  padding: 0 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 11px;
+}
+/* A non-image attachment: its kind icon and file name. */
+.sc-file {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 72px;
+  height: 72px;
+  padding: 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.sc-file small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
 }
 .sc-pending img {
   width: 52px;
