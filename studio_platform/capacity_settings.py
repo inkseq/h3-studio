@@ -155,6 +155,33 @@ def validate_snapshot(snapshot):
     return copy.deepcopy(value)
 
 
+def reservation_provenance(
+    snapshot, proof, scope, pool, provider, *, continuing, gpus, slots, usage
+):
+    """Distinct native continuing and Modal finite original capacity authority."""
+    value = validate_snapshot(snapshot)
+    if (
+        not isinstance(proof, dict)
+        or proof
+        != {
+            "capacity_backend": "dstack-v1" if continuing else "modal-v1",
+            "lifecycle_version": 2,
+            "tenant_id": scope.tenant_id,
+            "owner_id": scope.owner_id,
+            "project_id": scope.project_id,
+            "pool": pool,
+            "provider": provider,
+        }
+        or type(proof.get("lifecycle_version")) is not int
+        or provider not in ({"vast", "runpod"} if continuing else {"modal"})
+        or gpus != 1
+        or slots != 1
+        or usage is None
+    ):
+        raise ValueError("capacity_admission_provenance_invalid")
+    return value
+
+
 def normalize_changes(changes):
     if not isinstance(changes, dict):
         _invalid("changes", type="object")

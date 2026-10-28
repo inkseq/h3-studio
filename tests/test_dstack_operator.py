@@ -1343,6 +1343,7 @@ class DstackLifetimeTests(LedgerCase):
         self.assertEqual(usage['instances'], 1)
         self.assertEqual(usage['resources'], {('lium', 'intent:' + legacy['id']): 1})
         self.assertEqual(usage['active_instance_ids'], ())
+        self.assertEqual(usage['all_resource_intent_ids'], (legacy['id'],))
         self.assertEqual(self.repo.get_budget('owner-budget'), old_budget)
         self.assertEqual(len(self.client.applied), 1)
         self.service.provider_inventory = lambda backend: dict(

@@ -92,7 +92,12 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
 
 class ModalExtension:
     def __init__(self, service, hosts, bindings, *, enabled):
+        from .modal_capacity import registration_usage
+
         self.service, self.hosts, self.bindings = service, hosts, bindings
+        bindings.capacity_usage = lambda c, spec: registration_usage(
+            service, hosts, c, spec
+        )
         self.admission = ModalAdmission(
             service, hosts, environment='staging', enabled=enabled
         )

@@ -4,19 +4,30 @@ import copy
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, update
+
+from studio_platform.capacity_settings import admission_snapshot, read_policy
+from studio_platform.control import effective_registration_limits
 
 from studio_platform.modal_admission import ModalAdmission
 from studio_platform.modal_host import HostSpec, ModalHosts
-from studio_platform.repository import Scope, instance_intents, registered_workers
+from studio_platform.repository import (
+    Scope,
+    capacity_gate,
+    instance_intents,
+    pool_limits,
+    registered_workers,
+    spending_settings,
+)
 from studio_platform.runtime_catalog import engine_manifest
 from test_modal_budget import GUARD
 from test_modal_host import FakeModal
 from test_platform_repository import LedgerCase
 from studio_platform.modal_runtime import PROFILE
+from test_capacity_admission import adopt
 
 
-class ModalAdmissionTests(LedgerCase):
+class ModalAdmissionFixture(LedgerCase):
     def setUp(self):
         super().setUp()
         self.scope = Scope('sixnine', 'superdan', 'project-inkseq-staging-superdan')
@@ -44,6 +55,17 @@ class ModalAdmissionTests(LedgerCase):
             budget_account_ids=[GUARD['budget_account_id']],
         )
         self.work = []
+        adopt(self, maximum=10)
+        self.set_limits(
+            max_hourly_price_microusd=4_000_000,
+            mode_hourly_ceiling_microusd={
+                'fl': 5_000_000,
+                'ref': 5_000_000,
+                'other': 850_000,
+            },
+            max_runtime_seconds=600,
+            test_task_limit_microusd=50_000_000,
+        )
         self.service = SimpleNamespace(
             repo=self.repo,
             settings=SimpleNamespace(tenant_id='sixnine'),
@@ -51,14 +73,10 @@ class ModalAdmissionTests(LedgerCase):
                 'test_gpu_guard': GUARD,
                 'demand_start': {'test_task_id': GUARD['task_id']},
             },
-            _admin_limits=Mock(
-                return_value={
-                    'value': {
-                        'test_task_limit_microusd': 50_000_000,
-                        'max_runtime_seconds': 600,
-                    }
-                }
-            ),
+            _admin_limits=Mock(side_effect=lambda c: read_policy(c, 'sixnine')),
+            profiles={self.profile['id']: self.profile},
+            prelaunch_capacity_usage=self.capacity_usage,
+            prelaunch_capacity_limits=self.capacity_limits,
         )
         self.admission = ModalAdmission(
             self.service, self.hosts, environment='staging', enabled=True
@@ -71,12 +89,65 @@ class ModalAdmissionTests(LedgerCase):
             ),
             (
                 'studio_platform.dstack_demand.validate_start',
-                {'return_value': {'runtime_revision': 'original'}},
+                {
+                    'return_value': {
+                        'runtime_revision': 'original',
+                        'profile_id': self.profile['id'],
+                    }
+                },
             ),
         ):
             p = patch(target, **options)
             p.start()
             self.addCleanup(p.stop)
+
+    def set_limits(self, **changes):
+        with self.repo.transaction() as c:
+            row = (
+                c.execute(
+                    select(spending_settings).where(
+                        spending_settings.c.tenant_id == 'sixnine',
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            c.execute(
+                update(spending_settings)
+                .where(
+                    spending_settings.c.tenant_id == 'sixnine',
+                )
+                .values(value={**row['value'], **changes}, version=row['version'] + 1)
+            )
+
+    def capacity_usage(self, c):
+        value = self.repo._global_usage(c)
+        active = list(
+            c.execute(
+                select(instance_intents.c.id).where(
+                    instance_intents.c.state != 'destroyed',
+                )
+            ).scalars()
+        )
+        return {
+            **value,
+            'active_instance_ids': active,
+            'observations': [],
+            'hourly_cost_microusd': 0,
+            'native_resources': (),
+            'unconfirmed_allocation_ids': (),
+        }
+
+    def capacity_limits(self, c, *, profile, for_demand):
+        self.assertTrue(for_demand)
+        self.assertIs(profile, self.profile)
+        return effective_registration_limits(
+            c.execute(select(capacity_gate)).mappings().one(),
+            c.execute(select(pool_limits).where(pool_limits.c.pool == self.pool))
+            .mappings()
+            .one(),
+            snapshot=admission_snapshot(read_policy(c, 'sixnine')),
+        )
 
     def accepted(self, key):
         plan = self.repo.create_plan(
@@ -100,6 +171,8 @@ class ModalAdmissionTests(LedgerCase):
         self.work.append((job, self.profile))
         return job
 
+
+class ModalAdmissionTests(ModalAdmissionFixture):
     def test_default_off_and_production_never_select_or_create(self):
         self.accepted('one')
         for options in ({}, {'environment': 'production', 'enabled': True}):
@@ -183,10 +256,14 @@ class ModalAdmissionTests(LedgerCase):
                     updated_at=self.now,
                 )
             )
-        # Compatibility has its own original contract tests; exercise the real
-        # worker-window/funding and idle/expiry predicates here.
-        with patch(
-            'studio_platform.modal_admission.WorkerControl.matches', return_value=True
+        # Partial compatibility fixture: full consumer/runtime proofs are
+        # exercised through real DurableSlots in test_modal_dispatch.
+        with (
+            patch(
+                'studio_platform.modal_admission.WorkerControl.matches',
+                return_value=True,
+            ),
+            patch('studio_platform.modal_dispatch.consumer_reason', return_value=None),
         ):
             self.assertEqual(self.admission.tick()['state'], 'idle')
             self.assertEqual(len(self.client.created), 1)
@@ -217,7 +294,7 @@ class ModalAdmissionTests(LedgerCase):
 
     def test_shared_limit_rolls_back_reservation_before_provider_io(self):
         self.accepted('one')
-        self.service._admin_limits.return_value['value']['test_task_limit_microusd'] = 1
+        self.set_limits(test_task_limit_microusd=1)
         self.assertEqual(self.admission.tick()['state'], 'blocked')
         with self.repo.engine.connect() as c:
             self.assertEqual(list(c.execute(select(instance_intents))), [])

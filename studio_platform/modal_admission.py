@@ -14,6 +14,7 @@ from sqlalchemy import insert, select
 from .control import WorkerControl
 from .dstack_test_budget import ACCOUNT, PROJECTS, finite, task_guard
 from .modal_budget import bind_test_guard, require
+from .modal_capacity import BACKEND, admission, precreate
 from .modal_runtime import PROFILE
 from .repository import (
     BudgetExceeded,
@@ -109,6 +110,7 @@ class ModalAdmission:
     def __init__(self, service, hosts, *, environment=None, enabled=False):
         self.service, self.hosts, self.repo = service, hosts, service.repo
         self.enabled = enabled is True and environment == 'staging' and hosts.enabled
+        hosts.capacity_check = lambda c, intent: precreate(service, hosts, c, intent)
 
     def _reserve(self, c, job, profile, now):
         from .dstack_demand import validate_start
@@ -131,6 +133,7 @@ class ModalAdmission:
             ACCOUNT in profile['budget_account_ids']
             and profile['project_id'] in PROJECTS
         )
+        snapshot, usage = admission(self.service, c, profile, self.hosts.spec)
         limits = self.service._admin_limits(c)['value']
         policy = self.service.policy
         guard = task_guard(
@@ -165,6 +168,22 @@ class ModalAdmission:
             budget_account_ids=profile['budget_account_ids'],
             dry_run=False,
             connection=c,
+            capacity_usage=usage,
+            active_instance_ids=usage['active_instance_ids'],
+            capacity_policy_snapshot=snapshot,
+            capacity_provenance=(
+                dict(
+                    capacity_backend=BACKEND,
+                    lifecycle_version=2,
+                    tenant_id=self.service.settings.tenant_id,
+                    owner_id=profile['owner_id'],
+                    project_id=profile['project_id'],
+                    pool=profile['pool'],
+                    provider='modal',
+                )
+                if snapshot is not None
+                else None
+            ),
         )
         require(intent['created'])
         bind_test_guard(self.repo, c, intent['id'], guard, asdict(self.hosts.spec))
@@ -180,6 +199,8 @@ class ModalAdmission:
                     'mode': mode,
                     'configuration_id': execution['configuration_id'],
                     'manifest_digest': manifest.digest,
+                    'capacity_backend': BACKEND,
+                    'capacity_policy_snapshot': snapshot,
                 },
             )
         )
