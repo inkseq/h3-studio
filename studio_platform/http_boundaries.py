@@ -6,7 +6,9 @@ def install(app):
     from .quality_http import install as quality
     from .inky_hooks import install as inky
     from .inky_runtime import configure
+    from .llm_tracing import configure as tracing
 
+    tracing(app.state.settings)
     register_routes(app)
     configure(app)
     quality(app)

@@ -8,7 +8,7 @@ import uuid
 from fastapi import HTTPException, Request
 
 from .google_chat import ChatError, GoogleChatClient
-from . import story_chat_advice, story_chat_undo
+from . import llm_tracing, story_chat_advice, story_chat_undo
 from .repository import Conflict
 from .story_chat import (
     INSTRUCTION,
@@ -428,20 +428,37 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             if connection_turns_today(principal) >= limit:
                 _fail("story_chat_connection_daily_limit", 429, limit=limit)
         chat = story_chat_advice.turn_chat(chat, text)
-        try:
-            result = model_client().generate(
-                MODEL,
-                prompt_messages(row["payload"], chat, text),
-                story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
-                max_tokens=4096,
-                json_mode=True,
+        with llm_tracing.observe(
+            "story-chat-turn",
+            user=llm_tracing.person(principal.owner),
+            session=project_id,
+            tags=["story-chat", chat.get("language", "zh")],
+            input=llm_tracing.clip(text),
+            metadata={"machine": principal.machine},
+        ) as traced:
+            try:
+                result = model_client().generate(
+                    MODEL,
+                    prompt_messages(row["payload"], chat, text),
+                    story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
+                    max_tokens=4096,
+                    json_mode=True,
+                )
+                plan = _parse(result["text"])
+            except ChatError as error:
+                # Nothing was written; the person can simply send again.
+                _fail(
+                    "assistant_" + error.code, error.http_status, message=error.message
+                )
+            except StoryChatError as error:
+                _fail(error.code, error.status, **error.detail)
+            traced.update(
+                output={
+                    "reply": llm_tracing.clip(plan["reply"], 2000),
+                    "actions": len(plan["actions"]),
+                    "chips": plan["chips"],
+                }
             )
-            plan = _parse(result["text"])
-        except ChatError as error:
-            # Nothing was written; the person can simply send again.
-            _fail("assistant_" + error.code, error.http_status, message=error.message)
-        except StoryChatError as error:
-            _fail(error.code, error.status, **error.detail)
         # A card edit during the model call bumps the version: re-apply the same plan once
         # on the new version, or refuse if a card it names is gone.
         for _attempt in range(2):
