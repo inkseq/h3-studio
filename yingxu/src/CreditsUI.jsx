@@ -32,7 +32,7 @@ import {
 } from './credits.js';
 import { mockCreditsFetch } from './credits-mock.js';
 import './credits.css';
-import { track } from './analytics.js';
+import { checkoutAnalytics, track } from './analytics.js';
 
 // Dev preview only: /settings?tab=credits&mockCredits shows the UI without a backend.
 const mocked = () =>
@@ -69,6 +69,12 @@ export function useCredits(account) {
     };
   }, [api, account]);
   return credits;
+}
+
+// Adds the anonymous funnel id when analytics is on (h3-studio#725); older servers ignore it.
+function withAnalytics(body) {
+  const analytics = checkoutAnalytics();
+  return analytics ? { ...body, analytics } : body;
 }
 
 export function CreditsChip({ account }) {
@@ -167,7 +173,7 @@ export function CreditsPanel({ account, active }) {
     try {
       const { url } = await api.request('/v1/billing/checkout', {
         method: 'POST',
-        body: { pack_id: pack.id },
+        body: withAnalytics({ pack_id: pack.id }),
         key: 'checkout-' + pack.id + '-' + Date.now(),
       });
       if (typeof url !== 'string' || !url.startsWith('https://'))
