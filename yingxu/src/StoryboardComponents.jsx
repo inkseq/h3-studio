@@ -2476,6 +2476,12 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             )}
             <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
           </div>
+          {/* Advice right above Generate, always visible (h3-studio#739). */}
+          {info.hints?.map((hint) => (
+            <p key={hint} className="ed-hint">
+              {hint}
+            </p>
+          ))}
           <div className="ed-actions">
             {/* After a take: another version (new seed, same settings) or the same in HD. */}
             {made && (

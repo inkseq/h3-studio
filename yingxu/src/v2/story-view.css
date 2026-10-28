@@ -1451,3 +1451,13 @@ body.sb-resizing-y video {
     opacity: 1;
   }
 }
+/* Pre-generate advice (h3-studio#739): a quiet line above Generate, never a blocker. */
+.ed-footer .ed-hint {
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
