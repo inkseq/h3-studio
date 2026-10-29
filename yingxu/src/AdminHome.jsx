@@ -480,6 +480,43 @@ const refs = (row) =>
     ? '—'
     : row.image_refs_band + (row.audio_ref === 'yes' ? ' + ♪' : '');
 
+// Top line for the window (h3-studio#819): outcomes, waits, GPU cost, hands-on operations.
+function StatsOverview({ value }) {
+  const { t } = useI18n();
+  const rate = value.success_rate;
+  return (
+    <div className="ah-kpis">
+      <Kpi
+        label={t('adminHome.stats.success')}
+        value={rate == null ? '—' : Math.round(rate * 100) + '%'}
+        hint={t('adminHome.stats.outcomes', {
+          ok: value.succeeded,
+          failed: value.failed,
+          cancelled: value.cancelled,
+        })}
+        tone={rate == null ? '' : rate < 0.9 ? 'warn' : 'good'}
+      />
+      <Kpi
+        label={t('adminHome.stats.wait')}
+        value={value.wait_seconds ? duration(value.wait_seconds.median) : '—'}
+        hint={value.wait_seconds ? 'P90 ' + duration(value.wait_seconds.p90) : null}
+        tone={value.wait_seconds?.p90 > 900 ? 'warn' : ''}
+      />
+      <Kpi
+        label={t('adminHome.stats.clipCost')}
+        value={value.median_cost_microusd == null ? '—' : usd(value.median_cost_microusd)}
+        hint={t('adminHome.stats.totalCost', { amount: usd(value.total_cost_microusd) })}
+      />
+      <Kpi
+        label={t('adminHome.stats.manual')}
+        value={value.manual_operations}
+        hint={t('adminHome.stats.manualHint')}
+        tone={value.manual_operations ? 'warn' : 'good'}
+      />
+    </div>
+  );
+}
+
 // Seconds per GPU type and content (h3-studio#548): history from the ledger, read-only.
 function AdminStats({ api, active }) {
   const { t } = useI18n();
@@ -516,6 +553,7 @@ function AdminStats({ api, active }) {
       </div>
       {error && <Note tone="warn">{error}</Note>}
       {!error && !data && <Spinner />}
+      {data?.overview && <StatsOverview value={data.overview} />}
       {data && !data.groups.length && <EmptyState compact>{t('adminHome.stats.empty')}</EmptyState>}
       {data && data.groups.length > 0 && (
         <>
