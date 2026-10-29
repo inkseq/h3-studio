@@ -81,10 +81,13 @@
 .filter-chip.icon-only > small.zero {
   display: none;
 }
+/* The badge sits on the icon's corner (owner 2026-10-29), inside the 36px tile, so the
+   rail never shifts and the badge reads as part of the icon; the ring separates it. */
 .filter-chip.icon-only > small {
   position: absolute;
-  top: 2px;
-  right: 1px;
+  top: 5px;
+  left: calc(50% + 3px);
+  box-shadow: 0 0 0 2px var(--surface);
   display: grid;
   place-items: center;
   min-width: 14px;
@@ -97,6 +100,9 @@
   color: var(--ink-2);
   background: var(--surface-3);
   border-radius: 7px;
+}
+.filter-chip.icon-only.on > small {
+  box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .filter-chip.icon-only.alert > small {
   color: var(--accent-ink);

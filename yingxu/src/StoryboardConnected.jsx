@@ -109,25 +109,47 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
     !s.workspace.dirty;
   const cost = receiptCost(receipt),
     balance = useCredits(c.account)?.available,
-    takes = (receipt.items || []).some((item) => item.index > 0);
+    takes = (receipt.items || []).some((item) => item.index > 0),
+    short = cost.credits != null && Number.isFinite(balance) && cost.credits > balance,
+    usedPct =
+      cost.credits != null && balance > 0 ? Math.min(100, (cost.credits / balance) * 100) : 0,
+    closed = !!receipt.closed_preflight;
+  // A closed (refused) preflight never generates; leaving the dialog clears it so the
+  // next try is not blocked by "the previous operation is not confirmed".
+  const dismiss = async () => {
+    if (!closed) return onClose();
+    setBusy(true);
+    try {
+      await cloud.workbenchAbandonClosed(receipt.id);
+      onClose();
+    } catch {
+      setError(t('workbench.requestFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Dialog
       title={t('workbench.confirm')}
-      onClose={onClose}
+      onClose={() => void dismiss()}
       busy={busy}
       wide
       className="sb-confirm"
     >
-      <p className="sb-confirm-cost">
-        {cost.credits != null
-          ? t('workbench.costCredits', { credits: cost.credits.toLocaleString() })
-          : cost.money
-            ? t('workbench.estimate', { amount: cost.money })
-            : t('workbench.costUnknown')}
-        {cost.credits != null && Number.isFinite(balance) && (
-          <small>{t('workbench.balance', { credits: balance.toLocaleString() })}</small>
-        )}
-      </p>
+      {/* Owner 2026-10-29: a usage bar, never a per-clip price. The bar is the balance;
+          the highlighted part is what this generation will use. */}
+      {Number.isFinite(balance) && (
+        <div className="sb-confirm-usage">
+          <i className={'bar' + (short ? ' short' : '')}>
+            <b style={{ width: usedPct + '%' }} />
+          </i>
+          <small className="muted">
+            {short
+              ? t('workbench.notEnough')
+              : t('workbench.balance', { credits: balance.toLocaleString() })}
+          </small>
+        </div>
+      )}
       <p className="sb-confirm-note">{t('workbench.timing')}</p>
       {(receipt.items || []).map((item, i) => (
         <section key={item.plan_id || i}>
@@ -155,52 +177,46 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
       {!same && <p role="alert">{t('workbench.changed')}</p>}
       {/* The server refuses when no machine can take the work (none running and auto-start
           off or out of budget). Say so plainly instead of a silently greyed-out button. */}
-      {same && !receipt.ready && <p role="alert">{t('workbench.notReady')}</p>}
+      {same && !receipt.ready && (
+        <p role="alert">
+          {t(
+            closed
+              ? receipt.blocked === 'source_changed'
+                ? 'workbench.changed'
+                : 'workbench.blockedInput'
+              : 'workbench.notReady',
+          )}
+        </p>
+      )}
       {error && <p role="alert">{error}</p>}
       <DialogActions>
-        <Button disabled={busy} onClick={onClose}>
-          {t('workbench.cancel')}
+        <Button disabled={busy} onClick={() => void dismiss()}>
+          {t(closed ? 'workbench.acknowledge' : 'workbench.cancel')}
         </Button>
-        {receipt.closed_preflight && (
+        {!closed && (
           <Button
-            disabled={busy}
+            variant="primary"
+            disabled={busy || !same || !receipt.ready || short}
             onClick={async () => {
               setBusy(true);
               try {
-                await cloud.workbenchAbandonClosed(receipt.id);
+                await cloud.workbenchCommand('batch', {
+                  projectVersion: receipt.project_version,
+                  plan_ids: receipt.items.map((i) => i.plan_id),
+                });
                 onClose();
-              } catch {
-                setError(t('workbench.requestFailed'));
+              } catch (e) {
+                setError(
+                  t(e.message.startsWith('workbench.') ? e.message : 'workbench.requestFailed'),
+                );
               } finally {
                 setBusy(false);
               }
             }}
           >
-            {t('workbench.acknowledge')}
+            {t('workbench.submit')}
           </Button>
         )}
-        <Button
-          variant="primary"
-          disabled={busy || !same || !receipt.ready}
-          onClick={async () => {
-            setBusy(true);
-            try {
-              await cloud.workbenchCommand('batch', {
-                projectVersion: receipt.project_version,
-                plan_ids: receipt.items.map((i) => i.plan_id),
-              });
-              onClose();
-            } catch (e) {
-              setError(
-                t(e.message.startsWith('workbench.') ? e.message : 'workbench.requestFailed'),
-              );
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {t('workbench.submit')}
-        </Button>
       </DialogActions>
     </Dialog>
   );

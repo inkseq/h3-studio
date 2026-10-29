@@ -64,6 +64,9 @@ export const workbenchCatalogs = {
     'workbench.estimate': 'Estimated cost: {amount}',
     'workbench.costCredits': 'Cost: {credits} credits',
     'workbench.balance': 'You have {credits} credits',
+    'workbench.notEnough': 'Not enough credits for this. Top up in Settings → Credits.',
+    'workbench.blockedInput':
+      "This shot can't be made with its current pictures or settings. Nothing was charged. Check the shot's references and try again.",
     'workbench.costUnknown':
       "We couldn't read the price yet. Nothing is charged until you confirm.",
     'workbench.timing':
@@ -160,6 +163,9 @@ export const workbenchCatalogs = {
     'workbench.estimate': '预计费用：{amount}',
     'workbench.costCredits': '费用：{credits} 积分',
     'workbench.balance': '你有 {credits} 积分',
+    'workbench.notEnough': '积分不够，请先到 设置 → 积分 充值。',
+    'workbench.blockedInput':
+      '这个镜头的图片或设置暂时不能生成，没有扣费。请检查镜头的参考素材后再试。',
     'workbench.costUnknown': '暂时读不到价格。确认之前不会扣费。',
     'workbench.timing': '一个 5 秒镜头通常几分钟做好。第一个镜头要等机器启动，最长约 15 分钟。',
     'workbench.shotN': '镜头 {number}',
