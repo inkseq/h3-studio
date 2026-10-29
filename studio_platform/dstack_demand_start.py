@@ -185,6 +185,32 @@ def _write(connection, row, payload, now):
     )
 
 
+def modal_covered_jobs(connection):
+    """Queued jobs a live Modal host was started for (#784): one provider per job.
+
+    Modal admission runs first in the controller tick. Vast only starts for a job
+    Modal refused, or once its Modal host is going away or gone.
+    """
+    from .modal_capacity import OPERATION
+    from .repository import instance_intents, scaler_receipts
+
+    rows = connection.execute(
+        select(scaler_receipts.c.facts)
+        .join(
+            instance_intents,
+            instance_intents.c.id == scaler_receipts.c.intent_id,
+        )
+        .where(
+            scaler_receipts.c.operation == OPERATION,
+            instance_intents.c.provider == 'modal',
+            instance_intents.c.state.not_in(
+                ('destroyed', 'not_created', 'draining', 'destroying')
+            ),
+        )
+    ).scalars()
+    return {facts.get('job_id') for facts in rows if isinstance(facts, dict)}
+
+
 def _claim(service):
     from .dstack_demand import (
         _nodes,
@@ -203,7 +229,12 @@ def _claim(service):
             return _result('disabled'), None
         if demand_configuration(service.config, now=now) is None:
             return _result('blocked', 'authority_unavailable'), None
-        work = eligible_jobs(service, connection, now)
+        covered = modal_covered_jobs(connection)
+        work = [
+            item
+            for item in eligible_jobs(service, connection, now)
+            if item[0]['id'] not in covered
+        ]
         if not work:
             return _result('idle'), None
         journals = list(
