@@ -670,8 +670,8 @@ class QualityHTTPTests(unittest.TestCase):
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
                 shot = response.json()["project"]["entities"][-1]
                 self.assertEqual(shot["description"], PROMPT)
-                self.assertEqual(shot["data"]["h3"]["controls"]["steps"], 9)
                 if role == "admin":
+                    self.assertEqual(shot["data"]["h3"]["controls"]["steps"], 9)
                     self.assertEqual(shot["data"]["h3"]["deploymentProfileId"], PROFILE)
                     self.assertEqual(shot["data"]["h3"]["model_id"], MODEL)
                 else:
@@ -680,6 +680,8 @@ class QualityHTTPTests(unittest.TestCase):
                     )
                     self.assertEqual(shot["data"]["h3"]["recipeId"], "video-fl-v1")
                     self.assertNotIn("model_id", shot["data"]["h3"])
+                    # Tuning stays ours; the stored document keeps it (#798 B8b).
+                    self.assertNotIn("steps", shot["data"]["h3"]["controls"])
                 stored = self.app.state.repository.get_document(
                     Scope(self.settings.tenant_id, owner, "__projects"),
                     "project",

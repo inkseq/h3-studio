@@ -229,8 +229,13 @@ class QualityViewTests(unittest.TestCase):
             with self.subTest(principal=principal):
                 self.assertEqual(views.envelope(card, principal), card)
                 self.assertEqual(views.revision(summary, principal), summary)
-                self.assertEqual(views.selection(h3, principal), h3)
-                self.assertEqual(views.entity(entity, principal), entity)
+                # Tuning such as steps is ours; creators see their own choices.
+                public_h3 = {"controls": {"resolution": "720P"}}
+                self.assertEqual(views.selection(h3, principal), public_h3)
+                self.assertEqual(
+                    views.entity(entity, principal),
+                    {**entity, "data": {"h3": public_h3}},
+                )
                 self.assertEqual(views.selection(cpu, principal), cpu)
                 unknown = views.selection(
                     {"recipe_id": "retired-video-recipe"}, principal
@@ -779,11 +784,15 @@ class QualityViewTests(unittest.TestCase):
         original = copy.deepcopy(preflight)
         shown = views.envelope(preflight, USER)
         plan, job = shown["items"][0]["plan"], shown["items"][0]["job"]
-        self.assertEqual(plan["effective_request"]["controls"], published)
+        self.assertEqual(
+            plan["effective_request"]["controls"],
+            {k: v for k, v in published.items() if k in views.PUBLIC_CONTROLS},
+        )
+        self.assertNotIn("steps", plan["effective_request"]["controls"])
         self.assertEqual(plan["estimate"], original["items"][0]["plan"]["estimate"])
         self.assertEqual(plan["request_hash"], "immutable")
         self.assertEqual(plan["execution"]["remaining_window_s"], 99)
-        self.assertEqual(job["progress"], original["items"][0]["job"]["progress"])
+        self.assertEqual(job["progress"], {"stage": "sampling", "fraction": 0.33})
         self.assertEqual(job["remaining_wait_seconds"], 30)
         self.assertEqual(shown["items"][0]["shot_id"], "shot")
         self.assertNotIn(MODEL, json.dumps(shown))
