@@ -29,6 +29,7 @@ PROFILE_IDS = (
     "h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4",
     "h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4",
     "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7",
+    "h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8",
 )
 PROFILE_DIRECTORY = (
     Path(__file__).resolve().parents[1] / "deploy" / "wangp" / "profiles"

@@ -85,6 +85,8 @@ def transform(path, source):
     if path.endswith("vastai/compute.py"):
         source = "from " + HELPER_MODULE + " import VastAllocationUnknown, VastSafeReject\n" + source
         source = replace_once(source, '"inet_down": {"gt": 128}', '"inet_down": {"gte": 1000}')
+        # The v8 runtime image uses torch cu130 (#794); hosts need a CUDA 13 driver.
+        source = replace_once(source, '"cuda_max_good": {"gte": 12.8}', '"cuda_max_good": {"gte": 13.0}')
         start = source.index("        except VastAICreateInstanceError as e:")
         end = source.index("        return JobProvisioningData(", start)
         source = source[:start] + '''        except VastAllocationUnknown:

@@ -1,0 +1,25 @@
+# v8 runtime: the published v7 GPU image with WanGP's recommended CUDA 13.0 stack
+# (torch 2.10.0+cu130, triton 3.6) and SageAttention 2.2.0 for attention_mode sage2.
+# Measured on Lium RTX 5090 (2026-10-29, #794): 768P FL 93 s -> 55 s, REF 117 s -> 68 s,
+# same WanGP source and models; no sparse attention (owner decision).
+# Hosts need an NVIDIA driver with CUDA >= 13.0 (offer filter in the v8 profile).
+ARG BASE_IMAGE=public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:5985c4f46c342cb552dae39925f656684c87eb755c39f9393aec8d7f05503c4f
+FROM ${BASE_IMAGE}
+ARG SAGE_WHEEL=https://github.com/deepbeepmeep/SageAttention/releases/download/v2.2.0-linux.cg1/sageattention-2.2.0+cu130torch2.10.0.cg1-cp312-cp312-linux_x86_64.whl
+RUN /venv/main/bin/python -m pip install --no-cache-dir \
+        torch==2.10.0+cu130 torchvision==0.25.0+cu130 torchaudio==2.10.0+cu130 \
+        --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple \
+    && /venv/main/bin/python -m pip install --no-cache-dir "triton==3.6.0" \
+    && /venv/main/bin/python -m pip install --no-cache-dir --no-deps \
+        "sageattention @ ${SAGE_WHEEL}#sha256=28e527a22203af9f858fa5facfa6dd2b89dcc562467ec1d360b78f68e4754a56"
+# torch cu130 wheels ship their CUDA 13 runtime under nvidia/cu13/lib; the Qwen3-VL encoder's NVRTC kernels
+# (REF path) need libnvrtc-builtins.so.13.0 from there.
+ENV LD_LIBRARY_PATH=/venv/main/lib/python3.12/site-packages/nvidia/cu13/lib
+RUN test "$(/venv/main/bin/python -c 'import platform; print(platform.python_version())')" = "3.12.14" \
+    && test "$(git -C /opt/workspace-internal/Wan2GP rev-parse HEAD)" = "0e58385fbde7ff102d276e4a9e490845de76b4ea" \
+    && /venv/main/bin/python -c "import torch, triton, sageattention, importlib.metadata as m; \
+assert torch.__version__ == '2.10.0+cu130' and torch.version.cuda == '13.0', torch.__version__; \
+assert triton.__version__ == '3.6.0' and m.version('sageattention').startswith('2.2.0'); print('ok')" \
+    && test -e /venv/main/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.0
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

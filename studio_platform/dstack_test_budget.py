@@ -26,6 +26,9 @@ POOLS = frozenset(
         "inkseq-staging-v6-ref",
         "inkseq-staging-v7-fl",
         "inkseq-staging-v7-ref",
+        # v8 (CUDA 13 + sage2, #794) staging pools.
+        "inkseq-staging-v8-fl",
+        "inkseq-staging-v8-ref",
     }
 )
 PROJECTS = frozenset(
