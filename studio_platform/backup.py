@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from .asset_objects import ASSET_OBJECT_ROLES
 from .backup_missing import missing_object
+from .backup_loss_policy import EXPECTED_MISSING, valid_classification
 from .schema_version import (
     PAYMENT_REVISION,
     LIVE_PAYMENT_REVISION,
@@ -1229,7 +1230,7 @@ def _coverage(objects, missing, *, classified=False):
         missing_bytes=missing_bytes,
     )
     if classified:
-        expected = [x for x in missing if x['classification'] == 'expected_deleted']
+        expected = [x for x in missing if x['classification'] in EXPECTED_MISSING]
         result.update(
             expected_missing_objects=len(expected),
             expected_missing_bytes=sum(x['size_bytes'] for x in expected),
@@ -1352,8 +1353,7 @@ def verify_local(directory, *, allow_incomplete=False):
                 ):
                     raise BackupError("backup_manifest_reference_mismatch")
                 if manifest['version'] == 3 and (
-                    item['classification']
-                    != ('expected_deleted' if key in evidence else 'unexpected_missing')
+                    not valid_classification(item, evidence)
                     or item['deletion_evidence'] != evidence.get(key, [])
                     or any(
                         p['completed_at'] > item['observed_at']

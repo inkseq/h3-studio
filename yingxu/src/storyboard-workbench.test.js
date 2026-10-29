@@ -52,7 +52,7 @@ test('actual workbench renders its initial unread state without generation or de
   assert.doesNotMatch(html, />Delete<|>Move to trash<|workbench\./);
 });
 
-test('saved controls stay visible while the model behind a recipe stays admin-only', () => {
+test('people see their own choices; the model and engine settings stay admin-only', () => {
   const html = renderToStaticMarkup(
     React.createElement(compiled.exports.RecipePreview, {
       take: {
@@ -61,15 +61,15 @@ test('saved controls stay visible while the model behind a recipe stays admin-on
           deployment_profile_id: 'retired-profile',
           model_id: 'OriginalModel',
           prompt: 'Original prompt',
-          controls: { historical_strength: 0.73 },
+          controls: { historical_strength: 0.73, duration: 5, steps: 5, sampler_name: 'euler' },
           inputs: {},
         },
       },
       state: { capabilities: { recipes: [], deployment_profiles: [] }, materials: [] },
     }),
   );
-  assert.doesNotMatch(html, /OriginalModel|retired-profile/);
-  assert.match(html, /historical_strength/);
-  assert.match(html, /0.73/);
+  // Trade secret (owner 2026-10-29): no model, profile or engine setting for people.
+  assert.doesNotMatch(html, /OriginalModel|retired-profile|historical_strength|steps|euler/);
+  assert.match(html, /duration/);
   assert.match(html, /Original prompt/);
 });

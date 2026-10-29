@@ -102,6 +102,25 @@ class TracingTests(unittest.TestCase):
                 result = 42
         self.assertEqual(result, 42)
 
+    def test_usage_splits_cache_hits_without_double_counting(self):
+        self.assertEqual(
+            llm_tracing.usage(1000, 50, 800),
+            {"input": 200, "output": 50, "cache_read_input_tokens": 800},
+        )
+        self.assertEqual(
+            llm_tracing.usage(10, 5),
+            {"input": 10, "output": 5, "cache_read_input_tokens": 0},
+        )
+        # Missing or inconsistent provider counts are kept as reported.
+        self.assertEqual(
+            llm_tracing.usage(None, 5, 0), {"output": 5, "cache_read_input_tokens": 0}
+        )
+        self.assertEqual(
+            llm_tracing.usage(10, 5, 20),
+            {"input": 10, "output": 5, "cache_read_input_tokens": 20},
+        )
+        self.assertIsNone(llm_tracing.usage(None, None, None))
+
     def test_people_are_hashed_and_text_is_bounded(self):
         self.assertEqual(llm_tracing.person("qa-user"), llm_tracing.person("qa-user"))
         self.assertNotIn("qa-user", llm_tracing.person("qa-user"))

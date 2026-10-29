@@ -80,7 +80,7 @@ def protected_directory(path):
                 'alert_directory_unprotected')
 
 
-def read_protected_bytes(path, *, missing=False, private=True):
+def read_protected_bytes(path, *, missing=False, private=True, max_bytes=MAX_BYTES):
     path = Path(path)
     protected_directory(path.parent)
     try:
@@ -93,15 +93,30 @@ def read_protected_bytes(path, *, missing=False, private=True):
         info = os.fstat(stream.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
                 and not info.st_mode & (0o077 if private else 0o022)
-                and info.st_size <= MAX_BYTES, 'alert_file_unprotected')
-        raw = stream.read(MAX_BYTES + 1)
-        require(len(raw) <= MAX_BYTES, 'alert_file_too_large')
+                and info.st_size <= max_bytes, 'alert_file_unprotected')
+        raw = stream.read(max_bytes + 1)
+        require(len(raw) <= max_bytes, 'alert_file_too_large')
     return raw
 
 
 def read_protected(path, *, missing=False):
     raw = read_protected_bytes(path, missing=missing)
     return None if raw is None else json.loads(raw)
+
+
+def read_transport_manifest(operation):
+    # Transport owns this read-only copy (UID10001), behind a root-only parent.
+    # The caller binds these bytes to the original root receipt before use.
+    protected_directory(operation)
+    fd = os.open(operation / 'snapshot' / 'manifest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+            and info.st_uid in {0, 10001} and not info.st_mode & 0o022
+            and info.st_size <= 16 * MAX_BYTES, 'alert_manifest_unprotected')
+        raw = stream.read(16 * MAX_BYTES + 1)
+        require(len(raw) <= 16 * MAX_BYTES, 'alert_manifest_too_large')
+        return raw
 
 
 def atomic(path, value):
@@ -260,8 +275,38 @@ def oneshot_failed(unit, *, runner=subprocess.run):
     return None
 
 
-def backup_copy_missing(*, now, root=BACKUP_STATE):
-    """Check at most two daily receipts, not media or S3. None means unobservable.
+def backup_coverage_loss(completed, receipt):
+    """Classify only the hash-bound coverage; legacy unclassified misses alert."""
+    version = completed['version']
+    if version == 1:
+        require('coverage' not in completed and 'coverage' not in receipt, 'alert_backup_coverage_invalid')
+        return False  # v1 only allowed complete media copies.
+    coverage = completed.get('coverage')
+    fields = {'status', 'referenced_objects', 'available_objects', 'missing_objects',
+        'referenced_bytes', 'available_bytes', 'missing_bytes'}
+    if version == 3:
+        fields |= {'expected_missing_objects', 'expected_missing_bytes',
+            'unexpected_missing_objects', 'unexpected_missing_bytes', 'loss_alert_required'}
+    require(type(coverage) is dict and set(coverage) == fields and encode(coverage) == encode(receipt.get('coverage'))
+        and all(type(coverage[key]) is int and coverage[key] >= 0
+            for key in fields - {'status', 'loss_alert_required'}), 'alert_backup_coverage_invalid')
+    require(coverage['status'] == ('incomplete' if coverage['missing_objects'] else 'complete')
+        and (coverage['missing_objects'] == 0) == (coverage['missing_bytes'] == 0)
+        and all(coverage['referenced_' + suffix] == coverage['available_' + suffix]
+            + coverage['missing_' + suffix] for suffix in ('objects', 'bytes')), 'alert_backup_coverage_invalid')
+    if version == 2:
+        return coverage['missing_objects'] > 0
+    require(type(coverage['loss_alert_required']) is bool
+        and coverage['loss_alert_required'] == (coverage['unexpected_missing_objects'] > 0)
+        and all(coverage['missing_' + suffix] == coverage['expected_missing_' + suffix]
+            + coverage['unexpected_missing_' + suffix] for suffix in ('objects', 'bytes'))
+        and all((coverage[kind + '_objects'] == 0) == (coverage[kind + '_bytes'] == 0)
+            for kind in ('expected_missing', 'unexpected_missing')), 'alert_backup_coverage_invalid')
+    return coverage['loss_alert_required']
+
+
+def backup_copy_observation(*, now, root=BACKUP_STATE):
+    """Check at most two receipts, not media/S3; None fields mean unobservable.
 
     Root-pinned completion plus receipt hash is copy evidence, never restore proof.
     Before today's deadline, yesterday is still the most recent due copy.
@@ -296,17 +341,36 @@ def backup_copy_missing(*, now, root=BACKUP_STATE):
                 and 1 <= len(value['completion_version_id']) <= 1024
                 and receipt.get('completion_version_id') == value['completion_version_id'],
                 'alert_backup_receipt_invalid')
-            return False
-        return True
-    except (OSError, ValueError, TypeError, OverflowError):
-        return None
+            loss = backup_coverage_loss(value, receipt)
+            if value['version'] in (2, 3):
+                # Apply today's policy to the hash-bound manifest, not live media.
+                try:
+                    from backup_loss_policy import original_loss
+                except ImportError:
+                    from studio_platform.backup_loss_policy import original_loss
+                manifest_raw = read_transport_manifest(operation)
+                require(hashlib.sha256(manifest_raw).hexdigest() == receipt.get('snapshot_manifest_sha256'),
+                    'alert_backup_manifest_changed')
+                manifest = json.loads(manifest_raw)
+                require(encode(manifest.get('coverage')) == encode(value['coverage']),
+                    'alert_backup_manifest_coverage_invalid')
+                loss = original_loss(manifest)
+            return {'missing': False, 'loss': loss}
+        return {'missing': True, 'loss': None}
+    except (OSError, ValueError, TypeError, OverflowError, KeyError):
+        return {'missing': None, 'loss': None}
+
+
+def backup_copy_missing(*, now, root=BACKUP_STATE):
+    return backup_copy_observation(now=now, root=root)['missing']
 
 
 def backup_observation(*, now, runner=subprocess.run):
     failed = oneshot_failed('inkseq-business-backup.service', runner=runner)
-    missing = backup_copy_missing(now=now)
+    observed = backup_copy_observation(now=now)
+    missing = observed['missing']
     return {'business_backup_failed': failed, 'business_backup_missing': missing,
-        'business_backup_unobservable': missing is None}
+        'business_backup_unobservable': missing is None, 'business_backup_loss': observed['loss']}
 
 
 def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_window_seconds=300):
@@ -380,7 +444,7 @@ def notification(value, environment):
     # The core evaluator owns this finite code list. Keep a second boundary at SNS.
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
             'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained', 'host_disk_80', 'host_disk_90',
-            'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed',
+            'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed', 'business_backup_loss',
             'payment_fulfillment_stalled', 'payment_processing_stalled', 'payment_failed',
             'payment_refunded', 'payment_disputed', 'payment_monitor_unavailable',
             'payment_webhook_signature_failed', 'payment_webhook_receipt_failed',

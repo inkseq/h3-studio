@@ -458,6 +458,43 @@ def _reason(error):
     )
 
 
+LADDER_STEP_SECONDS = 180
+LADDER_STEP_FRACTION = 0.15
+
+
+def ladder_price(service, profile, job_id):
+    """Requested hourly price for a waiting job, or None to keep the profile price.
+
+    A fixed cap starved the first paid production job while 5090 offers sat at
+    0.77-1.0 USD/h (h3-studio#798 B13). Each 3 minutes a job waits adds 15% of
+    the profile price, never above the lowest of the profile price ceiling, the
+    admin mode ceiling and the admin hourly maximum. Read-only; it only shapes
+    the preview body that the original guarded start path validates again.
+    """
+    from .operator_prices import OperatorPrices, mode_price_ceiling
+    from .repository import jobs
+
+    with service.repo.engine.connect() as connection:
+        created = connection.execute(
+            select(jobs.c.created_at).where(jobs.c.id == job_id)
+        ).scalar()
+        price, _, _ = OperatorPrices(service.repo, service.settings).read(
+            connection, profile
+        )
+        limits = service._admin_limits(connection)
+    base, ceiling = price["max_price_microusd"], price["price_ceiling_microusd"]
+    caps = [ceiling, limits["value"]["max_hourly_price_microusd"]]
+    if limits["adopted"] or service.policy.get("demand_start"):
+        caps.append(mode_price_ceiling(profile, limits))
+    if not all(type(v) is int and v > 0 for v in [base, *caps]) or type(
+        created
+    ) not in (int, float):
+        return None
+    steps = max(0, int((service.repo.clock() - created) // LADDER_STEP_SECONDS))
+    target = min(int(base * (1 + LADDER_STEP_FRACTION * steps)), *caps)
+    return target if target > base else None
+
+
 def start_once(service):
     """At most one original allocation; unknown calls keep their frozen input."""
     result, claim = _claim(service)
@@ -478,6 +515,9 @@ def start_once(service):
             task = service.policy['demand_start'].get('test_task_id')
             if task is not None:
                 body['test_task_id'] = task
+            raised = ladder_price(service, profile, job_id)
+            if raised is not None:
+                body['max_price_microusd'] = raised
             preview = service._preview_for_owner(
                 profile['owner_id'], body, demand_job_id=job_id
             )

@@ -34,12 +34,27 @@ class BackupObservationTests(unittest.TestCase):
         raise FileNotFoundError
 
     def completed(self, day):
+        coverage = dict(
+            status='complete',
+            referenced_objects=1,
+            available_objects=1,
+            missing_objects=0,
+            referenced_bytes=100,
+            available_bytes=100,
+            missing_bytes=0,
+            expected_missing_objects=0,
+            expected_missing_bytes=0,
+            unexpected_missing_objects=0,
+            unexpected_missing_bytes=0,
+            loss_alert_required=False,
+        )
         receipt = dict(
             format='sixnine-private-backup-copy-v3',
             phase='copied_not_restored',
             completion_sha256='a' * 64,
             completion_version_id='synthetic-version',
             restore_verified=False,
+            coverage=coverage,
         )
         raw = json.dumps(receipt).encode()
         done = dict(
@@ -49,6 +64,7 @@ class BackupObservationTests(unittest.TestCase):
             completion_sha256='a' * 64,
             completion_version_id='synthetic-version',
             restore_verified=False,
+            coverage=coverage,
         )
         self.files[self.root / day / 'receipt.json'] = raw
         self.files[self.root / day / 'completed.json'] = json.dumps(done).encode()
@@ -112,7 +128,11 @@ class BackupObservationTests(unittest.TestCase):
                 ),
             )
         )
-        with patch.object(monitor, 'backup_copy_missing', return_value=None):
+        with patch.object(
+            monitor,
+            'backup_copy_observation',
+            return_value={'missing': None, 'loss': None},
+        ):
             result = monitor.backup_observation(now=1, runner=runner)
         self.assertEqual(
             result,
@@ -120,6 +140,7 @@ class BackupObservationTests(unittest.TestCase):
                 business_backup_failed=True,
                 business_backup_missing=None,
                 business_backup_unobservable=True,
+                business_backup_loss=None,
             ),
         )
         self.assertEqual(runner.call_count, 1)
@@ -133,6 +154,7 @@ class BackupObservationTests(unittest.TestCase):
             'business_backup_failed',
             'business_backup_missing',
             'business_backup_unobservable',
+            'business_backup_loss',
         ):
             first = evaluate(
                 None, None, environment='production', now=1000, host={code: True}

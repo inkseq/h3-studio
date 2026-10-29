@@ -245,6 +245,9 @@ class QualityTierTests(unittest.TestCase):
         self.assertEqual(selected["deployment_profile_id"], STANDARD)
         self.assertEqual(frozen["tier"], "standard")
         self.assertEqual(selected["prompt"], body["prompt"])
+        # An admin who picks no model gets the same default, not the raw base model.
+        admin, _ = self.normalize(body, allow_internal=True)
+        self.assertEqual(admin["deployment_profile_id"], STANDARD)
         self.settings = replace(self.settings, default_deployment_profile_id=None)
         self.assertEqual(self.normalize(body, allow_internal=False), (body, None))
         self.assertEqual(

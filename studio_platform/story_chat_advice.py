@@ -52,17 +52,12 @@ def guard(guided, settings, project, actions, plan, proposal, *, enabled, lang):
         if (not selected or shot["id"] in selected)
         and read_draft(preview, shot["id"], capabilities=caps)[1]
     ]
+    # Only a proposal is a request to act. An offered chip that cannot work
+    # is just removed below; it never replaces the model's reply (#699).
     picture_refused = not enabled and bool(
-        (proposal and proposal.get("picture_card_ids"))
-        or any(PICTURE.search(chip) for chip in plan.get("chips", []))
+        proposal and proposal.get("picture_card_ids")
     )
-    generation_refused = bool(blocked) and bool(
-        selected
-        or any(
-            GENERATE.search(chip) and not PICTURE.search(chip)
-            for chip in plan.get("chips", [])
-        )
-    )
+    generation_refused = bool(blocked) and bool(selected)
     if picture_refused and proposal:
         proposal.pop("picture_card_ids", None)
     if generation_refused and proposal:
