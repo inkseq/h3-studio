@@ -68,6 +68,29 @@ def is_admin(principal):
     )
 
 
+# Creator-authored controls plus the custom canvas; tuning stays internal.
+PUBLIC_CONTROLS = frozenset(
+    {
+        "duration",
+        "seed",
+        "resolution",
+        "aspect_ratio",
+        "generate_audio",
+        "width",
+        "height",
+    }
+)
+
+
+def _progress(value):
+    """Stage and completed fraction; step counts reveal our sampling setup."""
+    result = {k: v for k, v in value.items() if k not in {"steps_done", "steps_total"}}
+    done, total = value.get("steps_done"), value.get("steps_total")
+    if type(done) is int and type(total) is int and total > 0:
+        result["fraction"] = round(min(max(done / total, 0), 1), 2)
+    return result
+
+
 def _pick(value, fields):
     return (
         {key: copy.deepcopy(item) for key, item in value.items() if key in fields}
@@ -172,9 +195,9 @@ def _identities(result, original):
 
 
 def controls(value):
-    # DTO controls already passed the authoritative supported-control validator.
-    # Do not create a second key list that can lag behind newly supported fields.
-    return _managed(value)
+    # Creators only author these; steps, sampler, shift and other tuning are
+    # our configuration and stay internal (#798 B8b). New fields default hidden.
+    return _pick(_managed(value), PUBLIC_CONTROLS)
 
 
 def _reference(value):
@@ -410,6 +433,8 @@ def job(value, principal=None):
         )
     if isinstance(value.get("wait_diagnostic"), dict):
         result["wait_diagnostic"] = _managed(value["wait_diagnostic"])
+    if isinstance(value.get("progress"), dict):
+        result["progress"] = _progress(value["progress"])
     return result
 
 
@@ -459,7 +484,7 @@ def _support(value):
     result["controls"] = {
         key: _schema(item)
         for key, item in value.get("controls", {}).items()
-        if key != "script_window_prompts"
+        if key in PUBLIC_CONTROLS
     }
     result["reason_code"] = (
         "preflight_required" if value.get("enabled") else "quality_tier_unavailable"
