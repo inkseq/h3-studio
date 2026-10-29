@@ -7,7 +7,7 @@ Pattern after runpod-workers/worker-comfyui (background server + HTTP queue); re
 PUT URL rather than worker-held bucket credentials.
 
 Input:  {video_url, res: "1080"|"2k", steps, sigma, audio: "draft"|"silence", unet: "int8"|"fp8",
-         prompt?, output_put_url?}
+         attention?: "sdpa"|"sage"|"sage16" (default sage at 1080, sdpa at 2K), prompt?, output_put_url?}
 Output: {seconds, bytes, uploaded: true} after a PUT to output_put_url, otherwise {seconds, bytes, video_base64}.
 Tiers (owner 2026-10-29): standard = steps 2, sigma 0 (workflow 0.7 grid); enhanced = steps 3, sigma 0.8.
 
@@ -32,6 +32,7 @@ MODEL_DIRS = (
     'latent_upscale_models',
 )
 URL = 'http://127.0.0.1:8188'
+ATTENTION = ('sdpa', 'sage', 'sage16')
 WF = (
     COMFY
     + '/custom_nodes/ComfyUI-Open-H3-Regenerate/example_workflows/Open-H3 Regenerate 2K - Draft Video.json'
@@ -91,7 +92,6 @@ def start_comfy():
             '127.0.0.1',
             '--port',
             '8188',
-            '--use-sage-attention',
             '--disable-auto-launch',
         ],
         cwd=COMFY,
@@ -146,8 +146,13 @@ def convert(info):
     return api
 
 
-def job_prompt(base, tag, video, res, sigma, audio, steps, unet, text):
+def job_prompt(base, tag, video, res, sigma, audio, steps, unet, text, attn):
     p = json.loads(json.dumps(base))
+    # Per-job attention for the diffusion model (inkseq_attention.py); everything else runs on sdpa.
+    p['inkseq_attention'] = {
+        'class_type': 'InkseqAttention',
+        'inputs': {'model': ['3', 0], 'mode': attn},
+    }
     p['2']['inputs']['unet_name'] = UNET[unet]
     p['3']['inputs'].update(
         lora_name='open_h3_regenerate_2k_lora.safetensors',
@@ -156,7 +161,7 @@ def job_prompt(base, tag, video, res, sigma, audio, steps, unet, text):
     )
     # Node 4 is the sparse Sol attention patch: dense attention only (owner 2026-10-29).
     p.pop('4')
-    p['22']['inputs']['model'] = ['3', 0]
+    p['22']['inputs']['model'] = ['inkseq_attention', 0]
     p['6']['inputs']['clip_name'] = 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'
     p['7']['inputs']['vae_name'] = 'minimax_h3_video_vae_fp16.safetensors'
     p['8']['inputs']['vae_name'] = 'minimax_h3_audio_vae_fp32.safetensors'
@@ -205,12 +210,16 @@ def validate(job):
     text = job.get('prompt') or DEFAULT_PROMPT
     if not isinstance(text, str) or len(text) > 8000:
         raise ValueError('prompt must be a string up to 8000 characters')
-    return url, res, float(sigma), audio, steps, unet, text
+    # sage2's fp8-PV kernel corrupts 2K frames ~94-118 on sm89/sm90, so 2K defaults to sdpa.
+    attn = job.get('attention', 'sdpa' if res == '2k' else 'sage')
+    if attn not in ATTENTION:
+        raise ValueError('attention must be sdpa|sage|sage16')
+    return url, res, float(sigma), audio, steps, unet, text, attn
 
 
 def handler(event):
     global _base
-    url, res, sigma, audio, steps, unet, text = validate(event.get('input') or {})
+    url, res, sigma, audio, steps, unet, text, attn = validate(event.get('input') or {})
     if _base is None:
         _base = convert(start_comfy())
     tag = uuid.uuid4().hex
@@ -226,7 +235,7 @@ def handler(event):
             '/prompt',
             {
                 'prompt': job_prompt(
-                    _base, tag, video, res, sigma, audio, steps, unet, text
+                    _base, tag, video, res, sigma, audio, steps, unet, text, attn
                 )
             },
         )['prompt_id']

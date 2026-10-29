@@ -168,6 +168,7 @@ inventory.json
 !deploy/dstack/Dockerfile.wangp-cu130
 !deploy/enhance/Dockerfile
 !deploy/enhance/handler.py
+!deploy/enhance/inkseq_attention.py
 !deploy/wangp/profiles/h3-unpruned33b-int8-qwenbf16-vaefp16-sdpa-p3-144gib-fl-r2-v3.json
 !studio_platform/inference/comfy.py
 !docs/CURRENT-BASELINE.md

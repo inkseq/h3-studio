@@ -31,6 +31,7 @@ RUN pip install "triton==3.6.0" runpod==1.12.0 \
 ENV LD_LIBRARY_PATH=/opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib
 RUN echo /opt/venv/lib/python3.12/site-packages/nvidia/cu13/lib > /etc/ld.so.conf.d/zz-torch-cu13.conf && ldconfig
 COPY handler.py /opt/enhance/handler.py
+COPY inkseq_attention.py /opt/ComfyUI/custom_nodes/inkseq_attention/__init__.py
 RUN python -c "import torch, triton, sageattention, runpod, importlib.metadata as m; \
 assert torch.__version__ == '2.10.0+cu130' and torch.version.cuda == '13.0', torch.__version__; \
 assert triton.__version__ == '3.6.0' and m.version('sageattention').startswith('2.2.0'); print('ok')" \
@@ -38,6 +39,6 @@ assert triton.__version__ == '3.6.0' and m.version('sageattention').startswith('
     && git -C /opt/ComfyUI/custom_nodes/ComfyUI-Open-H3-Regenerate rev-parse HEAD | grep -q "^$REGENERATE_COMMIT" \
     && test -f "/opt/ComfyUI/custom_nodes/ComfyUI-Open-H3-Regenerate/example_workflows/Open-H3 Regenerate 2K - Draft Video.json" \
     && ldconfig -p | grep -q "libnvrtc-builtins.so.13.0 .*nvidia/cu13/lib" \
-    && python -m py_compile /opt/enhance/handler.py
+    && python -m py_compile /opt/enhance/handler.py /opt/ComfyUI/custom_nodes/inkseq_attention/__init__.py
 WORKDIR /opt/enhance
 CMD ["python", "-u", "handler.py"]
