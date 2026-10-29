@@ -10,7 +10,9 @@ next to `alert_monitor.py` in `/opt/inkseq-alert-monitor-v1`.
 
 Install reviewed exact source bytes and units through the protected host update
 procedure. This independent root-owned directory contains exactly
-`alert_monitor.py`, `alert_conditions.py`, and `deployment_target.py`. Copy
+`alert_monitor.py`, `alert_conditions.py`, `backup_loss_policy.py`, and `deployment_target.py`. Install
+`backup_loss_policy.py` byte-for-byte from `studio_platform/backup_loss_policy.py`;
+it is the shared stdlib-only policy. Copy
 `deployment_target.py` byte-for-byte from the accepted release revision; record
 and compare its SHA-256 with the approved host helper before installation. It
 uses the existing protected host target record and contains no credentials.

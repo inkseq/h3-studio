@@ -80,7 +80,7 @@ def protected_directory(path):
                 'alert_directory_unprotected')
 
 
-def read_protected_bytes(path, *, missing=False, private=True):
+def read_protected_bytes(path, *, missing=False, private=True, max_bytes=MAX_BYTES):
     path = Path(path)
     protected_directory(path.parent)
     try:
@@ -93,9 +93,9 @@ def read_protected_bytes(path, *, missing=False, private=True):
         info = os.fstat(stream.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
                 and not info.st_mode & (0o077 if private else 0o022)
-                and info.st_size <= MAX_BYTES, 'alert_file_unprotected')
-        raw = stream.read(MAX_BYTES + 1)
-        require(len(raw) <= MAX_BYTES, 'alert_file_too_large')
+                and info.st_size <= max_bytes, 'alert_file_unprotected')
+        raw = stream.read(max_bytes + 1)
+        require(len(raw) <= max_bytes, 'alert_file_too_large')
     return raw
 
 
@@ -326,9 +326,24 @@ def backup_copy_observation(*, now, root=BACKUP_STATE):
                 and 1 <= len(value['completion_version_id']) <= 1024
                 and receipt.get('completion_version_id') == value['completion_version_id'],
                 'alert_backup_receipt_invalid')
-            return {'missing': False, 'loss': backup_coverage_loss(value, receipt)}
+            loss = backup_coverage_loss(value, receipt)
+            if value['version'] in (2, 3):
+                # Apply today's policy to the hash-bound manifest, not live media.
+                try:
+                    from backup_loss_policy import original_loss
+                except ImportError:
+                    from studio_platform.backup_loss_policy import original_loss
+                manifest_raw = read_protected_bytes(operation / 'snapshot' / 'manifest.json',
+                    private=False, max_bytes=16 * MAX_BYTES)
+                require(hashlib.sha256(manifest_raw).hexdigest() == receipt.get('snapshot_manifest_sha256'),
+                    'alert_backup_manifest_changed')
+                manifest = json.loads(manifest_raw)
+                require(encode(manifest.get('coverage')) == encode(value['coverage']),
+                    'alert_backup_manifest_coverage_invalid')
+                loss = original_loss(manifest)
+            return {'missing': False, 'loss': loss}
         return {'missing': True, 'loss': None}
-    except (OSError, ValueError, TypeError, OverflowError):
+    except (OSError, ValueError, TypeError, OverflowError, KeyError):
         return {'missing': None, 'loss': None}
 
 

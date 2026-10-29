@@ -3,6 +3,7 @@
 import time
 
 from .storage import LocalObjectStore
+from .backup_loss_policy import classification
 
 
 def missing_object(item, store, evidence):
@@ -34,9 +35,7 @@ def missing_object(item, store, evidence):
     )
     if evidence is not None:
         result.update(
-            classification='expected_deleted'
-            if item['key'] in evidence
-            else 'unexpected_missing',
+            classification=classification(item, evidence),
             deletion_evidence=evidence.get(item['key'], []),
         )
     return result

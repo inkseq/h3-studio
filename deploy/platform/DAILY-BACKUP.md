@@ -144,8 +144,12 @@ no verified classification and remains actionable. Expected deletion does not
 make `coverage.status` complete or permit claiming full byte recovery.
 
 The host alert monitor reads this coverage only after validating the original
-root completion and receipt hash. `business_backup_loss` fires for v3 unexpected
-loss or older v2 unclassified misses; expected-only v3 deletions do not fire it.
+root completion, receipt and snapshot-manifest hash. `business_backup_loss`
+fires for missing originals, including uploads and generated videos. Regenerable
+model/display/preview/thumb copies are expected missing coverage and do not page;
+roles, never filenames, determine the category. Shared original references still
+page. Older receipts remain immutable and use the current original-only alert
+policy without a historical census or media repair. Copies remain incomplete.
 Invalid/mismatched coverage remains unobservable and cannot resolve an active
 loss incident. Delivery uses the existing durable SNS outbox and deduplication;
 no media keys or customer content enter the notification. A merged source change
