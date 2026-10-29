@@ -1,5 +1,6 @@
 import { shotSegments } from './shot-segments.js';
 import { translate } from './i18n/locale.js';
+import { modelsVisible, profileTier } from './model-visibility.js';
 /* Layout A projection of the existing v4 document. No second project store. */
 import { children } from './store.js';
 import { effectiveLimits, effectiveControlSchema, roleSupported } from './quick-chat-model.js';
@@ -275,7 +276,9 @@ export function storyboardView(
     models: Object.fromEntries(
       ['draft', 'final'].map((q) => [
         q,
-        storyboardProfile(capabilities, q, 'fl')?.label || '服务能力尚未读取',
+        modelsVisible()
+          ? storyboardProfile(capabilities, q, 'fl')?.label || '服务能力尚未读取'
+          : '',
       ]),
     ),
   };
@@ -661,7 +664,13 @@ export function expandStoryboard(
     mode: shot.mode,
     ...inputFlags(support, inputMode),
     kind: generationKind(shot),
-    machine: chosen?.label || t('projection.noModel'),
+    // Trade secret (owner 2026-10-29): people see the quality tier, never the model,
+    // GPU, precision or steps behind it. Admins keep the internal label.
+    machine: chosen
+      ? modelsVisible()
+        ? chosen.label
+        : t('credits.tier.' + profileTier(chosen))
+      : t('projection.noModel'),
     sec: shot.duration,
     res: shotResolution(shot, schema, t),
     parts: ctx.parts,

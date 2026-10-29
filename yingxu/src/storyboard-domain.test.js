@@ -182,7 +182,10 @@ test('generation preserves a qualified exact profile even when another profile b
   shotOf(p).data.h3 = { deploymentProfileId: old.id };
   const shot = view(p, cap).shots[0];
   assert.equal(storyboardGenerationProfile(cap, shot).id, old.id);
-  assert.equal(expandStoryboard(shot, view(p, cap)).machine, old.label);
+  // People see the tier, never the internal profile label (trade secret, owner 2026-10-29).
+  const machine = expandStoryboard(shot, view(p, cap)).machine;
+  assert.notEqual(machine, old.label);
+  assert.doesNotMatch(machine, /Pruned|INT8|RTX|steps/i);
   shot.entity.data.h3.deploymentProfileId = '';
   assert.equal(storyboardGenerationProfile(cap, shot).id, 'draft');
   shot.entity.data.h3.deploymentProfileId = 'retired';
