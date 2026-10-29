@@ -1,4 +1,4 @@
-"""Explicit staging fallback admission using original job and rental ledgers.
+"""Explicit Modal fallback admission using original job and rental ledgers.
 
 No alternate queue, job mutation or provider retry. A new host is bound to one
 original demand observation; an uncertain/terminated host is never re-created.
@@ -13,7 +13,7 @@ from sqlalchemy import insert, select
 
 from .control import WorkerControl
 from .dstack_test_budget import ACCOUNT, PROJECTS, finite, task_guard
-from .modal_budget import bind_test_guard, require
+from .modal_budget import bind_test_guard, production_guard, require
 from .modal_capacity import BACKEND, admission, precreate
 from .modal_runtime import PROFILE
 from .repository import (
@@ -107,9 +107,29 @@ def available_modal(connection, job, now, selections):
 
 
 class ModalAdmission:
-    def __init__(self, service, hosts, *, environment=None, enabled=False):
+    def __init__(
+        self,
+        service,
+        hosts,
+        *,
+        environment=None,
+        enabled=False,
+        budget_account_id=None,
+        start_after_seconds=0,
+    ):
         self.service, self.hosts, self.repo = service, hosts, service.repo
-        self.enabled = enabled is True and environment == 'staging' and hosts.enabled
+        # Backstop delay: a Modal host starts only for work queued this long
+        # (owner: Vast first, Modal covers a slow or failed start; #688).
+        self.start_after_seconds = start_after_seconds
+        self.production = environment == 'production'
+        self.budget_account_id = budget_account_id
+        self.enabled = (
+            enabled is True
+            and environment in {'staging', 'production'}
+            and environment == hosts.environment
+            and hosts.enabled
+            and (not self.production or isinstance(budget_account_id, str))
+        )
         hosts.capacity_check = lambda c, intent: precreate(service, hosts, c, intent)
 
     def _reserve(self, c, job, profile, now):
@@ -129,19 +149,30 @@ class ModalAdmission:
         manifest = engine_manifest(PROFILE, mode)
         require(execution.get('engine_manifest_digest') == manifest.digest)
         require(request.get('recipe_id') == manifest.document['generation_recipe_id'])
-        require(
-            ACCOUNT in profile['budget_account_ids']
-            and profile['project_id'] in PROJECTS
-        )
-        snapshot, usage = admission(self.service, c, profile, self.hosts.spec)
         limits = self.service._admin_limits(c)['value']
-        policy = self.service.policy
-        guard = task_guard(
-            policy['test_gpu_guard'],
-            policy['demand_start']['test_task_id'],
-            limit=limits['test_task_limit_microusd'],
-            max_runtime=limits['max_runtime_seconds'],
-        )
+        if self.production:
+            # A customer job: funded by the production account its profile
+            # already names, never the staging test ledger.
+            require(
+                self.budget_account_id in profile['budget_account_ids']
+                and profile['project_id'] not in PROJECTS
+            )
+            guard = production_guard(
+                self.budget_account_id,
+                max_runtime=min(limits['max_runtime_seconds'], 7200),
+            )
+        else:
+            require(
+                ACCOUNT in profile['budget_account_ids']
+                and profile['project_id'] in PROJECTS
+            )
+            policy = self.service.policy
+            guard = task_guard(
+                policy['test_gpu_guard'],
+                policy['demand_start']['test_task_id'],
+                limit=limits['test_task_limit_microusd'],
+                max_runtime=limits['max_runtime_seconds'],
+            )
         duration = min(guard['max_runtime_seconds'], 7200)
         expected = execution.get('expected_runtime_s')
         require(
@@ -153,6 +184,14 @@ class ModalAdmission:
             self.hosts.spec.max_hourly_microusd
             * (duration + guard['stop_margin_seconds'])
             / 3600
+        )
+        snapshot, usage = admission(
+            self.service,
+            c,
+            profile,
+            self.hosts.spec,
+            production=self.production,
+            additional_microusd=cost if self.production else 0,
         )
         intent = self.repo.reserve_instance_intent(
             Scope(
@@ -244,6 +283,8 @@ class ModalAdmission:
             spare = available_modal(c, job, now, selections) - consumed
             if spare:
                 consumed.add(sorted(spare)[0])
+                continue
+            if now - job['created_at'] < self.start_after_seconds:
                 continue
             if len(active) >= self.hosts.spec.max_containers:
                 return {

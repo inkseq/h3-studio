@@ -72,8 +72,15 @@ class HostSpec:
             )
         ):
             raise ValueError('modal_staging_limits_invalid')
-        if self.app_name != 'inkseq-staging-worker':
+        if self.app_name not in APP_NAMES.values():
             raise ValueError('modal_staging_app_required')
+
+
+# One Modal app per environment; the controller pins its own (#688).
+APP_NAMES = {
+    'staging': 'inkseq-staging-worker',
+    'production': 'inkseq-production-worker',
+}
 
 
 class ModalHosts:
@@ -86,7 +93,12 @@ class ModalHosts:
 
     def __init__(self, repo, client, spec, *, environment=None, enabled=False):
         self.repo, self.client, self.spec = repo, client, spec
-        self.enabled = enabled is True and environment == 'staging'
+        self.environment = environment
+        self.enabled = (
+            enabled is True
+            and environment in APP_NAMES
+            and spec.app_name == APP_NAMES[environment]
+        )
         self.capacity_check = None
 
     def _intent(self, c, identity):
@@ -152,11 +164,18 @@ class ModalHosts:
             )
         ):
             raise Conflict('modal_funding_unconfirmed')
+        # Admission binds a staging test guard or a production guard in the
+        # reservation transaction; re-check either before the paid create.
         from .dstack_test_budget import ACCOUNT
+        from .modal_budget import OPERATION, enforce
 
-        if any(row['account_id'] == ACCOUNT for row in rows):
-            from .modal_budget import enforce
-
+        bound = c.execute(
+            select(scaler_receipts.c.id).where(
+                scaler_receipts.c.intent_id == intent['id'],
+                scaler_receipts.c.operation == OPERATION,
+            )
+        ).first()
+        if bound is not None or any(row['account_id'] == ACCOUNT for row in rows):
             enforce(c, intent['id'], asdict(self.spec), self.repo.clock())
         for row in rows:
             account = self.repo._locked(
