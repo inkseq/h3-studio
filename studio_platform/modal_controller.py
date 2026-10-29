@@ -3,7 +3,6 @@
 from dataclasses import asdict
 import json
 from pathlib import Path
-import subprocess
 
 from sqlalchemy import select
 
@@ -93,6 +92,10 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
         if 'credentials_file' in value
         else client_factory(spec)
     )
+    # Sandbox.exec accepts only Modal's StreamType; a raw subprocess.DEVNULL
+    # makes every launch install fail ("Unsupported StreamType for stderr").
+    from modal.stream_type import StreamType
+
     hosts = ModalHosts(
         service.repo, client, spec, environment='staging', enabled=value['enabled']
     )
@@ -100,7 +103,7 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
         service.repo,
         Path(work_dir) / 'modal-bindings',
         connect,
-        stderr_sink=subprocess.DEVNULL,
+        stderr_sink=StreamType.DEVNULL,
     )
     return ModalExtension(service, hosts, bindings, enabled=value['enabled'])
 

@@ -60,6 +60,15 @@ class ModalControllerTests(ModalBudgetCase):
         self.assertFalse(extension.admission.enabled)
         self.assertEqual(self.client.created, [])
 
+    def test_sandbox_exec_gets_modal_stream_type(self):
+        from modal.stream_type import StreamType
+
+        self.reserve()
+        self.config(False)
+        self.factory.return_value = (self.client, Mock())
+        extension = load_extension(self.service, self.root, client_factory=self.factory)
+        self.assertIs(extension.bindings.stderr_sink, StreamType.DEVNULL)
+
     def test_fallback_runs_before_original_vast_planner_in_same_tick(self):
         order = []
         extension = ModalExtension(self.service, self.hosts, Mock(), enabled=True)
