@@ -85,6 +85,50 @@ class GenerationStatsTests(LedgerCase):
         self.assertNotIn("PRIVATE", str(result))
         self.assertEqual(result["recent"][0]["wait_seconds"], 30.0)
 
+    def test_overview_counts_outcomes_waits_cost_and_hands_on_starts(self):
+        # #819: the admin top line.
+        from studio_platform.operator_capacity import operator_commands
+
+        self.now = 1_800_000_000.0
+        now = self.repo.clock()
+        clip = compiled(97, 24, 480, 0, 0, "fl")
+        done = self.finished(clip, started=now - 800, finished=now - 500)
+        broken = self.finished(clip, started=now - 700, finished=now - 400)
+        with self.repo.engine.begin() as connection:
+            connection.execute(
+                update(jobs).where(jobs.c.id == done["id"]).values(status="succeeded")
+            )
+            connection.execute(
+                update(jobs).where(jobs.c.id == broken["id"]).values(status="failed")
+            )
+            for actor, kind in (
+                ("dstack:owner", "dstack_start"),
+                ("dstack:owner", "dstack_stop"),
+                ("dstack-demand:queue", "dstack_start"),
+                ("dstack:owner", "dstack_group_create"),
+            ):
+                connection.execute(
+                    insert(operator_commands).values(
+                        id=str(uuid.uuid4()),
+                        actor=actor,
+                        idempotency_key=str(uuid.uuid4()),
+                        request_hash="a" * 64,
+                        kind=kind,
+                        state="accepted",
+                        payload={},
+                        created_at=now - 100,
+                        updated_at=now - 100,
+                    )
+                )
+        top = generation_stats(self.repo, self.scope.tenant_id, days=14, now=now)[
+            "overview"
+        ]
+        self.assertEqual((top["succeeded"], top["failed"]), (1, 1))
+        self.assertEqual(top["success_rate"], 0.5)
+        self.assertEqual(top["wait_seconds"]["median"], 30.0)
+        self.assertEqual(top["median_cost_microusd"], 750000)
+        self.assertEqual(top["manual_operations"], 2)
+
     def test_content_and_worker_identity_are_closed(self):
         self.assertEqual(content({"request": {"mode": "x"}})["mode"], "unknown")
         self.assertEqual(content(None), {"mode": "unknown"})
