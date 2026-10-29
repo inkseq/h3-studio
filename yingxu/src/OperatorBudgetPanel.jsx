@@ -287,11 +287,9 @@ function BudgetEditor({ row, busy, onSave }) {
     minimum = row.spent_microusd + row.reserved_microusd;
   const retired = row.limit_mode === 'settings' || row.legacy_projection_only === true;
   return (
+    // One compact row per account (owner 2026-10-29): name, usage, limit and save.
     <section className="budget-admin-row">
-      <h3>{budgetLabel(row, locale)}</h3>
-      <Disclosure summary={t('operatorPanel.accountIdentity')}>
-        <small>{row.id}</small>
-      </Disclosure>
+      <h3 title={row.id}>{budgetLabel(row, locale)}</h3>
       <BudgetAccounts budgets={[row]} compact untitled />
       <form
         onSubmit={async (event) => {
@@ -439,10 +437,12 @@ function PriceEditor({ row, busy, onPreview, onSave }) {
     </section>
   );
 }
-export function AdminBudgetPanel({ controller, state, busy }) {
+export function AdminBudgetPanel({ controller, state, busy, part = 'all', activeIds = null }) {
   const { t, locale } = useI18n();
   const [notice, setNotice] = useState(''),
     [reading, setReading] = useState(false);
+  const showAccounts = part !== 'prices',
+    showPrices = part !== 'budgets';
   const authorized = state.snapshot?.operator?.admin === true;
   async function read(after_id) {
     setReading(true);
@@ -483,67 +483,106 @@ export function AdminBudgetPanel({ controller, state, busy }) {
         </Button>
       </header>
       {notice && <p role="status">{notice}</p>}
-      {budgets ? (
-        <>
-          {budgets.budgets.map((row) => (
-            <BudgetEditor
+      {showAccounts &&
+        (budgets ? (
+          <>
+            {budgets.budgets.map((row) => (
+              <BudgetEditor
+                key={row.id}
+                row={row}
+                busy={busy || reading}
+                onSave={(row, limit) => save(() => controller.updateBudget(row, limit))}
+              />
+            ))}
+            <p>
+              {t(
+                budgets.next_after_id
+                  ? 'operatorPanel.accountsMore'
+                  : 'operatorPanel.accountsComplete',
+                { count: budgets.budgets.length },
+              )}
+            </p>
+            {budgets.next_after_id && (
+              <Button disabled={busy || reading} onClick={() => void read(budgets.next_after_id)}>
+                {t('operatorPanel.loadBudgetAccounts')}
+              </Button>
+            )}
+          </>
+        ) : (
+          <p role="status">{t('operator.copy19')}</p>
+        ))}
+      {showAccounts && (
+        <OperatorBillingPanel controller={controller} state={state} busy={busy || reading} />
+      )}
+      {showAccounts && (
+        <Disclosure className="budget-audits" summary={t('operator.copy22')}>
+          {audits?.events?.length ? (
+            <ul>
+              {audits.events.map((event) => (
+                <li key={event.id}>
+                  {event.actor?.owner_id || event.actor?.actor_id || t('operator.status107')} ·{' '}
+                  {time(event.created_at, locale)} · {event.account_id}
+                  <br />
+                  {money(event.old?.limit_microusd)} → {money(event.new?.limit_microusd)} ·{' '}
+                  {event.id}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p>{t('operator.copy23')}</p>
+          )}
+          {audits?.next_before && <p>{t('operator.copy24')}</p>}
+        </Disclosure>
+      )}
+      {showPrices && (
+        <PriceSection
+          prices={prices}
+          activeIds={activeIds}
+          busy={busy || reading}
+          controller={controller}
+          save={save}
+        />
+      )}
+    </section>
+  );
+}
+
+// Machine prices: only machine types that can run today unless retired ones are shown.
+function PriceSection({ prices, activeIds, busy, controller, save }) {
+  const { t, locale } = useI18n();
+  const [showRetired, setShowRetired] = useState(false);
+  return (
+    <>
+      <h3>{t('operator.copy20')}</h3>
+      {prices && activeIds && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={showRetired}
+            onChange={(event) => setShowRetired(event.target.checked)}
+          />
+          {t('operatorPanel.showRetired', {
+            count: prices.profiles.filter((row) => !activeIds.has(row.id)).length,
+          })}
+        </label>
+      )}
+      {prices ? (
+        prices.profiles
+          .filter((row) => showRetired || !activeIds || activeIds.has(row.id))
+          .map((row) => (
+            <PriceEditor
               key={row.id}
               row={row}
-              busy={busy || reading}
-              onSave={(row, limit) => save(() => controller.updateBudget(row, limit))}
+              busy={busy}
+              onPreview={(row, max, ceiling) => controller.previewPrice(row, max, ceiling)}
+              onSave={(row, max, ceiling, confirmation) =>
+                save(() => controller.updatePrice(row, max, ceiling, confirmation))
+              }
             />
-          ))}
-          <p>
-            {t(
-              budgets.next_after_id
-                ? 'operatorPanel.accountsMore'
-                : 'operatorPanel.accountsComplete',
-              { count: budgets.budgets.length },
-            )}
-          </p>
-          {budgets.next_after_id && (
-            <Button disabled={busy || reading} onClick={() => void read(budgets.next_after_id)}>
-              {t('operatorPanel.loadBudgetAccounts')}
-            </Button>
-          )}
-        </>
-      ) : (
-        <p role="status">{t('operator.copy19')}</p>
-      )}
-      <OperatorBillingPanel controller={controller} state={state} busy={busy || reading} />
-      <h3>{t('operator.copy20')}</h3>
-      {prices ? (
-        prices.profiles.map((row) => (
-          <PriceEditor
-            key={row.id}
-            row={row}
-            busy={busy || reading}
-            onPreview={(row, max, ceiling) => controller.previewPrice(row, max, ceiling)}
-            onSave={(row, max, ceiling, confirmation) =>
-              save(() => controller.updatePrice(row, max, ceiling, confirmation))
-            }
-          />
-        ))
+          ))
       ) : (
         <p>{t('operator.copy21')}</p>
       )}
-      <Disclosure className="budget-audits" summary={t('operator.copy22')}>
-        {audits?.events?.length ? (
-          <ul>
-            {audits.events.map((event) => (
-              <li key={event.id}>
-                {event.actor?.owner_id || event.actor?.actor_id || t('operator.status107')} ·{' '}
-                {time(event.created_at, locale)} · {event.account_id}
-                <br />
-                {money(event.old?.limit_microusd)} → {money(event.new?.limit_microusd)} · {event.id}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p>{t('operator.copy23')}</p>
-        )}
-        {audits?.next_before && <p>{t('operator.copy24')}</p>}
-      </Disclosure>
       <Disclosure className="budget-audits" summary={t('operator.copy25')}>
         {prices?.audits?.length ? (
           <ul>
@@ -565,6 +604,6 @@ export function AdminBudgetPanel({ controller, state, busy }) {
           <p>{t('operator.copy26')}</p>
         )}
       </Disclosure>
-    </section>
+    </>
   );
 }

@@ -275,3 +275,26 @@
   display: grid;
   gap: 4px;
 }
+
+/* Budgets and machine prices sit in one admin card (owner 2026-10-29): the console's own
+   panel frame, nested account cards and stat boxes are flattened into the card. */
+.ah-budget .operator-budget {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: var(--fs-sm);
+}
+.ah-budget .operator-budget h3 {
+  font-size: var(--fs-md);
+}
+.ah-budget .operator-budget > header h3 {
+  font-size: var(--fs-lg);
+}
+.ah-budget .budget-account,
+.ah-budget .budget-accounts {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+}

@@ -137,9 +137,37 @@
 .operator-budget.compact h3 {
   font-size: 13px;
 }
+/* One line per account on wide screens (owner 2026-10-29): name | usage | limit + save. */
 .budget-admin-row {
-  padding: 16px 0;
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) minmax(0, 2.2fr) minmax(200px, 1.2fr);
+  align-items: center;
+  gap: 4px 16px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--line);
+}
+.budget-admin-row > h3 {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.budget-admin-row .budget-accounts {
+  margin: 0;
+}
+.budget-admin-row .budget-account {
+  padding: 0;
+  border: 0;
+  background: none;
+}
+.budget-admin-row > p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+@media (max-width: 900px) {
+  .budget-admin-row {
+    grid-template-columns: 1fr;
+  }
 }
 .budget-admin-row:last-child {
   border-bottom: 0;
@@ -148,8 +176,8 @@
   display: flex;
   align-items: flex-end;
   flex-wrap: wrap;
-  gap: 12px;
-  margin: 12px 0;
+  gap: 8px;
+  margin: 0;
 }
 .budget-admin-row label {
   flex: 1;

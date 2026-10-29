@@ -84,7 +84,10 @@ export default function StudioHeader({
     ['quick', '/quick-chat', 'nav.quickCreate', MessageSquare],
     ['works', '/', 'v2.works', LayoutGrid],
     ['library', '/library', 'library.title', Images],
-    ...(access?.gpus || active === 'operator' ? [['operator', '/operator', 'v2.gpus', Cpu]] : []),
+    // Admins reach GPUs inside Admin (owner 2026-10-29); other operators keep the tab.
+    ...((access?.gpus || active === 'operator') && !access?.admin
+      ? [['operator', '/operator', 'v2.gpus', Cpu]]
+      : []),
     ['settings', '/settings', 'settings.title', Settings2],
     // One admin console (h3-studio#537), only for admins.
     ...((access?.admin || active === 'admin') && !currentSupportView()
@@ -122,7 +125,7 @@ export default function StudioHeader({
         <AppNav
           label={t('nav.mobile')}
           items={links.map(([id, href, label, icon]) => ({ id, href, label: t(label), icon }))}
-          active={active}
+          active={active === 'operator' && access?.admin ? 'admin' : active}
           onNavigate={navigateApp}
         />
         <div className="spacer" />
