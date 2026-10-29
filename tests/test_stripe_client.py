@@ -405,6 +405,27 @@ class StripeClientTests(unittest.TestCase):
                 price[key] = old
         self.client.v1.checkout.sessions.create.assert_not_called()
 
+    def test_managed_checkout_prefills_email_in_test_and_live(self):
+        for live in (False, True):
+            with self.subTest(live=live):
+                gateway = self.live_gateway() if live else self.gateway
+                self.client.v1.prices.retrieve.return_value["livemode"] = live
+                self.client.v1.checkout.sessions.create.return_value = (
+                    self.live_session() if live else session()
+                )
+                gateway.checkout(
+                    self.live_payment() if live else payment(),
+                    idempotency_key="original-email",
+                    customer_email="buyer@example.test",
+                )
+                params = self.client.v1.checkout.sessions.create.call_args.kwargs[
+                    "params"
+                ]
+                self.assertEqual(params["customer_email"], "buyer@example.test")
+                self.assertEqual(params["managed_payments"], {"enabled": True})
+                self.assertNotIn("customer", params)
+                self.assertNotIn("receipt_email", params["payment_intent_data"])
+
     def test_signature_precedes_normalization_and_no_http_or_pii_persistence(self):
         obj = session(
             customer_details={
