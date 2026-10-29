@@ -1,3 +1,4 @@
+import { modelsVisible } from './model-visibility.js';
 import ThemeToggle from './ThemeToggle.jsx';
 import { Button } from './ui/Button.jsx';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
@@ -146,7 +147,8 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     [busy, setBusy] = useState(false),
     [search, setSearch] = useState(''),
     [, setLegacyGuide] = useState(false);
-  const c = useCloud();
+  const c = useCloud(),
+    maintenance = modelsVisible();
   const importRef = useRef(),
     selected = find(p, state.selectedId),
     chapter = find(p, state.scopeId);
@@ -341,7 +343,17 @@ function SeriesApp({ sidebarView, onSidebarView }) {
             }}
           />
           {/* Chapters are sections on the one storyboard; no chapter switcher (owner, 2026-10-21). */}
-          {state.workspace.mode === 'cloud' ? (
+          {state.workspace.mode === 'cloud' &&
+          !maintenance &&
+          !c.error &&
+          !c.conflict &&
+          !c.remoteUpdate &&
+          !c.message ? (
+            // Nothing to act on: just the save status, no menu.
+            <span className="v2-autosave">
+              <CloudSaveStatus plain />
+            </span>
+          ) : state.workspace.mode === 'cloud' ? (
             <Popover
               className="v2-cloud-status-panel"
               trigger={
@@ -350,24 +362,33 @@ function SeriesApp({ sidebarView, onSidebarView }) {
                 </Button>
               }
             >
-              <Button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
-                {t('account.copy64')}
-              </Button>
-              <Button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
-                {t('account.copy65')}
-              </Button>
-              <Button
-                disabled={c.busy}
-                onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
-              >
-                {t('account.copy66')}
-              </Button>
-              <Button
-                disabled={c.busy}
-                onClick={() => void cloud.reloadCapabilities().catch(() => {})}
-              >
-                {t('account.copy72')}
-              </Button>
+              {/* Stories save on their own (owner 2026-10-29): people only see the save
+                  status and, when something needs them, the matching fix. The maintenance
+                  actions stay for admins. */}
+              {(maintenance || c.error) && (
+                <Button disabled={c.busy} onClick={() => void cloud.save().catch(() => {})}>
+                  {t(c.error ? 'account.saveRetry' : 'account.copy64')}
+                </Button>
+              )}
+              {maintenance && (
+                <>
+                  <Button disabled={c.busy} onClick={() => void cloud.syncAll().catch(() => {})}>
+                    {t('account.copy65')}
+                  </Button>
+                  <Button
+                    disabled={c.busy}
+                    onClick={() => void cloud.checkRemoteVersion().catch(() => {})}
+                  >
+                    {t('account.copy66')}
+                  </Button>
+                  <Button
+                    disabled={c.busy}
+                    onClick={() => void cloud.reloadCapabilities().catch(() => {})}
+                  >
+                    {t('account.copy72')}
+                  </Button>
+                </>
+              )}
               {c.remoteUpdate && (
                 <Button disabled={c.busy} onClick={() => void cloud.open(p.id).catch(() => {})}>
                   {t('account.copy68')}
@@ -396,15 +417,17 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               {c.error && <p role="alert">{c.error}</p>}
               {c.message && <p role="status">{cloudSystemMessage(c.message, locale)}</p>}
               <PreservedStoryDrafts account={c.account} projectId={p.id} />
-              <Button
-                disabled={c.busy}
-                onClick={() => {
-                  cloud.leave();
-                  onSidebarView('story', { selected: true });
-                }}
-              >
-                {t('account.copy67')}
-              </Button>
+              {maintenance && (
+                <Button
+                  disabled={c.busy}
+                  onClick={() => {
+                    cloud.leave();
+                    onSidebarView('story', { selected: true });
+                  }}
+                >
+                  {t('account.copy67')}
+                </Button>
+              )}
             </Popover>
           ) : (
             <Badge tone="local">{t('story.copy9')}</Badge>

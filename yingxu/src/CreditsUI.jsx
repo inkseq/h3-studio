@@ -13,6 +13,7 @@ import {
   RotateCcw,
   ShieldCheck,
   Sparkles,
+  Loader2,
 } from 'lucide-react';
 import { createCloudClient } from './cloud-client.js';
 import { navigateApp } from './app-navigation.js';
@@ -275,7 +276,11 @@ export function CreditsPanel({ account, active }) {
             {packs.map((pack) => (
               <Button
                 key={pack.id}
-                className={'pack keep-label' + (pack.id === popular ? ' best' : '')}
+                className={
+                  'pack keep-label' +
+                  (pack.id === popular ? ' best' : '') +
+                  (buying === pack.id ? ' opening' : '')
+                }
                 data-ui-surface="pack"
                 disabled={!!buying}
                 onClick={() => void checkout(pack)}
@@ -289,9 +294,14 @@ export function CreditsPanel({ account, active }) {
                   <small className="good">{t('credits.bonus', { count: pack.bonus })}</small>
                 )}
                 <span className="pack-price">
-                  {buying === pack.id
-                    ? t('credits.opening')
-                    : formatPrice(pack.cents, pack.currency)}
+                  {buying === pack.id ? (
+                    <>
+                      <Loader2 size={13} className="pack-spinner" aria-hidden="true" />
+                      {t('credits.opening')}
+                    </>
+                  ) : (
+                    formatPrice(pack.cents, pack.currency)
+                  )}
                 </span>
               </Button>
             ))}

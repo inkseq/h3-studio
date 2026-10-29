@@ -1366,10 +1366,11 @@ body.sb-resizing-y video {
   color: var(--ink-2);
 }
 /* A playhead you can see and grab on any picture (owner, 2026-10-26): a light line with a
-   dark edge, a round grip on top, and a wider invisible hit area. */
+   dark edge, a round grip on top, and a wider invisible hit area. It stays inside the track
+   (owner, 2026-10-29) so at 0:00 it never covers the play button above. */
 .timeline .track.video .playhead {
-  top: -8px;
-  bottom: -2px;
+  top: 0;
+  bottom: 0;
   width: 3px;
   margin-left: -1px;
   background: var(--white);
@@ -1389,10 +1390,10 @@ body.sb-resizing-y video {
 .timeline .track.video .playhead::after {
   content: '';
   position: absolute;
-  top: -5px;
+  top: 2px;
   left: 50%;
-  width: 13px;
-  height: 13px;
+  width: 11px;
+  height: 11px;
   transform: translateX(-50%);
   border-radius: 50%;
   background: var(--accent);
