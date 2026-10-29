@@ -1,6 +1,6 @@
 // Credits chip, Settings → Credits and the not-enough-credits prompt (h3-studio#306/#307).
 // Port of prototype account.jsx. Hidden until GET /v1/credits answers, so it can merge early.
-import React, { useEffect, useEffectEvent, useMemo, useState } from 'react';
+import React, { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { Button } from './ui/Button.jsx';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import {
@@ -142,6 +142,10 @@ export function CreditsPanel({ account, active }) {
     [receipts, setReceipts] = useState([]),
     [openReceipt, setOpenReceipt] = useState(null),
     [error, setError] = useState('');
+  // A double click must not open a second Stripe session before React re-renders,
+  // and a retry of the same pack reuses its session (one key per pack per visit).
+  const opening = useRef(false),
+    keys = useRef({});
   const n = (value) => formatCredits(value, locale);
   useEffect(() => {
     if (!active) return undefined;
@@ -189,6 +193,8 @@ export function CreditsPanel({ account, active }) {
   }, [active]);
 
   async function checkout(pack) {
+    if (opening.current) return;
+    opening.current = true;
     track('credits_checkout_started', { pack: pack.id });
     setBuying(pack.id);
     setError('');
@@ -196,7 +202,7 @@ export function CreditsPanel({ account, active }) {
       const { url } = await api.request('/v1/billing/checkout', {
         method: 'POST',
         body: withAnalytics({ pack_id: pack.id }),
-        key: 'checkout-' + pack.id + '-' + Date.now(),
+        key: (keys.current[pack.id] ||= 'checkout-' + pack.id + '-' + Date.now()),
       });
       if (typeof url !== 'string' || !url.startsWith('https://'))
         throw Error(t('credits.noCheckout'));
@@ -204,6 +210,7 @@ export function CreditsPanel({ account, active }) {
     } catch (failure) {
       setError(failure.message);
       setBuying(null);
+      opening.current = false;
     }
   }
 
