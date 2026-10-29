@@ -1,5 +1,6 @@
 """Original Modal hosts and job fences; all provider operations are fake."""
 
+import math
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -9,7 +10,7 @@ from studio_platform.modal_lifecycle import ModalLifecycle
 from studio_platform.queue import TaskQueue
 from studio_platform.repository import attempts, budget_reservations, instance_intents
 from studio_platform.dstack_test_budget import ACCOUNT
-from test_modal_budget import ModalBudgetCase
+from test_modal_budget import GUARD, ModalBudgetCase
 
 
 class ModalLifecycleTests(ModalBudgetCase):
@@ -100,12 +101,40 @@ class ModalLifecycleTests(ModalBudgetCase):
         self.assertEqual(self.row()['state'], 'destroyed')
         self.assert_pending_cost()
 
-    def test_exit_withdraws_cpu_slot_without_settling_supplier_cost(self):
+    def test_exit_withdraws_cpu_slot_and_settles_once_at_exit_bound(self):
         self.client.hosts['inkseq-' + self.identity]['exit_code'] = 0
+        self.lifecycle.sweep()
         self.lifecycle.sweep()
         self.slots.stop.assert_called_with(self.identity)
         self.slots.ensure.assert_not_called()
-        self.assert_pending_cost()
+        with self.repo.engine.connect() as c:
+            row = (
+                c.execute(
+                    select(budget_reservations).where(
+                        budget_reservations.c.reference_type == 'instance',
+                        budget_reservations.c.reference_id == self.identity,
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        # Exit observed at creation time: only the guard's stop margin counts.
+        expected = math.ceil(
+            self.spec.max_hourly_microusd * GUARD['stop_margin_seconds'] / 3600
+        )
+        self.assertEqual(row['state'], 'settled')
+        self.assertEqual(row['actual_cost_microusd'], expected)
+
+    def test_unbound_destroyed_host_keeps_its_hold(self):
+        identity = self.reserve('unbound', bind=False)
+        with self.repo.transaction() as c:
+            c.execute(
+                update(instance_intents)
+                .where(instance_intents.c.id == identity)
+                .values(state='destroyed')
+            )
+        states = {r['intent_id']: r['state'] for r in self.lifecycle.sweep()}
+        self.assertEqual(states[identity], 'settlement_unconfirmed')
 
     def test_silent_attempt_is_fenced_before_stop_and_alerted_once(self):
         queue = TaskQueue(self.repo)

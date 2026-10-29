@@ -45,6 +45,9 @@ import { AttachedFiles, PendingFiles, useAttachments } from './StoryChatAttachme
 import { createCloudClient } from './cloud-client.js';
 import { agentLinkSearch } from './agent-navigation.js';
 import './story-chat.css';
+
+// A card is busy while its picture is being drawn or a chosen photo is uploading.
+const busyCard = (card) => card.status === 'generating' || card.status === 'uploading';
 import { track } from './analytics.js';
 
 // Dragged narrow, the stories list snaps to an icon rail (owner, 2026-10-25).
@@ -63,9 +66,7 @@ const cardName = (card, t) =>
 
 function Thumb({ card, wide = false }) {
   return (
-    <span
-      className={'sc-thumb' + (wide ? ' wide' : '') + (card.status === 'generating' ? ' busy' : '')}
-    >
+    <span className={'sc-thumb' + (wide ? ' wide' : '') + (busyCard(card) ? ' busy' : '')}>
       {card.image ? <img src={card.image} alt="" /> : <span>{(card.name || '').slice(0, 1)}</span>}
     </span>
   );
@@ -221,9 +222,11 @@ function CardDetail({
           <img src={card.image} alt="" />
         ) : (
           <span>
-            {card.status === 'generating'
-              ? t('storyChat.status.generating')
-              : t('storyChat.detailNoPicture')}
+            {card.status === 'uploading'
+              ? t('storyChat.status.uploading')
+              : card.status === 'generating'
+                ? t('storyChat.status.generating')
+                : t('storyChat.detailNoPicture')}
           </span>
         )}
       </div>
@@ -271,7 +274,7 @@ function CardDetail({
           <Button
             variant="primary"
             className="keep-label"
-            disabled={busy || card.status === 'generating'}
+            disabled={busy || busyCard(card)}
             onClick={() => {
               commit();
               onShot(card);
@@ -298,7 +301,7 @@ function CardDetail({
           <>
             <Button
               className="keep-label"
-              disabled={busy || card.status === 'generating'}
+              disabled={busy || busyCard(card)}
               onClick={() => photo.current?.click()}
             >
               <Upload size={15} aria-hidden="true" />
@@ -385,7 +388,13 @@ function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
                 >
                   <Thumb card={card} />
                   <strong>{card.name}</strong>
-                  <small>{card.status === 'generating' ? t('storyChat.drawing') : card.text}</small>
+                  <small>
+                    {card.status === 'uploading'
+                      ? t('storyChat.status.uploading')
+                      : card.status === 'generating'
+                        ? t('storyChat.drawing')
+                        : card.text}
+                  </small>
                 </Button>
               ))}
             </div>
