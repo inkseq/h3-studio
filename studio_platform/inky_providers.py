@@ -36,7 +36,7 @@ class Client:
         self.service, self.loader, self.transport = service, loader, transport
 
     def post(self, path, body, *, images=False):
-        from .llm_tracing import clip, generation
+        from .llm_tracing import clip, generation, usage as traced_usage
 
         model = body.get("model") if isinstance(body, dict) else None
         with generation(
@@ -47,16 +47,14 @@ class Client:
         ) as traced:
             value = self._post(path, body, images=images)
             usage = value.get("usage") if isinstance(value.get("usage"), dict) else {}
+            details = usage.get("prompt_tokens_details")
             traced.update(
                 output=clip(value, 4000),
-                usage_details={
-                    k: v
-                    for k, v in {
-                        "input": usage.get("prompt_tokens"),
-                        "output": usage.get("completion_tokens"),
-                    }.items()
-                    if isinstance(v, int)
-                },
+                usage_details=traced_usage(
+                    usage.get("prompt_tokens"),
+                    usage.get("completion_tokens"),
+                    details.get("cached_tokens", 0) if isinstance(details, dict) else 0,
+                ),
                 cost_details=(
                     {"total": float(usage["cost"])}
                     if isinstance(usage.get("cost"), (int, float))

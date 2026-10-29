@@ -8,7 +8,7 @@ from pathlib import Path
 
 import httpx
 
-from .llm_tracing import clip, digest, generation
+from .llm_tracing import clip, digest, generation, usage as traced_usage
 
 ORIGIN = "https://generativelanguage.googleapis.com"
 PROFILE = "gemini--user-supplied"
@@ -203,11 +203,12 @@ class GoogleChatClient:
             usage = result["usage"]
             traced.update(
                 output=clip(result["text"]),
-                usage_details={
-                    "input": usage.get("promptTokenCount", 0),
-                    "output": usage.get("candidatesTokenCount", 0)
+                usage_details=traced_usage(
+                    usage.get("promptTokenCount", 0),
+                    usage.get("candidatesTokenCount", 0)
                     + usage.get("thoughtsTokenCount", 0),
-                },
+                    usage.get("cachedContentTokenCount", 0),
+                ),
                 metadata={"finish_reason": result["finish_reason"]},
             )
         return result
@@ -243,6 +244,7 @@ class GoogleChatClient:
                     "promptTokenCount",
                     "candidatesTokenCount",
                     "thoughtsTokenCount",
+                    "cachedContentTokenCount",
                     "totalTokenCount",
                 )
                 if k in usage
