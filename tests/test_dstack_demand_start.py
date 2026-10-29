@@ -2,6 +2,7 @@
 
 import copy
 import json
+import unittest
 from unittest.mock import Mock, patch
 
 from sqlalchemy import insert, select, update
@@ -1238,3 +1239,49 @@ class DemandStartTests(LedgerCase):
                     self.owner, {'preview_id': preview['preview_id']}, 'no-paid-drift'
                 )
             self.assertEqual(self.client.applied, [])
+
+
+class VastShareTests(unittest.TestCase):
+    """Owner 2026-10-29 / #688: Modal first; Vast by the boot-time lookahead."""
+
+    def setUp(self):
+        from studio_platform.capacity_lookahead import Machine
+
+        self.policy = {'vast_min_queue': 20, 'vast_after_seconds': 600}
+        self.ready = Machine('modal-a', 'ready')
+        self.starting = Machine('modal-b', 'starting', ready_in_seconds=60)
+
+    def jobs(self, count, created=1000):
+        return [({'id': str(i), 'created_at': created}, {}) for i in range(count)]
+
+    def test_no_machine_at_all_takes_the_floor(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        queued = self.jobs(1)
+        self.assertEqual(vast_share(self.policy, queued, queued, 1000, ()), queued)
+
+    def test_modal_covers_a_queue_it_clears_before_vast_is_ready(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        queued = self.jobs(25)
+        machines = (self.ready, self.starting)
+        self.assertEqual(vast_share(self.policy, queued, queued, 1000, machines), [])
+
+    def test_vast_starts_when_twenty_would_be_left_at_ready(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        queued = self.jobs(60)  # two Modal hosts clear ~38 of them in 10 min
+        machines = (self.ready, self.starting)
+        self.assertEqual(
+            vast_share(self.policy, queued, queued, 1000, machines), queued
+        )
+
+    def test_a_job_waiting_past_the_fallback_reaches_vast(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        old = self.jobs(1, created=300)
+        fresh = self.jobs(1, created=1000)
+        queued = old + fresh
+        self.assertEqual(
+            vast_share(self.policy, queued, queued, 1000, (self.ready,)), old
+        )

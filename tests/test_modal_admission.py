@@ -219,10 +219,17 @@ class ModalAdmissionTests(ModalAdmissionFixture):
             self.assertEqual(modal_covered_jobs(c, self.now), {job['id']})
             # A start that never becomes ready stops holding the job back.
             self.assertEqual(modal_covered_jobs(c, self.now + 601), set())
+        from studio_platform.dstack_demand_start import modal_machines
+
+        with self.repo.transaction() as c:
+            (machine,) = modal_machines(c, self.now)
+            self.assertEqual((machine.identity, machine.state), (intent, 'starting'))
+            self.assertEqual(modal_machines(c, self.now + 601), ())
         self.hosts.stop(intent)
         self.hosts.observe(intent)
         with self.repo.transaction() as c:
             self.assertEqual(modal_covered_jobs(c, self.now), set())
+            self.assertEqual(modal_machines(c, self.now), ())
 
     def test_two_unresolved_hosts_block_third_and_release_no_funding(self):
         for key in ('one', 'two', 'three'):
