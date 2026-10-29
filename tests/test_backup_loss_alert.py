@@ -4,7 +4,11 @@ import copy
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import stat
+import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
@@ -91,14 +95,11 @@ class BackupLossTests(unittest.TestCase):
         with (
             patch.object(monitor, 'protected_directory'),
             patch.object(monitor, 'read_protected', return_value=completed),
+            patch.object(monitor, 'read_protected_bytes', return_value=raw),
             patch.object(
                 monitor,
-                'read_protected_bytes',
-                side_effect=lambda path, **_: (
-                    manifest_raw + (b' ' if tamper_manifest else b'')
-                    if path.name == 'manifest.json'
-                    else raw
-                ),
+                'read_transport_manifest',
+                return_value=manifest_raw + (b' ' if tamper_manifest else b''),
             ),
         ):
             return monitor.backup_copy_observation(
@@ -110,6 +111,31 @@ class BackupLossTests(unittest.TestCase):
         self.assertEqual(
             self.observe(*self.evidence()), {'missing': False, 'loss': True}
         )
+
+    def test_transport_uid_manifest_uses_root_operation_barrier(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            operation = Path(tmp)
+            (operation / 'snapshot').mkdir()
+            data = b'{"synthetic":true}'
+            (operation / 'snapshot' / 'manifest.json').write_bytes(data)
+            info = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o400,
+                st_nlink=1,
+                st_uid=10001,
+                st_size=len(data),
+            )
+            with (
+                patch.object(monitor, 'protected_directory') as boundary,
+                patch.object(
+                    os, 'O_NOFOLLOW', getattr(os, 'O_NOFOLLOW', 0), create=True
+                ),
+                patch.object(
+                    os, 'O_NONBLOCK', getattr(os, 'O_NONBLOCK', 0), create=True
+                ),
+                patch.object(os, 'fstat', return_value=info),
+            ):
+                self.assertEqual(monitor.read_transport_manifest(operation), data)
+                boundary.assert_called_once_with(operation)
 
     def test_expected_only_v3_and_complete_legacy_copy_do_not_raise_loss(self):
         for version, coverage in (

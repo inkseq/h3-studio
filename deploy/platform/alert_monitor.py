@@ -104,6 +104,21 @@ def read_protected(path, *, missing=False):
     return None if raw is None else json.loads(raw)
 
 
+def read_transport_manifest(operation):
+    # Transport owns this read-only copy (UID10001), behind a root-only parent.
+    # The caller binds these bytes to the original root receipt before use.
+    protected_directory(operation)
+    fd = os.open(operation / 'snapshot' / 'manifest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+            and info.st_uid in {0, 10001} and not info.st_mode & 0o022
+            and info.st_size <= 16 * MAX_BYTES, 'alert_manifest_unprotected')
+        raw = stream.read(16 * MAX_BYTES + 1)
+        require(len(raw) <= 16 * MAX_BYTES, 'alert_manifest_too_large')
+        return raw
+
+
 def atomic(path, value):
     path = Path(path)
     protected_directory(path.parent)
@@ -333,8 +348,7 @@ def backup_copy_observation(*, now, root=BACKUP_STATE):
                     from backup_loss_policy import original_loss
                 except ImportError:
                     from studio_platform.backup_loss_policy import original_loss
-                manifest_raw = read_protected_bytes(operation / 'snapshot' / 'manifest.json',
-                    private=False, max_bytes=16 * MAX_BYTES)
+                manifest_raw = read_transport_manifest(operation)
                 require(hashlib.sha256(manifest_raw).hexdigest() == receipt.get('snapshot_manifest_sha256'),
                     'alert_backup_manifest_changed')
                 manifest = json.loads(manifest_raw)
