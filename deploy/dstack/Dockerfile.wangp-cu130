@@ -13,13 +13,16 @@ RUN /venv/main/bin/python -m pip install --no-cache-dir \
     && /venv/main/bin/python -m pip install --no-cache-dir --no-deps \
         "sageattention @ ${SAGE_WHEEL}#sha256=28e527a22203af9f858fa5facfa6dd2b89dcc562467ec1d360b78f68e4754a56"
 # torch cu130 wheels ship their CUDA 13 runtime under nvidia/cu13/lib; the Qwen3-VL encoder's NVRTC kernels
-# (REF path) need libnvrtc-builtins.so.13.0 from there.
+# (REF path) need libnvrtc-builtins.so.13.0 from there. The worker is started over SSH, which does not inherit
+# image ENV, so register the directory with the dynamic linker as well (staging REF failed without it, #794).
 ENV LD_LIBRARY_PATH=/venv/main/lib/python3.12/site-packages/nvidia/cu13/lib
+RUN echo /venv/main/lib/python3.12/site-packages/nvidia/cu13/lib > /etc/ld.so.conf.d/zz-torch-cu13.conf && ldconfig
 RUN test "$(/venv/main/bin/python -c 'import platform; print(platform.python_version())')" = "3.12.14" \
     && test "$(git -C /opt/workspace-internal/Wan2GP rev-parse HEAD)" = "0e58385fbde7ff102d276e4a9e490845de76b4ea" \
     && /venv/main/bin/python -c "import torch, triton, sageattention, importlib.metadata as m; \
 assert torch.__version__ == '2.10.0+cu130' and torch.version.cuda == '13.0', torch.__version__; \
 assert triton.__version__ == '3.6.0' and m.version('sageattention').startswith('2.2.0'); print('ok')" \
-    && test -e /venv/main/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.0
+    && test -e /venv/main/lib/python3.12/site-packages/nvidia/cu13/lib/libnvrtc-builtins.so.13.0 \
+    && ldconfig -p | grep -q "libnvrtc-builtins.so.13.0 .*nvidia/cu13/lib"
 WORKDIR /workspace
 CMD ["sleep", "infinity"]
