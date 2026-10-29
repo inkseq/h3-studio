@@ -87,6 +87,18 @@ class ModalControllerTests(ModalBudgetCase):
                 {'vast_min_queue': 20, 'vast_after_seconds': 600},
             )
 
+    def test_configuration_without_profile_is_the_v7_image(self):
+        from studio_platform.modal_runtime import V7
+
+        host = asdict(self.spec)
+        host.pop('profile')
+        path = self.root / 'modal.json'
+        path.write_text(json.dumps(dict(version=1, enabled=True, host=host)))
+        path.chmod(0o600)
+        self.factory.return_value = (self.client, Mock())
+        extension = load_extension(self.service, self.root, client_factory=self.factory)
+        self.assertEqual(extension.hosts.spec.profile, V7)
+
     def test_live_original_without_configuration_refuses_silent_abandonment(self):
         self.reserve()
         with self.assertRaises(ValueError):

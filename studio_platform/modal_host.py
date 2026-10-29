@@ -36,6 +36,8 @@ class HostSpec:
     max_containers: int = 2
     max_inputs: int = 1
     idle_timeout: int = 60
+    # The runtime profile the image was built for (INKSEQ_MODAL_PROFILE in it).
+    profile: str = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
 
     def __post_init__(self):
         for value, prefix in (
@@ -74,6 +76,10 @@ class HostSpec:
             raise ValueError('modal_staging_limits_invalid')
         if self.app_name not in APP_NAMES.values():
             raise ValueError('modal_staging_app_required')
+        from .modal_runtime import PROFILES
+
+        if self.profile not in PROFILES:
+            raise ValueError('modal_profile_unknown')
 
 
 # One Modal app per environment; the controller pins its own (#688).
