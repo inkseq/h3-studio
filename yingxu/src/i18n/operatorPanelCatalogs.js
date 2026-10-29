@@ -232,6 +232,7 @@ Object.assign(operatorPanelCatalogs.en, {
   'operatorPanel.historicalLimit':
     'Historical cumulative allowance · USD (does not restrict starts)',
   'operatorPanel.accountIdentity': 'Account identifier',
+  'operatorPanel.showRetired': 'Show retired machine types ({count})',
   'operatorPanel.allBudgetAccounts':
     'All accounts, including shared GPU and shared generation budgets. The service verifies the balance and audit record on save.',
   'operatorPanel.accountsMore': '{count} budget accounts loaded; more accounts remain.',
@@ -257,6 +258,7 @@ Object.assign(operatorPanelCatalogs.zh, {
   'operatorPanel.pendingInvoiceHelp': '实际费用尚未确认，预估仍计入设置中的使用量。',
   'operatorPanel.historicalLimit': '历史累计额度 · USD（不限制启动）',
   'operatorPanel.accountIdentity': '账户标识',
+  'operatorPanel.showRetired': '显示已退役的机器类型（{count}）',
   'operatorPanel.allBudgetAccounts':
     '所有账户，包含共享 GPU 与共享生成预算。保存仍由服务核对余额和审核记录。',
   'operatorPanel.accountsMore': '已读取 {count} 个预算账户，还有更多账户。',

@@ -48,6 +48,7 @@ import './admin-home.css';
 const SECTIONS = [
   ['overview', 'adminHome.overview', LayoutDashboard],
   ['jobs', 'adminHome.jobs', ListChecks],
+  ['gpus', 'v2.gpus', Cpu],
   ['limits', 'adminHome.limits', ShieldCheck],
   ['settings', 'adminHome.settings', SlidersHorizontal],
   ['users', 'adminHome.users', Users],
@@ -411,7 +412,18 @@ function Overview({ data, api }) {
 }
 
 // Per-account dollar budgets and per-GPU prices (moved from Settings → Admin).
-function BudgetAdministration({ account }) {
+// Machine types that can run today, plus their other-owner twin; retired price rows fold away.
+function activeIds(profiles = []) {
+  return new Set(
+    profiles
+      .filter((p) => p.execution_eligibility?.status === 'confirmed')
+      .map((p) => p.id || p.runtime_profile_id)
+      .filter(Boolean)
+      .flatMap((id) => [id, id.replace(/superdan$/, 'supervan'), id + '-supervan']),
+  );
+}
+
+function BudgetAdministration({ account, part = 'all' }) {
   const { t } = useI18n();
   const controller = useMemo(() => createP4OperatorController({ locale: readBrowserLocale }), []),
     state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
@@ -422,13 +434,15 @@ function BudgetAdministration({ account }) {
   const current = state.account === account,
     authorized = current && state.snapshot?.operator?.admin === true;
   return (
-    <section className="ops-tab-panel">
+    <section className="ah-card ah-budget">
       {state.error && current && <p role="alert">{state.error}</p>}
       {authorized ? (
         <AdminBudgetPanel
           controller={controller}
           state={state}
           busy={state.busy || !!state.pending}
+          part={part}
+          activeIds={activeIds(state.catalog?.profiles)}
         />
       ) : (
         <p role="status">
@@ -607,9 +621,9 @@ function Limits({ api, active, account }) {
         <Note tone="warn">{t('adminHome.noPolicy')}</Note>
       )}
       <StartRulesPanel api={api} active={active} />
-      <Disclosure className="admin-fold" summary={t('admin.legacyBudgets')}>
-        <BudgetAdministration account={account} />
-      </Disclosure>
+      {/* One place for budgets and machine prices (owner 2026-10-29, plan B). */}
+      <BudgetAdministration account={account} part="budgets" />
+      <BudgetAdministration account={account} part="prices" />
     </>
   );
 }
@@ -629,7 +643,8 @@ export default function AdminHome({ account }) {
     };
   }, [account]);
   const data = useAdminData(api, active && access?.admin === true, section);
-  const go = (id) => navigateApp('/admin?section=' + id);
+  // GPUs is the full machine console at /operator, listed here so Admin is the one place.
+  const go = (id) => navigateApp(id === 'gpus' ? '/operator' : '/admin?section=' + id);
   return (
     <div className="home admin-home">
       <StudioHeader account={account} active="admin" />
