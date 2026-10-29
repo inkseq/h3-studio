@@ -2,6 +2,7 @@
 
 import copy
 import json
+import unittest
 from unittest.mock import Mock, patch
 
 from sqlalchemy import insert, select, update
@@ -1238,3 +1239,25 @@ class DemandStartTests(LedgerCase):
                     self.owner, {'preview_id': preview['preview_id']}, 'no-paid-drift'
                 )
             self.assertEqual(self.client.applied, [])
+
+
+class VastShareTests(unittest.TestCase):
+    """Owner 2026-10-29: Modal first; Vast at 20 queued or after 10 minutes."""
+
+    def test_short_queue_leaves_fresh_jobs_to_modal(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        policy = {'vast_min_queue': 20, 'vast_after_seconds': 600}
+        fresh = ({'id': 'fresh', 'created_at': 1000}, {})
+        old = ({'id': 'old', 'created_at': 300}, {})
+        queued = [fresh, old]
+        self.assertEqual(vast_share(policy, queued, queued, 1000), [old])
+        self.assertEqual(vast_share(None, queued, queued, 1000), queued)
+
+    def test_long_queue_lets_vast_start(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        policy = {'vast_min_queue': 20, 'vast_after_seconds': 600}
+        queued = [({'id': str(i), 'created_at': 1000}, {}) for i in range(20)]
+        work = queued[2:]  # two are already on Modal hosts
+        self.assertEqual(vast_share(policy, queued, work, 1000), work)

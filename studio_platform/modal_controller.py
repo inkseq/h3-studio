@@ -87,11 +87,21 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
     if environment == 'production':
         # Production never reads the staging secret: an explicit file and the
         # production budget account that funds Modal hosts are both required.
-        fields |= {'credentials_file', 'budget_account_id', 'start_after_seconds'}
+        fields |= {
+            'credentials_file',
+            'budget_account_id',
+            'start_after_seconds',
+            'vast_min_queue',
+            'vast_after_seconds',
+        }
         require(set(value) == fields)
         require(
             type(value['start_after_seconds']) is int
             and 0 <= value['start_after_seconds'] <= 1800
+            and type(value['vast_min_queue']) is int
+            and 1 <= value['vast_min_queue'] <= 1000
+            and type(value['vast_after_seconds']) is int
+            and 60 <= value['vast_after_seconds'] <= 3600
         )
     else:
         require(set(value) in (fields, fields | {'credentials_file'}))
@@ -106,6 +116,13 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
         )
     if not value['enabled'] and not originals:
         return None
+    if value['enabled'] and 'vast_min_queue' in value:
+        # Owner 2026-10-29: Modal first; Vast once the queue is this long, or
+        # for any job Modal has not served within vast_after_seconds.
+        service.modal_first = {
+            'vast_min_queue': value['vast_min_queue'],
+            'vast_after_seconds': value['vast_after_seconds'],
+        }
     client, connect = (
         client_factory(spec, credentials_file=value['credentials_file'])
         if 'credentials_file' in value

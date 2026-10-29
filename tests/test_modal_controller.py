@@ -68,7 +68,9 @@ class ModalControllerTests(ModalBudgetCase):
                         host=asdict(spec),
                         credentials_file=credentials,
                         budget_account_id='production-gpu',
-                        start_after_seconds=300,
+                        start_after_seconds=0,
+                        vast_min_queue=20,
+                        vast_after_seconds=600,
                     )
                 )
             )
@@ -79,7 +81,11 @@ class ModalControllerTests(ModalBudgetCase):
             self.assertEqual(extension.hosts.environment, 'production')
             self.assertIs(extension.admission.enabled, enabled)
             self.assertIs(extension.admission.production, True)
-            self.assertEqual(extension.admission.start_after_seconds, 300)
+            self.assertEqual(extension.admission.start_after_seconds, 0)
+            self.assertEqual(
+                self.service.modal_first,
+                {'vast_min_queue': 20, 'vast_after_seconds': 600},
+            )
 
     def test_live_original_without_configuration_refuses_silent_abandonment(self):
         self.reserve()

@@ -230,6 +230,18 @@ def modal_covered_jobs(connection, now):
     }
 
 
+def vast_share(policy, queued, work, now):
+    """With Modal first (owner 2026-10-29), Vast takes the queue only when it is
+    long, or a job that has waited past the fallback; otherwise Modal serves it."""
+    if not policy or len(queued) >= policy['vast_min_queue']:
+        return work
+    return [
+        item
+        for item in work
+        if now - item[0]['created_at'] >= policy['vast_after_seconds']
+    ]
+
+
 def _claim(service):
     from .dstack_demand import (
         _nodes,
@@ -249,11 +261,9 @@ def _claim(service):
         if demand_configuration(service.config, now=now) is None:
             return _result('blocked', 'authority_unavailable'), None
         covered = modal_covered_jobs(connection, now)
-        work = [
-            item
-            for item in eligible_jobs(service, connection, now)
-            if item[0]['id'] not in covered
-        ]
+        queued = eligible_jobs(service, connection, now)
+        work = [item for item in queued if item[0]['id'] not in covered]
+        work = vast_share(getattr(service, 'modal_first', None), queued, work, now)
         if not work:
             return _result('idle'), None
         journals = list(
