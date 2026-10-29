@@ -34,13 +34,13 @@ class InkyConfigTests(unittest.TestCase):
         self.assertIsNone(config.validate({"enabled": False}))
         cases = [{"enabled": 0}, {**valid(), "monthly_cap": 999}, {"enabled": True}]
         for field, value in (
-            ("profile", "openrouter--rig-root"),
+            ("profile", "openai--rig-root"),
             ("base_url", "https://example.test"),
             ("api_key", "bad\nkey"),
             ("base_url", None),
         ):
             changed = copy.deepcopy(valid())
-            changed["openrouter"][field] = value
+            changed["openai"][field] = value
             cases.append(changed)
         for value in cases:
             with self.subTest(value=list(value)):

@@ -63,7 +63,7 @@ class InkyCredentialTests(unittest.TestCase):
         return self.configs[service]
 
     def test_import_once_reconcile_and_metadata_only(self):
-        self.configs["openrouter"].base_url = None
+        self.configs["openai"].base_url = None
         result = credentials.import_existing(self.api, self.load)
         self.assertEqual(len(result), 2)
         self.assertTrue(all(set(row) == {"Name", "Type", "Version"} for row in result))
@@ -81,7 +81,7 @@ class InkyCredentialTests(unittest.TestCase):
         self.assertEqual(len(set(self.api.puts)), 2)
 
     def test_validate_all_sources_before_any_write(self):
-        self.configs["openrouter"].base_url = "https://wrong.example"
+        self.configs["openai"].base_url = "https://wrong.example"
         with self.assertRaisesRegex(ValueError, "inky_profile_invalid"):
             credentials.import_existing(self.api, self.load)
         self.assertFalse(self.api.puts)
@@ -89,7 +89,7 @@ class InkyCredentialTests(unittest.TestCase):
     def test_existing_difference_refuses_all_writes(self):
         credentials.import_existing(self.api, self.load)
         del self.api.rows[credentials.NAMES["typesafe"]]
-        self.configs["openrouter"].api_key = "different-secret-key"
+        self.configs["openai"].api_key = "different-secret-key"
         with self.assertRaisesRegex(ValueError, "inky_existing_parameter_differs"):
             credentials.import_existing(self.api, self.load)
         self.assertEqual(len(self.api.puts), 2)

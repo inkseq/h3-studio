@@ -7,7 +7,7 @@
       "Action": "ssm:GetParameters",
       "Resource": [
         "arn:aws:ssm:ap-southeast-1:829135631045:parameter/sixnine/staging/inky/typesafe",
-        "arn:aws:ssm:ap-southeast-1:829135631045:parameter/sixnine/staging/inky/openrouter"
+        "arn:aws:ssm:ap-southeast-1:829135631045:parameter/sixnine/staging/inky/openai"
       ],
       "Condition": {
         "StringEquals": {

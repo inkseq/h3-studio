@@ -4,7 +4,6 @@ Not wired into the application: server provisioning and the request-cost envelop
 must receive the single Tier2 review before activation. No secret-drop importer.
 """
 
-from decimal import Decimal, InvalidOperation, ROUND_CEILING
 import json
 
 import httpx
@@ -13,9 +12,12 @@ from .central_registry import load_api
 from .inky_models import example_payload, judgement_payload
 
 TYPE_PROFILE = "typesafe--avatar-user-20261008"
-OPEN_PROFILE = "openrouter--inkseq-chat"
+OPEN_PROFILE = "openai--inkseq"
 TYPE_ORIGIN = "https://api.typesafe.ai/v1"
-OPEN_ORIGIN = "https://openrouter.ai/api/v1"
+OPEN_ORIGIN = "https://api.openai.com/v1"
+# OpenAI list price for gpt-6.1-terra in micro-USD per token ($1/M in, $5/M out).
+# OpenAI returns no per-request cost; cached input is charged at the full rate.
+TERRA_PRICE = (1, 5)
 
 
 class InkyProviderError(ValueError):
@@ -24,14 +26,14 @@ class InkyProviderError(ValueError):
 
 def config(service):
     profile = TYPE_PROFILE if service == "typesafe" else OPEN_PROFILE
-    if service not in {"typesafe", "openrouter"}:
+    if service not in {"typesafe", "openai"}:
         raise InkyProviderError("inky_profile_invalid")
     return load_api(service, profile=profile)
 
 
 class Client:
     def __init__(self, service, *, loader=config, transport=None):
-        if service not in {"typesafe", "openrouter"}:
+        if service not in {"typesafe", "openai"}:
             raise InkyProviderError("inky_profile_invalid")
         self.service, self.loader, self.transport = service, loader, transport
 
@@ -67,9 +69,9 @@ class Client:
         try:
             cfg = self.loader(self.service)
             origin = TYPE_ORIGIN if self.service == "typesafe" else OPEN_ORIGIN
-            # This default is authorized for exactly openrouter--inkseq-chat.
+            # This default is authorized for exactly openai--inkseq.
             configured = cfg.base_url or (
-                OPEN_ORIGIN if self.service == "openrouter" else None
+                OPEN_ORIGIN if self.service == "openai" else None
             )
             if (
                 configured != origin
@@ -127,30 +129,26 @@ class Jev:
         return self.client.post("/systemone", upload_payload(upload, jpeg), images=True)
 
 
-def cost_micros(value):
-    """Missing/invalid accounting is unknown, never a manufactured zero charge."""
-    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+def token_cost(usage):
+    """Terra list-price cost from reported tokens; missing counts are unknown."""
+    if not isinstance(usage, dict):
         return None
-    try:
-        cost = Decimal(str(value))
-        if not cost.is_finite() or cost < 0 or cost > 1_000_000:
-            return None
-        return int((cost * 1_000_000).to_integral_value(rounding=ROUND_CEILING))
-    except (InvalidOperation, ValueError):
+    tokens = usage.get("prompt_tokens"), usage.get("completion_tokens")
+    if not all(type(t) is int and t >= 0 for t in tokens):
         return None
+    return tokens[0] * TERRA_PRICE[0] + tokens[1] * TERRA_PRICE[1]
 
 
 class Terra:
     # Conservative reservation, not the observed average price. This text-only
-    # envelope pins OpenAI, caps rate, byte size and total output (incl reasoning).
-    # 16KiB of message bytes + 4096 framing-token allowance at $5/M, and1024
-    # output tokens at $30/M => $0.13312, below this $0.25 reservation. No tools,
-    # plugins, fallback providers, images, or per-request charge are accepted.
-    # Qualification must verify this envelope on the exact provider before use.
+    # envelope calls OpenAI directly and caps byte size and total output (incl
+    # reasoning): 16KiB of message bytes + 4096 framing tokens at $1/M and 1024
+    # output tokens at $5/M => about $0.026, well below this $0.25 reservation.
+    # No tools, images or fallback providers are accepted.
     max_cost_micros = 250_000
 
     def __init__(self, **kwargs):
-        self.client = Client("openrouter", **kwargs)
+        self.client = Client("openai", **kwargs)
 
     def __call__(self, source, kind):
         body = example_payload(source, kind)
@@ -159,18 +157,9 @@ class Terra:
         )
         if size > 16384:
             raise InkyProviderError("inky_example_context_limit")
-        body.update(
-            max_tokens=1024,
-            stream=False,
-            provider={
-                "only": ["openai"],
-                "allow_fallbacks": False,
-                "require_parameters": True,
-                "max_price": {"prompt": 5, "completion": 30, "request": 0, "image": 0},
-            },
-        )
+        body.update(max_completion_tokens=1024, stream=False)
         result = self.client.post("/chat/completions", body)
-        actual = cost_micros(result.get("usage", {}).get("cost"))
+        actual = token_cost(result.get("usage"))
         choices = result.get("choices")
         text = None
         if (

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 PROFILES = {
     "typesafe": ("typesafe--avatar-user-20261008", "https://api.typesafe.ai/v1"),
-    "openrouter": ("openrouter--inkseq-chat", "https://openrouter.ai/api/v1"),
+    "openai": ("openai--inkseq", "https://api.openai.com/v1"),
 }
 
 

@@ -21,12 +21,10 @@ class InkyProvidersTests(unittest.TestCase):
         "seconds": 5,
     }
 
-    def test_exact_profile_and_authorized_missing_openrouter_origin(self):
+    def test_exact_profile_and_authorized_missing_openai_origin(self):
         with patch.object(providers, "load_api", return_value=object()) as load:
-            providers.config("openrouter")
-            load.assert_called_once_with(
-                "openrouter", profile="openrouter--inkseq-chat"
-            )
+            providers.config("openai")
+            load.assert_called_once_with("openai", profile="openai--inkseq")
         requests = []
 
         def endpoint(request):
@@ -40,7 +38,7 @@ class InkyProvidersTests(unittest.TestCase):
                             "finish_reason": "stop",
                         }
                     ],
-                    "usage": {"cost": 0.0006001},
+                    "usage": {"prompt_tokens": 400, "completion_tokens": 40},
                 },
             )
 
@@ -49,22 +47,22 @@ class InkyProvidersTests(unittest.TestCase):
             transport=httpx.MockTransport(endpoint),
         )
         result = client(self.source, "vague_action")
-        self.assertEqual(result["actual_micros"], 601)
+        self.assertEqual(result["actual_micros"], 400 * 1 + 40 * 5)
         self.assertEqual(
-            str(requests[0].url), "https://openrouter.ai/api/v1/chat/completions"
+            str(requests[0].url), "https://api.openai.com/v1/chat/completions"
         )
         body = json.loads(requests[0].content)
-        self.assertEqual(body["model"], "openai/gpt-6.1-terra")
-        self.assertEqual(body["max_tokens"], 1024)
-        self.assertFalse(body["provider"]["allow_fallbacks"])
-        self.assertEqual(body["provider"]["max_price"]["request"], 0)
-        self.assertNotIn("tools", body)
+        self.assertEqual(body["model"], "gpt-6.1-terra")
+        self.assertEqual(body["max_completion_tokens"], 1024)
+        self.assertEqual(body["reasoning_effort"], "low")
+        for key in ("provider", "usage", "reasoning", "max_tokens", "tools"):
+            self.assertNotIn(key, body)
 
     def test_wrong_origin_does_not_receive_a_key_and_has_no_fallback(self):
         endpoint = Mock()
         for service, origin in (
             ("typesafe", None),
-            ("openrouter", "https://other.invalid"),
+            ("openai", "https://other.invalid"),
         ):
             client = providers.Client(
                 service,
@@ -99,21 +97,33 @@ class InkyProvidersTests(unittest.TestCase):
         self.assertEqual(len(requests), 1)
         self.assertNotIn("assets", json.loads(requests[0].content))
 
-    def test_missing_or_invalid_cost_is_unknown(self):
-        for value in (None, True, -1, "NaN", float("inf"), {}, "secret"):
-            self.assertIsNone(providers.cost_micros(value))
-        self.assertEqual(providers.cost_micros(0), 0)
-        self.assertEqual(providers.cost_micros("0.0000001"), 1)
+    def test_missing_or_invalid_token_counts_are_unknown(self):
+        for value in (
+            None,
+            {},
+            {"prompt_tokens": 3},
+            {"prompt_tokens": -1, "completion_tokens": 1},
+            {"prompt_tokens": True, "completion_tokens": 1},
+            {"prompt_tokens": "3", "completion_tokens": 1},
+        ):
+            self.assertIsNone(providers.token_cost(value))
+        self.assertEqual(
+            providers.token_cost({"prompt_tokens": 0, "completion_tokens": 0}), 0
+        )
+        self.assertEqual(
+            providers.token_cost({"prompt_tokens": 10, "completion_tokens": 2}), 20
+        )
 
     def test_truncated_output_keeps_known_cost(self):
         result = {
             "choices": [{"finish_reason": "length", "message": {"content": ""}}],
-            "usage": {"cost": "0.001"},
+            "usage": {"prompt_tokens": 500, "completion_tokens": 100},
         }
         client = providers.Terra(
             loader=lambda _: SimpleNamespace(base_url=None, api_key="FAKE"),
             transport=httpx.MockTransport(lambda _: httpx.Response(200, json=result)),
         )
         self.assertEqual(
-            client(self.source, "vague_action"), {"text": None, "actual_micros": 1000}
+            client(self.source, "vague_action"),
+            {"text": None, "actual_micros": 500 + 100 * 5},
         )
