@@ -212,14 +212,16 @@ class ModalAdmissionTests(ModalAdmissionFixture):
 
         job = self.accepted('one')
         with self.repo.transaction() as c:
-            self.assertEqual(modal_covered_jobs(c), set())
+            self.assertEqual(modal_covered_jobs(c, self.now), set())
         intent = self.admission.tick()['intent_id']
         with self.repo.transaction() as c:
-            self.assertEqual(modal_covered_jobs(c), {job['id']})
+            self.assertEqual(modal_covered_jobs(c, self.now), {job['id']})
+            # A start that never becomes ready stops holding the job back.
+            self.assertEqual(modal_covered_jobs(c, self.now + 601), set())
         self.hosts.stop(intent)
         self.hosts.observe(intent)
         with self.repo.transaction() as c:
-            self.assertEqual(modal_covered_jobs(c), set())
+            self.assertEqual(modal_covered_jobs(c, self.now), set())
 
     def test_two_unresolved_hosts_block_third_and_release_no_funding(self):
         for key in ('one', 'two', 'three'):
