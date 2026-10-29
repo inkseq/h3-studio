@@ -54,6 +54,14 @@ def clip(value, limit=TEXT_LIMIT):
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def usage(prompt, output, cached=0):
+    """Langfuse usage types; total is their sum, so input excludes the cache hit."""
+    values = {"input": prompt, "output": output, "cache_read_input_tokens": cached}
+    if not all(type(v) is int and v >= 0 for v in values.values()) or cached > prompt:
+        return {k: v for k, v in values.items() if type(v) is int and v >= 0} or None
+    return {**values, "input": prompt - cached}
+
+
 def person(owner):
     """A stable, non-reversible id for filtering by person in Langfuse."""
     if not owner:
