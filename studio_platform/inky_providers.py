@@ -15,9 +15,11 @@ TYPE_PROFILE = "typesafe--avatar-user-20261008"
 OPEN_PROFILE = "openai--inkseq"
 TYPE_ORIGIN = "https://api.typesafe.ai/v1"
 OPEN_ORIGIN = "https://api.openai.com/v1"
-# OpenAI list price for gpt-6.1-terra in micro-USD per token ($1/M in, $5/M out).
-# OpenAI returns no per-request cost; cached input is charged at the full rate.
-TERRA_PRICE = (1, 5)
+# OpenAI price for gpt-6.1-terra in micro-USD per token: input is charged at the
+# cache-write rate ($1.25/M; caching is on by default), output $5/M. OpenAI returns
+# no per-request cost, so cached reads are conservatively overcounted.
+TERRA_INPUT_PER_4_TOKENS = 5  # 1.25 micro-USD per input token, kept integer.
+TERRA_OUTPUT_PER_TOKEN = 5
 
 
 class InkyProviderError(ValueError):
@@ -136,7 +138,10 @@ def token_cost(usage):
     tokens = usage.get("prompt_tokens"), usage.get("completion_tokens")
     if not all(type(t) is int and t >= 0 for t in tokens):
         return None
-    return tokens[0] * TERRA_PRICE[0] + tokens[1] * TERRA_PRICE[1]
+    return (
+        -(-tokens[0] * TERRA_INPUT_PER_4_TOKENS // 4)
+        + tokens[1] * TERRA_OUTPUT_PER_TOKEN
+    )
 
 
 class Terra:

@@ -47,7 +47,8 @@ class InkyProvidersTests(unittest.TestCase):
             transport=httpx.MockTransport(endpoint),
         )
         result = client(self.source, "vague_action")
-        self.assertEqual(result["actual_micros"], 400 * 1 + 40 * 5)
+        # 400 input tokens at the 1.25 cache-write rate + 40 output tokens at 5.
+        self.assertEqual(result["actual_micros"], 500 + 40 * 5)
         self.assertEqual(
             str(requests[0].url), "https://api.openai.com/v1/chat/completions"
         )
@@ -111,7 +112,14 @@ class InkyProvidersTests(unittest.TestCase):
             providers.token_cost({"prompt_tokens": 0, "completion_tokens": 0}), 0
         )
         self.assertEqual(
-            providers.token_cost({"prompt_tokens": 10, "completion_tokens": 2}), 20
+            providers.token_cost({"prompt_tokens": 10, "completion_tokens": 2}), 23
+        )
+        # A 2048-token first cache write is 2560 micro-USD; one token rounds up.
+        self.assertEqual(
+            providers.token_cost({"prompt_tokens": 2048, "completion_tokens": 0}), 2560
+        )
+        self.assertEqual(
+            providers.token_cost({"prompt_tokens": 1, "completion_tokens": 0}), 2
         )
 
     def test_truncated_output_keeps_known_cost(self):
@@ -125,5 +133,5 @@ class InkyProvidersTests(unittest.TestCase):
         )
         self.assertEqual(
             client(self.source, "vague_action"),
-            {"text": None, "actual_micros": 500 + 100 * 5},
+            {"text": None, "actual_micros": 625 + 100 * 5},
         )
