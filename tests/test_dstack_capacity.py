@@ -1788,6 +1788,7 @@ class DstackRESTTests(unittest.TestCase):
         self.assertEqual(seen[0].content, seen[1].content)
         self.assertEqual(json.loads(seen[0].content)["verified"], {"eq": True})
         self.assertEqual(json.loads(seen[0].content)["inet_down"], {"gte": 1000})
+        self.assertEqual(json.loads(seen[0].content)["cuda_max_good"], {"gte": 13.0})
 
     def test_vast_bandwidth_floor_refuses_unknown_and_preserves_advertised_location(
         self,
