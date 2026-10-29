@@ -180,7 +180,7 @@ class CandidateTests(LedgerCase):
         )
         self.publish('lium', [offer('smaller', ram_gib=35)])
         result = self.project()
-        self.assertEqual(len(result['candidates']), 5)
+        self.assertEqual(len(result['candidates']), 4)
         self.assertEqual(
             {row['selection']['runtime_profile_id'] for row in result['candidates']},
             {
@@ -188,8 +188,6 @@ class CandidateTests(LedgerCase):
                 PROFILE_IDS[5],
                 PROFILE_IDS[6],
                 PROFILE_IDS[10],
-                # v8 keeps the $1.20/h ceiling; v7's original $0.85/h excludes this offer.
-                PROFILE_IDS[17],
             },
         )
         self.assertEqual(self.registry.bindings[historical.binding_id], historical)

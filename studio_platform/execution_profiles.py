@@ -71,7 +71,7 @@ def _read_profiles(path):
             or type(value["schema_version"]) is not int
             or value["schema_version"] != 1
             or not isinstance(value["policies"], list)
-            or len(value["policies"]) > 32
+            or len(value["policies"]) > 64
         ):
             raise ValueError("Invalid execution profiles")
         from .execution_policy import validate_policy
