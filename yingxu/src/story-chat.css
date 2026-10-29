@@ -346,6 +346,9 @@ div.sc-tabs {
   right: -6px;
 }
 .sc-compose-row {
+  /* The shared IconButton reads these: the attach button matches the 36px send. */
+  --h-md: 36px;
+  --control-h: 36px;
   display: flex;
   align-items: flex-end;
   gap: 6px;

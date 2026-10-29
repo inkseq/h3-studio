@@ -98,6 +98,21 @@
 .pack.best {
   border-color: var(--accent);
 }
+/* The pack being opened stays bright with an accent edge while the others wait
+   (owner 2026-10-29: the clicked pack looked as dim as the rest). */
+.pack.opening:disabled {
+  opacity: 1;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.pack .pack-price {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.pack-spinner {
+  animation: spin 0.8s linear infinite;
+}
 .pack-tag {
   position: absolute;
   top: -9px;

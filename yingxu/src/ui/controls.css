@@ -202,6 +202,13 @@ textarea {
   resize: vertical;
   line-height: 1.55;
 }
+/* A one-line bare text area sits on the same line as its buttons: as tall as the
+   control height around it, text centered; more lines grow it (owner 2026-10-29). */
+textarea.field-bare[rows='1'] {
+  min-height: var(--control-h, var(--h-md));
+  padding-block: calc((var(--control-h, var(--h-md)) - 20px) / 2);
+  line-height: 20px;
+}
 /* A field that sits inside its own frame (the chat composer): no box of its own. */
 :is(input, textarea, select).field-bare,
 :is(input, textarea, select).field-bare:focus,
@@ -426,4 +433,21 @@ a.btn:hover {
 a.btn[aria-disabled='true'] {
   opacity: 0.4;
   pointer-events: none;
+}
+
+/* Icon + text headings and status lines center on one line (owner 2026-10-29: icons
+   sat higher than their text in "Credit history", "Purchases" and "Saved"). */
+:is(h1, h2, h3, h4, h5):has(> svg),
+.autosave-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.autosave-status {
+  display: inline-flex;
+  gap: 4px;
+}
+:is(h1, h2, h3, h4, h5) > svg,
+.autosave-status > svg {
+  flex: none;
 }
