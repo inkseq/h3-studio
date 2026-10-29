@@ -857,3 +857,12 @@ or CPU simulation is not an observed service-level receipt.
 
 ## 2026-10-29 — Early-stage operating mode; AI layer and Modal to Claude
 Owner: Codex is too conservative for a product with almost no users. Until 100 paying users: staging changes need no proofs/receipts/approvals; production needs one zero-job check and one read-back; approvals only for spend > USD 50, user-data deletion, price changes or charging users; a Claude-assigned task within those limits is owner-authorized; prove the smallest end-to-end first; updates ≤ 5 lines; deploy-helper/server-config changes count only when live on both hosts. Claude owns the AI layer (backend included) and Modal (#688). See AGENTS.md.
+
+### 2026-10-29 — Forward-only backup loss policy (#655)
+Owner in this session: forget the Oct28 display derivatives; no repair, census,
+mapping or retroactive investigation. Regenerable derivatives are expected
+missing coverage; only missing originals (uploads/generated videos) raise
+business_backup_loss. Use a known one-line cause fix if available, otherwise
+regenerate only on demand. Install the monitor at zero production jobs, read
+back once, report at most five issue lines. No further approval is required
+under the early-stage mode (#778); preserve receipts and original media.

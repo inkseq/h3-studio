@@ -1016,3 +1016,4 @@ inventory.json
 !deploy/platform/langfuse-staging-read-policy.json
 !deploy/platform/langfuse-production-read-policy.json
 !tests/test_modal_gvisor_ram.py
+!studio_platform/backup_loss_policy.py
