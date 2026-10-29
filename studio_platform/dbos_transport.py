@@ -17,8 +17,9 @@ from pathlib import Path
 import stat
 import threading
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 
+from . import workflow_status
 from .repository import Conflict, Scope, identifier, jobs
 from .domain_turns import DomainTurns
 from .workflow_schema import (
@@ -88,26 +89,7 @@ class GenerationTransport:
         base = workflow_id(
             row["tenant_id"], row["owner_id"], row["project_id"], row["id"]
         )
-        # Explicit schema name is a source constant, never a user identifier.
-        params = {
-            "id": base,
-            "prefix": base + "/%",
-            "application": APPLICATION,
-            "name": WORKFLOW,
-        }
-        active = (
-            connection.execute(
-                text(
-                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
-                    "AND application_name=:application AND name=:name "
-                    "AND status IN ('PENDING','ENQUEUED','DELAYED') LIMIT 2"
-                ),
-                params,
-            )
-            .scalars()
-            .all()
-        )
+        active = workflow_status.open_ids(connection, base, APPLICATION, WORKFLOW)
         if len(active) > 1:
             raise Conflict("workflow_original_job_binding_ambiguous")
         if active:
@@ -115,14 +97,9 @@ class GenerationTransport:
         else:
             if row["status"] not in ACTIVE:
                 return  # Historical/planned/terminal records do not acquire workflows.
-            previous = connection.execute(
-                text(
-                    "SELECT 1 FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
-                    "AND application_name=:application AND name=:name LIMIT 1"
-                ),
-                params,
-            ).first()
+            previous = workflow_status.latest_id(
+                connection, base, APPLICATION, WORKFLOW
+            )
             if previous and event_type not in {
                 "job.queued",
                 "job.waiting_capacity",
@@ -246,21 +223,9 @@ class GenerationTransport:
         from .film_runs import VERSION as FILM_VERSION
 
         base = "inkseq-film-" + workflow_id(tenant, owner, project, run_id)[11:]
-        return connection.execute(
-            text(
-                "SELECT status FROM inkseq_workflows.workflow_status "
-                "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
-                "AND application_name=:application AND application_version=:version "
-                "AND name=:name ORDER BY created_at DESC,workflow_uuid DESC LIMIT 1"
-            ),
-            {
-                "id": base,
-                "prefix": base + "/%",
-                "application": APPLICATION,
-                "version": VERSION,
-                "name": FILM_VERSION,
-            },
-        ).scalar()
+        return workflow_status.latest_status(
+            connection, base, APPLICATION, VERSION, FILM_VERSION
+        )
 
     def enqueue_film(self, connection, tenant, owner, project, run_id):
         from .film_runs import VERSION as FILM_VERSION
@@ -268,37 +233,15 @@ class GenerationTransport:
 
         assert_execution_allowed(connection)
         base = "inkseq-film-" + workflow_id(tenant, owner, project, run_id)[11:]
-        params = {
-            "id": base,
-            "prefix": base + "/%",
-            "application": APPLICATION,
-            "name": FILM_VERSION,
-        }
-        rows = (
-            connection.execute(
-                text(
-                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) AND application_name=:application "
-                    "AND name=:name AND status IN ('ENQUEUED','PENDING','DELAYED') LIMIT 2"
-                ),
-                params,
-            )
-            .scalars()
-            .all()
-        )
+        rows = workflow_status.open_ids(connection, base, APPLICATION, FILM_VERSION)
         if len(rows) > 1:
             raise Conflict("workflow_film_binding_ambiguous")
         if rows:
             ident = rows[0]
         else:
-            previous = connection.execute(
-                text(
-                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) AND application_name=:application "
-                    "AND name=:name ORDER BY created_at DESC,workflow_uuid DESC LIMIT 1"
-                ),
-                params,
-            ).scalar()
+            previous = workflow_status.latest_id(
+                connection, base, APPLICATION, FILM_VERSION
+            )
             # Called only by original confirmed submit/explicit resume, never a
             # timer. A transport epoch retains the same frozen run/jobs/holds.
             ident = (
