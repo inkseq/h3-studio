@@ -329,7 +329,7 @@ class RuntimeCatalogTests(unittest.TestCase):
 
     def test_catalog_is_detached_public_and_unqualified(self):
         catalog = public_catalog()
-        self.assertEqual(len(catalog['profiles']), 17)
+        self.assertEqual(len(catalog['profiles']), 18)
         for profile in catalog['profiles']:
             self.assertNotIn('runtime', profile)
             self.assertIs(profile['validation']['production_adapter_verified'], False)
@@ -376,7 +376,7 @@ class RuntimeCatalogTests(unittest.TestCase):
     def test_failed_bf16_and_trimmed_reference_samples_are_excluded(self):
         self.assertEqual(
             [len(get_profile(p)['verified_cases']) for p in PROFILE_IDS],
-            [8, 7, 7, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [8, 7, 7, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         )
         self.assertEqual(
             get_profile(PROFILE_IDS[2])['runtime']['task_config'], 'bf16,bf16'

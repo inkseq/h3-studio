@@ -743,7 +743,7 @@ class DstackClient:
             "reliability2": {"gte": request.min_reliability},
             "inet_down": {"gte": 1000},
             "verified": {"eq": True},
-            "cuda_max_good": {"gte": 12.8},
+            "cuda_max_good": {"gte": 13.0},
             "compute_cap": {"gte": 600},
             "rentable": {"eq": True},
             "rented": {"eq": False},
