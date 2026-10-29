@@ -230,10 +230,66 @@ def modal_covered_jobs(connection, now):
     }
 
 
-def vast_share(policy, queued, work, now):
-    """With Modal first (owner 2026-10-29), Vast takes the queue only when it is
-    long, or a job that has waited past the fallback; otherwise Modal serves it."""
-    if not policy or len(queued) >= policy['vast_min_queue']:
+MODAL_BOOT_SECONDS = 120  # Measured ≈2 min cold to ready on staging (#688).
+
+
+def modal_machines(connection, now):
+    """Live Modal hosts as lookahead capacity; a start past its grace counts no more."""
+    from .capacity_lookahead import Machine
+    from .repository import instance_intents
+
+    machines = []
+    for identity, state, created in connection.execute(
+        select(
+            instance_intents.c.id,
+            instance_intents.c.state,
+            instance_intents.c.created_at,
+        ).where(
+            instance_intents.c.provider == 'modal',
+            instance_intents.c.state.in_(
+                (
+                    'reserved',
+                    'creating',
+                    'creation_unknown',
+                    'starting',
+                    'ready',
+                    'busy',
+                )
+            ),
+        )
+    ):
+        if state in ('ready', 'busy'):
+            machines.append(Machine(identity, 'ready'))
+        elif isinstance(created, (int, float)) and 0 <= now - created < (
+            MODAL_START_GRACE_SECONDS
+        ):
+            machines.append(
+                Machine(
+                    identity,
+                    'starting',
+                    ready_in_seconds=max(0, MODAL_BOOT_SECONDS - (now - created)),
+                )
+            )
+    return tuple(machines)
+
+
+def vast_share(policy, queued, work, now, machines):
+    """Owner 2026-10-29 / #688: Modal first; Vast by the boot-time lookahead.
+
+    Modal hosts are the floor. Vast rents only when the lookahead still sees at
+    least vast_min_queue jobs left when a Vast machine would be ready, or for a
+    job that has waited past vast_after_seconds (Modal refused or failed).
+    """
+    from .capacity_lookahead import Policy, plan
+
+    decision = plan(
+        Policy(minimum_jobs=policy['vast_min_queue']),
+        machines,
+        queued=len(queued),
+        available_slots=1,
+        admission_blocked=False,
+    )
+    if decision.start_count:
         return work
     return [
         item
@@ -263,7 +319,11 @@ def _claim(service):
         covered = modal_covered_jobs(connection, now)
         queued = eligible_jobs(service, connection, now)
         work = [item for item in queued if item[0]['id'] not in covered]
-        work = vast_share(getattr(service, 'modal_first', None), queued, work, now)
+        policy = getattr(service, 'modal_first', None)
+        if policy:
+            work = vast_share(
+                policy, queued, work, now, modal_machines(connection, now)
+            )
         if not work:
             return _result('idle'), None
         journals = list(
