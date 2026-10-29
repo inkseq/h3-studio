@@ -15,7 +15,7 @@ import stat
 import time
 import traceback
 
-from .modal_runtime import PROFILE, host_factory, serve
+from .modal_runtime import PROFILE, PROFILES, host_factory, serve
 from .runtime_catalog import engine_manifest, runtime_config
 
 STATE = Path('/run/inkseq-modal')
@@ -51,7 +51,10 @@ def validate_launch(value):
         or value['mode'] not in {'fl', 'ref'}
         or not isinstance(value['token'], str)
         or not re.fullmatch(r'[0-9a-f]{64}', value['token'])
-        or value['manifest_digest'] != engine_manifest(PROFILE, value['mode']).digest
+        # The controller may launch either profile; prepare_files binds the
+        # document to the one profile this image actually runs.
+        or value['manifest_digest']
+        not in {engine_manifest(p, value['mode']).digest for p in PROFILES}
     ):
         raise ValueError('modal_launch_binding_invalid')
     return value

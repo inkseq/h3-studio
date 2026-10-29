@@ -13,7 +13,7 @@ from sqlalchemy import insert, select
 
 from .modal_budget import binding, require
 from .modal_capacity import selection
-from .modal_runtime import PROFILE
+from .modal_runtime import selected_profile
 from .repository import BudgetExceeded, scaler_receipts
 from .runtime_catalog import engine_manifest, profile_output_delivery
 
@@ -35,7 +35,8 @@ def _original(c, worker):
     identity = str(uuid.UUID(identity))
     intent, _ = binding(c, identity)
     original = selection(c, identity)
-    manifest = engine_manifest(PROFILE, original['mode'])
+    runtime = selected_profile(original)
+    manifest = engine_manifest(runtime, original['mode'])
     spec = worker['spec']
     require(worker['provider'] == spec['provider'] == 'modal')
     require(worker['id'] == 'modal-' + identity.replace('-', ''))
@@ -53,7 +54,7 @@ def _original(c, worker):
     require(
         spec['engine_manifest_digest'] == original['manifest_digest'] == manifest.digest
     )
-    require(spec['output_delivery'] == profile_output_delivery(PROFILE))
+    require(spec['output_delivery'] == profile_output_delivery(runtime))
     ready = list(
         c.execute(
             select(scaler_receipts.c.facts).where(

@@ -15,7 +15,6 @@ from .control import WorkerControl
 from .dstack_test_budget import ACCOUNT, PROJECTS, finite, task_guard
 from .modal_budget import bind_test_guard, production_guard, require
 from .modal_capacity import BACKEND, admission, precreate
-from .modal_runtime import PROFILE
 from .repository import (
     BudgetExceeded,
     Conflict,
@@ -140,13 +139,15 @@ class ModalAdmission:
         demand = validate_start(self.service, c, job['id'], profile['id'])
         request, execution = job['request'], job['execution_plan']
         mode = request.get('request', {}).get('mode')
+        # The host image serves exactly one runtime profile (v7 or v8).
+        runtime = self.hosts.spec.profile
         require(
             profile['runtime_profile_id']
             == request.get('deployment_profile_id')
-            == PROFILE
+            == runtime
         )
         require(mode == profile['mode'] and mode in {'fl', 'ref'})
-        manifest = engine_manifest(PROFILE, mode)
+        manifest = engine_manifest(runtime, mode)
         require(execution.get('engine_manifest_digest') == manifest.digest)
         require(request.get('recipe_id') == manifest.document['generation_recipe_id'])
         limits = self.service._admin_limits(c)['value']
@@ -236,6 +237,7 @@ class ModalAdmission:
                     'job_id': job['id'],
                     'demand': demand,
                     'mode': mode,
+                    'profile': runtime,
                     'configuration_id': execution['configuration_id'],
                     'manifest_digest': manifest.digest,
                     'capacity_backend': BACKEND,
