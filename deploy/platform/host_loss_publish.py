@@ -48,7 +48,10 @@ def valid(value):
 
 def publish(environment, ssm, *, now=None):
     now = time.time() if now is None else now
-    value = json.loads(SOURCE.read_text())
+    try:
+        value = json.loads(SOURCE.read_text())
+    except (OSError, ValueError):
+        return "missing"  # Controller not writing yet (or mid-deploy).
     if not valid(value) or now - value["updated_at"] > 600:
         return (
             "stale_or_invalid"  # Never refresh a list the controller stopped writing.
