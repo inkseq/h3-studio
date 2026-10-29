@@ -206,6 +206,23 @@ class ModalAdmissionTests(ModalAdmissionFixture):
         self.assertEqual(self.admission.tick()['state'], 'destroyed')
         self.assertEqual(len(self.client.created), 1)
 
+    def test_vast_skips_a_job_while_its_modal_host_lives(self):
+        # #784: one provider per job; Vast takes over once the Modal host is gone.
+        from studio_platform.dstack_demand_start import modal_covered_jobs
+
+        job = self.accepted('one')
+        with self.repo.transaction() as c:
+            self.assertEqual(modal_covered_jobs(c, self.now), set())
+        intent = self.admission.tick()['intent_id']
+        with self.repo.transaction() as c:
+            self.assertEqual(modal_covered_jobs(c, self.now), {job['id']})
+            # A start that never becomes ready stops holding the job back.
+            self.assertEqual(modal_covered_jobs(c, self.now + 601), set())
+        self.hosts.stop(intent)
+        self.hosts.observe(intent)
+        with self.repo.transaction() as c:
+            self.assertEqual(modal_covered_jobs(c, self.now), set())
+
     def test_two_unresolved_hosts_block_third_and_release_no_funding(self):
         for key in ('one', 'two', 'three'):
             self.accepted(key)

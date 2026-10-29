@@ -185,6 +185,51 @@ def _write(connection, row, payload, now):
     )
 
 
+# A Modal host that is not ready this long after its reservation no longer
+# holds its job back from Vast (owner: either provider covers a failed start).
+MODAL_START_GRACE_SECONDS = 600
+
+
+def modal_covered_jobs(connection, now):
+    """Queued jobs a live Modal host was started for (#784): one provider per job.
+
+    Modal admission runs first in the controller tick. Vast only starts for a job
+    Modal refused, once its Modal host is going away or gone, or when the host
+    has not become ready within MODAL_START_GRACE_SECONDS.
+    """
+    from .modal_capacity import OPERATION
+    from .repository import instance_intents, scaler_receipts
+
+    rows = connection.execute(
+        select(
+            scaler_receipts.c.facts,
+            instance_intents.c.state,
+            instance_intents.c.created_at,
+        )
+        .join(
+            instance_intents,
+            instance_intents.c.id == scaler_receipts.c.intent_id,
+        )
+        .where(
+            scaler_receipts.c.operation == OPERATION,
+            instance_intents.c.provider == 'modal',
+            instance_intents.c.state.not_in(
+                ('destroyed', 'not_created', 'draining', 'destroying')
+            ),
+        )
+    ).all()
+    return {
+        facts.get('job_id')
+        for facts, state, created in rows
+        if isinstance(facts, dict)
+        and (
+            state in ('ready', 'busy')
+            or isinstance(created, (int, float))
+            and now - created < MODAL_START_GRACE_SECONDS
+        )
+    }
+
+
 def _claim(service):
     from .dstack_demand import (
         _nodes,
@@ -203,7 +248,12 @@ def _claim(service):
             return _result('disabled'), None
         if demand_configuration(service.config, now=now) is None:
             return _result('blocked', 'authority_unavailable'), None
-        work = eligible_jobs(service, connection, now)
+        covered = modal_covered_jobs(connection, now)
+        work = [
+            item
+            for item in eligible_jobs(service, connection, now)
+            if item[0]['id'] not in covered
+        ]
         if not work:
             return _result('idle'), None
         journals = list(
