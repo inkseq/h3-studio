@@ -1368,11 +1368,17 @@ body.sb-resizing-y video {
 /* A playhead you can see and grab on any picture (owner, 2026-10-26): a light line with a
    dark edge, a round grip on top, and a wider invisible hit area. It stays inside the track
    (owner, 2026-10-29) so at 0:00 it never covers the play button above. */
+/* A small gutter at both ends, for the track and its ruler alike, so the playhead and its
+   grip at 0:00 or the last frame sit beside the picture instead of on it (owner 2026-10-29). */
+.dock-right .timeline {
+  padding-inline: 8px;
+}
 .timeline .track.video .playhead {
   top: 0;
   bottom: 0;
   width: 3px;
-  margin-left: -1px;
+  /* Drawn just before its time, so at 0:00 the line sits in the gutter, off the picture. */
+  margin-left: -2px;
   background: var(--white);
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.55),

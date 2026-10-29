@@ -54,6 +54,9 @@
   position: relative;
   display: grid;
   place-items: center;
+  /* The base chip packs content to the start; the icon must sit in the tile's centre so
+     the corner badge lands on the icon, not beside it (owner 2026-10-29). */
+  place-content: center;
   width: 36px;
   height: 36px;
   min-height: 36px;
