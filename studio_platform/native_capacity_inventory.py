@@ -26,7 +26,7 @@ def _exited_modal_worker(connection, intent, now):
     from .control import WorkerSpec, worker_spec_payload
     from .dstack_test_budget import finite
     from .modal_budget import binding, require
-    from .modal_runtime import PROFILE
+    from .modal_runtime import selected_profile
     from .runtime_catalog import engine_manifest, profile_output_delivery
 
     try:
@@ -60,7 +60,7 @@ def _exited_modal_worker(connection, intent, now):
         selection = records['modal_demand_bound']['facts']
         ready = records['modal_runtime_bound']
         facts = ready['facts']
-        manifest = engine_manifest(PROFILE, selection['mode'])
+        manifest = engine_manifest(selected_profile(selection), selection['mode'])
         require(
             selection.get('capacity_backend') == 'modal-v1'
             and selection['manifest_digest'] == manifest.digest
@@ -82,7 +82,7 @@ def _exited_modal_worker(connection, intent, now):
             selection['configuration_id'],
             'wangp-worker',
             manifest.digest,
-            profile_output_delivery(PROFILE),
+            profile_output_delivery(selected_profile(selection)),
             'hatchet-v1',
         )
         worker = (

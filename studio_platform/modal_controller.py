@@ -108,8 +108,13 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
     require(type(value['version']) is int and value['version'] == 1)
     require(type(value['enabled']) is bool)
     require(service.settings.generation_queue == 'dbos')
-    spec = HostSpec(**value['host'])
-    require(value['host'] == asdict(spec))
+    # Configurations written before v8 omit the profile: those images are v7.
+    host = {
+        'profile': HostSpec.__dataclass_fields__['profile'].default,
+        **value['host'],
+    }
+    spec = HostSpec(**host)
+    require(host == asdict(spec))
     if 'credentials_file' in value:
         require(
             value['credentials_file'] == str(Path(work_dir) / 'modal-credentials.json')

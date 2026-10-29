@@ -169,13 +169,15 @@ def registration_usage(service, hosts, c, spec):
     require(spec.backend == 'wangp-worker' and spec.dispatch_backend == 'hatchet-v1')
     require(original['configuration_id'] == spec.configuration_id)
     require(original['manifest_digest'] == spec.engine_manifest_digest)
-    from .modal_runtime import PROFILE
+    from .modal_runtime import selected_profile
     from .runtime_catalog import engine_manifest, profile_output_delivery
 
-    manifest = engine_manifest(PROFILE, original['mode'])
+    runtime = selected_profile(original)
+    require(runtime == hosts.spec.profile)
+    manifest = engine_manifest(runtime, original['mode'])
     require(spec.model_id == manifest.document['model_id'])
     require(spec.recipe_ids == (manifest.document['generation_recipe_id'],))
-    require(spec.output_delivery == profile_output_delivery(PROFILE))
+    require(spec.output_delivery == profile_output_delivery(runtime))
     ready = list(
         c.execute(
             select(scaler_receipts.c.facts).where(

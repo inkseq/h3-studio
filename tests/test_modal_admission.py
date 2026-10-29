@@ -18,6 +18,7 @@ from studio_platform.repository import (
     instance_intents,
     pool_limits,
     registered_workers,
+    scaler_receipts,
     spending_settings,
 )
 from studio_platform.runtime_catalog import engine_manifest
@@ -441,3 +442,48 @@ class ProductionModalAdmissionTests(ModalAdmissionFixture):
             production_guard(ACCOUNT, max_runtime=7200)
         with self.assertRaises(ValueError):
             production_guard('production-gpu', max_runtime=7201)
+
+
+class ModalProfileTests(ModalAdmissionFixture):
+    """v7 -> v8 switch: one Modal image serves one runtime profile."""
+
+    def test_receipts_before_v8_mean_v7_and_unknown_profiles_fail(self):
+        from studio_platform.modal_runtime import V7, V8, selected_profile
+
+        self.assertEqual(selected_profile({}), V7)
+        self.assertEqual(selected_profile({'profile': V8}), V8)
+        with self.assertRaises(ValueError):
+            selected_profile({'profile': 'something-else'})
+        with self.assertRaises(ValueError):
+            HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000, profile='unknown')
+
+    def test_a_v8_host_never_takes_a_v7_job(self):
+        from studio_platform.modal_runtime import V8
+
+        hosts = ModalHosts(
+            self.repo,
+            self.client,
+            HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000, profile=V8),
+            environment='staging',
+            enabled=True,
+        )
+        admission = ModalAdmission(
+            self.service, hosts, environment='staging', enabled=True
+        )
+        self.accepted('one')
+        self.assertEqual(admission.tick()['reason_code'], 'modal_admission_refused')
+        self.assertFalse(self.client.created)
+
+    def test_v7_admission_records_its_profile(self):
+        from studio_platform.modal_runtime import V7
+
+        self.accepted('one')
+        intent = self.admission.tick()['intent_id']
+        with self.repo.transaction() as c:
+            facts = c.execute(
+                select(scaler_receipts.c.facts).where(
+                    scaler_receipts.c.intent_id == intent,
+                    scaler_receipts.c.operation == 'modal_demand_bound',
+                )
+            ).scalar_one()
+        self.assertEqual(facts['profile'], V7)
