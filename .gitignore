@@ -126,6 +126,7 @@ inventory.json
 !studio_platform/repository.py
 !studio_platform/schema_version.py
 !studio_platform/workflow_schema.py
+!studio_platform/host_loss.py
 !studio_platform/workflow_status.py
 !studio_platform/workflow_backup.py
 !studio_platform/migrations/data/
@@ -254,6 +255,8 @@ inventory.json
 !deploy/platform/init_database.py
 !deploy/platform/check_config.py
 !deploy/platform/release.py
+!deploy/platform/host_loss_publish.py
+!deploy/platform/host_loss_lambda.py
 !deploy/platform/release_retention.py
 !deploy/platform/inkseq-release-retention.service
 !deploy/platform/inkseq-release-retention.timer

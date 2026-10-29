@@ -1460,6 +1460,14 @@ def main(argv=None):
 
         wakeup = DemandWakeup(repo, stop)
         cadence = IdleCadence()
+        from .host_loss import Manifest
+
+        stop_list = Manifest(repo, work_dir)
+
+        def heartbeat(active):
+            progress.beat(active)
+            stop_list.beat()
+
         try:
             if threading.current_thread() is threading.main_thread():
                 for signum in (signal.SIGINT, signal.SIGTERM):
@@ -1471,7 +1479,7 @@ def main(argv=None):
                 controller.tick,
                 active_seconds=lambda: cadence.interval(controller),
                 safety=controller.safety_sweep,
-                heartbeat=progress.beat,
+                heartbeat=heartbeat,
                 report=lambda value: print(
                     json.dumps(value, sort_keys=True), flush=True
                 ),
