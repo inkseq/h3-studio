@@ -398,6 +398,21 @@ def _profile_ram_limit(group):
     return int(value)
 
 
+def _gvisor_sandbox(proc_root, group):
+    """A gVisor kernel whose v1 memory group lacks hierarchy/stat files (Modal)."""
+    try:
+        kernel = (proc_root / 'version').read_text()
+    except (OSError, UnicodeError):
+        return False
+    return (
+        'gvisor' in kernel
+        and not (group / 'memory.use_hierarchy').exists()
+        and not (group / 'memory.stat').exists()
+        and (group / 'memory.limit_in_bytes').is_file()
+        and (group / 'memory.usage_in_bytes').is_file()
+    )
+
+
 def _profile_v1_ram(proc_root, group_root):
     """Observe the actual v1 memory controller, including hybrid hosts.
 
@@ -486,6 +501,12 @@ def _profile_v1_ram(proc_root, group_root):
                 raise ValueError('wangp_profile_cgroup_invalid')
         capacity = None
         available = None
+        if _gvisor_sandbox(proc_root, group):
+            # Modal's gVisor sandbox exposes only limit/usage for its own group;
+            # that limit IS the reserved sandbox memory. No cache is credited.
+            limit = number(read(group / 'memory.limit_in_bytes').strip(), positive=True)
+            used = number(read(group / 'memory.usage_in_bytes').strip())
+            return limit, max(0, limit - used)
         while True:
             if group.is_symlink() or not group.is_dir():
                 raise ValueError('wangp_profile_cgroup_invalid')

@@ -3,7 +3,6 @@
 from dataclasses import asdict
 import json
 from pathlib import Path
-import subprocess
 
 from sqlalchemy import select
 
@@ -23,9 +22,8 @@ def require(value):
         raise ValueError('modal_controller_configuration_unconfirmed')
 
 
-def client_from_staging_secret(spec):
-    """Existing EC2 role and existing secret only; never mutate SDK environment."""
-    import boto3
+def client_from_staging_secret(spec, *, credentials_file=None):
+    """Explicit existing secret source; never grant the CPU container an AWS role."""
     import modal
     from modal.config import config
     from .modal_client import ModalSandboxClient
@@ -33,14 +31,21 @@ def client_from_staging_secret(spec):
     try:
         require(modal.__version__ == '1.6.3')
         require(config['server_url'] == 'https://api.modal.com,https://api.modal2.com')
-        secret = boto3.client('secretsmanager', region_name=REGION).get_secret_value(
-            SecretId=SECRET, VersionStage='AWSCURRENT'
-        )
-        value = json.loads(secret['SecretString'])
-        require(set(value) == {'MODAL_TOKEN_ID', 'MODAL_TOKEN_SECRET'})
-        require(
-            all(isinstance(v, str) and v.strip() == v and v for v in value.values())
-        )
+        from .modal_credentials import read, unique_pairs, validate
+
+        if credentials_file is not None:
+            value = read(credentials_file)
+        else:
+            # Preserve the original explicit SDK source for existing callers.
+            # An invalid selected file never falls back to a different source.
+            import boto3
+
+            secret = boto3.client(
+                'secretsmanager', region_name=REGION
+            ).get_secret_value(SecretId=SECRET, VersionStage='AWSCURRENT')
+            value = validate(
+                json.loads(secret['SecretString'], object_pairs_hook=unique_pairs)
+            )
         client = modal.Client.from_credentials(
             value['MODAL_TOKEN_ID'], value['MODAL_TOKEN_SECRET']
         )
@@ -68,16 +73,29 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
         require(not originals)
         return None
     value = _json(path)
-    require(set(value) == {'version', 'enabled', 'host'})
+    fields = {'version', 'enabled', 'host'}
+    require(set(value) in (fields, fields | {'credentials_file'}))
     require(type(value['version']) is int and value['version'] == 1)
     require(type(value['enabled']) is bool)
     require(service.settings.public_origin == 'https://staging.inkseq.com')
     require(service.settings.generation_queue == 'dbos')
     spec = HostSpec(**value['host'])
     require(value['host'] == asdict(spec))
+    if 'credentials_file' in value:
+        require(
+            value['credentials_file'] == str(Path(work_dir) / 'modal-credentials.json')
+        )
     if not value['enabled'] and not originals:
         return None
-    client, connect = client_factory(spec)
+    client, connect = (
+        client_factory(spec, credentials_file=value['credentials_file'])
+        if 'credentials_file' in value
+        else client_factory(spec)
+    )
+    # Sandbox.exec accepts only Modal's StreamType; a raw subprocess.DEVNULL
+    # makes every launch install fail ("Unsupported StreamType for stderr").
+    from modal.stream_type import StreamType
+
     hosts = ModalHosts(
         service.repo, client, spec, environment='staging', enabled=value['enabled']
     )
@@ -85,7 +103,7 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
         service.repo,
         Path(work_dir) / 'modal-bindings',
         connect,
-        stderr_sink=subprocess.DEVNULL,
+        stderr_sink=StreamType.DEVNULL,
     )
     return ModalExtension(service, hosts, bindings, enabled=value['enabled'])
 

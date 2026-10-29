@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 import stat
 import time
+import traceback
 
 from .modal_runtime import PROFILE, host_factory, serve
 from .runtime_catalog import engine_manifest, runtime_config
@@ -148,9 +149,23 @@ def main(argv=None):
             session_factory=partial(create_session, modal_l40s=True),
             serve=serve,
         )
-    except Exception:
+    except Exception as error:
         # Any restart gets the existing directory and refuses; no queue replay.
-        print(json.dumps({'state': 'modal_native_start_refused'}))
+        # Only the class and a short reason code are printed: never file bytes.
+        code = str(error)
+        print(
+            json.dumps(
+                {
+                    'state': 'modal_native_start_refused',
+                    'error': type(error).__name__,
+                    'reason': code
+                    if re.fullmatch(r'[a-z0-9_.:-]{1,100}', code)
+                    else None,
+                }
+            ),
+            flush=True,
+        )
+        traceback.print_exc()
         return 1
 
 

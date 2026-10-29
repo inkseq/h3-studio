@@ -64,6 +64,9 @@ inventory.json
 !platform_app.py
 !studio_platform/
 !studio_platform/__init__.py
+!studio_platform/modal_credentials.py
+!deploy/platform/modal_credentials.py
+!deploy/modal/STAGING-CREDENTIALS.md
 !studio_platform/api.py
 !studio_platform/settings.py
 !studio_platform/error_monitoring.py
@@ -1012,3 +1015,4 @@ inventory.json
 !tests/test_langfuse_deployment.py
 !deploy/platform/langfuse-staging-read-policy.json
 !deploy/platform/langfuse-production-read-policy.json
+!tests/test_modal_gvisor_ram.py

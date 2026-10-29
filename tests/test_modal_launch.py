@@ -61,7 +61,7 @@ class LaunchTests(unittest.TestCase):
         self.assertEqual(json.loads(stream.getvalue()), self.value)
         args, kwargs = sandbox.exec.call_args
         self.assertNotIn(self.value['token'], str(args))
-        self.assertEqual(kwargs['timeout'], 15)
+        self.assertEqual(kwargs['timeout'], 50)  # waits for the entrypoint directory
         sandbox.exec.side_effect = RuntimeError('provider-private-error')
         with self.assertRaisesRegex(ValueError, '^modal_launch_result_unknown$'):
             initialize(sandbox, self.value, stderr_sink=object())
