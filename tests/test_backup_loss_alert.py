@@ -56,7 +56,34 @@ class BackupLossTests(unittest.TestCase):
             completed['coverage'] = copy.deepcopy(receipt['coverage'])
         return completed, receipt
 
-    def observe(self, completed, receipt, *, tamper_hash=False, day=28):
+    def observe(
+        self,
+        completed,
+        receipt,
+        *,
+        tamper_hash=False,
+        day=28,
+        derivative=False,
+        tamper_manifest=False,
+    ):
+        coverage = receipt.get('coverage', {})
+        missing = [
+            {
+                'key': f'synthetic-{i}',
+                'size_bytes': 100,
+                'references': [
+                    {'table': 'artifacts', 'role': 'thumb' if derivative else 'video'}
+                ],
+                'classification': 'expected_deleted'
+                if i < coverage.get('expected_missing_objects', 0)
+                else 'unexpected_missing',
+            }
+            for i in range(coverage.get('missing_objects', 0))
+        ]
+        manifest_raw = json.dumps(
+            {'coverage': coverage, 'missing_objects': missing}
+        ).encode()
+        receipt['snapshot_manifest_sha256'] = hashlib.sha256(manifest_raw).hexdigest()
         raw = json.dumps(receipt).encode()
         completed['receipt_sha256'] = (
             'b' * 64 if tamper_hash else hashlib.sha256(raw).hexdigest()
@@ -64,7 +91,15 @@ class BackupLossTests(unittest.TestCase):
         with (
             patch.object(monitor, 'protected_directory'),
             patch.object(monitor, 'read_protected', return_value=completed),
-            patch.object(monitor, 'read_protected_bytes', return_value=raw),
+            patch.object(
+                monitor,
+                'read_protected_bytes',
+                side_effect=lambda path, **_: (
+                    manifest_raw + (b' ' if tamper_manifest else b'')
+                    if path.name == 'manifest.json'
+                    else raw
+                ),
+            ),
         ):
             return monitor.backup_copy_observation(
                 now=datetime(2026, 10, day, 19, tzinfo=timezone.utc).timestamp(),
@@ -93,6 +128,20 @@ class BackupLossTests(unittest.TestCase):
     ):
         self.assertTrue(self.observe(*self.evidence(2))['loss'])
         self.assertFalse(self.observe(*self.evidence(2, self.coverage(0, 0)))['loss'])
+
+    def test_old_derivative_only_receipts_do_not_open_loss_under_current_policy(self):
+        for version in (2, 3):
+            with self.subTest(version=version):
+                self.assertEqual(
+                    self.observe(*self.evidence(version), derivative=True),
+                    {'missing': False, 'loss': False},
+                )
+
+    def test_manifest_must_match_original_receipt_hash(self):
+        self.assertEqual(
+            self.observe(*self.evidence(), derivative=True, tamper_manifest=True),
+            {'missing': None, 'loss': None},
+        )
 
     def test_hash_mismatch_or_corrupt_coverage_is_unknown_not_recovery(self):
         for changed in (
