@@ -102,6 +102,28 @@ class AdviceTests(unittest.TestCase):
         self.assertEqual(actual, proposal)
         self.assertEqual(project, before)
 
+    def test_unready_generate_chip_is_dropped_and_reply_kept(self):
+        plan = {
+            "reply": "A boy waits for his grandfather at the old station.",
+            "chips": ["Make video", "Make it warmer"],
+        }
+        project = storyboard_project()
+        shot = next(e for e in project["entities"] if e["id"] == "shot-one")
+        shot["data"]["prompt"] = ""  # no action description: not ready
+        actual, proposal = guard(
+            self.app.state.guided,
+            self.settings,
+            project,
+            [],
+            plan,
+            None,
+            enabled=True,
+            lang="en",
+        )
+        self.assertEqual(actual["reply"], plan["reply"])
+        self.assertEqual(actual["chips"], ["Make it warmer"])
+        self.assertIsNone(proposal)
+
     def test_empty_character_and_place_variants_do_not_add_suffixes(self):
         project = storyboard_project()
         for entity in project["entities"]:
