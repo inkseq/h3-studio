@@ -13,7 +13,6 @@ export function TermsGate({ account }) {
   const { t, locale } = useI18n();
   const api = useClient(account);
   const [terms, setTerms] = useState(null),
-    [agreed, setAgreed] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState('');
   useEffect(() => {
@@ -49,22 +48,22 @@ export function TermsGate({ account }) {
   };
   return (
     <Dialog title={t('terms.gateTitle')} onClose={() => setTerms(null)} busy={busy} portal>
-      <p>{t('terms.gateBody')}</p>
-      <p className="terms-gate-links">
-        {['terms', 'privacy', 'content'].map((doc) => (
-          <a key={doc} href={'/' + doc} target="_blank" rel="noreferrer">
-            {(LEGAL[doc][locale] || LEGAL[doc].en).title}
-          </a>
+      {/* Same one-line consent as sign-in; no checkbox or version shown. */}
+      <p className="terms-gate-consent">
+        {t('signIn.consentBefore')}
+        {['terms', 'privacy', 'content'].map((doc, index) => (
+          <React.Fragment key={doc}>
+            {index === 1 ? t('signIn.comma') : index === 2 ? t('signIn.and') : null}
+            <a href={'/' + doc} target="_blank" rel="noreferrer">
+              {(LEGAL[doc][locale] || LEGAL[doc].en).title}
+            </a>
+          </React.Fragment>
         ))}
+        {t('signIn.consentAfter')}
       </p>
-      <label className="check">
-        <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} />
-        {t('terms.gateAgree', { version: terms.version })}
-      </label>
       {error && <p role="alert">{error}</p>}
       <DialogActions>
-        <Button onClick={() => setTerms(null)}>{t('terms.gateLater')}</Button>
-        <Button variant="primary" disabled={!agreed || busy} onClick={() => void accept()}>
+        <Button variant="primary" disabled={busy} onClick={() => void accept()}>
           {t('terms.gateAccept')}
         </Button>
       </DialogActions>

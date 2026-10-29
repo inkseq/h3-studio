@@ -574,9 +574,9 @@ dialog::backdrop {
   align-items: center;
   gap: 6px;
 }
-/* Terms acceptance dialog (h3-studio#374): the three policy links on one line. */
-.terms-gate-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
+/* Terms acceptance dialog (h3-studio#374): policy links read as links inside the sentence. */
+.terms-gate-consent a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
