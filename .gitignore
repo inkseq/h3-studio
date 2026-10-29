@@ -125,6 +125,7 @@ inventory.json
 !studio_platform/schema_version.py
 !studio_platform/workflow_schema.py
 !studio_platform/host_loss.py
+!studio_platform/workflow_status.py
 !studio_platform/workflow_backup.py
 !studio_platform/migrations/data/
 !studio_platform/migrations/data/dbos_3_3_0_catalog.json
