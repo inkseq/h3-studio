@@ -80,16 +80,29 @@ def usage(service, c):
     return {**value, 'active_instance_ids': active, 'hourly_cost_microusd': hourly}
 
 
-def admission(service, c, profile, spec, *, identity=None, expected_snapshot=None):
+def admission(
+    service,
+    c,
+    profile,
+    spec,
+    *,
+    production=False,
+    additional_microusd=0,
+    identity=None,
+    expected_snapshot=None,
+):
     from .supplier_spending import admit
 
     stored = service._admin_limits(c)
+    # Staging hosts are test-ledger work; production hosts count against the
+    # customer supplier-spending day like any Vast rental (#688).
     snapshot = admit(
         c,
         service.settings.tenant_id,
         service.repo.clock(),
+        additional_microusd=additional_microusd,
         reference_type='instance',
-        test_task=True,
+        test_task=not production,
         policy=stored,
     )
     if identity is not None and snapshot != expected_snapshot:
@@ -105,8 +118,12 @@ def admission(service, c, profile, spec, *, identity=None, expected_snapshot=Non
     current = stored['value']
     price = spec.max_hourly_microusd
     mode = profile['mode'] if profile['mode'] in {'fl', 'ref'} else 'other'
-    require(price <= current['max_hourly_price_microusd'])
-    require(price <= current['mode_hourly_ceiling_microusd'][mode])
+    if not production:
+        require(price <= current['max_hourly_price_microusd'])
+        require(price <= current['mode_hourly_ceiling_microusd'][mode])
+    # Production: the per-machine Vast ceilings do not price a Modal backstop
+    # (an all-resource L40S quote is bounded by HostSpec); the fleet hourly
+    # limit, supplier day and budget accounts still bound total spend.
     require(
         value['hourly_cost_microusd'] + (price if identity is None else 0)
         <= current['fleet_hourly_limit_microusd']
@@ -125,6 +142,7 @@ def precreate(service, hosts, c, intent):
         c,
         profile,
         hosts.spec,
+        production=hosts.environment == 'production',
         identity=intent['id'],
         expected_snapshot=original['capacity_policy_snapshot'],
     )

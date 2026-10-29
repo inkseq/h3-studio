@@ -39,12 +39,47 @@ class ModalControllerTests(ModalBudgetCase):
         )
         self.factory.assert_not_called()
 
-    def test_production_refuses_even_an_enabled_configuration(self):
+    def test_production_refuses_a_staging_shaped_configuration(self):
         self.config(True)
         self.service.settings.public_origin = 'https://inkseq.com'
         with self.assertRaises(ValueError):
             load_extension(self.service, self.root, client_factory=self.factory)
         self.factory.assert_not_called()
+
+    def test_production_backstop_needs_its_own_app_file_and_account(self):
+        # #688: production uses an explicit credentials file, the production
+        # Modal app and the production budget account; never staging values.
+        from dataclasses import replace
+
+        self.service.settings.public_origin = 'https://inkseq.com'
+        credentials = str(self.root / 'modal-credentials.json')
+        self.factory.return_value = (self.client, Mock())
+        for app_name, enabled in (
+            ('inkseq-production-worker', True),
+            ('inkseq-staging-worker', False),
+        ):
+            spec = replace(self.spec, app_name=app_name)
+            path = self.root / 'modal.json'
+            path.write_text(
+                json.dumps(
+                    dict(
+                        version=1,
+                        enabled=True,
+                        host=asdict(spec),
+                        credentials_file=credentials,
+                        budget_account_id='production-gpu',
+                        start_after_seconds=300,
+                    )
+                )
+            )
+            path.chmod(0o600)
+            extension = load_extension(
+                self.service, self.root, client_factory=self.factory
+            )
+            self.assertEqual(extension.hosts.environment, 'production')
+            self.assertIs(extension.admission.enabled, enabled)
+            self.assertIs(extension.admission.production, True)
+            self.assertEqual(extension.admission.start_after_seconds, 300)
 
     def test_live_original_without_configuration_refuses_silent_abandonment(self):
         self.reserve()
