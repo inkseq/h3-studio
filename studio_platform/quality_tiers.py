@@ -195,7 +195,9 @@ def normalize_request(settings, body, *, allow_internal=True, now=None):
         and "model_id" not in body
         and "model" not in body
     )
-    if legacy_mode_only and allow_internal is not True:
+    # Admins get the same default as everyone when they choose no model; only an
+    # explicit internal selection routes elsewhere (owner 2026-10-29 paid test).
+    if legacy_mode_only:
         default = getattr(settings, "default_deployment_profile_id", None)
         if default is None:
             result.pop("mode", None)
