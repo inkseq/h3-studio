@@ -53,14 +53,16 @@
 .credits-today {
   min-width: 200px;
 }
-.credits-today .bar {
+.credits-today .bar,
+.sb-confirm-usage .bar {
   display: block;
   height: 6px;
   border-radius: 6px;
   background: var(--surface-3);
   overflow: hidden;
 }
-.credits-today .bar b {
+.credits-today .bar b,
+.sb-confirm-usage .bar b {
   display: block;
   height: 100%;
   background: var(--accent);
@@ -274,4 +276,14 @@
     position: absolute;
     inset: 0;
   }
+}
+
+/* Confirm dialog usage bar (owner 2026-10-29): balance, with this generation's share. */
+.sb-confirm-usage {
+  display: grid;
+  gap: 6px;
+}
+.sb-confirm-usage .bar.short b {
+  width: 100% !important;
+  background: var(--danger);
 }
