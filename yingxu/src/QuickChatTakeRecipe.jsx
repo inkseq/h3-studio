@@ -4,6 +4,15 @@ import { modelsVisible, profileLabel } from './model-visibility.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { recipeFor, effectiveControlSchema } from './quick-chat-model.js';
 import GenerationControl from './GenerationControl.jsx';
+// Trade secret (owner 2026-10-29): only these settings are the person's own choice;
+// engine settings (steps, sampler, shift, precision, decoding) stay internal.
+const PUBLIC_CONTROLS = new Set([
+  'duration',
+  'resolution',
+  'aspect_ratio',
+  'generate_audio',
+  'seed',
+]);
 export default function TakeRecipe({ take, state }) {
   const { t, locale } = useI18n();
   if (!take?.recipe)
@@ -37,22 +46,24 @@ export default function TakeRecipe({ take, state }) {
       </p>
       <p className="qc-card-prompt">{value.prompt}</p>
       <fieldset disabled className="qc-form-grid">
-        {Object.entries(value.controls || {}).map(([field, item]) =>
-          schema[field] ? (
-            <GenerationControl
-              key={field}
-              field={field}
-              schema={schema[field]}
-              value={item}
-              onChange={() => {}}
-            />
-          ) : (
-            <label key={field}>
-              {field}
-              <output>{typeof item === 'object' ? JSON.stringify(item) : String(item)}</output>
-            </label>
-          ),
-        )}
+        {Object.entries(value.controls || {})
+          .filter(([field]) => modelsVisible() || PUBLIC_CONTROLS.has(field))
+          .map(([field, item]) =>
+            schema[field] ? (
+              <GenerationControl
+                key={field}
+                field={field}
+                schema={schema[field]}
+                value={item}
+                onChange={() => {}}
+              />
+            ) : (
+              <label key={field}>
+                {field}
+                <output>{typeof item === 'object' ? JSON.stringify(item) : String(item)}</output>
+              </label>
+            ),
+          )}
       </fieldset>
       <p>{t('takes.lockedSeed', { seed: take.seed })}</p>
       <ul>
