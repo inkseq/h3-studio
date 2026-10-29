@@ -36,7 +36,8 @@ def require_preview_ram(document, profile):
         memory = document.get('memory_gib')
         require(
             type(memory) is int
-            and memory >= planning_ram_gib(profile['runtime_profile_id'], profile['memory_gib']),
+            and memory
+            >= planning_ram_gib(profile['runtime_profile_id'], profile['memory_gib']),
             'dstack_preview_memory_headroom_stale',
         )
     return document
@@ -55,4 +56,6 @@ def catalog_resources(profile, fields):
 
 def vast_ram_floor(request):
     # Vast advertises cpu_ram in MiB. Keep historical non-TaoMate mapping intact.
-    return request.memory_gib * (1024 if request.profile_id in TAOMATE_PROFILES else 1000)
+    return request.memory_gib * (
+        1024 if request.profile_id in TAOMATE_PROFILES else 1000
+    )
