@@ -463,7 +463,9 @@ class PaymentAPI:
             return {"url": provider_url(payment["checkout_url"])}
         try:
             session = self.gateway.checkout(
-                payment, idempotency_key=prepared["stripe_idempotency_key"]
+                payment,
+                idempotency_key=prepared["stripe_idempotency_key"],
+                customer_email=user["email"] if user["email_verified"] else None,
             )
         except StripeGatewayError as error:
             self.core.mark_checkout_unknown(

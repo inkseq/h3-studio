@@ -866,3 +866,13 @@ business_backup_loss. Use a known one-line cause fix if available, otherwise
 regenerate only on demand. Install the monitor at zero production jobs, read
 back once, report at most five issue lines. No further approval is required
 under the early-stage mode (#778); preserve receipts and original media.
+
+### 2026-10-29 — Checkout email and LIVE product expiry copy (#374)
+Owner authorizes two small money-path fixes with one Claude Tier2 PR review,
+then production: prefill Checkout from the signed-in account's verified email,
+using Stripe's supported customer_email parameter; never invent or trust a
+browser-supplied email. Update only the descriptions of the four existing LIVE
+products to their purchased credit amounts and "Valid for 12 months."
+No price, Price ID, product creation, grant, payment or expiry-policy change.
+Production needs one no-running-job check and one read-back; report <=5 lines
+on #374 when both fixes are live. No other work is in this slice.

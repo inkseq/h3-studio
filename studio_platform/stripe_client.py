@@ -246,7 +246,7 @@ class StripeGateway:
             raise StripeGatewayError("billing_webhook_unavailable")
         return config
 
-    def checkout(self, payment, *, idempotency_key):
+    def checkout(self, payment, *, idempotency_key, customer_email=None):
         """Call only with the core's persisted original payment and Stripe key."""
         config = self.configuration(for_checkout=True)
         live = config.mode == "live"
@@ -287,6 +287,8 @@ class StripeGateway:
                 + "/settings?tab=credits&paid={CHECKOUT_SESSION_ID}",
                 "cancel_url": self.settings.public_origin + "/settings?tab=credits",
             }
+            if customer_email:
+                params["customer_email"] = customer_email
             try:
                 session = client.v1.checkout.sessions.create(
                     params=params, options={"idempotency_key": idempotency_key}
