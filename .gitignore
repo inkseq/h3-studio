@@ -27,6 +27,8 @@ inventory.json
 !requirements.audit.lock.txt
 !tools/check_maintainability.py
 !tools/maintainability-baseline.json
+!tools/module_boundaries.py
+!tools/module-boundaries.json
 !tools/audit_dependencies.py
 !docs/MAINTAINABILITY.md
 !.github/dependabot.yml
