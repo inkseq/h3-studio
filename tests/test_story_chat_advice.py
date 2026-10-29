@@ -32,6 +32,13 @@ class AdviceTests(unittest.TestCase):
         self.assertEqual(replay["turn"], third["turn"])
         self.assertEqual(len(self.model.calls), 3)
         self.assertEqual(turn_chat({"language": "zh"}, "👍")["language"], "zh")
+        # A typo or one word keeps the conversation's language.
+        for text in ("asdf", "ok", "cat", "12345", "Shot 2"):
+            self.assertEqual(turn_chat({"language": "zh"}, text)["language"], "zh")
+        self.assertEqual(turn_chat({"language": "en"}, "好")["language"], "zh")
+        self.assertEqual(
+            turn_chat({"language": "zh"}, "make it warmer")["language"], "en"
+        )
 
     def test_switch_change_during_model_call_blocks_proposals_and_chips(self):
         chat = self.start()
