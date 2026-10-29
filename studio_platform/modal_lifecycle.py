@@ -1,7 +1,8 @@
 """Reconcile original Modal hosts, native slots and fenced attempt timeouts.
 
 Runs in the existing controller loop. Admission being OFF never disables
-reconciliation. Exit and timeout do not settle invoices or recreate a host.
+reconciliation. Exit and timeout never recreate a host; a confirmed exit
+settles the held test budget at its exit-receipt bound (#783).
 """
 
 import uuid
@@ -9,6 +10,7 @@ import uuid
 from sqlalchemy import insert, select
 
 from .capacity_watchdog import reclaimed_attempt, timeout_reason
+from .modal_budget import settle_destroyed
 from .queue import TaskQueue
 from .repository import (
     Conflict,
@@ -178,6 +180,12 @@ class ModalLifecycle:
         state = fact['state']
         if state in {'destroyed', 'not_created'}:
             self.slots.stop(identity)
+            if state == 'destroyed':
+                try:
+                    settle_destroyed(self.repo, identity)
+                except Exception:
+                    # Unbound or malformed attribution stays held for review.
+                    return dict(intent_id=identity, state='settlement_unconfirmed')
             return dict(intent_id=identity, state=state)
         startup_due = (
             state == 'starting'

@@ -205,31 +205,66 @@ def projected_reservation(connection, row, guard, now):
         return actual
     require(row['state'] in {'reserved', 'invoice_pending'} and actual is None)
     if intent['state'] == 'destroyed':
-        # Only the original provider-exit receipt bounds the lifetime. A stop
-        # acknowledgment or edited intent status is not removal evidence. Keep
-        # the reservation/invoice untouched; this is a conservative projection.
-        exits = []
-        for receipt in connection.execute(
-            select(scaler_receipts).where(
-                scaler_receipts.c.intent_id == intent['id'],
-                scaler_receipts.c.operation == 'observed',
-            )
-        ).mappings():
-            facts, stamp = receipt['facts'], receipt['observed_at']
-            if (
-                isinstance(facts, dict)
-                and facts.get('id') == intent['provider_instance_id']
-                and type(facts.get('exit_code')) is int
-                and finite(stamp)
-                and intent['created_at'] <= stamp <= now
-            ):
-                exits.append(stamp)
-        if exits:
-            elapsed = (
-                min(exits)
-                - intent['created_at']
-                + value['guard']['stop_margin_seconds']
-            )
-            return math.ceil(value['spec']['max_hourly_microusd'] * elapsed / 3600)
+        bound = exit_bound(connection, intent, value, now)
+        if bound is not None:
+            return bound
     elapsed = now - intent['created_at'] + value['guard']['stop_margin_seconds']
     return max(amount, math.ceil(value['spec']['max_hourly_microusd'] * elapsed / 3600))
+
+
+def exit_bound(connection, intent, value, now):
+    """Upper cost bound from the original provider-exit receipt, else None.
+
+    Only that receipt bounds the lifetime. A stop acknowledgment or edited
+    intent status is not removal evidence.
+    """
+    exits = []
+    for receipt in connection.execute(
+        select(scaler_receipts).where(
+            scaler_receipts.c.intent_id == intent['id'],
+            scaler_receipts.c.operation == 'observed',
+        )
+    ).mappings():
+        facts, stamp = receipt['facts'], receipt['observed_at']
+        if (
+            isinstance(facts, dict)
+            and facts.get('id') == intent['provider_instance_id']
+            and type(facts.get('exit_code')) is int
+            and finite(stamp)
+            and intent['created_at'] <= stamp <= now
+        ):
+            exits.append(stamp)
+    if not exits:
+        return None
+    elapsed = min(exits) - intent['created_at'] + value['guard']['stop_margin_seconds']
+    return math.ceil(value['spec']['max_hourly_microusd'] * elapsed / 3600)
+
+
+def settle_destroyed(repo, identity):
+    """Settle a destroyed host's held test budget at its exit-receipt bound.
+
+    Modal has no per-sandbox invoice here, so the conservative bound becomes
+    the actual. Without an exit receipt the hold stays for manual review.
+    """
+    with repo.transaction() as c:
+        repo._lock_capacity(c)
+        intent = repo._locked(
+            c, select(instance_intents).where(instance_intents.c.id == identity)
+        )
+        if intent is None or intent['state'] != 'destroyed':
+            return None
+        held = c.execute(
+            select(budget_reservations.c.id).where(
+                budget_reservations.c.reference_type == 'instance',
+                budget_reservations.c.reference_id == identity,
+                budget_reservations.c.state == 'reserved',
+            )
+        ).first()
+        if held is None:
+            return None
+        _, value = binding(c, identity)
+        cost = exit_bound(c, intent, value, repo.clock())
+        if cost is None:
+            return None
+        repo.settle_instance_cost(identity, actual_cost_microusd=cost, connection=c)
+        return cost
