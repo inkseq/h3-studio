@@ -324,7 +324,7 @@ export function createLiveChat({
     // A photo chosen in a card's drawer goes straight onto that card.
     async attachPhoto(cardId, file, emit) {
       if (!project) return;
-      emit({ type: 'card.status', id: cardId, status: 'generating' });
+      emit({ type: 'card.status', id: cardId, status: 'uploading' });
       try {
         await attach(project, [{ file, kind: 'image', name: file.name, cardId }]);
       } catch (failure) {
