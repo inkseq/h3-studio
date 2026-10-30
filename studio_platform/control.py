@@ -199,7 +199,7 @@ class WorkerSpec:
                 or self.physical_gpu_ids
                 or self.model_id != "open-h3-regenerate-2k"
                 or self.configuration_id != "runpod-enhance-v1"
-                or self.recipe_ids != ("h3-enhance-v1",)
+                or self.recipe_ids != ("enhance-v1",)
             ):
                 raise ValueError("enhance_identity_required")
         elif self.provider in {"mock", "local-cpu"} or not self.recipe_ids:

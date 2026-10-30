@@ -32,7 +32,7 @@ def _shape(job):
 
         shape = validate_render_request(job["request"], owner_id=job.get("owner_id"))
         return shape["width"], shape["height"], shape["duration"], shape["audio"]
-    if job["request"].get("recipe_id") == "h3-enhance-v1":
+    if job["request"].get("recipe_id") == "enhance-v1":
         # 1080P/2K enhance of a validated take; the MP4 keeps its draft audio.
         from ..enhance_plans import TIERS
 
