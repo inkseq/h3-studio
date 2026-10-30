@@ -1032,3 +1032,5 @@ inventory.json
 !tests/test_modal_gvisor_ram.py
 !studio_platform/backup_loss_policy.py
 !docs/EXPERIMENTS.md
+!tests/test_dstack_providers.py
+!studio_platform/dstack_inventory.py
