@@ -25,6 +25,7 @@ from .dstack_capacity import (
     DstackCapacity,
     DstackClient,
     DstackError,
+    control_plane,
     live_capacity_usage,
 )
 from .capacity_policy import window_open, cold_unadmitted_runtime
@@ -2939,6 +2940,8 @@ class DstackOperator:
         if host_selection is not None:
             request = replace(request, host_selection=copy.deepcopy(host_selection))
         binding = request.binding(self.config["ssh_public_key"])
+        # Which dstack server owns this run (local or Sky); see live_capacity_usage.
+        binding["control_plane"] = control_plane(self.capacity.client)
         command_id = str(uuid.uuid4())
         command_payload = {
             "preview_id": preview_id,

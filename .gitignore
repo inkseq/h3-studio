@@ -1030,3 +1030,4 @@ inventory.json
 !tests/test_modal_gvisor_ram.py
 !studio_platform/backup_loss_policy.py
 !docs/EXPERIMENTS.md
+!studio_platform/dstack_control_plane.py

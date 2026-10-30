@@ -1118,6 +1118,38 @@ class DstackLiveUsageTests(unittest.TestCase):
             clock=lambda: self.now,
         )
 
+    def test_nodes_from_another_control_plane_settle_only_by_provider_absence(self):
+        # A Sky client reads history that ran on the local server (no binding field).
+        self.client.endpoint = "https://sky.dstack.ai"
+        self.client.get = Mock(
+            side_effect=AssertionError("foreign run must not be read")
+        )
+        result = self.usage()
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_foreign_provider_absent"
+        )
+        self.assertEqual(result["instances"], 0)
+        self.inventory.return_value = {
+            **self.inventory.return_value,
+            "instance_ids": [self.node["payload"]["dstack"]["provider_instance_id"]],
+        }
+        result = self.usage()
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_foreign_unconfirmed"
+        )
+        self.assertTrue(result["observations"][0]["counted"])
+        # Its own control plane reads the run as before.
+        self.node["payload"]["dstack"]["control_plane"] = "https://sky.dstack.ai"
+        self.client.get = Mock(side_effect=lambda **_: copy.deepcopy(self.run))
+        self.inventory.return_value = {
+            **self.inventory.return_value,
+            "instance_ids": [],
+        }
+        self.assertEqual(
+            self.usage()["observations"][0]["reason_code"],
+            "dstack_terminal_provider_absent",
+        )
+
     def test_owned_terminal_and_fresh_provider_absence_free_capacity_not_billing(self):
         original = copy.deepcopy(self.node)
         legacy = {
