@@ -1042,6 +1042,7 @@ inventory.json
 !docs/EXPERIMENTS.md
 !docs/CAPACITY-LANES.md
 !docs/WORKER-DIALOUT.md
+!docs/ENHANCE.md
 !studio_platform/dstack_control_plane.py
 !tests/test_dstack_providers.py
 !studio_platform/dstack_inventory.py
