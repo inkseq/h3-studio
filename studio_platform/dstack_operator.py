@@ -2394,7 +2394,7 @@ class DstackOperator:
         client = self.capacity.client
 
         class ObservedClient:
-            project = client.project
+            project, endpoint = client.project, getattr(client, "endpoint", None)
 
             def get(self, **identity):
                 run = client.get(**identity)
