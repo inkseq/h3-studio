@@ -90,6 +90,7 @@ PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
 SCHEDULER_GPU_ALIASES = {
+    "RTXPRO6000": "RTX PRO 6000 Blackwell",
     "RTXPRO6000S": "RTX PRO 6000 Blackwell Server Edition",
     "RTXPRO6000WS": "RTX PRO 6000 Blackwell Workstation Edition",
 }

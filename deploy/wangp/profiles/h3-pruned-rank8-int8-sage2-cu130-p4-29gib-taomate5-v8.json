@@ -4,7 +4,10 @@
   "label": "RTX 5090 · Pruned Rank8 INT8 · TaoMate 5 steps · CUDA 13 sage2",
   "model_id": "MiniMax-H3-Pruned-Rank8-INT8",
   "gpu_models": [
-    "RTX 5090"
+    "RTX 5090",
+    "RTX PRO 6000 Blackwell",
+    "RTX PRO 6000 Blackwell Server Edition",
+    "RTX PRO 6000 Blackwell Workstation Edition"
   ],
   "gpu_count_options": [
     1
