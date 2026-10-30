@@ -86,7 +86,9 @@ class SlotConfig:
                 raise ValueError("absolute_wangp_runtime_config_required")
         elif self.runtime_config_file != "":
             raise ValueError("unexpected_engine_runtime_config")
-        if self.spec.backend in {"mock", "cpu-render"}:
+        if self.spec.backend in {"mock", "cpu-render", "runpod-enhance"}:
+            # Serverless enhance reaches RunPod through its own fixed API, not a
+            # slot endpoint (#795).
             if self.endpoint or self.allowed_origins or self.comfy_revision:
                 raise ValueError("cpu_slot_cannot_have_gpu_endpoint")
         elif self.spec.backend == "wangp-worker":

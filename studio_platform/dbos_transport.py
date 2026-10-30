@@ -373,7 +373,13 @@ class DurableSlots:
             plan.CONFIGURATION,
             plan.BACKEND,
         )
-        self.ensure(worker, SlotConfig(spec, enabled=True))
+        try:
+            self.ensure(worker, SlotConfig(spec, enabled=True))
+        except Exception:
+            # Optional: enhance stays unavailable (its plans read "not ready")
+            # and the controller keeps running everything else.
+            print("dbos_enhance_slot_unavailable", flush=True)
+            return
         self.heartbeat_cpu()
 
     @contextmanager
