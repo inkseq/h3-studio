@@ -406,7 +406,10 @@ def install(config, slot_key, token_file, *, launch=True):
 
 
 def runtime_stopped(session, wait=10):
-    """No process left in the launcher's own session and none on the GPU."""
+    """No process left in the launcher's own session and none on the GPU.
+
+    Waits up to `wait` s for the session to empty; each nvidia-smi read may add up to 30 s.
+    """
     deadline = time.monotonic() + wait
     while True:
         try:

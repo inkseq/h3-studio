@@ -237,6 +237,51 @@ class DemandStartTests(LedgerCase):
         self.assertEqual(self.repo.get_job(self.scope, job['id'])['status'], 'queued')
         self.assertEqual(len(self.client.applied), 2)
 
+    def test_repeated_failed_starts_stop_renting_at_the_replacement_cap(self):
+        from studio_platform.capacity_watchdog import reclaim_node
+        from studio_platform.repository import instance_intents
+
+        self.enabled()
+        self.accepted()
+        for attempt in range(3):
+            started = start_once(self.service)
+            self.assertEqual(started['state'], 'accepted', (attempt, started))
+            node_id = started['node_id']
+            self.now += 1201
+            with self.repo.engine.connect() as connection:
+                node = dict(
+                    connection.execute(
+                        select(operator_nodes).where(
+                            operator_nodes.c.intent_id == node_id
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                intent = dict(
+                    connection.execute(
+                        select(instance_intents).where(instance_intents.c.id == node_id)
+                    )
+                    .mappings()
+                    .one()
+                )
+            self.assertTrue(reclaim_node(self.service, node, intent)['stop_requested'])
+            with self.repo.transaction() as connection:  # The provider removed it.
+                connection.execute(
+                    update(instance_intents)
+                    .where(instance_intents.c.id == node_id)
+                    .values(state='destroyed')
+                )
+            outcome = start_once(self.service)
+            if attempt < 2:
+                self.assertEqual(outcome['reason_code'], 'backoff')
+                self.now += 80
+            else:
+                self.assertEqual(
+                    outcome, dict(state='blocked', reason_code='download_retry_limit')
+                )
+        self.assertEqual(len(self.client.applied), 3)
+
     def test_demand_does_not_spend_when_actual_registration_cap_is_disabled(self):
         self.enabled()
         self.accepted()
