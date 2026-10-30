@@ -19,6 +19,18 @@ NO_FLEET_MESSAGE = (
     "https://dstack.ai/docs/guides/troubleshooting/#no-fleets"
 )
 NO_FLEET_SOURCE = "native_dstack_0225_no_fleet_v1"
+# Stock dstack (Sky) emits no typed rejections (#868). Without allocation data,
+# the only way a no-capacity start could still charge is an instance the
+# provider created that dstack never recorded; it would stay in the account,
+# named "dstack-<project>-<run name>-0-0-<random>". dstack truncates only that
+# prefix, to at least 51 characters for these backends, so with a project of at
+# most 27 characters the run name's first 16 ("sixnine-" + 8 hex) always survive.
+# Matching fewer characters, anywhere in a name, is the conservative direction.
+ACCOUNT_ABSENT_SOURCE = "provider_account_absent_v1"
+LABEL_BACKENDS = frozenset({"vastai", "runpod", "lium"})
+RUN_MARKER_LENGTH = 16
+MAX_PROJECT_LENGTH = 27
+ACCOUNT_FIELDS = {"backend", "observed_at", "label_prefix", "matched"}
 SAFE_REJECTIONS = {
     (400, "invalid_args"),
     (404, "no_such_ask"),
@@ -84,11 +96,17 @@ def validate_proof(value, binding):
             or set(value) != PROOF_FIELDS
             or type(value["version"]) is not int
             or value["version"] != 1
-            or value["source"] not in {"native_vast_rejections_v1", NO_FLEET_SOURCE}
+            or value["source"]
+            not in {"native_vast_rejections_v1", NO_FLEET_SOURCE, ACCOUNT_ABSENT_SOURCE}
             or not _uuid(value["run_id"])
             or value["run_id"] != binding.get("run_id")
             or not _uuid(value["submission_id"])
-            or binding.get("backend") != "vastai"
+            or binding.get("backend")
+            not in (
+                LABEL_BACKENDS
+                if value["source"] == ACCOUNT_ABSENT_SOURCE
+                else {"vastai"}
+            )
             or any(
                 binding.get(key) is not None
                 for key in (
@@ -108,6 +126,24 @@ def validate_proof(value, binding):
         ):
             return None
         attempts = value["attempts"]
+        if value["source"] == ACCOUNT_ABSENT_SOURCE:
+            (read,) = attempts
+            if (
+                value["attempted_count"] != 0
+                or type(read) is not dict
+                or set(read) != ACCOUNT_FIELDS
+                or read["backend"] != binding["backend"]
+                or read["matched"] != 0
+                or read["label_prefix"] != label_prefix(binding)
+                or type(read["observed_at"]) not in (int, float)
+            ):
+                return None
+            payload = {key: value[key] for key in PROOF_FIELDS - {"evidence_sha256"}}
+            return (
+                copy.deepcopy(value)
+                if value["evidence_sha256"] == _digest(payload)
+                else None
+            )
         if value["source"] == NO_FLEET_SOURCE:
             # The pinned scheduler rejected fleet selection before a provider
             # attempt. This is distinct from an empty provider-rejection list.
@@ -207,3 +243,62 @@ def from_terminal_run(run, binding):
         return validate_proof(proof, binding)
     except (ValueError, TypeError, KeyError):
         return None
+
+
+def label_prefix(binding):
+    return binding["run_name"][:RUN_MARKER_LENGTH]
+
+
+def from_account_absence(run, binding, inventory, project):
+    """Call after terminal_no_allocation with no other proof, on a fresh read."""
+    try:
+        from .dstack_capacity import terminal_no_allocation_shape
+
+        labels = inventory.get("labels")
+        ids = inventory.get("instance_ids")
+        if (
+            binding.get("backend") not in LABEL_BACKENDS
+            or not isinstance(project, str)
+            or len(project) > MAX_PROJECT_LENGTH
+            or not terminal_no_allocation_shape(run, binding)
+            or inventory.get("backend") != binding["backend"]
+            or inventory.get("complete") is not True
+            or not isinstance(labels, list)
+            or not isinstance(ids, list)
+            or len(labels) != len(ids)
+            or any(label is not None and not isinstance(label, str) for label in labels)
+        ):
+            return None
+        prefix = label_prefix(binding)
+        if any(label is not None and prefix in label for label in labels):
+            return None  # A live instance may be this run's: billing stays pending.
+        proof = {
+            "version": 1,
+            "source": ACCOUNT_ABSENT_SOURCE,
+            "run_id": run["id"],
+            "submission_id": run["latest_job_submission"]["id"],
+            "attempted_count": 0,
+            "attempts": [
+                {
+                    "backend": binding["backend"],
+                    "observed_at": inventory["observed_at"],
+                    "label_prefix": prefix,
+                    "matched": 0,
+                }
+            ],
+        }
+        proof["evidence_sha256"] = _digest(proof)
+        return validate_proof(proof, binding)
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+def account_absence(client, run, binding):
+    """Stock dstack (Sky) no-capacity proof from one fresh account read (#868)."""
+    if binding.get("backend") not in LABEL_BACKENDS:
+        return None
+    try:
+        inventory = client.provider_inventory(binding["backend"])
+    except Exception:
+        return None  # Unread is not absence; the next observation retries.
+    return from_account_absence(run, binding, inventory, client.project)
