@@ -1034,3 +1034,4 @@ inventory.json
 !docs/EXPERIMENTS.md
 !tests/test_dstack_providers.py
 !studio_platform/dstack_inventory.py
+!renovate.json
