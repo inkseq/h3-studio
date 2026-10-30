@@ -14,6 +14,7 @@ import httpx
 
 from .native_bootstrap import BootError
 from .wangp_bootstrap import WanGPSSHHost
+from . import wangp_bootstrap
 
 
 class DialoutHost(WanGPSSHHost):
@@ -53,10 +54,9 @@ class DialoutHost(WanGPSSHHost):
 
     def run(self, code, *, limit=4 * 1024 * 1024, timeout=25):
         if getattr(self.config, "deployment_profile_id", ""):
-            # Same slot isolation rewrite as the SSH host.
-            from .wangp_bootstrap import REMOTE_ROOT
-
-            code = code.replace(REMOTE_ROOT, self.remote_root)
+            # Same slot isolation rewrite as the SSH host: snippets name the
+            # unslotted root, which this rewrite maps to the slot exactly once.
+            code = code.replace(wangp_bootstrap.REMOTE_ROOT, self.remote_root)
             code = code.replace("==8199 and", "==" + str(self.remote_port) + " and")
         try:
             response = self._client().post(
@@ -91,7 +91,7 @@ class DialoutHost(WanGPSSHHost):
             "import hashlib,json\nfrom pathlib import Path\nroot=Path(%r)\n"
             "print(json.dumps({n:(hashlib.sha256((root/n).read_bytes()).hexdigest() "
             "if (root/n).is_file() and not (root/n).is_symlink() else None) "
-            "for n in %r}))" % (self.remote_root, sorted(expected))
+            "for n in %r}))" % (wangp_bootstrap.REMOTE_ROOT, sorted(expected))
         )
         if found != expected:
             raise BootError("bootstrap_existing_source_mismatch")
@@ -102,7 +102,7 @@ class DialoutHost(WanGPSSHHost):
             "import json\nfrom pathlib import Path\n"
             "p=Path(%r)/'sixnine-bootstrap-identity.json'\n"
             "print(json.dumps(json.loads(p.read_text()) if p.is_file() else None))"
-            % self.remote_root
+            % wangp_bootstrap.REMOTE_ROOT
         )
         if marker != identity:
             raise BootError("wangp_boot_token_identity_conflict")

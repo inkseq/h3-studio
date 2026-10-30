@@ -204,6 +204,22 @@ class HostTests(unittest.TestCase):
         with self.assertRaises(BootError):
             host.open_tunnel(19102)
 
+    def test_slotted_profiles_rewrite_the_remote_root_exactly_once(self):
+        self.config.deployment_profile_id = "profile"
+        host = self.host()
+        self.assertEqual(host.remote_root, "/workspace/h3-studio/profile-slot-0")
+        digest = hashlib.sha256(b"one").hexdigest()
+        self.replies = [
+            (200, 0, json.dumps({"a": digest}).encode()),
+            (200, 0, json.dumps({"intent_id": INTENT}).encode()),
+        ]
+        host.upload({"a": b"one"})
+        host.start({"intent_id": INTENT})
+        for request in [r for r in self.requests if r.url.path == "/boot/run"]:
+            code = request.content.decode()
+            self.assertIn("/workspace/h3-studio/profile-slot-0", code)
+            self.assertNotIn("profile-slot-0/profile-slot-0", code)
+
     def test_unreachable_worker_reads_as_not_yet_connected(self):
         def down(request):
             raise httpx.ConnectError("refused")
