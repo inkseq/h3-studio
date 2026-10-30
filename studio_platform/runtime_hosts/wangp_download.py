@@ -563,9 +563,9 @@ def download_environment(environment, state_root):
         HF_DEBUG="0",
         HF_HUB_DOWNLOAD_TIMEOUT="60",
         HF_HUB_ETAG_TIMEOUT="30",
-        # Plain HTTPS through the Hub CDN. Native Xet transfers stalled with open
-        # sockets and no bytes on staging Lium hosts (2026-10-31) while the CDN
-        # served the same file at ~9 MB/s; HTTP also keeps SDK resume.
+        # Plain HTTPS through the Hub CDN. On staging Lium hosts (2026-10-31) native
+        # Xet averaged ~8.5 MB/s and missed the startup window; HTTPS reached
+        # ~38 MB/s on the same provider. HTTP also keeps SDK resume.
         HF_HUB_DISABLE_XET="1",
         HF_XET_HIGH_PERFORMANCE="0",
         HF_XET_CHUNK_CACHE_SIZE_BYTES="0",
