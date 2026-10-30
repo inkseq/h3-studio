@@ -190,12 +190,12 @@ class EnhanceBackendTests(unittest.TestCase):
         self.assertRaises(BackendError, temp_key, "../x")
 
     def test_worker_spec_is_serverless_and_bound_to_the_recipe(self):
-        args = ["w", "enhance", "runpod", "w", (), ("h3-enhance-v1",)]
+        args = ["w", "enhance", "runpod", "w", (), ("enhance-v1",)]
         tail = ["open-h3-regenerate-2k", "runpod-enhance-v1", "runpod-enhance"]
         WorkerSpec(*args, *tail)
         for bad in (
-            ["w", "enhance", "runpod", "w", ("gpu0",), ("h3-enhance-v1",)],
-            ["w", "enhance", "local-cpu", "w", (), ("h3-enhance-v1",)],
+            ["w", "enhance", "runpod", "w", ("gpu0",), ("enhance-v1",)],
+            ["w", "enhance", "local-cpu", "w", (), ("enhance-v1",)],
             ["w", "enhance", "runpod", "w", (), ("h3-default",)],
         ):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
