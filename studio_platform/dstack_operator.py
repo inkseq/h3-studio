@@ -1249,7 +1249,8 @@ class DstackOperator:
                 raise OperatorError("dstack_test_guard_invalid", 422) from None
             require(
                 getattr(settings, "public_origin", None) == "https://staging.inkseq.com"
-                and self.config.get("project") == "sixnine-staging"
+                # Local server project, or the dstack Sky staging project.
+                and self.config.get("project") in {"sixnine-staging", "inkseq-staging"}
                 and self.policy.get("lifecycle_version") == 2
                 and _integer(self.policy.get("max_instances"), 1, 10)
                 and _integer(self.policy.get("max_physical_gpus"), 1, 10)
