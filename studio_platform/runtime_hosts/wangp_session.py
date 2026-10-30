@@ -25,7 +25,6 @@ from ..inference.wangp_contract import (
     EngineManifest,
     RuntimeObservation,
     RuntimeOutput,
-    UPSTREAM_REVISION,
 )
 
 REQUIRED_CONFIG = {
@@ -145,7 +144,7 @@ The returned evidence contains no runtime environment or configuration values.
         from .wangp_environment import verify_bound_environment
 
         environment_evidence = verify_bound_environment(root, manifest.document)
-        revision = UPSTREAM_REVISION
+        revision = manifest.document["source_revision"]
     else:
         # Historical candidate manifests retain their exact verification path;
         # new cold bootstrap requires the fully bound package above.
@@ -155,7 +154,7 @@ The returned evidence contains no runtime environment or configuration values.
             capture_output=True,
             text=True,
         ).stdout.strip()
-        if revision != UPSTREAM_REVISION:
+        if revision != manifest.document["source_revision"]:
             raise ValueError("wangp_runtime_source_mismatch")
         # Pilot image modified installation metadata only; executable source and
         # the exact requirements bytes remain pinned for the new native profiles.
