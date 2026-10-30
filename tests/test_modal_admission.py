@@ -448,10 +448,12 @@ class ModalProfileTests(ModalAdmissionFixture):
     """v7 -> v8 switch: one Modal image serves one runtime profile."""
 
     def test_receipts_before_v8_mean_v7_and_unknown_profiles_fail(self):
-        from studio_platform.modal_runtime import V7, V8, selected_profile
+        from studio_platform.modal_runtime import V7, V8, V9, selected_profile
 
         self.assertEqual(selected_profile({}), V7)
         self.assertEqual(selected_profile({'profile': V8}), V8)
+        self.assertEqual(selected_profile({'profile': V9}), V9)
+        HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000, profile=V9)
         with self.assertRaises(ValueError):
             selected_profile({'profile': 'something-else'})
         with self.assertRaises(ValueError):
