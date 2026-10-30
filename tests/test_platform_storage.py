@@ -509,6 +509,10 @@ class CloudStorageTests(OfflineTest):
             )
             upload = store.presign_upload("safe/new", content_type="video/mp4")
             self.assertIn("If-None-Match", upload.required_headers)
+            # A remote worker's plain PUT sends only Content-Type (#795).
+            worker = store.presign_worker_upload("safe/tmp", content_type="video/mp4")
+            self.assertEqual(worker.required_headers, {"Content-Type": "video/mp4"})
+            self.assertIn("X-Amz-SignedHeaders=content-type%3Bhost", worker.reveal())
             with self.assertRaises(StorageError):
                 store._client.meta.events.emit(
                     "before-send.s3.PutObject",

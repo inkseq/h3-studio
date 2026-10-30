@@ -41,7 +41,7 @@ class Store:
     def presign_download(self, key, *, expires_seconds):
         return SecretURL("https://r2.test/get/" + key, "GET", 0, {})
 
-    def presign_upload(self, key, *, content_type, expires_seconds):
+    def presign_worker_upload(self, key, *, content_type, expires_seconds):
         self.uploads.append((key, content_type))
         return SecretURL("https://r2.test/put/" + key, "PUT", 0, {})
 

@@ -34,7 +34,7 @@ class PresignedStore(LocalObjectStore):
     def presign_download(self, key, *, expires_seconds=300, download_filename=None):
         return SecretURL("https://r2.test/" + key, "GET", 0, {})
 
-    def presign_upload(self, key, *, content_type, expires_seconds=300):
+    def presign_worker_upload(self, key, *, content_type, expires_seconds=300):
         return SecretURL("https://r2.test/" + key, "PUT", 0, {})
 
 
