@@ -621,6 +621,7 @@ def capabilities(value, principal=None, *, settings=None):
         value,
         {
             "story_film",
+            "enhance",
             "library",
             "content_lifecycle",
             "upload_constraints",
