@@ -1399,9 +1399,10 @@ def create_app(
 
     app.state.quick_chat_recovery = QuickChatRecovery(app.state.quick_chat)
     register_agent_connect_routes(app)
-    from .worker_boot import register_routes as register_worker_boot_routes
+    from . import enhance_routes, worker_boot
 
-    register_worker_boot_routes(app)
+    worker_boot.register_routes(app)
+    enhance_routes.register_routes(app)
     from .batches import register_routes
 
     register_routes(app)

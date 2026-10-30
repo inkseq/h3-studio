@@ -118,6 +118,23 @@ class CreditsRouteTests(LedgerCase):
                 connection, "sixnine", "supervan", compiled or self.compiled(), **extra
             )
 
+    def test_enhance_quote_uses_the_owner_price_and_no_rate_card(self):
+        from studio_platform.enhance_plans import BACKEND, compile_enhance
+        from test_enhance_plans import PROJECT, body, source
+
+        self.enable()
+        compiled, _ = compile_enhance(
+            body(tier="1080p"), PROJECT, lambda e, k: source()
+        )
+        frozen = self.get_quote(compiled, execution={"backend": BACKEND})
+        self.assertEqual(frozen["credits"], 100)
+        self.assertEqual(frozen["tier"], "enhance-1080p")
+        self.assertEqual(frozen["breakdown"][0]["rate"], 0)
+        longer, _ = compile_enhance(body(), PROJECT, lambda e, k: source(duration=10.0))
+        self.assertEqual(
+            self.get_quote(longer, execution={"backend": BACKEND})["credits"], 300
+        )
+
     def test_reads_zero_without_creating_or_granting_a_balance(self):
         self.assertEqual(
             self.service.balance(self.user),

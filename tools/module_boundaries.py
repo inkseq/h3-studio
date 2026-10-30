@@ -121,6 +121,7 @@ DOMAINS = (
             "stage_metrics",
             "telemetry",
             "render_",
+            "enhance_",
             "film_",
             "account_workflows",
             "payments_workflows",

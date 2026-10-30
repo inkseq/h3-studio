@@ -71,6 +71,8 @@ inventory.json
 !studio_platform/dialout_boot.py
 !studio_platform/dialout_host.py
 !studio_platform/worker_grant.py
+!studio_platform/enhance_plans.py
+!studio_platform/enhance_routes.py
 !studio_platform/worker_tunnel.py
 !deploy/platform/modal_credentials.py
 !deploy/modal/STAGING-CREDENTIALS.md

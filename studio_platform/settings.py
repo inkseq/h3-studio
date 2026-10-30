@@ -122,6 +122,8 @@ class Settings:
     storyboard_owners: tuple[str, ...] = ()
     stage_query_config_file: Path | None = None
     render_enabled: bool = False
+    # Enhance a finished take to 1080P/2K on RunPod Serverless (#795).
+    enhance_enabled: bool = False
     recovery_backends: tuple[str, ...] = ()
     generation_queue: str = "postgres"
     capacity_no_progress_seconds: int = 600
@@ -498,6 +500,7 @@ class Settings:
             if os.environ.get("SIXNINE_STAGE_QUERY_CONFIG_FILE")
             else None,
             render_enabled=os.environ.get("SIXNINE_RENDER_ENABLED", "0") == "1",
+            enhance_enabled=os.environ.get("INKSEQ_ENHANCE_ENABLED", "0") == "1",
             recovery_backends=tuple(
                 x.strip()
                 for x in os.environ.get("SIXNINE_RECOVERY_BACKENDS", "").split(",")

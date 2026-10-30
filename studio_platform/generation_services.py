@@ -9,6 +9,7 @@ from sqlalchemy import select
 
 from .capabilities import compile_request
 from .render_plans import RECIPE as RENDER_RECIPE, validate_render_source
+from .enhance_plans import RECIPE as ENHANCE_RECIPE
 from .repository import Scope, NotFound, Conflict, plans, artifacts, jobs
 from .source_snapshot import source_snapshot, validate_source_ref
 
@@ -579,6 +580,22 @@ class GenerationPlanning:
         if compiled["recipe_id"] == RENDER_RECIPE:
             if not validate_render_source(project, compiled):
                 raise Conflict("chapter_timeline_changed")
+        elif compiled["recipe_id"] == ENHANCE_RECIPE:
+            # The take entity must still point at the planned source artifact.
+            take = next(
+                (
+                    e
+                    for e in project["entities"]
+                    if e.get("id") == compiled["client_ref"]["entity_id"]
+                ),
+                None,
+            )
+            if (
+                take is None
+                or (take.get("data") or {}).get("cloudArtifactId")
+                != compiled["request"]["enhance"]["source_artifact_id"]
+            ):
+                raise Conflict("enhance_source_changed")
         else:
             ref = compiled["client_ref"]
             if not validate_source_ref(project, ref) or compiled.get(
