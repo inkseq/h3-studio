@@ -23,14 +23,18 @@ NO_FLEET_SOURCE = "native_dstack_0225_no_fleet_v1"
 # the only way a no-capacity start could still charge is an instance the
 # provider created that dstack never recorded; it would stay in the account,
 # named "dstack-<project>-<run name>-0-0-<random>". dstack truncates only that
-# prefix, to at least 51 characters for these backends, so with a project of at
-# most 27 characters the run name's first 16 ("sixnine-" + 8 hex) always survive.
-# Matching fewer characters, anywhere in a name, is the conservative direction.
+# prefix (Vast 60-8-1=51, Lium 63-8-1=54, RunPod 60-16-1=43 with its provider
+# ref), so the run name's first 16 characters ("sixnine-" + 8 hex) survive while
+# the project name stays within the per-backend bound below. Matching fewer
+# characters, anywhere in a name, is the conservative direction. A create that
+# timed out client-side can still finish at the provider, so the read must come
+# at least LATE_CREATE_SECONDS after the submission finished.
 ACCOUNT_ABSENT_SOURCE = "provider_account_absent_v1"
-LABEL_BACKENDS = frozenset({"vastai", "runpod", "lium"})
+MAX_PROJECT_LENGTH = {"vastai": 27, "lium": 30, "runpod": 19}
+LABEL_BACKENDS = frozenset(MAX_PROJECT_LENGTH)
 RUN_MARKER_LENGTH = 16
-MAX_PROJECT_LENGTH = 27
-ACCOUNT_FIELDS = {"backend", "observed_at", "label_prefix", "matched"}
+LATE_CREATE_SECONDS = 300
+ACCOUNT_FIELDS = {"backend", "terminal_at", "observed_at", "label_prefix", "matched"}
 SAFE_REJECTIONS = {
     (400, "invalid_args"),
     (404, "no_such_ask"),
@@ -136,6 +140,8 @@ def validate_proof(value, binding):
                 or read["matched"] != 0
                 or read["label_prefix"] != label_prefix(binding)
                 or type(read["observed_at"]) not in (int, float)
+                or type(read["terminal_at"]) not in (int, float)
+                or read["observed_at"] < read["terminal_at"] + LATE_CREATE_SECONDS
             ):
                 return None
             payload = {key: value[key] for key in PROOF_FIELDS - {"evidence_sha256"}}
@@ -256,10 +262,17 @@ def from_account_absence(run, binding, inventory, project):
 
         labels = inventory.get("labels")
         ids = inventory.get("instance_ids")
+        from datetime import datetime
+
+        finished = run["latest_job_submission"].get("finished_at")
+        terminal_at = datetime.fromisoformat(
+            finished.replace("Z", "+00:00")
+        ).timestamp()
         if (
             binding.get("backend") not in LABEL_BACKENDS
             or not isinstance(project, str)
-            or len(project) > MAX_PROJECT_LENGTH
+            or len(project) > MAX_PROJECT_LENGTH[binding["backend"]]
+            or not inventory.get("observed_at", 0) >= terminal_at + LATE_CREATE_SECONDS
             or not terminal_no_allocation_shape(run, binding)
             or inventory.get("backend") != binding["backend"]
             or inventory.get("complete") is not True
@@ -281,6 +294,7 @@ def from_account_absence(run, binding, inventory, project):
             "attempts": [
                 {
                     "backend": binding["backend"],
+                    "terminal_at": terminal_at,
                     "observed_at": inventory["observed_at"],
                     "label_prefix": prefix,
                     "matched": 0,
@@ -289,7 +303,7 @@ def from_account_absence(run, binding, inventory, project):
         }
         proof["evidence_sha256"] = _digest(proof)
         return validate_proof(proof, binding)
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, AttributeError):
         return None
 
 

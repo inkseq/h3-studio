@@ -325,14 +325,21 @@ class DstackCapacityTests(unittest.TestCase):
         # dstack Sky runs stock dstack: no typed Vast rejections exist (#868).
         self.start()
         self.client.run = no_capacity_run(self.client.run)
+        for submission in (
+            self.client.run["latest_job_submission"],
+            self.client.run["jobs"][0]["job_submissions"][0],
+        ):
+            submission["finished_at"] = "2026-10-30T12:00:00Z"
+        terminal = 1793361600.0  # 2026-10-30T12:00:00Z
         marker = self.client.run["run_spec"]["run_name"][:16]
         labels = ["dstack-inkseq-production-sixnine-ffffffff-0-0-ab", None]
+        read_at = [terminal + 300]
 
         def inventory(backend):
             return {
                 "backend": backend,
                 "complete": True,
-                "observed_at": 21.0,
+                "observed_at": read_at[0],
                 "instance_ids": [str(i) for i in range(len(labels))],
                 "labels": list(labels),
             }
@@ -345,6 +352,10 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(pending["billing_state"], "unsettled")
         self.assertEqual(pending["reason_code"], "dstack_no_capacity_billing_pending")
         labels[1] = None
+        # A create that timed out may still land: no proof inside the window.
+        read_at[0] = terminal + 299
+        self.assertEqual(self.capacity.observe(INTENT)["billing_state"], "unsettled")
+        read_at[0] = terminal + 300
         from studio_platform.dstack_allocation_proof import from_account_absence
 
         # A project name long enough to truncate the run marker away is refused.
@@ -366,8 +377,9 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(proof["source"], "provider_account_absent_v1")
         self.assertEqual(proof["attempts"][0]["label_prefix"], marker)
         self.assertIsNotNone(validate_proof(proof, self.store.load(INTENT)))
-        tampered = {**proof, "attempts": [{**proof["attempts"][0], "matched": 1}]}
-        self.assertIsNone(validate_proof(tampered, self.store.load(INTENT)))
+        for change in ({"matched": 1}, {"observed_at": terminal + 10}):
+            tampered = {**proof, "attempts": [{**proof["attempts"][0], **change}]}
+            self.assertIsNone(validate_proof(tampered, self.store.load(INTENT)))
         self.native.assert_not_called()
         self.assertEqual(self.client.apply_count, 1)
 
