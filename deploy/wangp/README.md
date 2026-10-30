@@ -180,10 +180,11 @@ across interruption is **not qualified by the fake SDK tests**. New ephemeral
 GPU instances do not gain a persistent model cache from this change.
 
 The child sets `HF_HUB_DISABLE_XET=1`, so the SDK downloads over plain HTTPS
-from the Hub CDN even though `hf_xet` is installed. On 2026-10-31 native Xet
-transfers on staging Lium hosts held open sockets with no byte progress for
-15+ minutes (twice, same 7/11 point) while the CDN served the same file at
-~9 MB/s on that host.
+from the Hub CDN even though `hf_xet` is installed. On 2026-10-31 a staging Lium
+host on native Xet averaged ~8.5 MB/s (28 GB in ~55 min) and hit
+`capacity_startup_timeout`; the next Lium host over HTTPS sustained ~38 MB/s.
+The completed-file counter in progress receipts does not move while one large
+file transfers, so it is not a stall signal.
 
 The parent watches a two-hour model-transfer deadline, free disk headroom and the
 isolated Hub/Xet cache (a watched 1 GiB threshold, not a filesystem quota, with
