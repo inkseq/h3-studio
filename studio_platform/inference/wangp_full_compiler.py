@@ -15,7 +15,12 @@ import re
 
 from .protocol import BackendError
 from .wangp_compiler import MAX_SEED, control_schema as legacy_schema
-from .wangp_contract import InputDescriptor, PreparedRequest, canonical_json
+from .wangp_contract import (
+    InputDescriptor,
+    PreparedRequest,
+    StoredInput,
+    canonical_json,
+)
 from ..runtime_catalog import get_profile, model_for, validate_manifest
 from ..storage import key_belongs_to, validate_key
 
@@ -1055,7 +1060,7 @@ class H3ProfileCompiler:
             )
             for item in descriptors:
                 heartbeat()
-                with store.open(keys[item.asset_id]) as stream:
+                with StoredInput(store, keys[item.asset_id]) as stream:
                     if self.stage_input(item, stream, heartbeat=heartbeat) != item:
                         raise ValueError('wangp_staged_input_mismatch')
             return prepared

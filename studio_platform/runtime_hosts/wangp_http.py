@@ -14,12 +14,16 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
+import urllib.request
+from urllib.parse import urlsplit
 import uuid
 from fractions import Fraction
 import subprocess
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.concurrency import run_in_threadpool
 
 from ..inference.wangp_contract import InputDescriptor, PreparedRequest
 from ..storage import LocalObjectStore
@@ -48,6 +52,11 @@ def private_token_file(path):
     ):
         raise ValueError("wangp_invalid_token")
     return value.decode("ascii")
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
 
 
 class StagedInputs:
@@ -97,6 +106,39 @@ class StagedInputs:
             # Replay checks the same bytes rather than overwriting a live input.
             pass
         self.resolve(descriptor)
+
+    def fetch(self, descriptor, url, *, deadline_seconds=600):
+        """Pull one input by signed HTTPS GET with the same size and hash checks."""
+        self.key(descriptor)
+        parts = urlsplit(url)
+        if parts.scheme != "https" or not parts.hostname or parts.username:
+            raise ValueError("wangp_input_url_invalid")
+        # No proxy environment and no redirects: only the signed object itself.
+        opener = urllib.request.build_opener(
+            urllib.request.ProxyHandler({}), _NoRedirect()
+        )
+        started = time.monotonic()
+        with tempfile.TemporaryFile() as spool:
+            size, checksum = 0, hashlib.sha256()
+            with opener.open(urllib.request.Request(url), timeout=60) as response:
+                if response.status != 200:
+                    raise ValueError("wangp_input_fetch_failed")
+                for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                    size += len(chunk)
+                    if (
+                        size > descriptor.size_bytes
+                        or time.monotonic() - started > deadline_seconds
+                    ):
+                        raise ValueError("wangp_staged_input_mismatch")
+                    spool.write(chunk)
+                    checksum.update(chunk)
+            if (
+                size != descriptor.size_bytes
+                or checksum.hexdigest() != descriptor.sha256
+            ):
+                raise ValueError("wangp_staged_input_mismatch")
+            spool.seek(0)
+            self.save(descriptor, spool)
 
     def image_path(self, descriptor, *, reference=False, deployment_profile_id=None):
         """Expose inspected normalized PNG bytes under a runtime-safe extension.
@@ -755,6 +797,23 @@ def create_app(host, inputs, *, token):
             host.read_artifact(_operation(operation_id), kind),
             media_type="application/octet-stream",
         )
+
+    @app.post("/v1/inputs/{handle}/fetch")
+    async def fetch(handle: str, request: Request):
+        try:
+            body = await request.body()
+            if len(body) > 16384:
+                raise ValueError()
+            value = json.loads(body)
+            if set(value) != {"input", "url"} or not isinstance(value["url"], str):
+                raise ValueError()
+            descriptor = InputDescriptor(**value["input"])
+            if handle != descriptor.handle:
+                raise ValueError()
+            await run_in_threadpool(inputs.fetch, descriptor, value["url"])
+            return asdict(descriptor)
+        except Exception:
+            return JSONResponse({"error": "wangp_input_rejected"}, status_code=422)
 
     @app.put("/v1/inputs/{handle}")
     async def stage(handle: str, request: Request):
