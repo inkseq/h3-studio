@@ -9,6 +9,7 @@ from studio_platform.runtime_hosts.wangp_session import (
     PinnedWanGPSession,
     _check_config,
     config_for_model_root,
+    device_attention,
 )
 
 
@@ -107,6 +108,27 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(self.upstream.calls[0]["num_inference_steps"], 50)
         self.assertIs(handle.observe(), result)
         self.assertEqual(len(self.writes), 1)
+
+    def test_resolved_device_attention_replaces_only_the_compiled_sdpa(self):
+        self.facade.attention = "sage2"
+        self.facade.submit_task({"override_attention": "sdpa"})
+        self.assertEqual(self.upstream.calls[0]["override_attention"], "sage2")
+        self.upstream.active_job = None
+        self.facade.attention = None
+        self.facade.submit_task({"override_attention": "sdpa"})
+        self.assertEqual(self.upstream.calls[1]["override_attention"], "sdpa")
+
+    def test_device_attention_is_sage2_only_on_cc12_for_a_sage2_profile(self):
+        def torch(capability):
+            return NS(cuda=NS(get_device_capability=lambda index: capability))
+
+        sage = {"runtime": {"config": {"attention_mode": "sage2"}}}
+        sdpa = {"runtime": {"config": {"attention_mode": "sdpa"}}}
+        self.assertEqual(device_attention(torch((12, 0)), sage), "sage2")
+        for capability in ((8, 9), (9, 0), (8, 6)):
+            self.assertIsNone(device_attention(torch(capability), sage))
+        self.assertIsNone(device_attention(torch((12, 0)), sdpa))
+        self.assertIsNone(device_attention(torch((12, 0)), {"runtime": {}}))
 
     def test_packaging_retry_uses_same_result_without_regeneration(self):
         attempts = []

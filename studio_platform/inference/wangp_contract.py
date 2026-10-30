@@ -17,6 +17,11 @@ from typing import Any, Iterable, Mapping, Protocol
 from .protocol import TAG
 
 UPSTREAM_REVISION = "0e58385fbde7ff102d276e4a9e490845de76b4ea"
+# Every manifest binds one of these; its own source_revision is what the host verifies,
+# so profiles on different WanGP revisions run side by side (v9 on 9cb2bcd, #844).
+SUPPORTED_REVISIONS = frozenset(
+    {UPSTREAM_REVISION, "9cb2bcdafa7b41d2a1c30d2571cea4bc104657fb"}
+)
 PROTOCOL_VERSION = "wangp-private-v1"
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
@@ -71,7 +76,7 @@ class EngineManifest:
         data = _object(self.document_json)
         if (
             data.get("engine") != "wangp"
-            or data.get("source_revision") != UPSTREAM_REVISION
+            or data.get("source_revision") not in SUPPORTED_REVISIONS
             or data.get("protocol_version") != PROTOCOL_VERSION
         ):
             raise ValueError("wangp_manifest_revision_mismatch")
