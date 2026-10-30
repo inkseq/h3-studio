@@ -31,6 +31,7 @@ from .inference.protocol import (
     SubmissionRejected,
     SubmissionUncertain,
 )
+from .media import ffmpeg
 from .protected_config import read_protected_json
 
 API = "https://api.runpod.ai/v2/"
@@ -91,10 +92,13 @@ def temp_key(tag):
 
 
 def cost_microusd(status, rate):
-    """Billed worker time, conservatively including queue and cold start."""
+    """Billed worker time, conservatively including queue and cold start.
+
+    Without executionTime the cost is unknown, never zero.
+    """
     total = 0
-    for name in ("delayTime", "executionTime"):
-        value = status.get(name, 0)
+    for name, default in (("delayTime", 0), ("executionTime", None)):
+        value = status.get(name, default)
         if type(value) not in (int, float) or not 0 <= value <= 86_400_000:
             return None
         total += value
@@ -207,6 +211,8 @@ class RunPodEnhanceBackend:
             "input": {
                 "video_url": video.reveal(),
                 **{k: enhance[k] for k in ("res", "steps", "sigma", "audio", "unet")},
+                # The take's own prompt, as in the #795 quality runs; else the default.
+                **({"prompt": enhance["prompt"]} if enhance.get("prompt") else {}),
                 "output_put_url": output.reveal(),
             },
             "policy": POLICY,
@@ -232,9 +238,23 @@ class RunPodEnhanceBackend:
         if not isinstance(task_id, str) or not ID.fullmatch(task_id):
             raise BackendError("enhance_task_identity_invalid")
         status, data = self._call("GET", "/status/" + task_id)
+        if status == 404:
+            raise BackendError("runpod_enhance_status_expired")
         if data is None or data.get("id", task_id) != task_id:
             raise BackendError("runpod_enhance_status_unavailable")
         return data
+
+    def _expired(self, tag, task_id):
+        """RunPod keeps /status for about 30 min after a job ends. The uploaded
+        output then proves success (a presigned PUT is all-or-nothing); the
+        billed time is no longer readable, so the cost stays unknown."""
+        if tag is not None:
+            try:
+                if self.store.stat(temp_key(tag)).size_bytes > 0:
+                    return Outcome("succeeded", task_id)
+            except Exception:
+                pass
+        return Outcome("unknown", task_id)
 
     def reconcile(self, tag, task_id=None):
         return Outcome("unknown") if task_id is None else self.poll(tag, task_id)
@@ -242,7 +262,9 @@ class RunPodEnhanceBackend:
     def poll(self, tag, task_id):
         try:
             data = self._status(task_id)
-        except BackendError:
+        except BackendError as error:
+            if error.args == ("runpod_enhance_status_expired",):
+                return self._expired(tag, task_id)
             return Outcome("unknown", task_id)
         state = STATES.get(data.get("status"), "unknown")
         output = data.get("output")
@@ -293,9 +315,16 @@ class RunPodEnhanceBackend:
         finally:
             if partial.exists():
                 partial.unlink()
-        # The enhanced MP4 carries the regenerated draft audio; the collector
-        # encodes video from it and extracts the FLAC from the same file.
-        return {"video": output, "audio": output}
+        # The MP4 carries the regenerated draft audio. Map only that stream so
+        # the collector's FLAC step never decodes the 2K video (#873 review).
+        audio = target / "enhance-audio.flac"
+        try:
+            ffmpeg(
+                ["-y", "-i", output, "-map", "0:a:0", "-c:a", "flac", audio], timeout=60
+            )
+        except Exception:
+            raise BackendError("enhance_output_audio_missing") from None
+        return {"video": output, "audio": audio}
 
 
 def create(store, settings):

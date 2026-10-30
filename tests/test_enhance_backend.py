@@ -160,7 +160,7 @@ class EnhanceBackendTests(unittest.TestCase):
                 98_455,
             ),
             ((200, {"id": "job-1", "status": "TIMED_OUT", **timing}), "failed", 98_455),
-            ((200, {"id": "job-1", "status": "CANCELLED"}), "cancelled", 0),
+            ((200, {"id": "job-1", "status": "CANCELLED"}), "cancelled", None),
             ((200, {"id": "job-2", "status": "COMPLETED"}), "unknown", None),
             ((503, {}), "unknown", None),
         ]
@@ -173,21 +173,45 @@ class EnhanceBackendTests(unittest.TestCase):
                 )
         self.assertEqual(self.backend([]).reconcile("attempt-1").state, "unknown")
 
-    def test_fetch_returns_the_one_mp4_for_video_and_audio(self):
-        with tempfile.TemporaryDirectory() as directory:
+    def test_fetch_keeps_the_mp4_and_demuxes_its_audio_without_decoding(self):
+        calls = []
+
+        def demux(args, timeout):
+            calls.append([str(a) for a in args])
+            Path(args[-1]).write_bytes(b"audio")
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            mock.patch.object(enhance_backend, "ffmpeg", side_effect=demux),
+        ):
             paths = self.backend([]).fetch(
                 job(), "attempt-1", "job-1", Path(directory), lambda: None
             )
-            self.assertEqual(paths["video"], paths["audio"])
             self.assertEqual(paths["video"].read_bytes(), b"mp4")
+            self.assertEqual(paths["audio"].name, "enhance-audio.flac")
+            self.assertIn(["-map", "0:a:0", "-c:a", "flac"], [calls[0][3:7]])
             self.assertEqual(
-                sorted(p.name for p in Path(directory).iterdir()), ["enhance-raw.mp4"]
+                sorted(p.name for p in Path(directory).iterdir()),
+                ["enhance-audio.flac", "enhance-raw.mp4"],
             )
             with self.assertRaises(BackendError):
                 self.backend([], Store(output=b"")).fetch(
                     job(), "attempt-2", "job-1", Path(directory), lambda: None
                 )
         self.assertRaises(BackendError, temp_key, "../x")
+
+    def test_expired_status_is_success_only_with_the_uploaded_output(self):
+        class Missing(Store):
+            def stat(self, key):
+                raise FileNotFoundError(key)
+
+        found = self.backend([(404, {})]).poll("attempt-1", "job-1")
+        self.assertEqual((found.state, found.actual_cost_microusd), ("succeeded", None))
+        missing = self.backend([(404, {})], Missing()).poll("attempt-1", "job-1")
+        self.assertEqual(missing.state, "unknown")
+        self.assertEqual(
+            self.backend([(404, {})]).reconcile("attempt-1").state, "unknown"
+        )
 
     def test_worker_spec_is_serverless_and_bound_to_the_recipe(self):
         args = ["w", "enhance", "runpod", "w", (), ("enhance-v1",)]
