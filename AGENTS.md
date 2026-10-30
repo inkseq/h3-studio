@@ -11,6 +11,9 @@
 - **Stuck 30 minutes? Ask Claude instead of adding guards.** If your own guard blocks a normal operation, loosen or delete it first.
 - **Deploy-helper or server-config changes are done only when live on BOTH staging and production.**
 
+## Experiments
+- Before any GPU/provider/model/quality test, search `docs/EXPERIMENTS.md`; reuse a matching row instead of re-running. Afterwards append one row (date, setup, numbers, verdict, evidence link), failures included.
+
 ## Coordination
 - Codex: backend/API/schema/infra/GPU/money/Agent docs in `inkseq/h3-studio`, except the AI layer.
 - Claude (owner 2026-10-29): the whole AI layer (model clients/prompts, story chat, Inky, pictures, attachments, Langfuse, evals) and Modal (#688), backend included; Codex reviews only when it touches money, schema or auth.
