@@ -15,6 +15,7 @@ from .wangp_contract import (
     EngineManifest,
     InputDescriptor,
     PreparedRequest,
+    StoredInput,
     canonical_json,
 )
 from ..storage import key_belongs_to, validate_key
@@ -321,7 +322,7 @@ class H3FL2VACompiler:
             )
             for item in descriptors:
                 heartbeat()
-                with store.open(keys[item.asset_id]) as source:
+                with StoredInput(store, keys[item.asset_id]) as source:
                     if self.stage_input(item, source, heartbeat=heartbeat) != item:
                         raise ValueError("wangp_staged_input_mismatch")
             return prepared
