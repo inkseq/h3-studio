@@ -543,7 +543,9 @@ def slot_runner(
     elif (
         slot.spec.backend == "cpu-render"
         and not settings.render_enabled
-        or slot.spec.backend != "cpu-render"
+        or slot.spec.backend == "runpod-enhance"
+        and not settings.enhance_enabled
+        or slot.spec.backend not in {"cpu-render", "runpod-enhance"}
         and (
             settings.execution_backend != slot.spec.backend
             or not settings.generation_enabled
@@ -577,6 +579,10 @@ def slot_runner(
             from .render_backend import CPURenderBackend
 
             backend = CPURenderBackend(directory / "render", enabled=True)
+        elif slot.spec.backend == "runpod-enhance":
+            from . import enhance_backend
+
+            backend = enhance_backend.create(store_factory(settings), settings)
         elif slot.spec.backend == "comfy-worker":
             backend = ComfyBackend(
                 endpoint=slot.endpoint,
@@ -609,7 +615,7 @@ def slot_runner(
                 slot.spec.dispatch_backend == "hatchet-v1" and worker["drain_requested"]
             )
         ):
-            if slot.spec.backend in {"mock", "cpu-render"}:
+            if slot.spec.backend in {"mock", "cpu-render", "runpod-enhance"}:
                 control.mark_ready(worker_id, upstream_idle_confirmed=True)
             elif slot.confirmed_idle:
                 # A startup declaration alone is insufficient: the dedicated
