@@ -802,8 +802,12 @@ class DstackCapacityTests(unittest.TestCase):
     def test_supported_backend_never_falls_back(self):
         config = request(backend="runpod").run_spec(PUB)["configuration"]
         self.assertEqual(config["backends"], ["runpod"])
+        for backend in ("lium", "cloudrift"):
+            config = request(backend=backend).run_spec(PUB)["configuration"]
+            self.assertEqual(config["backends"], [backend])
+            self.assertNotIn("backend_options", config)
         with self.assertRaisesRegex(DstackError, "dstack_backend_unsupported"):
-            request(backend="lium")
+            request(backend="targon")
 
     def test_resource_floors_and_optional_regions_use_pinned_range_semantics(self):
         config = request().run_spec(PUB)["configuration"]

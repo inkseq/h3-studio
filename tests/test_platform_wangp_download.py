@@ -270,16 +270,25 @@ class DownloadTests(unittest.TestCase):
                     # A turbo profile pins one extra LoRA file.
                     turbo = 'acceleration' in get_profile(profile)
                     self.assertEqual(len(records), 11 if turbo else 10)
-                    self.assertEqual(
-                        fetch._content_preserving_revision(
-                            original, manifest.digest, records
-                        ),
-                        fetch._LOCATOR_REVISION,
+                    located = fetch._content_preserving_revision(
+                        original, manifest.digest, records
                     )
+                    direct = set(fetch._DIRECT_FILES.values())
+                    if isinstance(located, dict):
+                        # Per-file locator: only whitelisted direct rows leave 8d90934.
+                        self.assertEqual(set(located), {row[3] for row in records})
+                        self.assertLessEqual(
+                            set(located.values()), {fetch._LOCATOR_REVISION, *direct}
+                        )
+                        self.assertEqual(
+                            located[records[0][3]], fetch._LOCATOR_REVISION
+                        )
+                    else:
+                        self.assertEqual(located, fetch._LOCATOR_REVISION)
                     self.assertTrue(
                         all(
-                            row[1:3]
-                            == (fetch._LOCATOR_REPOSITORY, fetch._LOCATOR_ORIGINAL)
+                            row[1] == fetch._LOCATOR_REPOSITORY
+                            and row[2] in {fetch._LOCATOR_ORIGINAL, *direct}
                             for row in records
                         )
                     )
@@ -303,6 +312,44 @@ class DownloadTests(unittest.TestCase):
                         self.assertEqual(call.kwargs['filename'], records[0][3])
                         self.assertIs(call.kwargs['token'], False)
                     self.assertEqual(manifest.document, original)
+
+    def test_direct_rows_need_their_own_revision_and_exact_content(self):
+        from studio_platform.runtime_catalog import engine_manifest
+
+        manifest = engine_manifest(
+            'h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9', 'fl'
+        )
+        records = fetch.selected_files(manifest.document, manifest.digest)
+        located = fetch._content_preserving_revision(
+            manifest.document, manifest.digest, records
+        )
+        self.assertEqual(
+            located['minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors'],
+            '98b5288b174fe08f6d54f9af0dc46ee8bb58b225',
+        )
+        for revision, sha in (
+            # New content claimed at the original revision.
+            (fetch._LOCATOR_ORIGINAL, fetch._V9_VAE[3]),
+            # Original content claimed at the direct revision.
+            ('98b5288b174fe08f6d54f9af0dc46ee8bb58b225', fetch._VAE_ORIGINAL[3]),
+        ):
+            document = copy.deepcopy(manifest.document)
+            document['components']['video_vae']['revision'] = revision
+            document['components']['video_vae']['files'][0]['sha256'] = sha
+            with (
+                self.subTest(revision=revision),
+                self.assertRaisesRegex(ValueError, 'model_download_locator_invalid'),
+            ):
+                fetch._content_preserving_revision(
+                    document,
+                    manifest.digest,
+                    [
+                        (r[0], r[1], revision, r[3], r[4])
+                        if r[3].endswith('video_vae_int8_convrot.safetensors')
+                        else r
+                        for r in records
+                    ],
+                )
 
     def test_full_controls_changed_content_or_manifest_rejects_before_sdk(self):
         from studio_platform.runtime_catalog import (
