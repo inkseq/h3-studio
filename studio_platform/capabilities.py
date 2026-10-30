@@ -358,6 +358,12 @@ def capabilities(settings):
             "cancel": "/v1/projects/{project_id}/films/{run_id}/cancel",
             "resume": "/v1/projects/{project_id}/films/{run_id}/resume",
         },
+        # Enhance a finished take to 1080P/2K (#795); the UI offers it only when on.
+        "enhance": {
+            "enabled": bool(getattr(settings, "enhance_enabled", False)),
+            "tiers": ["1080p", "2k"],
+            "plan": "/v1/enhance-plans",
+        },
         "recipes": recipes,
         "deployment_profiles": profiles,
         "library": __import__(

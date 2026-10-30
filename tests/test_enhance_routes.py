@@ -107,6 +107,20 @@ class EnhanceRouteTests(unittest.TestCase):
         self.assertNotIn("h3", job.text.lower())
         self.assertEqual(job.json()["client_ref"]["shot_id"], "s1")
 
+    def test_capabilities_offer_enhance_only_when_enabled(self):
+        enhance = self.client.get("/v1/capabilities").json()["enhance"]
+        self.assertEqual(
+            enhance,
+            {"enabled": True, "tiers": ["1080p", "2k"], "plan": "/v1/enhance-plans"},
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            off = create_app(Settings(Path(tmp), auth_mode="local-test"))
+            with TestClient(off) as client:
+                client.post("/api/auth/login", json={"username": "superdan"})
+                self.assertFalse(
+                    client.get("/v1/capabilities").json()["enhance"]["enabled"]
+                )
+
     def test_enhanced_or_oversized_sources_are_refused(self):
         for job in (source_job("enhance-v1"), source_job(width=1920, height=1088)):
             self.job = job
