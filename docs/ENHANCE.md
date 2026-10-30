@@ -12,7 +12,7 @@ Enhance reuses the existing plan → job → worker → collection path, so hold
 
 | piece | where | notes |
 |---|---|---|
-| recipe `h3-enhance-v1` | `enhance_plans.py` | Body `{client_ref: {project_id, entity_id}, tier: "1080p"\|"2k"}`. The source is resolved with the render source resolver: owner/project checked, immutable object, duration and size. Output spec: 1920×1080 or 2560×1440, same frames and fps as the source |
+| recipe `enhance-v1` | `enhance_plans.py` | Body `{client_ref: {project_id, entity_id}, tier: "1080p"\|"2k"}`. The source is resolved with the render source resolver (owner/project checked, immutable object) and must be a generated take: not an enhance or chapter-render output, ≤ 15 s, both sides ≤ 1536. The job carries the source take's `shot_id`, so the result is listed as a new take of that shot. Output spec: 1920×1080 or 2560×1440, same frames and fps as the source |
 | plan route | `POST /v1/enhance-plans` | Same as `/v1/render-plans`: compile → policy → `credits_pricing.quote` → `create_plan`. The job then starts through the normal `/v1/jobs` with `plan_id` |
 | price | `credits_pricing` | Enhance branch (owner 2026-10-30): 1080P 100 credits per 5 s clip +10 per extra s; 2K 150 +30. Rounded up per started second. Never shown as money |
 | policy | `execution_policy.evaluate` | Pool `enhance`, backend `runpod-enhance`. Blocked unless `settings.enhance_enabled` and an enhance worker is registered |
