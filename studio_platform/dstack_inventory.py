@@ -77,13 +77,39 @@ def read_ids(backend, read):
     return _ids(myself["pods"], exact_keys={"id"}), {}
 
 
+OPTIONAL_PROFILE_FIELDS = {
+    "regions",
+    "min_reliability",
+    "fallback_backends",
+    "transport",
+}
+
+
 def fallbacks_valid(profile, providers):
+    """Optional fallback backends and worker transport (#859) are well formed."""
     fallback = profile.get("fallback_backends", [])
     return (
         isinstance(fallback, list)
         and len(fallback) == len(set(fallback))
         and all(b in providers and b != profile["backend"] for b in fallback)
+        and profile.get("transport", "ssh") in {"ssh", "dialout"}
     )
+
+
+def request_options(profile, operator):
+    """Optional CapacityRequest fields taken straight from a profile."""
+    options = {
+        "regions": tuple(profile.get("regions", [])),
+        "min_reliability": profile.get("min_reliability", 0.9),
+    }
+    if profile.get("transport") == "dialout":
+        from .worker_boot import BOOT_PATH, mint
+
+        options.update(
+            boot_token=mint()[0],
+            boot_url=operator.settings.public_origin.rstrip("/") + BOOT_PATH,
+        )
+    return options
 
 
 def profile_backends(profile, providers):

@@ -17,6 +17,7 @@ def body_limit(path, project_bytes, upload_bytes):
     if path in {
         "/v1/agent-connect/exchange",
         "/v1/agent-connect/grant-preview",
+        "/v1/worker/boot",
     } or path.startswith("/v1/account/agent-connections"):
         return min(project_bytes, AGENT_CONNECT_BODY_BYTES)
     return upload_bytes + 1024 * 1024 if is_asset_upload(path) else project_bytes

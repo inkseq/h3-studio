@@ -61,7 +61,8 @@ from .repository import (
     scaler_actions,
     scaler_receipts,
 )
-from .dstack_inventory import fallbacks_valid, profile_backends
+from .dstack_inventory import OPTIONAL_PROFILE_FIELDS as OPTIONAL, fallbacks_valid
+from .dstack_inventory import profile_backends, request_options
 from .runtime_catalog import engine_manifest, get_profile
 
 BACKEND_MARKER = "dstack-v1"
@@ -1298,10 +1299,7 @@ class DstackOperator:
             "budget_account_ids",
         }
         require(
-            required <= set(profile)
-            and not set(profile)
-            - required
-            - {"regions", "min_reliability", "fallback_backends"},
+            required <= set(profile) and not set(profile) - required - OPTIONAL,
             "dstack_profile_fields_invalid",
             422,
         )
@@ -1578,8 +1576,7 @@ class DstackOperator:
             created_at=created_at,
             hard_deadline=deadline,
             max_duration_s=duration,
-            regions=tuple(profile.get("regions", [])),
-            min_reliability=profile.get("min_reliability", 0.9),
+            **request_options(profile, self),
             lifecycle_version=lifecycle_version,
             test_task_id=test_task_id,
             test_max_duration_s=(

@@ -654,6 +654,79 @@ class FactoryTests(LedgerCase):
             with self.assertRaisesRegex(DstackError, "configuration_missing"):
                 create_runtime(self.repo, self.store)
 
+    def test_dialout_boot_exchange_hands_over_the_grant_once(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from studio_platform.dstack_operator import DstackOperator
+        from studio_platform.worker_boot import (
+            BootRefused,
+            exchange,
+            register_routes,
+            write_grant,
+        )
+
+        settings = SimpleNamespace(
+            **vars(self.settings), public_origin="https://staging.inkseq.com"
+        )
+        config = copy.deepcopy(self.operator.config)
+        for profile in config["profiles"]:
+            profile["transport"] = "dialout"
+        self.operator = DstackOperator(self.repo, settings, self.capacity, config)
+        binding, _ = self.allocation()
+        intent = binding["intent_id"]
+        env = binding["run_spec"]["configuration"]["env"]
+        # The control plane stores the spec: it carries only the one-time code.
+        self.assertEqual(
+            env,
+            {
+                "INKSEQ_BOOT_URL": "https://staging.inkseq.com/v1/worker/boot",
+                "INKSEQ_INTENT": intent,
+                "INKSEQ_BOOT_TOKEN": env["INKSEQ_BOOT_TOKEN"],
+            },
+        )
+        token = env["INKSEQ_BOOT_TOKEN"]
+        self.assertEqual(
+            binding["boot"]["token_sha256"], hashlib.sha256(token.encode()).hexdigest()
+        )
+        grants = self.root / "grants"
+        grants.mkdir()
+        attempts = [
+            (token, "worker_boot_not_ready"),
+            ("x" * 43, "worker_boot_denied"),
+        ]
+        for value, code in attempts:
+            with self.assertRaisesRegex(BootRefused, code):
+                exchange(self.repo, grants, intent, value)
+        write_grant(grants, intent, {"tunnel": "fixture"})
+        app = FastAPI()
+        app.state.repository = self.repo
+        app.state.settings = SimpleNamespace(data_dir=self.root)
+        (self.root / "worker-tunnel").symlink_to(grants)
+        register_routes(app)
+        with TestClient(app) as client:
+            body = {"intent_id": intent, "token": token}
+            first = client.post("/v1/worker/boot", json=body)
+            self.assertEqual(first.json(), {"tunnel": "fixture"})
+            self.assertEqual(first.headers["cache-control"], "no-store")
+            again = client.post("/v1/worker/boot", json=body)
+            self.assertEqual(
+                (again.status_code, again.json()), (409, {"error": "worker_boot_used"})
+            )
+            junk = client.post("/v1/worker/boot", json={"intent_id": intent})
+            self.assertEqual(junk.status_code, 403)
+        # An expired intent never hands out a grant.
+        other, _ = self.allocation(key="two")
+        write_grant(grants, other["intent_id"], {"tunnel": "fixture"})
+        self.now = other["boot"]["expires_at"]
+        with self.assertRaisesRegex(BootRefused, "worker_boot_closed"):
+            exchange(
+                self.repo,
+                grants,
+                other["intent_id"],
+                other["run_spec"]["configuration"]["env"]["INKSEQ_BOOT_TOKEN"],
+            )
+
     def test_pinned_direct_coordinates_and_unsupported_topologies(self):
         binding, run = self.allocation()
         coordinates = coordinates_for_run(binding, run)

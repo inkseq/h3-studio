@@ -81,6 +81,8 @@ DOMAINS = (
             "drain_safe_runner",
             "boyesir_backend",
             "wangp_bootstrap",
+            "worker_boot",
+            "worker_tunnel",
         ),
     ),
     (
