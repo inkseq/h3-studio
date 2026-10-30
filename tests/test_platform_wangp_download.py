@@ -789,6 +789,7 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(value["HF_HUB_DISABLE_IMPLICIT_TOKEN"], "1")
         self.assertEqual(value["HF_HUB_DISABLE_TELEMETRY"], "1")
         self.assertEqual(value["HF_HUB_DISABLE_PROGRESS_BARS"], "1")
+        self.assertEqual(value["HF_HUB_DISABLE_XET"], "1")
         self.assertEqual(value["RUST_LOG"], "off")
 
     def run_child(self, child, **kwargs):
