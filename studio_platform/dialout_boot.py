@@ -28,6 +28,11 @@ RUN_OUTPUT_LIMIT = 4 * 1024 * 1024
 CHISEL = Path("/tmp/inkseq-chisel")
 
 
+def log(message):
+    # Container stdout is what the dstack logs API shows; never log secrets.
+    print("inkseq-boot: " + message, flush=True)
+
+
 def _opener():
     # Signed URLs and the exchange only: no proxy environment, no redirects.
     class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -53,8 +58,9 @@ def exchange(url, intent, token, *, clock=time.monotonic, wait=time.sleep):
             # 425: the controller has not prepared the grant yet. 5xx: retry.
             if error.code in (403, 409):
                 raise SystemExit("inkseq_boot_refused_%d" % error.code) from None
-        except OSError:
-            pass
+            log("exchange waiting (HTTP %d)" % error.code)
+        except OSError as error:
+            log("exchange unreachable (%s)" % type(error).__name__)
         wait(5)
     raise SystemExit("inkseq_boot_exchange_timeout")
 
@@ -199,13 +205,24 @@ def main(environ=os.environ):
         fetch(source["url"], root / name, source["sha256"])
     fetch(grant["chisel"]["url"], CHISEL, grant["chisel"]["sha256"])
     CHISEL.chmod(0o755)
+    log("sources and chisel verified")
     write_once(root / "wangp-token", grant["token"].encode(), 0o600)
     server = http.server.ThreadingHTTPServer(
         ("127.0.0.1", STATUS_PORT), status_handler(grant["token"])
     )
     threading.Thread(target=server.serve_forever, daemon=True).start()
     threading.Thread(target=keep_tunnel, args=(grant,), daemon=True).start()
-    start_runtime(grant, root)
+    log("tunnel and status endpoint started")
+    try:
+        start_runtime(grant, root)
+        log("runtime launched")
+    except (OSError, SystemExit) as error:
+        # Stay reachable so the controller can read why; its startup
+        # deadline still stops and replaces this machine.
+        log(
+            "runtime launch failed (%s)"
+            % (error.code if isinstance(error, SystemExit) else type(error).__name__)
+        )
     # The container lives as long as the run; the controller stops the run.
     threading.Event().wait()
 
