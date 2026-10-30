@@ -202,7 +202,7 @@ class RunPodEnhanceBackend:
             video = self.store.presign_download(
                 source["key"], expires_seconds=URL_SECONDS
             )
-            output = self.store.presign_upload(
+            output = self.store.presign_worker_upload(
                 temp_key(tag), content_type="video/mp4", expires_seconds=URL_SECONDS
             )
         except Exception:
