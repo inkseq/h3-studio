@@ -23,7 +23,14 @@ queue ──> router (one rules table) ──┬─> pod lane        (dstack: Va
 
 **Pod lane.** Unchanged in concept: dstack rents, workers pull, the account sweep and idle stop stay.
 
-**Serverless lane.** Per-call execution. The platform scales; we never keep a host.
+**Serverless lane.** Its purpose is a **wait-time guarantee**: when no warm pod is free and a pod boot (5–10 min) would break the per-user wait limit, the router hands the job to a serverless platform. Those platforms boot in about 2 min and scale out in parallel.
+
+Serverless workers are **not one container per job**:
+- the first job pays boot plus model load;
+- the worker then stays warm with the model in VRAM and runs the following jobs back to back;
+- the platform scales it to zero only after an idle timeout (5–10 min).
+
+Modal sandboxes already behave this way (they pull jobs until idle). On RunPod Serverless, one worker process handles sequential calls with the WanGP session loaded once. "Submit" means "hand this job to the lane", not "start a container for it".
 - One small interface per platform:
   - `submit(job, input_urls, output_put_url) -> call_id`
   - `poll(call_id) -> queued | running | done(result) | failed(code)`
