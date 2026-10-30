@@ -105,6 +105,15 @@ class EnhanceRouteTests(unittest.TestCase):
         self.assertEqual(job.status_code, 202, job.text)
         self.assertEqual(job.json()["recipe_id"], "enhance-v1")
         self.assertNotIn("h3", job.text.lower())
+        # Users see the tier and source take, never steps, sigma or weights.
+        self.assertEqual(
+            job.json()["effective_request"],
+            {
+                "duration": 124 / 24,
+                "enhance": {"source_artifact_id": "artifact-one"},
+                "tier": "2k",
+            },
+        )
         self.assertEqual(job.json()["client_ref"]["shot_id"], "s1")
 
     def test_capabilities_offer_enhance_only_when_enabled(self):

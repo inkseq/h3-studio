@@ -252,7 +252,15 @@ def request(value, principal=None):
         result["authoring_context"] = authoring_context(
             value["authoring_context"], principal
         )
-    return _identities(result, value)
+    result = _identities(result, value)
+    if isinstance(value.get("enhance"), dict):
+        # Enhance (#795): users see the tier and the source take, never the
+        # regenerate steps, sigma, weights or audio mode.
+        source = value["enhance"].get("source_artifact_id")
+        result["enhance"] = {"source_artifact_id": source} if source else {}
+        if value.get("tier") in {"1080p", "2k"}:
+            result["tier"] = value["tier"]
+    return result
 
 
 def diagnostic(value, principal=None):
