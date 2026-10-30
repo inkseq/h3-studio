@@ -3,6 +3,9 @@
 from concurrent.futures import ThreadPoolExecutor
 import copy
 from decimal import Decimal
+from fractions import Fraction
+import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +18,7 @@ from studio_platform.auth import Auth, Principal
 from studio_platform.credit_schema import metadata as credit_metadata, prices
 from studio_platform.credits import CreditError
 from studio_platform.credits_pricing import (
+    PROFILE_CREDIT_MULTIPLIERS,
     DEFAULT_RATES,
     PricingError,
     admin_margin_estimate,
@@ -233,7 +237,10 @@ class CreditsRouteTests(LedgerCase):
             )
             frozen = self.get_quote(compiled)
             self.assertEqual(frozen["tier"], tier)
-            self.assertEqual(frozen["credits"], 21 if tier == "standard" else 62)
+            # The multiplier applies before the single round-up: 4 credits/s x 124/24 s.
+            base = Fraction(4 if tier == "standard" else 12) * Fraction(124, 24)
+            multiplier = PROFILE_CREDIT_MULTIPLIERS.get(identity, 1)
+            self.assertEqual(frozen["credits"], math.ceil(base * multiplier))
         for identity, model in (
             ("unregistered-private-profile", "MiniMax-H3-Pruned-Rank8-INT8"),
             (next(iter(PROFILE_TIERS)), "MiniMax-H3-Base-INT8"),
@@ -244,6 +251,24 @@ class CreditsRouteTests(LedgerCase):
                 compiled["deployment_profile_id"] = identity
             with self.assertRaisesRegex(PricingError, "credit_quote_invalid"):
                 self.get_quote(compiled)
+
+    def test_profile_multiplier_raises_usage_without_changing_tier(self):
+        self.enable()
+        from studio_platform.quality_tiers import PROFILE_TIERS
+        from studio_platform.runtime_catalog import get_profile
+
+        identity = next(i for i, tier in PROFILE_TIERS.items() if tier == "standard")
+        compiled = self.compiled(
+            deployment_profile_id=identity,
+            request={"model": get_profile(identity)["model_id"]},
+        )
+        with patch.dict(PROFILE_CREDIT_MULTIPLIERS, {identity: Fraction(13, 10)}):
+            frozen = self.get_quote(compiled)
+        # 124 frames at the standard rate is 20.67 credits (21 billed); x1.3 is
+        # 26.87, rounded up once to 27.
+        self.assertEqual((frozen["tier"], frozen["credits"]), ("standard", 27))
+        self.assertEqual(frozen["breakdown"][0]["rate"], 4)
+        self.assertNotIn("multiplier", json.dumps(frozen))
 
     def render_compiled(self):
         compiled, _, blockers, _ = compile_render(
