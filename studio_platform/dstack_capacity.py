@@ -26,6 +26,7 @@ import httpx
 
 from .inference.wangp_contract import HostReadiness, safe_model_progress
 from .dstack_control_plane import control_plane, foreign_usage, provider_retry_after
+from .worker_boot import boot_env, boot_record, boot_valid
 from .capacity_memory import vast_ram_floor
 
 from .dstack_inventory import (
@@ -234,9 +235,12 @@ class CapacityRequest:
     host_selection: dict | None = None
     test_max_duration_s: int | None = None
     test_task_id: str | None = None
+    boot_token: str | None = None
+    boot_url: str | None = None
 
     def __post_init__(self):
         _uuid(self.intent_id)
+        _require(boot_valid(self.boot_token, self.boot_url), "dstack_boot_invalid")
         _require(self.backend in BACKENDS, "dstack_backend_unsupported")
         _require(self.mode in {"fl", "ref"}, "dstack_mode_invalid")
         for identity in (self.profile_id, self.model_id, self.configuration_id):
@@ -383,7 +387,7 @@ class CapacityRequest:
             "retry": False,
             "spot_policy": "on-demand",
             "dstack": False,
-            "env": {},
+            "env": boot_env(self.intent_id, self.boot_token, self.boot_url),
             "ports": [],
             "stop_duration": 300,
             "regions": list(self.regions) if self.regions else None,
@@ -441,6 +445,7 @@ class CapacityRequest:
             value["lifecycle_version"] = 2
         if self.host_selection is not None:
             value["host_selection"] = copy.deepcopy(self.host_selection)
+        value.update(boot_record(self.boot_token, self.created_at))
         return value
 
 
