@@ -107,7 +107,7 @@ export function LandingChatDemo() {
         <span />
         <span />
         <span />
-        <small>{t('landing.v2.storyTitle')} · 映序</small>
+        <small>{t('landing.v2.storyTitle')} · Inkseq</small>
       </div>
       <div className="lp-demo-app">
         <div className="lp-demo-chat">

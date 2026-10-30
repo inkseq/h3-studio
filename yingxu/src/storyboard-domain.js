@@ -1,3 +1,4 @@
+import { ENHANCE_RECIPE } from './enhance-take.js';
 import { shotSegments } from './shot-segments.js';
 import { translate } from './i18n/locale.js';
 import { modelsVisible, profileTier } from './model-visibility.js';
@@ -146,6 +147,8 @@ function shotVersions(project, s, jobs) {
       error: j.error_code || j.message || '',
       audio: j.artifacts?.find((a) => a.kind === 'audio'),
       effectiveRequest: j.effective_request,
+      // A 1080P/2K copy of another take (h3-studio#795); never enhanced again.
+      enhanced: j.recipe_id === ENHANCE_RECIPE,
     };
   });
   for (const id of list(s.data.candidateIds)) {
@@ -160,6 +163,9 @@ function shotVersions(project, s, jobs) {
         mode: mode(s) === 'ref' ? 'REF' : 'FL',
         artifactId: e.data.cloudArtifactId,
         jobId: e.data.sourceJobId,
+        enhanced: !!project.jobs.find(
+          (j) => j.id === e.data.sourceJobId && j.recipe_id === ENHANCE_RECIPE,
+        ),
         asset: { fileId: e.data.fileId, entity: e, kind: 'video' },
         duration: e.data.metadata?.duration,
       });

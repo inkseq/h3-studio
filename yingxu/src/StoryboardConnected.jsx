@@ -3,7 +3,7 @@ import { Button } from './ui/Button.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
 import StoryFilmControl from './StoryFilmControl.jsx';
 import { formatMoneyMicros } from './money.js';
-import { useCredits } from './CreditsUI.jsx';
+import { CreditUsageBar, creditShortfall, useCredits } from './CreditsUI.jsx';
 import { storyboardPresentation } from './i18n/legacyPresentation.js';
 import { createQuickChatClient } from './quick-chat-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -110,9 +110,7 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
   const cost = receiptCost(receipt),
     balance = useCredits(c.account)?.available,
     takes = (receipt.items || []).some((item) => item.index > 0),
-    short = cost.credits != null && Number.isFinite(balance) && cost.credits > balance,
-    usedPct =
-      cost.credits != null && balance > 0 ? Math.min(100, (cost.credits / balance) * 100) : 0,
+    short = creditShortfall(cost.credits, balance),
     closed = !!receipt.closed_preflight;
   // A closed (refused) preflight never generates; leaving the dialog clears it so the
   // next try is not blocked by "the previous operation is not confirmed".
@@ -136,20 +134,7 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
       wide
       className="sb-confirm"
     >
-      {/* Owner 2026-10-29: a usage bar, never a per-clip price. The bar is the balance;
-          the highlighted part is what this generation will use. */}
-      {Number.isFinite(balance) && (
-        <div className="sb-confirm-usage">
-          <i className={'bar' + (short ? ' short' : '')}>
-            <b style={{ width: usedPct + '%' }} />
-          </i>
-          <small className="muted">
-            {short
-              ? t('workbench.notEnough')
-              : t('workbench.balance', { credits: balance.toLocaleString() })}
-          </small>
-        </div>
-      )}
+      <CreditUsageBar credits={cost.credits} balance={balance} />
       <p className="sb-confirm-note">{t('workbench.timing')}</p>
       {(receipt.items || []).map((item, i) => (
         <section key={item.plan_id || i}>

@@ -62,7 +62,7 @@ export function deferredPanel(load, label) {
           this.state.backupUrl &&
             React.createElement(
               'a',
-              { href: this.state.backupUrl, download: '映序项目结构备份.json' },
+              { href: this.state.backupUrl, download: 'Inkseq-项目结构备份.json' },
               t('workspace.deferred6'),
             ),
         );

@@ -47,6 +47,30 @@ function useClient(account) {
   }, [account]);
 }
 
+// Owner 2026-10-29: confirmations show a usage bar, never a per-clip price. The bar is the
+// balance; the highlighted part is what this action will use.
+export function creditShortfall(credits, balance) {
+  return credits != null && Number.isFinite(balance) && credits > balance;
+}
+export function CreditUsageBar({ credits, balance }) {
+  const { t } = useI18n();
+  if (!Number.isFinite(balance)) return null;
+  const short = creditShortfall(credits, balance),
+    used = credits != null && balance > 0 ? Math.min(100, (credits / balance) * 100) : 0;
+  return (
+    <div className="sb-confirm-usage">
+      <i className={'bar' + (short ? ' short' : '')}>
+        <b style={{ width: used + '%' }} />
+      </i>
+      <small className="muted">
+        {short
+          ? t('workbench.notEnough')
+          : t('workbench.balance', { credits: balance.toLocaleString() })}
+      </small>
+    </div>
+  );
+}
+
 // null while loading or unavailable (signed out, or the backend has no credits yet).
 export function useCredits(account) {
   const api = useClient(account);

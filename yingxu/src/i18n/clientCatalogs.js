@@ -92,7 +92,7 @@ export const clientCatalogs = {
   zh: {
     'client.refVideoTooLong':
       '清晰画质配参考视频目前最长 5 秒。请把镜头缩短到 5 秒，或改用普通画质。',
-    'client.newVersion': '映序有新版本了。',
+    'client.newVersion': 'Inkseq 有新版本了。',
     'client.supportViewReadOnly': '只读查看中，不能修改。',
     'client.supportViewPathBlocked': '只读查看时不能打开这里。',
     'client.supportViewInvalid': '这次查看已结束，请回到管理后台重新开始。',
@@ -112,14 +112,15 @@ export const clientCatalogs = {
     'client.accountChanged': '登录账户已改变，请重新打开项目。',
     'client.identityChanged': '登录身份已改变。旧账户响应未展示或写入，请重新打开当前账户项目。',
     'client.contextChanged': '登录身份已改变。请求被阻止，旧账户草稿仍保留。',
-    'maintenance.title': '映序正在更新。',
+    'maintenance.title': 'Inkseq 正在更新。',
     'maintenance.until': '预计 {time}（你的当地时间）可以重新开始生成。',
     'maintenance.soon': '很快就可以重新开始生成。',
     'maintenance.overdue': '更新比预计的久，完成后这条提示会自动消失。',
     'maintenance.safe': '你的作品、素材和正在跑的任务都不受影响。',
     'errors.maintenance_in_progress':
-      '映序正在更新，这次没有提交也没有扣费。请在 {time}（你的当地时间）之后再试。',
-    'errors.maintenance_in_progress_soon': '映序正在更新，这次没有提交也没有扣费。请几分钟后再试。',
+      'Inkseq 正在更新，这次没有提交也没有扣费。请在 {time}（你的当地时间）之后再试。',
+    'errors.maintenance_in_progress_soon':
+      'Inkseq 正在更新，这次没有提交也没有扣费。请几分钟后再试。',
     'client.capacityDrain':
       'GPU 正在休眠或切换，任务尚未提交。请重新检查后生成；作品和素材已保留。',
     'client.versionChanged': '云端版本已改变。你的草稿已保留，请先比较新版本。',

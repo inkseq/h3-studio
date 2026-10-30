@@ -1607,6 +1607,29 @@ export function createCloudController({
       });
     }
   }
+  // Enhance one finished take to 1080P/2K (h3-studio#795). The result is a new take of the
+  // same shot; the original is kept.
+  async function planEnhance(entityId, tier) {
+    requireCloud();
+    const ctx = context(),
+      plan = await api.enhancePlan({
+        client_ref: { project_id: ctx.projectId, entity_id: entityId },
+        tier,
+      });
+    guard(ctx);
+    if (!plan.plan_id || !['ready', 'blocked'].includes(plan.status))
+      throw Error('Invalid enhance plan response');
+    return plan;
+  }
+  async function submitEnhance(plan) {
+    requireCloud();
+    const ctx = context(),
+      key = intent('enhance-submit', ctx.projectId + ':' + plan.plan_id),
+      job = await api.submit(plan.plan_id, key);
+    guard(ctx);
+    await mergeJobs([job, ...state.jobs.filter((j) => j.id !== job.id)], ctx);
+    return job;
+  }
   async function checkRemoteVersion() {
     if (!api.projectMeta || operation || !state.account || current().workspace.mode !== 'cloud')
       return;
@@ -2326,6 +2349,8 @@ export function createCloudController({
     },
     prepareRender: (chapterId, options) => action(() => prepareRender(chapterId, options)),
     submitRender: (chapterId) => action(() => submitRender(chapterId), { exclusive: true }),
+    planEnhance: (entityId, tier) => action(() => planEnhance(entityId, tier)),
+    submitEnhance: (plan) => action(() => submitEnhance(plan), { exclusive: true }),
     prepareBatch: (shotIds) =>
       action(async () => {
         requireCloud();

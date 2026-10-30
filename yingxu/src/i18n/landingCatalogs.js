@@ -106,10 +106,10 @@ export const landingCatalogs = {
     'landing.demoLabel': 'A storyboard in Inkseq',
   },
   zh: {
-    'landing.pageTitle': '映序 · 一句话，变成一部短片',
+    'landing.pageTitle': 'Inkseq · 一句话，变成一部短片',
     'landing.pricing': '价格',
     'landing.signIn': '登录',
-    'landing.signInTitle': '登录映序',
+    'landing.signInTitle': '登录 Inkseq',
     'landing.signInLead': '欢迎回来。',
     'landing.start': '开始使用',
     'landing.v2.title': '你出主意，小墨滴跑腿',
@@ -184,7 +184,7 @@ export const landingCatalogs = {
     'landing.v2.finalTitle': '你的故事，也可以这样拍。',
     'landing.v2.pricingLink': '看价格',
     'landing.title': '一句话，变成一部短片',
-    'landing.lede': '写下你的故事，映序帮你拆成分镜、生成每个镜头，再剪成可以导出的成片。',
+    'landing.lede': '写下你的故事，Inkseq 帮你拆成分镜、生成每个镜头，再剪成可以导出的成片。',
     'landing.howTitle': '怎么用',
     'landing.step1Title': '写故事',
     'landing.step1Body': '从一句话开始，或者贴一段剧本，自动分出章节和场景。',
@@ -204,7 +204,7 @@ export const landingCatalogs = {
     'landing.demoShot1': '先交代空间',
     'landing.demoShot2': '靠近那封信',
     'landing.demoShot3': '她的反应',
-    'landing.demoLabel': '映序里的一页分镜',
+    'landing.demoLabel': 'Inkseq 里的一页分镜',
   },
 };
 
