@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import argparse
 import copy
-from email.utils import parsedate_to_datetime
 import hashlib
 import importlib
 import json
@@ -26,6 +25,7 @@ from uuid import UUID
 import httpx
 
 from .inference.wangp_contract import HostReadiness, safe_model_progress
+from .dstack_control_plane import control_plane, foreign_usage, provider_retry_after
 from .capacity_memory import vast_ram_floor
 
 from .dstack_inventory import (
@@ -184,21 +184,6 @@ class DstackReadRateLimited(DstackError):
     def __init__(self, retry_after=None):
         super().__init__("dstack_provider_rate_limited")
         self.retry_after = min(86400, max(1, math.ceil(retry_after or 1)))
-
-
-def _provider_retry_after(value):
-    if not isinstance(value, str) or len(value) > 128:
-        return None
-    value = value.strip()
-    if re.fullmatch(r"[0-9]{1,8}", value):
-        return float(value)
-    try:
-        parsed = parsedate_to_datetime(value)
-        if parsed.tzinfo is not None:
-            return max(0.0, parsed.timestamp() - time.time())
-    except (ValueError, TypeError, OverflowError):
-        pass
-    return None
 
 
 def _require(condition, code):
@@ -675,7 +660,7 @@ class DstackClient:
                     # These exact allowlisted endpoints are reads, including
                     # search/GraphQL POSTs. Mutations use _post and never retry.
                     if response.status_code == 429:
-                        retry_after = _provider_retry_after(
+                        retry_after = provider_retry_after(
                             response.headers.get("Retry-After")
                         )
                     else:
@@ -1462,6 +1447,10 @@ def live_capacity_usage(
             and binding.get("billing_state") == "no_charge_confirmed"
         ):
             included, reason = False, "dstack_never_applied"
+        elif (
+            foreign := foreign_usage(binding, client, provider_absent, BACKENDS)
+        ) is not None:
+            included, reason = foreign
         elif binding.get("apply_started") is True:
             try:
                 run = (
@@ -1659,6 +1648,7 @@ class DstackCapacity:
             "dstack_window_expired",
         )
         binding = request.binding(ssh_key_pub)
+        binding["control_plane"] = control_plane(self.client)
         prior = self.store.load(request.intent_id)
         _require(isinstance(prior, dict), "dstack_intent_missing")
         if prior.get("spec_digest"):

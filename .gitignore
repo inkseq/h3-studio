@@ -1032,6 +1032,8 @@ inventory.json
 !tests/test_modal_gvisor_ram.py
 !studio_platform/backup_loss_policy.py
 !docs/EXPERIMENTS.md
+!docs/CAPACITY-LANES.md
+!studio_platform/dstack_control_plane.py
 !tests/test_dstack_providers.py
 !studio_platform/dstack_inventory.py
 !renovate.json
