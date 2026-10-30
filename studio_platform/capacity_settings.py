@@ -187,9 +187,8 @@ def reservation_provenance(
             "provider": provider,
         }
         or type(proof.get("lifecycle_version")) is not int
-        or provider not in (
-            {"vast", "runpod", "lium", "cloudrift"} if continuing else {"modal"}
-        )
+        or provider
+        not in ({"vast", "runpod", "lium", "cloudrift"} if continuing else {"modal"})
         or gpus != 1
         or slots != 1
         or usage is None

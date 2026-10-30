@@ -43,7 +43,12 @@ from .wangp_bootstrap import (
 from .slot_lock import slot_lock
 
 GPU_UUID = re.compile(r"GPU-[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
-PROVIDERS = {"vastai": "vast", "runpod": "runpod", "lium": "lium", "cloudrift": "cloudrift"}
+PROVIDERS = {
+    "vastai": "vast",
+    "runpod": "runpod",
+    "lium": "lium",
+    "cloudrift": "cloudrift",
+}
 IDENTITY_FIELDS = (
     "intent_id",
     "run_id",

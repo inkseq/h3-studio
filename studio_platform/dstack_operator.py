@@ -86,7 +86,12 @@ def preferred_download_offer(offer):
     )
 
 
-PROVIDERS = {"vastai": "vast", "runpod": "runpod", "lium": "lium", "cloudrift": "cloudrift"}
+PROVIDERS = {
+    "vastai": "vast",
+    "runpod": "runpod",
+    "lium": "lium",
+    "cloudrift": "cloudrift",
+}
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
 SCHEDULER_GPU_ALIASES = {
@@ -1877,6 +1882,75 @@ class DstackOperator:
         owner = self.authorize(principal)
         return self._preview_for_owner(owner, body)
 
+    def _vast_host_selection(self, request, offers, demand_job_id):
+        """Filter planned Vast offers by host policy/download speed; freeze the selector."""
+        from .host_policy import FRESH_SECONDS, HostPolicyStore, selection
+
+        mapper = getattr(self.capacity.client, "vast_offer_mapping", None)
+        require(callable(mapper), "host_identity_unconfirmed")
+        mapping = mapper(request, clock=self.repo.clock)
+        require(
+            isinstance(mapping, dict) and isinstance(mapping.get("offers"), list),
+            "host_identity_unconfirmed",
+        )
+        by_offer = {r["offer_id"]: r for r in mapping["offers"]}
+        store = HostPolicyStore(self.repo, self.settings.tenant_id)
+        with self.repo._budget_read() as connection:
+            from .host_policy import original_nodes
+
+            nodes = original_nodes(connection, self.settings.tenant_id)
+            excluded = set()
+            if demand_job_id is not None:
+                from .dstack_demand_start import excluded_download_machines
+
+                excluded = excluded_download_machines(
+                    connection, self.settings.tenant_id, demand_job_id
+                )
+            allowed = [
+                r
+                for r in offers
+                if r.get("offer_id") in by_offer
+                and by_offer[r['offer_id']]['machine_id'] not in excluded
+                and type(by_offer[r['offer_id']].get('advertised_download_mbps'))
+                in (int, float)
+                and math.isfinite(by_offer[r['offer_id']]['advertised_download_mbps'])
+                and by_offer[r['offer_id']]['advertised_download_mbps'] >= 1000
+                and store.read(
+                    connection, by_offer[r["offer_id"]]["machine_id"], nodes=nodes
+                )[0]["effective"]
+                != "deny"
+            ]
+            # Preference must not discard qualified ordinary fallback.
+            # instance_types freezes membership; the reviewed native Vast
+            # patch also preserves the explicit preferred-first order.
+            offers = sorted(
+                allowed,
+                key=lambda r: (
+                    not preferred_download_offer(by_offer[r['offer_id']]),
+                    store.read(
+                        connection,
+                        by_offer[r["offer_id"]]["machine_id"],
+                        nodes=nodes,
+                    )[0]["effective"]
+                    != "prefer",
+                ),
+            )[:MAX_HOST_CANDIDATES]
+            require(offers, "dstack_no_compatible_host_offers")
+            approved = [copy.deepcopy(by_offer[r["offer_id"]]) for r in offers]
+            # Plan/native assignment uses bundle IDs, not a display-only
+            # filtered offers list. The same selector is frozen below.
+            selected = selection(
+                {
+                    "version": 1,
+                    "observed_at": mapping["observed_at"],
+                    "expires_at": mapping["observed_at"] + FRESH_SECONDS,
+                    "policy_snapshot": store.admission_snapshot(connection, approved),
+                    "offers": approved,
+                },
+                now=self.repo.clock(),
+            )
+        return replace(request, host_selection=selected), offers, store
+
     def _preview_for_owner(self, owner, body, *, demand_job_id=None):
         self._enabled()
         continuing = self.policy.get("lifecycle_version") == 2
@@ -1994,95 +2068,38 @@ class DstackOperator:
             if lifecycle
             else None,
         )
-        offers = plan_offers(
-            self.capacity.plan(request, self.config["ssh_public_key"]), request
-        )
-        # One intent always rents from exactly one backend. When the primary
-        # has nothing compatible, ask each configured fallback in order and
-        # bind the preview (and so the start) to the first one with offers.
-        for backend in profile.get("fallback_backends", []) if not offers else []:
-            candidate = replace(request, backend=backend, regions=())
+        # One intent always rents from exactly one backend. Each backend in
+        # order (primary, then configured fallbacks) is planned and fully
+        # filtered; the first with eligible offers binds the preview and start.
+        backends = [request.backend, *profile.get("fallback_backends", [])]
+        store, offers = None, []
+        for index, backend in enumerate(backends):
+            candidate = (
+                request if index == 0 else replace(request, backend=backend, regions=())
+            )
             offers = plan_offers(
                 self.capacity.plan(candidate, self.config["ssh_public_key"]),
                 candidate,
             )
+            if offers and backend == "vastai":
+                try:
+                    candidate, offers, store = self._vast_host_selection(
+                        candidate, offers, demand_job_id
+                    )
+                except OperatorError as error:
+                    if (
+                        error.code != "dstack_no_compatible_host_offers"
+                        or index == len(backends) - 1
+                    ):
+                        raise
+                    offers = []
             if offers:
                 request = candidate
-                profile["backend"] = backend
-                profile.pop("regions", None)
+                if index:
+                    profile["backend"] = backend
+                    profile.pop("regions", None)
                 break
         require(bool(offers), "dstack_no_compatible_offers")
-        if request.backend == "vastai":
-            from .host_policy import FRESH_SECONDS, HostPolicyStore, selection
-
-            mapper = getattr(self.capacity.client, "vast_offer_mapping", None)
-            require(callable(mapper), "host_identity_unconfirmed")
-            mapping = mapper(request, clock=self.repo.clock)
-            require(
-                isinstance(mapping, dict) and isinstance(mapping.get("offers"), list),
-                "host_identity_unconfirmed",
-            )
-            by_offer = {r["offer_id"]: r for r in mapping["offers"]}
-            store = HostPolicyStore(self.repo, self.settings.tenant_id)
-            with self.repo._budget_read() as connection:
-                from .host_policy import original_nodes
-
-                nodes = original_nodes(connection, self.settings.tenant_id)
-                excluded = set()
-                if demand_job_id is not None:
-                    from .dstack_demand_start import excluded_download_machines
-
-                    excluded = excluded_download_machines(
-                        connection, self.settings.tenant_id, demand_job_id
-                    )
-                allowed = [
-                    r
-                    for r in offers
-                    if r.get("offer_id") in by_offer
-                    and by_offer[r['offer_id']]['machine_id'] not in excluded
-                    and type(by_offer[r['offer_id']].get('advertised_download_mbps'))
-                    in (int, float)
-                    and math.isfinite(
-                        by_offer[r['offer_id']]['advertised_download_mbps']
-                    )
-                    and by_offer[r['offer_id']]['advertised_download_mbps'] >= 1000
-                    and store.read(
-                        connection, by_offer[r["offer_id"]]["machine_id"], nodes=nodes
-                    )[0]["effective"]
-                    != "deny"
-                ]
-                # Preference must not discard qualified ordinary fallback.
-                # instance_types freezes membership; the reviewed native Vast
-                # patch also preserves the explicit preferred-first order.
-                offers = sorted(
-                    allowed,
-                    key=lambda r: (
-                        not preferred_download_offer(by_offer[r['offer_id']]),
-                        store.read(
-                            connection,
-                            by_offer[r["offer_id"]]["machine_id"],
-                            nodes=nodes,
-                        )[0]["effective"]
-                        != "prefer",
-                    ),
-                )[:MAX_HOST_CANDIDATES]
-                require(offers, "dstack_no_compatible_host_offers")
-                approved = [copy.deepcopy(by_offer[r["offer_id"]]) for r in offers]
-                # Plan/native assignment uses bundle IDs, not a display-only
-                # filtered offers list. The same selector is frozen below.
-                selected = selection(
-                    {
-                        "version": 1,
-                        "observed_at": mapping["observed_at"],
-                        "expires_at": mapping["observed_at"] + FRESH_SECONDS,
-                        "policy_snapshot": store.admission_snapshot(
-                            connection, approved
-                        ),
-                        "offers": approved,
-                    },
-                    now=self.repo.clock(),
-                )
-            request = replace(request, host_selection=selected)
         # Reserve preparation and a complete job from the first paid request,
         # plus shutdown grace; continuing funding has no absolute lifetime.
         initial_seconds = lifecycle["reservation_seconds"] if continuing else ttl
@@ -2146,6 +2163,8 @@ class DstackOperator:
                 "dstack_price_policy_changed",
             )
             if request.host_selection is not None:
+                from .host_policy import selection
+
                 require(
                     store.admission_snapshot(
                         connection, request.host_selection["offers"]

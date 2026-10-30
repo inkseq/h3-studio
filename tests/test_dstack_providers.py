@@ -58,19 +58,24 @@ class ProviderInventoryTests(unittest.TestCase):
             )
 
         result = provider_client(self, "lium", read).provider_inventory("lium")
+        # One allocation per pod; a name is only an alias for a pending binding.
         self.assertEqual(
             result["instance_ids"],
             [
                 "11111111-2222-3333-4444-555555555555",
-                "p-1",
                 "66666666-7777-8888-9999-000000000000",
             ],
+        )
+        self.assertEqual(
+            result["aliases"], {"p-1": "11111111-2222-3333-4444-555555555555"}
         )
         self.assertTrue(result["complete"])
 
     def test_cloudrift_lists_live_instances_with_pinned_api_version(self):
         def read(req):
-            self.assertEqual((req.method, str(req.url)), ("POST", CLOUDRIFT_INSTANCES_URL))
+            self.assertEqual(
+                (req.method, str(req.url)), ("POST", CLOUDRIFT_INSTANCES_URL)
+            )
             body = json.loads(req.content)
             self.assertEqual(body["version"], "2026-10-12")
             self.assertIn("Active", body["data"]["selector"]["ByStatus"]["statuses"])
@@ -130,7 +135,10 @@ class FallbackBackendTests(LedgerCase):
         def plan(spec):
             backend = spec["configuration"]["backends"][0]
             self.planned.append(backend)
-            return {"run_spec": spec, "job_plans": [{"offers": self.stock.get(backend, [])}]}
+            return {
+                "run_spec": spec,
+                "job_plans": [{"offers": self.stock.get(backend, [])}],
+            }
 
         self.client.plan = plan
 
@@ -166,6 +174,39 @@ class FallbackBackendTests(LedgerCase):
         with self.repo.engine.connect() as connection:
             intent = connection.execute(select(instance_intents)).mappings().one()
         self.assertEqual(intent["provider"], "lium")
+
+    def test_vast_offers_rejected_by_host_policy_fall_through_to_lium(self):
+        vast = self.client.__class__.plan(self.client, {})["job_plans"][0]["offers"]
+        self.stock["vastai"] = vast
+        slow = self.client.vast_offer_mapping
+
+        def mapping(request, *, clock):
+            value = slow(request, clock=clock)
+            for row in value["offers"]:
+                row["advertised_download_mbps"] = 100
+            return value
+
+        self.client.vast_offer_mapping = mapping
+        service = self.operator(fallback_backends=["lium"])
+        preview = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        self.assertEqual(self.planned, ["vastai", "lium"])
+        self.assertEqual({row["backend"] for row in preview["offers"]}, {"lium"})
+
+    def test_vast_host_rejection_without_fallback_keeps_its_reason(self):
+        self.stock["vastai"] = self.client.__class__.plan(self.client, {})["job_plans"][
+            0
+        ]["offers"]
+        slow = self.client.vast_offer_mapping
+        self.client.vast_offer_mapping = lambda request, *, clock: {
+            **slow(request, clock=clock),
+            "offers": [],
+        }
+        with self.assertRaisesRegex(OperatorError, "dstack_no_compatible_host_offers"):
+            self.operator().preview(
+                self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+            )
 
     def test_primary_with_offers_never_asks_a_fallback(self):
         self.stock["vastai"] = self.client.__class__.plan(self.client, {})["job_plans"][

@@ -1018,7 +1018,7 @@ class DstackClient:
                     timeout=min(15, self.timeout, remaining),
                 )
 
-            ids = []
+            ids, aliases = [], {}
             if backend == "vastai":
                 params = {
                     "limit": 25,
@@ -1104,11 +1104,14 @@ class DstackClient:
                         "dstack_provider_inventory_unconfirmed",
                     )
                     ids.append(row["id"])
-                    # Before Lium returns a pod ID, dstack records the pod name.
+                    # Before Lium returns a pod ID, dstack records the pod name:
+                    # keep names only as aliases, never as extra allocations.
                     name = row.get("pod_name") or row.get("name")
                     if isinstance(name, str) and IDENTIFIER.fullmatch(name):
-                        ids.append(name)
-                ids = list(dict.fromkeys(ids))
+                        aliases[name] = row["id"]
+                _require(
+                    len(set(ids)) == len(ids), "dstack_provider_inventory_unconfirmed"
+                )
             elif backend == "cloudrift":
                 document = read(
                     "POST",
@@ -1178,16 +1181,27 @@ class DstackClient:
                 _require(
                     len(set(ids)) == len(ids), "dstack_provider_inventory_unconfirmed"
                 )
-            return {
+            result = {
                 "backend": backend,
                 "complete": True,
                 "observed_at": observed_at,
                 "instance_ids": ids,
             }
+            if aliases:
+                result["aliases"] = aliases
+            return result
         except DstackError:
             raise
         except Exception:
             raise DstackError("dstack_provider_inventory_unavailable") from None
+
+    def configured_backends(self):
+        """Supported backends configured on this dstack project (names only)."""
+        project = self._post(f"/api/projects/{self.project}/get", {})
+        rows = project.get("backends") if isinstance(project, dict) else None
+        _require(isinstance(rows, list), "dstack_provider_inventory_unconfirmed")
+        names = {row.get("name") for row in rows if isinstance(row, dict)}
+        return frozenset(names & BACKENDS)
 
     def plan(self, spec):
         # Use the same fleet selection as apply. Global stock browsing can
@@ -1477,7 +1491,13 @@ def live_capacity_usage(
                     and observed > 0,
                     "dstack_provider_inventory_unconfirmed",
                 )
-                inventories[backend] = (observed, frozenset(ids))
+                aliases = document.get("aliases", {})
+                _require(
+                    isinstance(aliases, dict)
+                    and all(value in ids for value in aliases.values()),
+                    "dstack_provider_inventory_unconfirmed",
+                )
+                inventories[backend] = (observed, frozenset(ids) | frozenset(aliases))
             except Exception:
                 inventories[backend] = None
         inventory = inventories[backend]

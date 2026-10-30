@@ -441,9 +441,9 @@ class DstackController:
             if not isinstance(rows, list) or len(rows) >= 100:
                 raise ValueError("incomplete_active_runs")
             nodes = self._nodes()
-            # Always sweep the original two accounts; newer backends are swept
-            # once any retained node has used them.
-            swept = {"vastai", "runpod"} | {
+            # Sweep every configured account, even before its first node, plus
+            # any backend a retained node used (never an unconfigured account).
+            swept = set(client.configured_backends()) | {
                 node["payload"].get("dstack", {}).get("backend") for node in nodes
             }
             providers = {
@@ -459,7 +459,10 @@ class DstackController:
                 if binding.get("backend") in known and binding.get(
                     "provider_instance_id"
                 ):
-                    known[binding["backend"]].add(binding["provider_instance_id"])
+                    # A pending Lium binding may hold the pod name, not its ID.
+                    aliases = providers[binding["backend"]].get("aliases", {})
+                    identity = binding["provider_instance_id"]
+                    known[binding["backend"]].add(aliases.get(identity, identity))
                 if binding.get("run_id"):
                     known_runs.add(binding["run_id"])
             with self.repo.engine.connect() as connection:
