@@ -682,6 +682,7 @@ class FactoryTests(LedgerCase):
             ("hostname", "host;secret"),
             ("instance_id", "other"),
             ("dockerized", True),
+            ("dockerized", None),
             ("ssh_proxy", {"hostname": "proxy"}),
             ("username", "ubuntu"),
             ("instance_type", None),
@@ -696,6 +697,61 @@ class FactoryTests(LedgerCase):
         with self.assertRaisesRegex(DstackError, "username_unsupported"):
             coordinates_for_run(binding, detached)
         self.assertNotIn("bootstrap_started", self.store.load(binding["intent_id"]))
+
+    def test_jump_host_coordinates_for_vm_and_proxied_backends(self):
+        binding, run = self.allocation()
+        provisioning = run["latest_job_submission"]["job_provisioning_data"]
+        # CloudRift: the VM user's sshd, then the runner sshd on its loopback.
+        vm = copy.deepcopy(run)
+        vm["latest_job_submission"]["job_provisioning_data"].update(
+            backend="cloudrift", dockerized=True, username="riftuser", ssh_port=22
+        )
+        vm["latest_job_submission"]["job_runtime_data"] = {"ports": {"10022": 10023}}
+        self.assertEqual(
+            coordinates_for_run({**binding, "backend": "cloudrift"}, vm),
+            {
+                "host": "localhost",
+                "port": 10023,
+                "username": "root",
+                "instance_id": "gpu-one",
+                "jump": {"host": "198.51.100.8", "port": 22, "username": "riftuser"},
+            },
+        )
+        # Lium without a mapped runner port forwards through its root SSH.
+        proxied = copy.deepcopy(run)
+        proxied["latest_job_submission"]["job_provisioning_data"].update(
+            backend="lium",
+            hostname="localhost",
+            ssh_port=10022,
+            ssh_proxy={"hostname": "203.0.113.4", "port": 40022, "username": "root"},
+        )
+        self.assertEqual(
+            coordinates_for_run({**binding, "backend": "lium"}, proxied)["jump"],
+            {"host": "203.0.113.4", "port": 40022, "username": "root"},
+        )
+        # Each topology stays with the backend that produces it.
+        for backend, value in (
+            ("vastai", vm),
+            ("cloudrift", proxied),
+            ("vastai", proxied),
+        ):
+            detached = copy.deepcopy(value)
+            detached["latest_job_submission"]["job_provisioning_data"]["backend"] = (
+                backend
+            )
+            with self.assertRaisesRegex(DstackError, "topology_unsupported"):
+                coordinates_for_run({**binding, "backend": backend}, detached)
+        for proxy in (
+            {"hostname": "203.0.113.4", "port": 40022, "username": "root;x"},
+            {"hostname": "203.0.113.4", "port": "40022", "username": "root"},
+        ):
+            detached = copy.deepcopy(proxied)
+            detached["latest_job_submission"]["job_provisioning_data"]["ssh_proxy"] = (
+                proxy
+            )
+            with self.assertRaises(DstackError):
+                coordinates_for_run({**binding, "backend": "lium"}, detached)
+        self.assertEqual(provisioning["dockerized"], False)
 
 
 if __name__ == "__main__":

@@ -49,6 +49,8 @@ ENTRY_KEYS = {
     "source_sha256",
 }
 PURPOSE = "local-unqualified-dstack-source-set"
+# dstack's in-container runner sshd (DSTACK_RUNNER_SSH_PORT).
+RUNNER_PORT = 10022
 
 
 def _require(condition, code):
@@ -120,7 +122,7 @@ def _directory_parent(path):
 
 
 def coordinates_for_run(binding, run):
-    """Pinned 0.22.5 direct provider-container SSH; no SDK host-key bypass."""
+    """dstack container SSH, direct or through one pinned jump host; no SDK host-key bypass."""
     _require(
         type(binding) is dict
         and type(run) is dict
@@ -148,19 +150,61 @@ def coordinates_for_run(binding, run):
         type(gpus) is list and len(gpus) == 1 and type(gpus[0]) is dict,
         "dstack_ssh_allocation_mismatch",
     )
+    dockerized, proxy = provisioning.get("dockerized"), provisioning.get("ssh_proxy")
     _require(
-        provisioning.get("dockerized") is False
-        and provisioning.get("ssh_proxy") is None,
+        dockerized is False
+        and (proxy is None or binding["backend"] == "lium")
+        or dockerized is True
+        and proxy is None
+        and binding["backend"] == "cloudrift",
         "dstack_ssh_topology_unsupported",
     )
     runtime = latest.get("job_runtime_data")
     _require(runtime is None or type(runtime) is dict, "dstack_ssh_coordinates_invalid")
-    username = (runtime or {}).get("username") or provisioning.get("username") or "root"
+    # A VM backend's provisioning user owns the host, not the container.
+    container_user = None if dockerized else provisioning.get("username")
+    username = (runtime or {}).get("username") or container_user or "root"
     _require(
-        username == "root" and provisioning.get("username") in (None, "root"),
+        username == "root" and container_user in (None, "root"),
         "dstack_ssh_username_unsupported",
     )
-    host, port = provisioning.get("hostname"), provisioning.get("ssh_port")
+    host, port = _endpoint(provisioning.get("hostname"), provisioning.get("ssh_port"))
+    coordinates = {
+        "host": host,
+        "port": port,
+        "username": username,
+        "instance_id": binding["provider_instance_id"],
+    }
+    if dockerized:
+        # As `dstack attach` does for VM backends: the host user's sshd, then
+        # the container's runner sshd on the host loopback.
+        ports = (runtime or {}).get("ports") or {}
+        _require(type(ports) is dict, "dstack_ssh_coordinates_invalid")
+        jump_host, jump_port = host, port
+        jump_user = provisioning.get("username")
+        host, port = _endpoint("localhost", ports.get(str(RUNNER_PORT), RUNNER_PORT))
+    elif proxy is not None:
+        # Lium without a mapped runner port: its forward-only root SSH service.
+        _require(type(proxy) is dict, "dstack_ssh_coordinates_invalid")
+        jump_host, jump_port = _endpoint(proxy.get("hostname"), proxy.get("port"))
+        jump_user = proxy.get("username")
+    else:
+        return coordinates
+    _require(
+        host == "localhost"
+        and isinstance(jump_user, str)
+        and re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", jump_user),
+        "dstack_ssh_coordinates_invalid",
+    )
+    coordinates.update(
+        host=host,
+        port=port,
+        jump={"host": jump_host, "port": jump_port, "username": jump_user},
+    )
+    return coordinates
+
+
+def _endpoint(host, port):
     _require(
         isinstance(host, str) and host and type(port) is int and 1 <= port <= 65535,
         "dstack_ssh_coordinates_unavailable",
@@ -174,12 +218,7 @@ def coordinates_for_run(binding, run):
             for label in host.rstrip(".").split(".")
         )
     _require(valid, "dstack_ssh_coordinates_invalid")
-    return {
-        "host": host,
-        "port": port,
-        "username": username,
-        "instance_id": binding["provider_instance_id"],
-    }
+    return host, port
 
 
 class RuntimeFactory:
