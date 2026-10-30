@@ -64,7 +64,10 @@ class Config:
 
 
 def load_config(path):
-    value = read_protected_json(path, ConfigError)
+    return validate_config(read_protected_json(path, ConfigError))
+
+
+def validate_config(value):
     if (
         type(value) is not dict
         or set(value) != {"api_key", "endpoint_id", "rate_microusd_per_s"}
