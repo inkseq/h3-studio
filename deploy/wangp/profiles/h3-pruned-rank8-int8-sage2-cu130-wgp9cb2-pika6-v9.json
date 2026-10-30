@@ -183,7 +183,7 @@
       "attention_mode": "sage2",
       "audio_output_codec": "aac_128",
       "boost": 1,
-      "compile": "",
+      "compile": "disabled",
       "embed_source_images": false,
       "enhancer_enabled": 3,
       "fit_canvas": 2,
