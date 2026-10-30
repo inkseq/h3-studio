@@ -238,6 +238,9 @@ class ObjectStore(Protocol):
     def presign_upload(
         self, key: str, *, content_type: str, expires_seconds: int = 300
     ) -> SecretURL: ...
+    def presign_worker_upload(
+        self, key: str, *, content_type: str, expires_seconds: int = 300
+    ) -> SecretURL: ...
     def presign_artifact_upload(
         self,
         key: str,
@@ -445,6 +448,14 @@ class LocalObjectStore:
         validate_key(key)
         raise UnsupportedStorageOperation(
             "Local objects require an authenticated application download route"
+        )
+
+    def presign_worker_upload(
+        self, key: str, *, content_type: str, expires_seconds=300
+    ) -> SecretURL:
+        validate_key(key)
+        raise UnsupportedStorageOperation(
+            "Local objects cannot be written by a remote worker"
         )
 
     def presign_upload(
@@ -858,6 +869,18 @@ class S3ObjectStore:
             "PUT",
             expires_seconds,
             {"Content-Type": _content_type(content_type), "If-None-Match": "*"},
+        )
+
+    def presign_worker_upload(
+        self, key: str, *, content_type: str, expires_seconds=300
+    ) -> SecretURL:
+        """A PUT a remote worker can send with only Content-Type (#795).
+
+        Plain HTTP clients don't add If-None-Match, so it is not signed here;
+        callers must use a key unique to one attempt and never reused.
+        """
+        return self._presign(
+            key, "PUT", expires_seconds, {"Content-Type": _content_type(content_type)}
         )
 
     def presign_artifact_upload(
