@@ -510,7 +510,7 @@ class MainAndRehearsalTests(unittest.TestCase):
     def test_main_automatically_targets_stage_pr_and_docs_cannot_deploy(self):
         for path, action in (
             ('studio_platform/auth.py', 'stage-platform'),
-            ('yingxu/src/App.jsx', 'stage-frontend'),
+            ('inkseq-web/src/App.jsx', 'stage-frontend'),
             ('README.md', 'check'),
         ):
             with (

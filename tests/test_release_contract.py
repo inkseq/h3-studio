@@ -23,8 +23,8 @@ class CompatibilityFingerprints(unittest.TestCase):
 
     def test_ui_source_edits_do_not_require_backend_or_worker_restart(self):
         before = build_contracts(self.root)
-        (self.root / 'yingxu').mkdir()
-        (self.root / 'yingxu/index.html').write_text('new page')
+        (self.root / 'inkseq-web').mkdir()
+        (self.root / 'inkseq-web/index.html').write_text('new page')
         self.assertEqual(before, build_contracts(self.root))
 
     def test_discovery_changes_api_only_but_job_code_changes_both(self):

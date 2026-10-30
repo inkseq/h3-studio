@@ -252,7 +252,7 @@ inventory.json
 !docs/SIXNINE-READINESS.zh-CN.md
 !docs/archive/OVERNIGHT-HANDOFF.md
 !Dockerfile.platform
-!tools/sync_yingxu_source.py
+!tools/sync_web_source.py
 !tools/check_platform_container.py
 !tools/check_platform_stack.py
 !tools/soak_platform.py
@@ -291,23 +291,23 @@ inventory.json
 !deploy/platform/READINESS-REVIEW.zh-CN.md
 !deploy/platform/STACK-VALIDATION.zh-CN.md
 !deploy/platform/stack-validation-20261004-final.json
-!yingxu/
-!yingxu/package.json
-!yingxu/package-lock.json
-!yingxu/index.html
-!yingxu/vite.config.js
-!yingxu/source-manifest.json
-!yingxu/.prettierignore
-!yingxu/.prettierrc.json
-!yingxu/eslint.config.js
-!yingxu/tools/
-!yingxu/tools/check-changed.mjs
-!yingxu/src/
-!yingxu/src/*.js
-!yingxu/src/*.jsx
-!yingxu/src/*.css
-!yingxu/src/*.json
-!yingxu/src/NOVICE-STORIES-AC.md
+!inkseq-web/
+!inkseq-web/package.json
+!inkseq-web/package-lock.json
+!inkseq-web/index.html
+!inkseq-web/vite.config.js
+!inkseq-web/source-manifest.json
+!inkseq-web/.prettierignore
+!inkseq-web/.prettierrc.json
+!inkseq-web/eslint.config.js
+!inkseq-web/tools/
+!inkseq-web/tools/check-changed.mjs
+!inkseq-web/src/
+!inkseq-web/src/*.js
+!inkseq-web/src/*.jsx
+!inkseq-web/src/*.css
+!inkseq-web/src/*.json
+!inkseq-web/src/NOVICE-STORIES-AC.md
 
 # Reviewed Agent authoring API and distributable skill; never credential files.
 !studio_platform/guided.py
@@ -594,9 +594,9 @@ inventory.json
 !tests/test_quick_chat_history.py
 !tests/test_creation_history_storage.py
 !tests/test_creation_history_routes.py
-!yingxu/src/CreationHistory.jsx
-!yingxu/src/creation-history-model.js
-!yingxu/src/creation-history.test.js
+!inkseq-web/src/CreationHistory.jsx
+!inkseq-web/src/creation-history-model.js
+!inkseq-web/src/creation-history.test.js
 
 # Event wakeup and reviewed native Vast safety source; no runtime receipts.
 !studio_platform/demand_wakeup.py
@@ -678,10 +678,10 @@ inventory.json
 !tests/test_backup_expected_deletion.py
 
 # Canonical bilingual source modules and styles; no runtime data.
-!yingxu/src/i18n/
-!yingxu/src/i18n/*.js
-!yingxu/src/i18n/*.jsx
-!yingxu/src/i18n/*.css
+!inkseq-web/src/i18n/
+!inkseq-web/src/i18n/*.js
+!inkseq-web/src/i18n/*.jsx
+!inkseq-web/src/i18n/*.css
 
 !studio_platform/quick_chat_takes.py
 !tests/test_quick_chat_takes.py
@@ -733,18 +733,18 @@ inventory.json
 !studio_platform/invoice_checks.py
 
 # Managed prototype view snapshot (source-manifest constrained)
-!yingxu/src/v2/
-!yingxu/src/v2/**
-!yingxu/src/ui/
-!yingxu/src/ui/**
-!yingxu/src/inky/
-!yingxu/src/inky/**
-!yingxu/src/guide.js
-!yingxu/src/guide.css
-!yingxu/src/guide.test.js
-!yingxu/src/inky-model.test.js
-!yingxu/src/data/
-!yingxu/src/data/**
+!inkseq-web/src/v2/
+!inkseq-web/src/v2/**
+!inkseq-web/src/ui/
+!inkseq-web/src/ui/**
+!inkseq-web/src/inky/
+!inkseq-web/src/inky/**
+!inkseq-web/src/guide.js
+!inkseq-web/src/guide.css
+!inkseq-web/src/guide.test.js
+!inkseq-web/src/inky-model.test.js
+!inkseq-web/src/data/
+!inkseq-web/src/data/**
 
 # Held staging-only, no-GPU resource spike (#295).
 !tools/workflow_spike295.py

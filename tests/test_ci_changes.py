@@ -143,7 +143,10 @@ class ChangeClassificationTests(unittest.TestCase):
 
     def test_only_frontend_snapshot_can_use_frontend_gates(self):
         result = ci.classify(
-            [("M", "yingxu/src/Freestyle.jsx"), ("M", "yingxu/source-manifest.json")]
+            [
+                ("M", "inkseq-web/src/Freestyle.jsx"),
+                ("M", "inkseq-web/source-manifest.json"),
+            ]
         )
         self.assertTrue(result["frontend"])
         self.assertTrue(result["frontend_tools"])
@@ -152,8 +155,8 @@ class ChangeClassificationTests(unittest.TestCase):
         for path in (
             "web/app.js",
             "other/src/App.jsx",
-            "yingxu/start.sh",
-            "yingxu/.env",
+            "inkseq-web/start.sh",
+            "inkseq-web/.env",
         ):
             self.assert_full(ci.classify([("M", path)]))
 
@@ -165,7 +168,7 @@ class ChangeClassificationTests(unittest.TestCase):
         self.assertFalse(result["frontend"])
         self.assertFalse(result["macos_helper"])
         combined = ci.classify(
-            [("M", "studio_platform/guided.py"), ("M", "yingxu/src/App.jsx")]
+            [("M", "studio_platform/guided.py"), ("M", "inkseq-web/src/App.jsx")]
         )
         self.assertTrue(combined["frontend"])
         self.assertTrue(combined["python"])
@@ -197,7 +200,7 @@ class ChangeClassificationTests(unittest.TestCase):
             self.assertTrue(ci.classify([("M", path)])["macos_helper"])
         for changes in (
             [("M", "README.md")],
-            [("M", "yingxu/src/App.jsx")],
+            [("M", "inkseq-web/src/App.jsx")],
             [("M", "studio_platform/guided.py")],
         ):
             self.assertFalse(ci.classify(changes)["macos_helper"])
@@ -233,28 +236,28 @@ class ChangeClassificationTests(unittest.TestCase):
 
     def test_added_removed_renamed_and_type_changed_safe_paths_still_require_full(self):
         for status in ("A", "D", "T", "U", "R100", "C100"):
-            for path in ("yingxu/src/New.jsx", "tools/new-guide.md"):
+            for path in ("inkseq-web/src/New.jsx", "tools/new-guide.md"):
                 self.assert_full(ci.classify([(status, path)]))
         self.assert_full(ci.classify([("T", "README.md")]))
         self.assert_full(
             ci.classify(
-                [("D", "studio_platform/auth.py"), ("A", "yingxu/src/Auth.jsx")]
+                [("D", "studio_platform/auth.py"), ("A", "inkseq-web/src/Auth.jsx")]
             )
         )
 
     def test_unsafe_paths_never_reduce_verification(self):
         for path in (
-            "yingxu/src/../../auth.py",
-            "/yingxu/src/App.jsx",
-            "yingxu\\src\\App.jsx",
-            "yingxu/src//App.jsx",
-            "yingxu/src/App.jsx\n",
-            "C:/yingxu/src/App.jsx",
+            "inkseq-web/src/../../auth.py",
+            "/inkseq-web/src/App.jsx",
+            "inkseq-web\\src\\App.jsx",
+            "inkseq-web/src//App.jsx",
+            "inkseq-web/src/App.jsx\n",
+            "C:/inkseq-web/src/App.jsx",
         ):
             self.assert_full(ci.classify([("M", path)]))
 
     def test_full_diff_is_not_truncated_at_github_path_filter_limit(self):
-        raw = b"".join(f"M\0yingxu/src/View{n}.jsx\0".encode() for n in range(700))
+        raw = b"".join(f"M\0inkseq-web/src/View{n}.jsx\0".encode() for n in range(700))
         raw += b"M\0studio_platform/auth.py\0"
         changes = ci.parse_diff(raw)
         self.assertEqual(len(changes), 701)
@@ -427,8 +430,11 @@ class StagingBaselineTests(unittest.TestCase):
                 ci,
                 "git_changes",
                 side_effect=[
-                    [("M", "yingxu/src/App.jsx")],
-                    [("M", "studio_platform/frontend.py"), ("M", "yingxu/src/App.jsx")],
+                    [("M", "inkseq-web/src/App.jsx")],
+                    [
+                        ("M", "studio_platform/frontend.py"),
+                        ("M", "inkseq-web/src/App.jsx"),
+                    ],
                 ],
             ) as read,
         ):
@@ -444,7 +450,7 @@ class StagingBaselineTests(unittest.TestCase):
     def test_known_runtime_keeps_frontend_docs_fast_unknown_history_never_does(self):
         for changes, action in (
             ([("M", "README.md")], "check"),
-            ([("M", "yingxu/src/App.jsx")], "stage-frontend"),
+            ([("M", "inkseq-web/src/App.jsx")], "stage-frontend"),
         ):
             with (
                 self.subTest(changes=changes),
@@ -666,13 +672,13 @@ class LocalGitDiffTests(unittest.TestCase):
             git("add", ".")
             git("commit", "-m", "fixture base")
             base = git("rev-parse", "HEAD")
-            (root / "yingxu/src").mkdir(parents=True)
-            git("mv", "studio_platform/auth.py", "yingxu/src/App.jsx")
+            (root / "inkseq-web/src").mkdir(parents=True)
+            git("mv", "studio_platform/auth.py", "inkseq-web/src/App.jsx")
             git("commit", "-m", "fixture rename")
             head = git("rev-parse", "HEAD")
             changes = ci.git_changes(root, base, head)
             self.assertIn(("D", "studio_platform/auth.py"), changes)
-            self.assertIn(("A", "yingxu/src/App.jsx"), changes)
+            self.assertIn(("A", "inkseq-web/src/App.jsx"), changes)
             self.assertTrue(ci.classify(changes)["postgres"])
             with self.assertRaises(ValueError):
                 ci.git_changes(root, base, BASE)

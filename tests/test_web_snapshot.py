@@ -6,14 +6,14 @@ import tempfile
 import unittest
 
 spec = importlib.util.spec_from_file_location(
-    "yingxu_snapshot",
-    Path(__file__).resolve().parents[1] / "tools" / "sync_yingxu_source.py",
+    "web_snapshot",
+    Path(__file__).resolve().parents[1] / "tools" / "sync_web_source.py",
 )
 snapshot = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(snapshot)
 
 
-class YingxuSnapshotTests(unittest.TestCase):
+class WebSnapshotTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

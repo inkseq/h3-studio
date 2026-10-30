@@ -41,7 +41,7 @@
 | GPU 租赁账本与算法 | `scaler.py:113`、`autoscale.py:102` 分别负责副作用协调与纯建议 | 保留；未知租赁占用和费用不能因换文件/类而重置 |
 | 按需服务政策 | on-demand 依赖 finite controller，配置含有限测试约束 | 局部重构为生产政策与有限验收政策；共用同一个租赁协调器 |
 | 引擎与引导 | B2 提取 ComfyBackend 并让 fleet 用 `is_idle()`；boot/政策仍有 Comfy 绑定 | 按同一接口接入已选定的 WanGP；真实启用前处理执行绑定、参数映射、引导与容量保护 |
-| 前端源码与快照 | `studio-app` 是 canonical；`yingxu/` 用于构建发布 | 一份编辑源，保留生成快照；不是两个平行产品代码库 |
+| 前端源码与快照 | `studio-app` 是 canonical；`inkseq-web/` 用于构建发布 | 一份编辑源，保留生成快照；不是两个平行产品代码库 |
 | 旧独立 H3 服务 | `server.py`、根 Dockerfile、旧 deploy 仍有兼容入口与 CI | 冻结新增业务，列为退役候选；不在本轮删文件或旧数据 |
 | 外部 API / Hippius 等实验 | 存在适配和研究，但支持范围与验证状态不同 | 保留为明确禁用/实验候选，未验收不接入默认生产路径 |
 
@@ -115,7 +115,7 @@ deploy/platform/gpu_scaler.py
 | 根 Dockerfile、旧 deploy | `.github/workflows/ci.yml:209–240` 同时维护兼容与平台构建 | 确认不再承担旧服务恢复，替代检查到位后再减少 CI |
 | 历史有限 GPU 验收入口 | 交接、销毁责任与恢复工具仍引用 | 原实例/attempt/输出收集/租赁账单完成对账，部署工具不再依赖 |
 | 8865 mock | 已批准的视觉与交互依据 | 保留作为验收参考，假任务/假 Key 逻辑不成为生产实现 |
-| `yingxu/` | Docker 实际构建用的生成快照 | 只有发布机制替换后才能改变，不直接手改/删掉 |
+| `inkseq-web/` | Docker 实际构建用的生成快照 | 只有发布机制替换后才能改变，不直接手改/删掉 |
 
 退役单应包含：功能归属、静态及部署引用、已知客户端、数据/资产与备份、后台任务和云计费、替代入口、验收、回滚、删除授权。未发现引用不等于无人使用。本次不清理文件；未来清理前还要执行中央 HOUSEKEEPING 规则。
 
@@ -189,6 +189,6 @@ D1/#18 只证明注入假 Session 的接口、回执和故障处理；不会产�
 - `studio_platform/on_demand_scaler.py:39,136,224,370`；`production_scaler.py:356,629`；`scaler.py:113,351`：按需、有限周期与租赁协调。
 - `studio_platform/drain_safe_runner.py:45,68`；`queued_task_runner.py:159,190`；`production_scaler_boot.py:56,440`；`fleet.py:154,331`：执行保护及引擎引导。
 - `studio_platform/production_worker.py:1,253`；`deploy/platform/gpu_acceptance.py:56,167`：有限交接验收仍有调用。
-- `tools/release_contract.py:15–40`；`tools/sync_yingxu_source.py:2`；`run_local.py:49`；`recover_audio.py:5`；`tools/chat_model_lab.py:41`：发布与兼容依赖。
+- `tools/release_contract.py:15–40`；`tools/sync_web_source.py:2`；`run_local.py:49`；`recover_audio.py:5`；`tools/chat_model_lab.py:41`：发布与兼容依赖。
 
 行号是本次工作区快照定位，后续改动可能移动；核查时结合符号名和实际 diff，不将行号当永久接口。
