@@ -228,8 +228,25 @@ _DIRECT_FILES = {
         "sha256",
         "0cb8161a12166fb049a2c1295e6a4833fdc571effdab9ac0ed074b10f2d6646d",
     ): "98b5288b174fe08f6d54f9af0dc46ee8bb58b225",
+    # Pika H3 Flex adapters for the v9 Pika profile (#844 stage 2), one per mode.
+    (
+        "loras/pika_h3_flex_fl2va_6step_v1_bf16.safetensors",
+        1383678576,
+        "sha256",
+        "d2e7b5ded8671fd480dc92b86beca078708e90f4712e73670111ea8adb98988f",
+    ): "2375fd1c3475ea21cc1bfa9761c5ab79f0cde3ea",
+    (
+        "loras/pika_h3_flex_ref2va_6step_v1_bf16.safetensors",
+        1383678576,
+        "sha256",
+        "202e31cd53963fc9ad7692542b911024c6d2025c37e8f2c143bca5179cb10e98",
+    ): "2375fd1c3475ea21cc1bfa9761c5ab79f0cde3ea",
 }
 _V9_VAE = next(row for row in _DIRECT_FILES if row[0] == _VAE_ORIGINAL[0])
+_PIKA_LORAS = {
+    mode: next(row for row in _DIRECT_FILES if "_" + name + "_6step" in row[0])
+    for mode, name in (("fl", "fl2va"), ("ref", "ref2va"))
+}
 
 
 def _with_v9_vae(rows):
@@ -255,6 +272,16 @@ _FULL_CONTROL_LOCATOR_FILES = {
                 _TAOMATE_LORA,
             )
         ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["ref"]
+                ),
+                _PIKA_LORAS["fl"],
+            )
+        ),
     ),
     "ref": (
         tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
@@ -272,6 +299,16 @@ _FULL_CONTROL_LOCATOR_FILES = {
                     if row[0] != _LOCATOR_TRANSFORMERS["fl"]
                 ),
                 _TAOMATE_LORA,
+            )
+        ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["fl"]
+                ),
+                _PIKA_LORAS["ref"],
             )
         ),
     ),

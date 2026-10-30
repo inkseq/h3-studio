@@ -31,6 +31,7 @@ PROFILE_TIERS = MappingProxyType(
         "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7": "standard",
         "h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8": "standard",
         "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9": "standard",
+        "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9": "standard",
         "h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2": "standard",
         "h3-unpruned33b-int8-sdpa-p3-controls-v2": "refine",
         "h3-unpruned33b-bf16-sdpa-p3-controls-v3": "refine",

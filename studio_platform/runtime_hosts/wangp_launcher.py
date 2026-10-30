@@ -197,7 +197,7 @@ def resolve_inputs(prepared, inputs, manifest=None, model_root=None):
                 from ..inference.wangp_full_compiler import acceleration
                 from .wangp_session import _contained_file
 
-                turbo = acceleration(profile_id)
+                turbo = acceleration(profile_id, manifest.document['mode'])
                 # validate_prepared already bound this list to the profile; the
                 # verified file under this slot's model root is the only target.
                 if (
