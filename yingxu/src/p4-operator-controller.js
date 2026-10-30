@@ -319,16 +319,27 @@ export function createP4OperatorController({
       throw error;
     }
   }
+  // Only the window bounds actually given take part in the filter (and its page check).
+  const billingFilter = (owner_id, created_after, created_before) => ({
+    owner_id,
+    ...(created_after !== undefined ? { created_after } : {}),
+    ...(created_before !== undefined ? { created_before } : {}),
+  });
+  // A next page appends to the rows already shown, one row per reference key.
+  const mergeBillingPage = (prior, value) => ({
+    ...value,
+    items: [
+      ...new Map(
+        [...prior.items, ...value.items].map((row) => [billingReferenceKey(row), row]),
+      ).values(),
+    ],
+  });
   async function readBillingReferences({ owner_id, after, created_after, created_before } = {}) {
     const account = state.account,
       version = epoch,
       request = ++billingReading,
       prior = state.billingReferences;
-    const filter = {
-      owner_id,
-      ...(created_after !== undefined ? { created_after } : {}),
-      ...(created_before !== undefined ? { created_before } : {}),
-    };
+    const filter = billingFilter(owner_id, created_after, created_before);
     if (state.snapshot?.operator?.admin !== true) throw Error(message('copy5'));
     if (
       after &&
@@ -351,16 +362,7 @@ export function createP4OperatorController({
         throw Error(billMessage('pageChanged'));
       emit({
         billingFilter: filter,
-        billingReferences: after
-          ? {
-              ...value,
-              items: [
-                ...new Map(
-                  [...prior.items, ...value.items].map((row) => [billingReferenceKey(row), row]),
-                ).values(),
-              ],
-            }
-          : value,
+        billingReferences: after ? mergeBillingPage(prior, value) : value,
       });
       return value;
     } catch (error) {

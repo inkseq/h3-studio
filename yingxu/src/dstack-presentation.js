@@ -4,28 +4,30 @@ export const dstackProvider = (value) =>
 export const dstackMode = (value) =>
   ({ fl: 'FL2VA 首尾帧', ref: 'Ref2VA 全能参考' })[value] || '模式尚未确认';
 
+const between = (value, low, high) => Number.isSafeInteger(value) && value >= low && value <= high;
+const uniqueIds = (ids) =>
+  Array.isArray(ids) &&
+  ids.length > 0 &&
+  ids.every((id) => typeof id === 'string' && id) &&
+  new Set(ids).size === ids.length;
+// A held machine has a future hold time; every other keep-on rule holds nothing.
+const validHold = (policy) =>
+  seconds(policy.hold_until) !== null &&
+  (policy.keep_on === 'until' ? policy.hold_until > 0 : policy.hold_until === 0);
+
 export function dstackLifecycle(value) {
   const policy = value?.lifecycle;
   if (
     value?.hard_deadline !== null ||
     policy?.version !== 2 ||
     !['idle', 'until', 'until_stopped'].includes(policy.keep_on) ||
-    seconds(policy.hold_until) === null ||
-    policy.hold_until < 0 ||
-    (policy.keep_on === 'until' ? policy.hold_until <= 0 : policy.hold_until !== 0) ||
-    !Number.isSafeInteger(policy.idle_shutdown_seconds) ||
-    policy.idle_shutdown_seconds < 1 ||
-    policy.idle_shutdown_seconds > 86400 ||
-    !Number.isSafeInteger(policy.reservation_seconds) ||
-    policy.reservation_seconds < 120 ||
-    policy.reservation_seconds > 86400 ||
+    !validHold(policy) ||
+    !between(policy.idle_shutdown_seconds, 1, 86400) ||
+    !between(policy.reservation_seconds, 120, 86400) ||
     seconds(policy.expected_runtime_s) === null ||
     policy.expected_runtime_s <= 0 ||
     policy.expected_runtime_s > 86400 ||
-    !Array.isArray(policy.budget_account_ids) ||
-    !policy.budget_account_ids.length ||
-    policy.budget_account_ids.some((id) => typeof id !== 'string' || !id) ||
-    new Set(policy.budget_account_ids).size !== policy.budget_account_ids.length ||
+    !uniqueIds(policy.budget_account_ids) ||
     (Object.hasOwn(value, 'hold_until') && value.hold_until !== policy.hold_until)
   )
     return null;

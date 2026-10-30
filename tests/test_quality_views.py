@@ -653,7 +653,13 @@ class QualityViewTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     configure["deployment_profile_id"]["enum"],
-                    ["quality:fast", "quality:standard", "quality:refine", None],
+                    [
+                        "quality:fast",
+                        "quality:standard",
+                        "quality:natural",
+                        "quality:refine",
+                        None,
+                    ],
                 )
                 defaults = shown["operation_schemas"]["storyboard.defaults"][
                     "properties"

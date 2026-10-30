@@ -729,7 +729,7 @@ class QualityHTTPTests(unittest.TestCase):
                         self.assertEqual(caps["recipes"][0]["id"], "video-fl-v1")
                         self.assertEqual(
                             [p["tier"] for p in caps["deployment_profiles"]],
-                            ["fast", "standard", "refine"],
+                            ["fast", "standard", "natural", "refine"],
                         )
                         self.assertNotIn(MODEL, schema.text)
                         self.assertNotIn(PROFILE, schema.text)
