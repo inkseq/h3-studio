@@ -315,16 +315,20 @@ def _lock_profile_device(torch, profile):
             hardware['maximum_total_vram_bytes'],
         )
     else:
-        accepted = (
-            re.fullmatch(r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name)
-            if pruned
-            else re.fullmatch(
-                r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition',
-                name,
-            )
+        pro6000 = re.fullmatch(
+            r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition',
+            name,
         )
+        rtx5090 = pruned and re.fullmatch(
+            r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name
+        )
+        # A pruned profile runs on PRO 6000 only when it lists one in gpu_models
+        # (v8, measured clean on 2026-10-30, #794); older pruned profiles stay 5090-only.
+        if pruned and not any('PRO 6000' in m for m in profile.get('gpu_models', ())):
+            pro6000 = None
+        accepted = rtx5090 or pro6000
         capability = (12, 0)
-        low, high = (30, 34) if pruned else (90, 100)
+        low, high = (30, 34) if rtx5090 else (90, 100)
         minimum, maximum = low * 1024**3, high * 1024**3
     if (
         not accepted

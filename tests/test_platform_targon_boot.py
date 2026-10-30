@@ -156,6 +156,26 @@ class CandidateProfileTests(unittest.TestCase):
                 self.assertRaisesRegex(ValueError, 'gpu_mismatch'),
             ):
                 device(profile, name, size)
+        # v8 lists PRO 6000 in gpu_models: both cards, each with its own VRAM window.
+        v7 = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
+        v8 = 'h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8'
+        for name, size in (
+            ('NVIDIA GeForce RTX 5090', 32),
+            ('NVIDIA RTX PRO 6000 Blackwell Server Edition', 96),
+            ('NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 96),
+        ):
+            with self.subTest(name=name), self.assertRaises(LockReached):
+                device(v8, name, size)
+        for profile, name, size in (
+            (v7, 'NVIDIA RTX PRO 6000 Blackwell Server Edition', 96),
+            (v8, 'NVIDIA RTX PRO 6000 Blackwell Server Edition', 32),
+            (v8, 'NVIDIA GeForce RTX 5090', 96),
+        ):
+            with (
+                self.subTest(profile=profile, name=name, size=size),
+                self.assertRaisesRegex(ValueError, 'gpu_mismatch'),
+            ):
+                device(profile, name, size)
 
 
 class VMMemoryTests(unittest.TestCase):
