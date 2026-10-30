@@ -103,7 +103,9 @@ class IdleCadence:
             return self._fast("other_unresolved_attempt")
         nodes = controller._nodes()
         backends = {node["payload"].get("dstack", {}).get("backend") for node in nodes}
-        if not backends or not backends <= {"vastai", "runpod"}:
+        from .dstack_capacity import BACKENDS
+
+        if not backends or not backends <= BACKENDS:
             return self._fast("node_backend_unconfirmed")
         node_ids = {
             "dstack-" + node["intent_id"].replace("-", "")

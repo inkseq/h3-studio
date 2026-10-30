@@ -21,6 +21,7 @@ import threading
 from sqlalchemy import or_, select
 
 from .control import WorkerControl, worker_spec_payload
+from .dstack_inventory import known_allocations, read_inventories
 from .dstack_capacity import (
     idle_action,
     assert_run_owned,
@@ -439,22 +440,14 @@ class DstackController:
             )
             if not isinstance(rows, list) or len(rows) >= 100:
                 raise ValueError("incomplete_active_runs")
-            providers = {
-                name: client.provider_inventory(name) for name in ("vastai", "runpod")
-            }
+            nodes = self._nodes()
+            providers = read_inventories(client, nodes)
             if not all(value["complete"] is True for value in providers.values()):
                 raise ValueError("incomplete_provider_inventory")
-            known = {name: set() for name in providers}
-            known_runs = set()
-            nodes = self._nodes()
-            for node in nodes:
-                binding = node["payload"].get("dstack", {})
-                if binding.get("backend") in known and binding.get(
-                    "provider_instance_id"
-                ):
-                    known[binding["backend"]].add(binding["provider_instance_id"])
-                if binding.get("run_id"):
-                    known_runs.add(binding["run_id"])
+            known = known_allocations(providers, nodes)
+            known_runs = {
+                node["payload"].get("dstack", {}).get("run_id") for node in nodes
+            }
             with self.repo.engine.connect() as connection:
                 busy = self._business_demand(connection)
             if (
