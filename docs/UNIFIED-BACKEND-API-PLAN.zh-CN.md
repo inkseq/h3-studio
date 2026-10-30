@@ -458,7 +458,7 @@ RDS Multi-AZ 可改善数据库故障切换，但不是业务媒体备份，也�
 
 ### 16.2 源码、环境和发布物放在哪里
 
-当前后端源码入口是 `C:\Users\danmo\Desktop\inference\h3-studio`；前端唯一开发源是 `C:\Users\danmo\Desktop\inference\video-studio-design\studio-app`。`yingxu` 发布快照不作为第二份手改源码。当前 `deploy/compose.yaml`、`deploy/platform/compose.yaml` 与 `.github/workflows/ci.yml` 是核对入口；使用哪个入口、生产实际路径和运行版本需在包 A 对照当前回执确认，不能猜一个目录后直接覆盖。
+当前后端源码入口是 `C:\Users\danmo\Desktop\inference\h3-studio`；前端唯一开发源是 `C:\Users\danmo\Desktop\inference\video-studio-design\studio-app`。`inkseq-web` 发布快照不作为第二份手改源码。当前 `deploy/compose.yaml`、`deploy/platform/compose.yaml` 与 `.github/workflows/ci.yml` 是核对入口；使用哪个入口、生产实际路径和运行版本需在包 A 对照当前回执确认，不能猜一个目录后直接覆盖。
 
 建议交付环境分为：本地假执行开发环境、隔离的集成测试环境、生产环境。各自有明确的数据库、媒体命名空间、认证来源、执行开关和预算政策；本地默认不能领取生产队列或租机。测试脚本必须确认目标环境后运行，不能仅根据网页端口判断是否安全。
 

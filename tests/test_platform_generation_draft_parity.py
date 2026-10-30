@@ -16,7 +16,9 @@ from test_platform_api import project
 
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL = ROOT.parent / 'video-studio-design/studio-app/src/cloud-model.js'
-BROWSER_MODEL = CANONICAL if CANONICAL.is_file() else ROOT / 'yingxu/src/cloud-model.js'
+BROWSER_MODEL = (
+    CANONICAL if CANONICAL.is_file() else ROOT / 'inkseq-web/src/cloud-model.js'
+)
 
 
 @unittest.skipUnless(

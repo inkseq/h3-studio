@@ -1,5 +1,5 @@
 {
-  "format": "yingxu-source-snapshot-v1",
+  "format": "inkseq-web-source-snapshot-v1",
   "canonical_source": "../video-studio-design/studio-app",
   "direction": "canonical-to-release-only",
   "files": {

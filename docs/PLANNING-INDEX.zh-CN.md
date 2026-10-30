@@ -33,7 +33,7 @@
 `本地 .architecture-research/WAN2GP-REVIEW-20261006.md`（受保护研究记录，不随远端源码发布） 保留选型前后的证据；其早期许可缺口已由上述用户确认解决。SGLang/vLLM-Omni/Diffusers 的比较仍可查阅，但只是历史备选研究，不再构成 SGLang 优先实施指令。选定 WanGP 不代表已经安装、接通真实模型或切换生产。
 
 - 后端继续 `platform_app.py` / `studio_platform/`；新部署主线 `deploy/platform/`。
-- 前端编辑源：`C:\Users\danmo\Desktop\inference\video-studio-design\studio-app`；`yingxu/` 是生成的发布快照。
+- 前端编辑源：`C:\Users\danmo\Desktop\inference\video-studio-design\studio-app`；`inkseq-web/` 是生成的发布快照。
 - 旧 `server.py/web/` 冻结新增业务的建议已登记，尚未删除或正式退役；部分共享编译器/实验室/测试仍依赖其中内容。
 - 不复制数据库、素材、Key 或租赁状态来搭建第二套生产；本地测试使用明确隔离的假执行配置。
 
