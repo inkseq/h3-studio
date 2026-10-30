@@ -12,6 +12,12 @@ from .credit_schema import CreditSchemaError, prices, ready
 from .identity_schema import users
 
 DEFAULT_RATES = {"fast": 2, "standard": 4, "refine": 12}
+# Runtime profiles that cost more GPU time than their tier's rate covers. Users
+# see only the larger usage, never a per-clip price (owner 2026-10-30): Pika's
+# accelerator measured about +30% GPU time against TaoMate on the same runtime.
+PROFILE_CREDIT_MULTIPLIERS = {
+    "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9": Fraction(13, 10),
+}
 RECOMMENDED_IMAGE_CREDITS = 5
 DEFAULT_CONFIGURATION = {
     "cost_multiplier": 3,
@@ -434,7 +440,8 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         else reference_price(
             price["configuration"],
             compiled,
-            Fraction(rate * frames, fps),
+            Fraction(rate * frames, fps)
+            * PROFILE_CREDIT_MULTIPLIERS.get(compiled.get("deployment_profile_id"), 1),
             resolution.get("resolution"),
         )
     )

@@ -587,6 +587,8 @@ class WorkerControl:
                         not in {
                             ("dstack-v1", "vast"),
                             ("dstack-v1", "runpod"),
+                            ("dstack-v1", "lium"),
+                            ("dstack-v1", "cloudrift"),
                             ("modal-v1", "modal"),
                         }
                         or type(admission["lifecycle_version"]) is not int

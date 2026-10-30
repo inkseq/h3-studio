@@ -27,7 +27,8 @@ ROOT = Path("/run/sixnine-secrets")
 LOCK = Path("/opt/sixnine-release/migration-secret-hydration.lock")
 HOST_ID = Path("/var/lib/cloud/data/instance-id")
 INTENT = Path("/var/lib/sixnine/migration-secret-initialization/intent.json")
-ENDPOINTS = {"vastai": "https://console.vast.ai/api", "runpod": "https://api.runpod.io/graphql"}
+ENDPOINTS = {"vastai": "https://console.vast.ai/api", "runpod": "https://api.runpod.io/graphql",
+    "lium": "https://lium.io/api", "cloudrift": "https://api.cloudrift.ai"}
 INFRASTRUCTURE = frozenset({"dstack_admin_token", "dstack_database_url",
     "hatchet_database_password", "hatchet_administrator_password"})
 POSTGRES_INFRASTRUCTURE = frozenset({"dstack_admin_token", "dstack_database_url"})
@@ -73,7 +74,8 @@ def validate(payload, *, allow_uninitialized=False, target='production'):
     if type(providers) is not dict or not providers or set(providers) - set(ENDPOINTS):
         raise ValueError("migration_provider_invalid")
     selected = deployment_target.profile(target)
-    if target == 'staging' and (set(providers) != {'vastai'}
+    # Staging keeps its own Vast account (#828); further backends are optional.
+    if target == 'staging' and ('vastai' not in providers
             or type(providers['vastai']) is not dict
             or providers['vastai'].get('profile_id') != selected['vast_profile']):
         raise ValueError('staging_provider_identity_invalid')
