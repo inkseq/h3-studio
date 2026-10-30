@@ -11,6 +11,7 @@ import {
 } from './storyboard-domain.js';
 import { shotSnapshot, digest, mergeJobCandidate } from './cloud-model.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
+import { enhanceable } from './enhance-take.js';
 
 const entity = (id, type, data = {}, parentId = null, order = 0) => ({
   id,
@@ -677,4 +678,55 @@ test('submit hints: video or many references, and audio without written lines', 
   );
   assert.deepEqual(submitHints({ prompt: 'she sings' }, [item('声音')], t), ['hint.writeLines']);
   assert.deepEqual(submitHints({ prompt: '她说：“我们走吧”' }, [item('声音')], t), []);
+});
+
+test('an enhance job joins the shot takes as an enhanced copy; the original stays enhanceable', () => {
+  const p = fixture();
+  const ref = { project_id: 'project', shot_id: 'shot', shot_version: 1 },
+    on = { enhance: { enabled: true } };
+  mergeJobCandidate(p, {
+    id: 'draft-job',
+    status: 'succeeded',
+    client_ref: ref,
+    artifacts: [{ id: 'draft', kind: 'video', mime: 'video/mp4' }],
+  });
+  mergeJobCandidate(p, {
+    id: 'enhance-job',
+    recipe_id: 'enhance-v1',
+    status: 'running',
+    client_ref: { ...ref, entity_id: 'result-draft' },
+    artifacts: [],
+  });
+  let takes = view(p).shots[0].versions;
+  assert.equal(takes.find((v) => v.jobId === 'enhance-job').status, 'running');
+  assert.ok(
+    enhanceable(
+      takes.find((v) => v.artifactId === 'draft'),
+      on,
+    ),
+  );
+  mergeJobCandidate(p, {
+    id: 'enhance-job',
+    recipe_id: 'enhance-v1',
+    status: 'succeeded',
+    client_ref: { ...ref, entity_id: 'result-draft' },
+    artifacts: [{ id: 'sharp', kind: 'video', mime: 'video/mp4' }],
+  });
+  takes = view(p).shots[0].versions;
+  const sharp = takes.find((v) => v.artifactId === 'sharp');
+  assert.ok(sharp.enhanced);
+  assert.equal(enhanceable(sharp, on), false);
+  assert.equal(
+    enhanceable(
+      takes.find((v) => v.artifactId === 'draft'),
+      {},
+    ),
+    false,
+  );
+  assert.ok(
+    enhanceable(
+      takes.find((v) => v.artifactId === 'draft'),
+      on,
+    ),
+  );
 });

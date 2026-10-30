@@ -220,7 +220,7 @@ export async function exportBundle(input, { readFile = getFile } = {}) {
   for (const [id, blob] of media) if (blob) zip.file('media/' + id, await blob.arrayBuffer());
   zip.file(
     '说明.txt',
-    '映序项目备份：project.json 保存项目结构，media 保存本次可读取的素材。\n云任务、源素材与候选归属信息保留在项目中；这不是自动合成的最终成片。\n限制：单份素材 30 MB，不同素材合计 120 MB，项目结构 8 MB。\n' +
+    'Inkseq 项目备份：project.json 保存项目结构，media 保存本次可读取的素材。\n云任务、源素材与候选归属信息保留在项目中；这不是自动合成的最终成片。\n限制：单份素材 30 MB，不同素材合计 120 MB，项目结构 8 MB。\n' +
       (missing.length ? '这是不完整备份，缺失素材：' + missing.join('、') : '素材完整。'),
   );
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });

@@ -132,12 +132,12 @@ export const assistantCatalogs = {
     'telegram.agentExplain':
       '用一次性代码连接 Codex、Claude 等 AI 助手。它只处理你在下面选的范围，在每日上限内用积分。随时可以在这里断开。',
     'telegram.explain':
-      '把映序的 Telegram 机器人连到这个账号。它会把故事存进你的作品，在你设的每日上限内用积分。随时可以在这里断开。',
+      '把 Inkseq 的 Telegram 机器人连到这个账号。它会把故事存进你的作品，在你设的每日上限内用积分。随时可以在这里断开。',
     'telegram.connect': '连接 Telegram',
     'telegram.ready': '打开 Telegram 完成连接',
     'telegram.scan': '用手机相机扫码；在这台设备上就点按钮。',
     'telegram.open': '打开 Telegram',
-    'telegram.qr': '打开映序机器人的二维码',
+    'telegram.qr': '打开 Inkseq 机器人的二维码',
     'telegram.expires': '这个链接只能用一次，{date} 前有效。',
     'telegram.private': '这是一次性连接码，不是密码，请不要发给别人。',
     'telegram.badCode': '这个连接码不能用，请重新创建。',
@@ -199,7 +199,7 @@ export const assistantCatalogs = {
     'assistants.single': '只能用一次，{date} 过期。',
     'assistants.lost': '连接码不会再显示。如需新的，请先删除原连接。',
     'assistants.paragraph':
-      '请在 {origin} 帮我处理映序作品，先阅读 {skill}。一次性连接码：{code}。范围：{scope}。权限：{permission}。{capSentence}到期时间：{date}。付费操作必须先完成原预检和授权，请使用下方完整交换元数据。',
+      '请在 {origin} 帮我处理 Inkseq 作品，先阅读 {skill}。一次性连接码：{code}。范围：{scope}。权限：{permission}。{capSentence}到期时间：{date}。付费操作必须先完成原预检和授权，请使用下方完整交换元数据。',
     'assistants.capSentence.organise': '不能做付费工作。',
     'assistants.capSentence.none': '不单独设每日上限，账户的上限仍然有效。',
     'assistants.capSentence.cap': '每日上限：{cap} 美元。',

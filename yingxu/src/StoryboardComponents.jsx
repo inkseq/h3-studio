@@ -1,4 +1,5 @@
 import { Disclosure } from './ui/Disclosure.jsx';
+import { EnhanceTakeButton } from './EnhanceTake.jsx';
 import {
   UserRound,
   MapPin,
@@ -1983,6 +1984,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             {/* #232 (#53): downloads and "save frame" stay in view as compact buttons. */}
             <div className="take-tools-inline">
               <StoryboardDownloads version={viewing} title={shot.title} />
+              <EnhanceTakeButton take={viewing} onMessage={setMsg} />
               <Button
                 size="sm"
                 disabled={saving}

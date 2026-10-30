@@ -12,6 +12,7 @@ import { trashCatalogs } from './trashCatalogs.js';
 import { workbenchCatalogs } from './workbenchCatalogs.js';
 import { assistantCatalogs } from './assistantCatalogs.js';
 import { takesCatalogs } from './takesCatalogs.js';
+import { enhanceCatalogs } from './enhanceCatalogs.js';
 import { inkyCatalogs } from '../inky/inkyCatalogs.js';
 import { adjunctCatalogs } from './adjunctCatalogs.js';
 import { accountDetailCatalogs } from './accountDetailCatalogs.js';
@@ -46,6 +47,7 @@ export const catalogs = {
     ...trashCatalogs.en,
     ...workbenchCatalogs.en,
     ...takesCatalogs.en,
+    ...enhanceCatalogs.en,
     ...inkyCatalogs.en,
     ...assistantCatalogs.en,
     'workspace.closeHistory': 'Close creation history',
@@ -102,6 +104,7 @@ export const catalogs = {
     ...trashCatalogs.zh,
     ...workbenchCatalogs.zh,
     ...takesCatalogs.zh,
+    ...enhanceCatalogs.zh,
     ...inkyCatalogs.zh,
     ...assistantCatalogs.zh,
     'workspace.closeHistory': '关闭创作记录',
@@ -123,9 +126,9 @@ export const catalogs = {
     ...clientCatalogs.zh,
     ...storyboardCatalogs.zh,
     ...legacyCatalogs.zh,
-    'app.name': '映序',
-    'app.libraryTitle': '映序 · 作品库',
-    'app.storyTitle': '映序 · 故事工作台',
+    'app.name': 'Inkseq',
+    'app.libraryTitle': 'Inkseq · 作品库',
+    'app.storyTitle': 'Inkseq · 故事工作台',
     'nav.skipWorkspace': '跳到工作区',
     'nav.library': '作品库',
     'nav.mobile': '主要导航',
