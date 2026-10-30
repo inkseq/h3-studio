@@ -248,6 +248,7 @@ def capacity_failure(node, *, now):
             "capacity_no_progress",
             "capacity_runtime_exceeded",
             "capacity_startup_timeout",
+            "capacity_startup_failed",
         }
         or not finite(value.get("at"), minimum=1, maximum=now)
         or bound_observation(node, now=now) is None
@@ -255,7 +256,7 @@ def capacity_failure(node, *, now):
         return None
     return {
         "stage": "runtime_start"
-        if value["reason"] == "capacity_startup_timeout"
+        if value["reason"] in {"capacity_startup_timeout", "capacity_startup_failed"}
         else "generate",
         "reason_code": value["reason"],
         "at": value["at"],

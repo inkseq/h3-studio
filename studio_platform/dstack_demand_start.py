@@ -22,6 +22,11 @@ STATES = {'planning', 'starting', 'observing', 'backoff', 'blocked'}
 MAX_DOWNLOAD_REPLACEMENTS = 2
 DOWNLOAD_RETRY_LIMIT = 'download_retry_limit'
 DOWNLOAD_TIMEBOX = 'dstack_download_timebox_exceeded'
+# Stops that count toward the per-job replacement cap: a stalled download, and a
+# start that failed or timed out, which is usually deterministic (#874).
+COUNTED_STOPS = frozenset(
+    {DOWNLOAD_TIMEBOX, 'capacity_startup_failed', 'capacity_startup_timeout'}
+)
 
 
 def download_journal(connection, tenant, job_id):
@@ -409,9 +414,7 @@ def _claim(service):
                     .first()
                 )
                 if _ended_for_replacement(connection, node):
-                    timed_out = (
-                        node['payload'].get('stop_reason_code') == DOWNLOAD_TIMEBOX
-                    )
+                    timed_out = node['payload'].get('stop_reason_code') in COUNTED_STOPS
                     replacements = payload.get('download_replacements', 0)
                     if timed_out and replacements >= MAX_DOWNLOAD_REPLACEMENTS:
                         payload.update(

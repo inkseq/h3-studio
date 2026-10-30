@@ -366,9 +366,12 @@ def install(config, slot_key, token_file, *, launch=True):
                 except Exception:
                     failure = None
                 if failure is not None:
-                    # A caught failure is not proof all runtime descendants stopped.
-                    # Keep unknown after dispatch; preserve only literal diagnostics.
-                    return status("runtime_start_unknown", state="unknown", failed_phase=failure["phase"],
+                    # A caught failure alone is not proof all runtime descendants
+                    # stopped. With the child's session empty and no process on
+                    # the GPU it is terminal, so the node can stop now (#871).
+                    stopped = runtime_stopped(child.pid)
+                    return status("setup_failed" if stopped else "runtime_start_unknown",
+                        state="failed" if stopped else "unknown", failed_phase=failure["phase"],
                         failure_phase=failure["phase"], error_type=failure["error_type"],
                         code=failure["error_code"], runtime_verified=False)
                 raise ValueError("runtime_process_exited")
@@ -400,6 +403,30 @@ def install(config, slot_key, token_file, *, launch=True):
         return status("runtime_start_unknown" if started else "setup_failed", state="unknown" if started else "failed",
                       failed_phase=last_phase, failure_phase=last_phase, error_type=error_type,
                       code=str(error) if allowed else "bootstrap_operation_failed", **failure_diagnostics)
+
+
+def runtime_stopped(session, wait=10):
+    """No process left in the launcher's own session and none on the GPU.
+
+    Waits up to `wait` s for the session to empty; each nvidia-smi read may add up to 30 s.
+    """
+    deadline = time.monotonic() + wait
+    while True:
+        try:
+            os.killpg(session, 0)
+        except ProcessLookupError:
+            try:
+                apps = subprocess.run(["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader"],
+                    capture_output=True, text=True, timeout=30, check=True).stdout.strip()
+            except Exception:
+                return False
+            if not apps:
+                return True
+        except OSError:
+            return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
 
 
 def main(argv=None):

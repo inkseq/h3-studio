@@ -377,6 +377,7 @@ class PackageTests(unittest.TestCase):
         receipt="valid",
         ready_incarnation="a" * 32,
         startup_failure=None,
+        stopped=False,
     ):
         from studio_platform.inference.wangp_contract import EngineManifest
         from studio_platform.runtime_hosts import wangp_download, wangp_launcher
@@ -476,6 +477,7 @@ class PackageTests(unittest.TestCase):
             patch.object(bootstrap.time, "sleep"),
             patch.object(bootstrap.os, "fstat", side_effect=token_fstat),
             patch.object(wangp_download, "run_download"),
+            patch.object(bootstrap, "runtime_stopped", return_value=stopped),
         ):
             result = bootstrap.install(value, "test-slot", str(token), launch=launch)
         return result, runs, starts, value
@@ -490,6 +492,21 @@ class PackageTests(unittest.TestCase):
         )
         self.assertFalse(result["runtime_verified"])
         self.assertEqual(json.loads(Path(value["status_path"]).read_text()), result)
+        starts.assert_called_once()
+
+    def test_startup_failure_with_its_runtime_stopped_is_terminal(self):
+        result, _, starts, _ = self.bootstrap_after_download(
+            receipt="missing", startup_failure="valid", stopped=True
+        )
+        self.assertEqual(
+            (result["state"], result["phase"], result["failure_phase"], result["code"]),
+            (
+                "failed",
+                "setup_failed",
+                "runtime_manifest",
+                "wangp_startup_stage_failed",
+            ),
+        )
         starts.assert_called_once()
 
     def test_wrong_startup_identity_falls_back_without_claiming_stop(self):
