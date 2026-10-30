@@ -26,7 +26,7 @@ import httpx
 
 from .inference.wangp_contract import HostReadiness, safe_model_progress
 from .dstack_control_plane import control_plane, foreign_usage, provider_retry_after
-from .worker_boot import boot_env, boot_record, boot_valid
+from .worker_boot import boot_commands, boot_env, boot_record, boot_valid
 from .capacity_memory import vast_ram_floor
 
 from .dstack_inventory import (
@@ -365,7 +365,7 @@ class CapacityRequest:
             "type": "task",
             "name": self.run_name,
             "image": self.image,
-            "commands": ["exec sleep infinity"],
+            "commands": boot_commands(self.boot_token),
             "backends": [self.backend],
             "resources": {
                 "cpu": {"arch": "x86", "count": f"{self.cpu_count}.."},

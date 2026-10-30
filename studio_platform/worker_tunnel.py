@@ -170,3 +170,28 @@ def client_command(url, server_fingerprint, user, password, forwards):
         url,
         *remotes,
     ]
+
+
+SERVER_PORT = 8846
+
+
+def serve(root, *, popen=subprocess.Popen, wait=None):
+    """Keep one chisel server running for the controller's lifetime (daemon)."""
+    import threading
+    import time
+
+    root = Path(root)
+    users = TunnelUsers(root / "users.json")
+    users._locked(lambda current: None)  # Never start without the sentinel.
+    ensure_key(root / "server.key")
+    command = server_command(SERVER_PORT, root / "users.json", root / "server.key")
+
+    def run():
+        while True:
+            process = popen(command, stdin=subprocess.DEVNULL)
+            process.wait()
+            (wait or time.sleep)(5)
+
+    thread = threading.Thread(target=run, name="worker-tunnel-server", daemon=True)
+    thread.start()
+    return thread

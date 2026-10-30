@@ -226,7 +226,7 @@ class RuntimeFactory:
         self.repo, self.store = repo, store
         config = _json(configuration_path)
         _require(
-            set(config) in (CONFIG_KEYS, CONFIG_KEYS | {"broker_config_file"})
+            set(config) - {"broker_config_file", "dialout_root"} == CONFIG_KEYS
             and type(config.get("version")) is int
             and config["version"] == 1
             and type(config.get("trust_first_host_key")) is bool,
@@ -247,6 +247,8 @@ class RuntimeFactory:
         self.known_hosts_file = _path(config["known_hosts_file"])
         _directory_parent(self.known_hosts_file.parent)
         self.trust_first_host_key = config["trust_first_host_key"]
+        root = config.get("dialout_root")
+        self.dialout_root = None if root is None else _path(root)
         index_file = _path(config["source_index_file"])
         index = _json(index_file)
         _require(
@@ -503,16 +505,17 @@ class RuntimeFactory:
                     "dstack_runtime_stopped_port_unallocated",
                 )
                 taken = {reserved for _, reserved in retained}
-                port = next(
-                    (
-                        value
-                        for value in range(self.first_port, self.last_port + 1)
-                        if value not in taken and self._port_available(value)
-                    ),
-                    None,
-                )
-                _require(port is not None, "dstack_runtime_ports_exhausted")
-                current["local_port"] = port
+                # A dial-out worker (#859) also tunnels its boot exec endpoint.
+                wanted = 2 if current.get("boot") else 1
+                free = [
+                    value
+                    for value in range(self.first_port, self.last_port + 1)
+                    if value not in taken and self._port_available(value)
+                ][:wanted]
+                _require(len(free) == wanted, "dstack_runtime_ports_exhausted")
+                port = current["local_port"] = free[0]
+                if current.get("boot"):
+                    current["local_ports"] = free[1:]
                 connection.execute(
                     update(operator_nodes)
                     .where(operator_nodes.c.intent_id == intent["id"])
@@ -559,10 +562,13 @@ class RuntimeFactory:
                 ),
             ),
             trust_first_host_key=self.trust_first_host_key,
+            status_port=(current.get("local_ports") or [None])[0]
+            if current.get("boot")
+            else None,
         )
 
 
-def create_runtime(repo, store, *, configuration_path=None):
+def create_runtime(repo, store, *, configuration_path=None, settings=None):
     """CPU controller factory. No construction-time journal, SSH or cloud call."""
     filename = (
         configuration_path
@@ -572,11 +578,26 @@ def create_runtime(repo, store, *, configuration_path=None):
     _require(filename is not None, "dstack_runtime_configuration_missing")
     try:
         factory = RuntimeFactory(repo, store, filename)
+        grant_writer = dialout_factory = None
+        if factory.dialout_root is not None:
+            # Dial-out workers (#859) for profiles with transport "dialout".
+            from .dialout_host import DialoutHost
+            from .fleet import create_store
+            from .worker_grant import GrantWriter
+            from .worker_tunnel import serve
+
+            grant_writer = GrantWriter(
+                factory.dialout_root, create_store(settings), settings.public_origin
+            )
+            dialout_factory = DialoutHost
+            serve(factory.dialout_root)
         runtime = DstackNativeRuntime(
             store,
             factory.config_for_binding,
             coordinates_for_run,
             max_hosts=factory.last_port - factory.first_port + 1,
+            grant_writer=grant_writer,
+            dialout_factory=dialout_factory,
         )
         return runtime, factory.work_dir
     except DstackError:

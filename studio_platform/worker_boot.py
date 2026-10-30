@@ -55,6 +55,18 @@ def boot_valid(token, url):
     )
 
 
+def boot_commands(token):
+    """SSH workers idle for the controller; dial-out workers boot themselves."""
+    if token is None:
+        return ["exec sleep infinity"]
+    script = (Path(__file__).with_name("dialout_boot.py")).read_text()
+    if "INKSEQ_BOOT_SCRIPT" in script:
+        raise ValueError("worker_boot_script_invalid")
+    # Public code only; the env holds the one-time code and nothing else.
+    heredoc = "exec python3 - <<'INKSEQ_BOOT_SCRIPT'" + chr(10)
+    return [heredoc + script + "INKSEQ_BOOT_SCRIPT"]
+
+
 def boot_env(intent_id, token, url):
     """The run env: only what the worker needs to call the exchange once."""
     if token is None:
