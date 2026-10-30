@@ -96,7 +96,7 @@ def fallbacks_valid(profile, providers):
     )
 
 
-def request_options(profile, settings):
+def request_options(profile, operator):
     """Optional CapacityRequest fields taken straight from a profile."""
     options = {
         "regions": tuple(profile.get("regions", [])),
@@ -107,7 +107,7 @@ def request_options(profile, settings):
 
         options.update(
             boot_token=mint()[0],
-            boot_url=settings.public_origin.rstrip("/") + BOOT_PATH,
+            boot_url=operator.settings.public_origin.rstrip("/") + BOOT_PATH,
         )
     return options
 

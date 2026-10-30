@@ -1576,7 +1576,7 @@ class DstackOperator:
             created_at=created_at,
             hard_deadline=deadline,
             max_duration_s=duration,
-            **request_options(profile, self.settings),
+            **request_options(profile, self),
             lifecycle_version=lifecycle_version,
             test_task_id=test_task_id,
             test_max_duration_s=(
