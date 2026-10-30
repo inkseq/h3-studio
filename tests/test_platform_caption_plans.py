@@ -141,7 +141,10 @@ class CaptionPlanTests(unittest.TestCase):
         # not the creator's sibling workspace. Snapshot integrity is gated
         # separately; parity must use the exact JavaScript shipped to users.
         module_path = (
-            Path(__file__).resolve().parents[1] / "yingxu" / "src" / "caption-model.js"
+            Path(__file__).resolve().parents[1]
+            / "inkseq-web"
+            / "src"
+            / "caption-model.js"
         )
         self.assertTrue(module_path.is_file())
         module = module_path.as_uri()

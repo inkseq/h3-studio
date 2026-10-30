@@ -29,7 +29,7 @@ CPU 业务主机常驻，PostgreSQL 保存项目版本、计划、任务、执�
 
 项目ZIP目前限制每份素材30MB、不同素材合计120MB；云上传上限512MiB。大素材需单独下载，ZIP不能代替任意云作品的完整备份。当前两个账户是私有隔离，尚无团队共同编辑或分享权限。小说到角色图/视觉分镜的AI生产仍需接入并验收真实服务，是下一阶段最明显的功能缺口。
 
-前端逐项故事和实际浏览器记录见[用户故事验收](../yingxu/src/NOVICE-STORIES-AC.md)，接口说明见[API使用方式](API-USAGE.zh-CN.md)。
+前端逐项故事和实际浏览器记录见[用户故事验收](../inkseq-web/src/NOVICE-STORIES-AC.md)，接口说明见[API使用方式](API-USAGE.zh-CN.md)。
 
 ## 本机查看
 
@@ -65,7 +65,7 @@ CPU 业务主机常驻，PostgreSQL 保存项目版本、计划、任务、执�
 
 ## 代码、测试与版本
 
-后端仓库为私有 `apedintensor/h3-studio`，最终运行与前端源码提交是 `b588b60d00091d677b5936b39c01c0b27ba6b6ba`。后续交付记录提交仅更新文档，不改变该测试镜像的来源。canonical前端在 `../video-studio-design/studio-app`，`yingxu/`为96个文件的受管源码快照；用户媒体、数据库、中央凭据、GPU文件和会话不在Git或镜像中。
+后端仓库为私有 `apedintensor/h3-studio`，最终运行与前端源码提交是 `b588b60d00091d677b5936b39c01c0b27ba6b6ba`。后续交付记录提交仅更新文档，不改变该测试镜像的来源。canonical前端在 `../video-studio-design/studio-app`，`inkseq-web/`为96个文件的受管源码快照；用户媒体、数据库、中央凭据、GPU文件和会话不在Git或镜像中。
 
 | 验证层 | 最终固定版本实测 | 边界 |
 |---|---|---|

@@ -1,4 +1,4 @@
-# Sixnine / Yingxu: Backend and API Project Plan
+# Inkseq: Backend and API Project Plan
 
 Baseline date: 2026-10-06 (Australia/Sydney).
 This English plan is the GitHub working baseline for cross-session development.
@@ -12,7 +12,7 @@ Accepted choices and their rationale are indexed in [DECISIONS.md](DECISIONS.md)
 ## 1. North star
 
 A user or an AI agent can upload references, describe a video, confirm generation, and retrieve the real result through the same business API.
-Quick Chat, Yingxu story production, and future advertising tools are clients of that API.
+Quick Chat, Inkseq story production, and future advertising tools are clients of that API.
 The website remains useful while GPU capacity starts, fails, recovers, or shuts down.
 Every accepted job has a traceable owner, immutable request, execution history, output, and cost obligation.
 
@@ -181,7 +181,7 @@ Use these packages to organize actual GitHub issues and specifications, not to m
 | D — WanGP runtime integration | P0 integration alongside B after A; C-equivalent gates before switching. | Thin adapter to pinned upstream WanGP, capability matrix, controlled comparison with the existing Comfy baseline. | All selected recipe/control, quality, resource, and recovery gates pass; unmatched controls remain explicit. |
 | E — Two-node redundancy | P1; reliable single-slot B/C. | Durable pool/member state, per-node isolation, capacity and budget policy. | First healthy matching node serves; another failure does not stop it; no duplicate job dispatch; unknown capacity remains accounted for. |
 | F — Storage and recovery | P1; backup design may start with A. | Independent backup, private object-storage migration/rollback and restore; consented reference-aware content retention (DEC-014). | Preserve unintended/shared copies and original ledgers; explicit creation purge requires fresh authorization and reference proof; trash has no automatic expiry (CR-20261017-23); restored unknown operations are held. |
-| G — Scenario integration | After the core B/C loop; coordinated with A contracts. | Approved Quick Chat and usable Yingxu clients of the same API. | Real media inputs and results are visible; web/agents share objects; ordinary flows do not expose deployment parameters. |
+| G — Scenario integration | After the core B/C loop; coordinated with A contracts. | Approved Quick Chat and usable Inkseq story clients of the same API. | Real media inputs and results are visible; web/agents share objects; ordinary flows do not expose deployment parameters. |
 | H — Collaboration and scale | P2; proven identity, storage, and core execution boundaries. | User directory, memberships, audit, required multi-host operation. | Ownership migration, access/revocation, conflicts, staging, admission, and load tests pass before broader access. |
 
 E preserves the desired policy: confirmed demand, target two independent nodes, serve with one ready, no always-on GPU, and shutdown after 600 seconds with no pool obligations.
