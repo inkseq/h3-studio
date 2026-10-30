@@ -227,7 +227,7 @@ class EnhanceBackendTests(unittest.TestCase):
 
     def test_output_shape_and_submission_recheck(self):
         enhance = job("1080p")
-        self.assertEqual(_shape(enhance), (1920, 1080, 124 / 24, True))
+        self.assertEqual(_shape(enhance), (1920, 1080, 121 / 24, True))
         enhance["execution_plan"] = {
             "enabled": True,
             "backend": "runpod-enhance",

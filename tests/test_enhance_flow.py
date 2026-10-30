@@ -42,7 +42,7 @@ def enhanced_mp4(path, size):
     subprocess.run(
         ["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"testsrc=size={size}:rate=24"]
         + ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000"]
-        + ["-frames:v", "124", "-t", str(124 / 24), "-c:v", "libx264"]
+        + ["-frames:v", "121", "-t", str(121 / 24), "-c:v", "libx264"]
         + ["-preset", "ultrafast", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)],
         check=True,
         timeout=120,
@@ -144,7 +144,7 @@ class EnhanceFlowTests(unittest.TestCase):
         self.assertEqual(
             (video["width"], video["height"], video["fps"]), (1920, 1080, 24)
         )
-        self.assertAlmostEqual(video["duration_s"], 124 / 24, places=3)
+        self.assertAlmostEqual(video["duration_s"], 121 / 24, places=3)
 
     def test_wrong_size_output_fails_without_a_second_run(self):
         done = {"status": "COMPLETED", "output": {"uploaded": True}}
