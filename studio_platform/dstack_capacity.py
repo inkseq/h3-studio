@@ -1011,11 +1011,11 @@ class DstackClient:
                     timeout=min(15, self.timeout, remaining),
                 )
 
-            ids, aliases = [], {}
+            ids, aliases, labels = [], {}, []
             if backend == "vastai":
                 params = {
                     "limit": 25,
-                    "select_cols": '["id"]',
+                    "select_cols": '["id","label"]',
                     "order_by": '[{"col":"id","dir":"asc"}]',
                 }
                 cursors, total = set(), None
@@ -1059,6 +1059,7 @@ class DstackClient:
                             "dstack_provider_inventory_unconfirmed",
                         )
                         ids.append(str(row["id"]))
+                        labels.append(row.get("label"))
                     _require(
                         len(set(ids)) == len(ids) and len(ids) <= total,
                         "dstack_provider_inventory_unconfirmed",
@@ -1085,7 +1086,7 @@ class DstackClient:
                     raise DstackError("dstack_provider_inventory_unconfirmed")
             else:
                 try:
-                    ids, aliases = read_ids(backend, read)
+                    ids, aliases, labels = read_ids(backend, read)
                 except InventoryUnconfirmed:
                     raise DstackError("dstack_provider_inventory_unconfirmed") from None
             result = {
@@ -1096,6 +1097,8 @@ class DstackClient:
             }
             if aliases:
                 result["aliases"] = aliases
+            if labels is not None:  # dstack instance names, for #868 proofs
+                result["labels"] = labels
             return result
         except DstackError:
             raise
@@ -1974,9 +1977,11 @@ class DstackCapacity:
                     return value
             if terminal_no_allocation(run, binding):
                 value["reason_code"] = "dstack_no_capacity_billing_pending"
-                from .dstack_allocation_proof import from_terminal_run
+                from .dstack_allocation_proof import account_absence, from_terminal_run
 
-                proof = from_terminal_run(run, binding)
+                proof = from_terminal_run(run, binding) or account_absence(
+                    self.client, run, binding
+                )
                 if proof is not None:
                     value["no_allocation_proof"] = proof
                     value.update(
