@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 import httpx
@@ -16,6 +17,7 @@ from studio_platform.inference.wangp_contract import (
     InputDescriptor,
     OperationReceipt,
     PreparedRequest,
+    StoredInput,
     canonical_json,
 )
 from studio_platform.inference.wangp_http import HTTPWanGPTransport
@@ -232,6 +234,116 @@ class HTTPTests(unittest.TestCase):
         actual.write_bytes(b"x" * len(data))
         with self.assertRaisesRegex(ValueError, "mismatch"):
             self.inputs.resolve(descriptor)
+
+    def signed_store(self, data, *, headers=None):
+        class Signed:
+            required_headers = headers or {}
+
+            def reveal(self):
+                return "https://objects.example/inputs/one?X-Signature=s"
+
+        class Store:
+            opened = 0
+
+            def presign_download(self, key, *, expires_seconds):
+                assert expires_seconds == 900
+                return Signed()
+
+            def open(self, key):
+                Store.opened += 1
+                return io.BytesIO(data)
+
+        return Store()
+
+    def fetched(self, data):
+        class Response:
+            status = 200
+
+            def __init__(self):
+                self.body = io.BytesIO(data)
+
+            def read(self, size):
+                return self.body.read(size)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return False
+
+        class Opener:
+            requests = []
+
+            def open(self, request, timeout):
+                Opener.requests.append(request.full_url)
+                return Response()
+
+        return Opener()
+
+    def test_host_pulls_signed_input_and_cpu_never_streams_it(self):
+        data = b"synthetic-signed-input"
+        descriptor = InputDescriptor(
+            "asset-one",
+            "input-one",
+            "image",
+            hashlib.sha256(data).hexdigest(),
+            len(data),
+        )
+        store, opener = self.signed_store(data), self.fetched(data)
+        with patch("urllib.request.build_opener", return_value=opener):
+            with StoredInput(store, "assets/one") as source:
+                self.assertEqual(
+                    self.transport.stage_input(descriptor, source), descriptor
+                )
+        self.assertEqual(store.opened, 0)
+        self.assertEqual(
+            opener.requests, ["https://objects.example/inputs/one?X-Signature=s"]
+        )
+        self.assertEqual(self.inputs.resolve(descriptor).read_bytes(), data)
+        # A signed object with different bytes is never admitted.
+        other = InputDescriptor("asset-two", "input-two", "image", "0" * 64, len(data))
+        with patch("urllib.request.build_opener", return_value=self.fetched(data)):
+            with self.assertRaisesRegex(Exception, "stage_failed"):
+                with StoredInput(store, "assets/two") as source:
+                    self.transport.stage_input(other, source)
+
+    def test_host_fetch_requires_https_and_cpu_streams_for_older_hosts(self):
+        data = b"synthetic-older-host"
+        descriptor = InputDescriptor(
+            "asset-one",
+            "input-one",
+            "image",
+            hashlib.sha256(data).hexdigest(),
+            len(data),
+        )
+        with self.assertRaisesRegex(ValueError, "url_invalid"):
+            self.inputs.fetch(descriptor, "http://objects.example/inputs/one")
+
+        def older(request):
+            if request.url.path.endswith("/fetch"):
+                return httpx.Response(404, json={"detail": "Not Found"})
+            return self.dispatch(request)
+
+        transport = HTTPWanGPTransport(
+            "http://127.0.0.1:8199", TOKEN, transport=httpx.MockTransport(older)
+        )
+        self.addCleanup(transport.close)
+        store = self.signed_store(data)
+        with StoredInput(store, "assets/one") as source:
+            self.assertEqual(transport.stage_input(descriptor, source), descriptor)
+        self.assertEqual(store.opened, 1)
+        self.assertEqual(self.inputs.resolve(descriptor).read_bytes(), data)
+        # Signatures that need request headers, or stores that cannot sign, stream too.
+        for unsigned in (
+            self.signed_store(data, headers={"x-amz": "1"}),
+            io.BytesIO(data),
+        ):
+            source = (
+                StoredInput(unsigned, "assets/one")
+                if hasattr(unsigned, "presign_download")
+                else unsigned
+            )
+            self.assertIsNone(getattr(source, "signed_url", lambda: None)())
 
     def test_staging_never_admits_bad_hash_or_oversize(self):
         descriptor = InputDescriptor("asset-one", "input-one", "image", "0" * 64, 3)
