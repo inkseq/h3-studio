@@ -7,7 +7,7 @@ Pattern after runpod-workers/worker-comfyui (background server + HTTP queue); re
 PUT URL rather than worker-held bucket credentials.
 
 Input:  {video_url, res: "1080"|"2k", steps, sigma, audio: "draft"|"silence", unet: "int8"|"fp8",
-         attention?: "sdpa"|"sage"|"sage16" (default sage at 1080, sdpa at 2K), prompt?, output_put_url?}
+         attention?: "sdpa"|"sage"|"sage16" (default: see default_attention), prompt?, output_put_url?}
 Output: {seconds, bytes, uploaded: true} after a PUT to output_put_url, otherwise {seconds, bytes, video_base64}.
 Tiers (owner 2026-10-29): standard = steps 2, sigma 0 (workflow 0.7 grid); enhanced = steps 3, sigma 0.8.
 
@@ -33,6 +33,7 @@ MODEL_DIRS = (
 )
 URL = 'http://127.0.0.1:8188'
 ATTENTION = ('sdpa', 'sage', 'sage16')
+_capability = None
 WF = (
     COMFY
     + '/custom_nodes/ComfyUI-Open-H3-Regenerate/example_workflows/Open-H3 Regenerate 2K - Draft Video.json'
@@ -186,6 +187,32 @@ def job_prompt(base, tag, video, res, sigma, audio, steps, unet, text, attn):
     return p
 
 
+def compute_capability():
+    """(major, minor) of GPU 0 from nvidia-smi: importing torch here would put a CUDA context on the GPU."""
+    global _capability
+    if _capability is None:
+        try:
+            out = subprocess.run(
+                ['nvidia-smi', '--query-gpu=compute_cap', '--format=csv,noheader'],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            ).stdout.split()[0]
+            _capability = tuple(int(x) for x in out.split('.'))
+        except (OSError, IndexError, ValueError, subprocess.TimeoutExpired):
+            _capability = ()
+    return _capability
+
+
+def default_attention(res):
+    """sage is clean at 1080 everywhere and at 2K on sm120 (5090, PRO 6000), where sdpa at 2K is 3-5x slower
+    under VRAM pressure. On sm89/sm90 (L40S, H100, H200) sage's int8 QK turns 2K frames ~94-118 into noise,
+    so 2K uses sdpa there and on any GPU not measured (RunPod/Modal checks, #795, 2026-10-30)."""
+    if res != '2k' or compute_capability()[:1] == (12,):
+        return 'sage'
+    return 'sdpa'
+
+
 def validate(job):
     res, audio, unet = (
         job.get('res', '1080'),
@@ -210,8 +237,7 @@ def validate(job):
     text = job.get('prompt') or DEFAULT_PROMPT
     if not isinstance(text, str) or len(text) > 8000:
         raise ValueError('prompt must be a string up to 8000 characters')
-    # sage2's fp8-PV kernel corrupts 2K frames ~94-118 on sm89/sm90, so 2K defaults to sdpa.
-    attn = job.get('attention', 'sdpa' if res == '2k' else 'sage')
+    attn = job.get('attention') or default_attention(res)
     if attn not in ATTENTION:
         raise ValueError('attention must be sdpa|sage|sage16')
     return url, res, float(sigma), audio, steps, unet, text, attn

@@ -2,8 +2,8 @@
 
 The server starts without --use-sage-attention; this node sets the model's own attention override, so one
 worker serves all modes without a restart. sage16 keeps sage2's int8 QK but computes PV in fp16 with fp32
-accumulation: sage2's automatic fp8 PV kernel turns 2K frames ~94-118 into noise on sm89/sm90 (L40S, H100,
-H200; Modal measurement 2026-10-30), while sm120 (5090) is clean.
+accumulation. It was a candidate fix for 2K noise in frames ~94-118 on sm89/sm90 (L40S, H100, H200), but it
+fails the same way (the int8 QK is the cause, 2026-10-30), so nothing defaults to it. sm120 is clean with sage.
 """
 
 import comfy.ldm.modules.attention as attention
