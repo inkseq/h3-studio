@@ -62,6 +62,20 @@ class TransportTests(unittest.TestCase):
             credentials.name("dev")
 
 
+class SwitchTests(unittest.TestCase):
+    def test_installed_credential_turns_enhance_on_unless_explicitly_off(self):
+        from studio_platform.settings import enhance_switch
+
+        with tempfile.TemporaryDirectory() as root:
+            self.assertFalse(enhance_switch(None, root))
+            self.assertTrue(enhance_switch("1", root))
+            secrets = Path(root) / "runtime-secrets"
+            secrets.mkdir()
+            (secrets / "runpod-enhance.json").write_text("{}")
+            self.assertTrue(enhance_switch(None, root))
+            self.assertFalse(enhance_switch("0", root))
+
+
 @unittest.skipIf(os.name == "nt", "POSIX ownership required")
 class InstallTests(unittest.TestCase):
     def test_install_writes_root_app_readonly_once_in_the_app_contract(self):
