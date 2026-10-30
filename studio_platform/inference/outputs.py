@@ -32,6 +32,15 @@ def _shape(job):
 
         shape = validate_render_request(job["request"], owner_id=job.get("owner_id"))
         return shape["width"], shape["height"], shape["duration"], shape["audio"]
+    if job["request"].get("recipe_id") == "enhance-v1":
+        # 1080P/2K enhance of a validated take; the MP4 keeps its draft audio.
+        from ..enhance_plans import TIERS
+
+        size, _ = TIERS[_request(job)["tier"]]
+        spec = job["request"]["output_spec"]
+        if (spec["width"], spec["height"]) != size:
+            raise BackendError("invalid_output_requirements")
+        return spec["width"], spec["height"], float(spec["actual_duration"]), True
     from comfy_workflow import native_output_spec
 
     request = _request(job)

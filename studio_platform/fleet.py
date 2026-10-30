@@ -519,6 +519,22 @@ def request_drain(config):
     return {"state": "drain_requested"}
 
 
+def _require_service_backend(slot, settings):
+    """The slot's backend must be the one this service explicitly enabled."""
+    backend = slot.spec.backend
+    if slot.recovery_only:
+        if backend not in settings.recovery_backends:
+            raise ValueError("fleet_recovery_backend_not_explicitly_allowed")
+        return
+    switches = {"cpu-render": "render_enabled", "runpod-enhance": "enhance_enabled"}
+    if backend in switches:
+        allowed = getattr(settings, switches[backend])
+    else:
+        allowed = settings.execution_backend == backend and settings.generation_enabled
+    if not allowed:
+        raise ValueError("fleet_backend_does_not_match_explicit_service_settings")
+
+
 @contextmanager
 def slot_runner(
     config,
@@ -537,19 +553,7 @@ def slot_runner(
     if not config.enabled or not slot.enabled:
         yield None
         return
-    if slot.recovery_only:
-        if slot.spec.backend not in settings.recovery_backends:
-            raise ValueError("fleet_recovery_backend_not_explicitly_allowed")
-    elif (
-        slot.spec.backend == "cpu-render"
-        and not settings.render_enabled
-        or slot.spec.backend != "cpu-render"
-        and (
-            settings.execution_backend != slot.spec.backend
-            or not settings.generation_enabled
-        )
-    ):
-        raise ValueError("fleet_backend_does_not_match_explicit_service_settings")
+    _require_service_backend(slot, settings)
     own_repo = repository is None
     repo = repository or Repository(settings.database_url)
     backend = None
@@ -577,6 +581,10 @@ def slot_runner(
             from .render_backend import CPURenderBackend
 
             backend = CPURenderBackend(directory / "render", enabled=True)
+        elif slot.spec.backend == "runpod-enhance":
+            from . import enhance_backend
+
+            backend = enhance_backend.create(store_factory(settings), settings)
         elif slot.spec.backend == "comfy-worker":
             backend = ComfyBackend(
                 endpoint=slot.endpoint,
@@ -609,7 +617,7 @@ def slot_runner(
                 slot.spec.dispatch_backend == "hatchet-v1" and worker["drain_requested"]
             )
         ):
-            if slot.spec.backend in {"mock", "cpu-render"}:
+            if slot.spec.backend in {"mock", "cpu-render", "runpod-enhance"}:
                 control.mark_ready(worker_id, upstream_idle_confirmed=True)
             elif slot.confirmed_idle:
                 # A startup declaration alone is insufficient: the dedicated

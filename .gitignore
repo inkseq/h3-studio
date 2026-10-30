@@ -73,6 +73,7 @@ inventory.json
 !studio_platform/worker_grant.py
 !studio_platform/enhance_plans.py
 !studio_platform/enhance_routes.py
+!studio_platform/enhance_backend.py
 !studio_platform/worker_tunnel.py
 !deploy/platform/modal_credentials.py
 !deploy/modal/STAGING-CREDENTIALS.md
@@ -1037,6 +1038,11 @@ inventory.json
 !tests/test_langfuse_deployment.py
 !deploy/platform/langfuse-staging-read-policy.json
 !deploy/platform/langfuse-production-read-policy.json
+!deploy/platform/runpod_enhance_credentials.py
+!tools/import_runpod_enhance_credentials.py
+!tests/test_runpod_enhance_deployment.py
+!deploy/platform/runpod-enhance-staging-read-policy.json
+!deploy/platform/runpod-enhance-production-read-policy.json
 !tests/test_modal_gvisor_ram.py
 !studio_platform/backup_loss_policy.py
 !docs/EXPERIMENTS.md

@@ -1222,7 +1222,17 @@ class ExecutionPolicies:
         """
         execution = job.get("execution_plan", {})
         from .render_plans import RECIPE, MODEL as RENDER_MODEL, configuration_for, POOL
+        from . import enhance_plans
 
+        if job.get("request", {}).get("recipe_id") == enhance_plans.RECIPE:
+            return bool(
+                getattr(self.settings, "enhance_enabled", False)
+                and execution.get("enabled") is True
+                and execution.get("backend") == enhance_plans.BACKEND
+                and execution.get("pool") == enhance_plans.POOL
+                and execution.get("configuration_id") == enhance_plans.CONFIGURATION
+                and job["request"]["request"].get("model") == enhance_plans.MODEL
+            )
         if job.get("request", {}).get("recipe_id") == RECIPE:
             try:
                 configuration = configuration_for(job["request"])
