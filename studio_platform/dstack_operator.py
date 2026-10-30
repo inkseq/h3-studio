@@ -2394,7 +2394,6 @@ class DstackOperator:
         client = self.capacity.client
 
         class ObservedClient:
-            # The endpoint decides which control plane's history is foreign.
             project, endpoint = client.project, getattr(client, "endpoint", None)
 
             def get(self, **identity):
