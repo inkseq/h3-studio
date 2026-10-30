@@ -1,0 +1,67 @@
+# Capacity lanes: pods and serverless behind one router
+
+Owner approved, 2026-10-30. This doc records the target and the migration order; each step is its own PR.
+
+## Today
+
+- **Queue.** The Postgres job queue (DBOS) is the only source of truth. Keep it.
+- **Pods.** `dstack` (self-hosted, 0.22.5) rents whole machines on Vast. Lium, RunPod pods and CloudRift arrive with #836, and AWS g7e with #837. Workers pull jobs. Reconciliation reads every provider account.
+- **Modal.** `modal_*` (~3,000 lines, 14 modules) runs Modal **sandboxes** as long-lived hosts that also pull jobs. That makes it a second, hand-written pod lane, with its own budget, admission, host and lifecycle code.
+- **Enhance.** RunPod Serverless (#795) is a standalone test. It is not connected to the router.
+- **Routing rules are spread across several places:**
+  - `modal_admission.start_after_seconds`;
+  - `dstack_demand_start.vast_share` (`vast_min_queue`, `vast_after_seconds`);
+  - `capacity_lookahead.Policy` (boot time, job time, minimum jobs).
+
+## Target
+
+```
+queue ──> router (one rules table) ──┬─> pod lane        (dstack: Vast, Lium, RunPod pods, CloudRift, AWS)
+                                     └─> serverless lane (adapters: Modal functions, RunPod Serverless)
+                     both lanes run the same worker image; outputs go to R2; one cost/telemetry record per job
+```
+
+**Pod lane.** Unchanged in concept: dstack rents, workers pull, the account sweep and idle stop stay.
+
+**Serverless lane.** Per-call execution. The platform scales; we never keep a host.
+- One small interface per platform:
+  - `submit(job, input_urls, output_put_url) -> call_id`
+  - `poll(call_id) -> queued | running | done(result) | failed(code)`
+  - `cancel(call_id)`
+  - `price(call)` (seconds × rate)
+- The job contract is the same as the pod worker's: signed input URLs in, one presigned R2 PUT out, plus a receipt (seconds, GPU, attention, bytes).
+- The idempotency key is the job attempt ID. A lost submit reply is reconciled by listing calls by that key, never by resubmitting blindly.
+
+**Router.** One pure function over a snapshot (queued jobs and ages, warm idle pods, booting pods, serverless calls in flight, prices). It returns `{pod_starts, serverless_submits}`.
+- Today's rules become one table:
+  - a warm idle pod takes the job;
+  - otherwise serverless first, so there is no cold-start wait;
+  - when the lookahead says enough work remains for a pod to pay off, start pods (the #688 lookahead);
+  - when a job has waited past the limit, take any lane that has capacity.
+- Hard gates (budget, account, provider limits) stay where they are, and the router never bypasses them.
+
+**One worker image, three entry points:** the dstack task, the Modal function and the RunPod Serverless handler. They share the WanGP session code and attention/device resolution (#839).
+
+## Migration order (each step keeps production working)
+
+1. **Serverless lane interface plus RunPod Serverless for enhance.**
+   - Enhance is new, so nothing existing can break.
+   - Add `studio_platform/serverless_lane.py` (interface, call ledger rows, idempotent submit/poll/cancel) and a RunPod adapter. Route enhance jobs through it.
+   - Accept on staging with frame checks.
+2. **Generation handler in the serverless image.** The same worker entry runs one generation call (input URLs → R2), behind the interface. Accept a v8 FL/REF run on RunPod Serverless (5090/PRO 6000).
+3. **Modal as a serverless adapter.**
+   - Re-implement the Modal backstop as Modal **functions** behind the same interface.
+   - Run both paths on staging, then retire the sandbox-host modules (`modal_host`, `modal_lifecycle`, `modal_worker_binding`, `modal_capacity` …) once production has been on the function path for a week.
+4. **Router consolidation.**
+   - Move `start_after_seconds`, `vast_share` and the lookahead knobs into one rules table and one pure function, with table-driven tests that reproduce today's decisions before changing any of them.
+   - Steps 1–3 already use it for serverless submits.
+
+Money paths (submit, budget and settlement of serverless calls) are Tier 2 and get one Codex review per step.
+
+## Not changing
+
+- The queue/DBOS ownership.
+- R2 delivery.
+- The pod lane's reconciliation and idle stop.
+- The prices users pay.
+- dstack self-hosted vs Sky is independent (staging trial 2026-10-30) and affects only the pod lane's control plane.
