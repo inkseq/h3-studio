@@ -25,6 +25,7 @@ from .dstack_capacity import (
     DstackCapacity,
     DstackClient,
     DstackError,
+    control_plane,
     live_capacity_usage,
 )
 from .capacity_policy import window_open, cold_unadmitted_runtime
@@ -1254,7 +1255,8 @@ class DstackOperator:
                 raise OperatorError("dstack_test_guard_invalid", 422) from None
             require(
                 getattr(settings, "public_origin", None) == "https://staging.inkseq.com"
-                and self.config.get("project") == "sixnine-staging"
+                # Local server project, or the dstack Sky staging project.
+                and self.config.get("project") in {"sixnine-staging", "inkseq-staging"}
                 and self.policy.get("lifecycle_version") == 2
                 and _integer(self.policy.get("max_instances"), 1, 10)
                 and _integer(self.policy.get("max_physical_gpus"), 1, 10)
@@ -2979,6 +2981,8 @@ class DstackOperator:
         if host_selection is not None:
             request = replace(request, host_selection=copy.deepcopy(host_selection))
         binding = request.binding(self.config["ssh_public_key"])
+        # Which dstack server owns this run (local or Sky); see live_capacity_usage.
+        binding["control_plane"] = control_plane(self.capacity.client)
         command_id = str(uuid.uuid4())
         command_payload = {
             "preview_id": preview_id,
