@@ -283,6 +283,19 @@ def _upstream_worker_alive():
     )
 
 
+def device_attention(torch, profile):
+    """The profile's attention on cc 12.x (5090, PRO 6000); None keeps the compiled sdpa.
+
+    sage2 is measured clean on sm120 for base generation and 2K enhance; on sm89/sm90
+    (L40S, H100, H200) its int8 QK corrupts long 2K sequences, and the Modal L40S
+    acceptance ran sdpa, so every other device stays on sdpa (#794, 2026-10-30).
+    """
+    mode = profile['runtime'].get('config', {}).get('attention_mode', 'sdpa')
+    if mode == 'sdpa' or torch.cuda.get_device_capability(0)[0] != 12:
+        return None
+    return mode
+
+
 def _lock_profile_device(torch, profile):
     """One explicit visible device and one owned process per physical GPU."""
     import fcntl
@@ -1037,6 +1050,7 @@ class PinnedWanGPSession:
         result_audit=None,
         device_lock=None,
         model_progress=None,
+        attention=None,
     ):
         if not callable(quiesce) or not callable(worker_alive):
             raise ValueError("wangp_runtime_stop_probe_required")
@@ -1051,6 +1065,7 @@ class PinnedWanGPSession:
         )
         self.device_lock = device_lock
         self._model_progress = model_progress
+        self.attention = attention
         if manifest is not None:
             from ..runtime_catalog import validate_manifest
 
@@ -1092,6 +1107,10 @@ class PinnedWanGPSession:
                 self.before_submit()
             values = self.session.get_default_settings(model)
             values.update(copy.deepcopy(dict(settings)))
+            # Compiled tasks pin override_attention=sdpa, which WanGP ranks above the
+            # server's attention_mode; this device's resolved profile attention wins.
+            if self.attention and values.get("override_attention") == "sdpa":
+                values["override_attention"] = self.attention
             job = (
                 self.session.submit_task(values, callbacks=self._model_progress)
                 if self._model_progress is not None
@@ -1208,6 +1227,7 @@ def create_session(
             result_audit=lambda: audit(loaded=True),
             device_lock=device_lock,
             model_progress=model_progress,
+            attention=device_attention(torch, profile),
         )
     return PinnedWanGPSession(
         session, output, quiesce=torch.cuda.synchronize, model_progress=model_progress
