@@ -38,7 +38,7 @@ export default function PersistenceWarning() {
         </Button>
         {risk.current && <Button onClick={prepare}>{lt('legacy.copy22')}</Button>}
         {url && (
-          <a href={url} download="映序-未落盘项目结构.json">
+          <a href={url} download="Inkseq-未落盘项目结构.json">
             {lt('legacy.copy23')}
           </a>
         )}

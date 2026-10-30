@@ -1,4 +1,4 @@
-# 映序：十个新手故事验收矩阵
+# Inkseq：十个新手故事验收矩阵
 
 时间：2026-10-04。检查范围：canonical studio-app 源码、临时数据自动测试、Chrome `http://localhost:8850/` 开发预览及 `http://localhost:8851/` 生产构建预览。API 使用 `.platform-preview-v2`，不是用户原本地作品；不调用真实 H3、不租 GPU。测试图片为纯色 PNG 或明确模拟成片的截图、音频为静音或明确标记的本地440Hz测试 WAV，模拟产物带 SIMULATION / NOT H3 水印。
 
@@ -54,7 +54,7 @@
 
 预检、未保存状态、模拟标签、原prompt保留、错误位置与撤销，采用“状态可见、用户控制、错误预防、减少记忆负担”的原则。[NN/g usability heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/)
 
-React Flow 本身不替业务安排节点布局；映序继续使用列式排布和矩形避让，只给新节点找空位，不为一次布局引入额外依赖或覆盖用户已移动坐标。[React Flow layouting](https://reactflow.dev/learn/layouting/layouting)
+React Flow 本身不替业务安排节点布局；Inkseq 继续使用列式排布和矩形避让，只给新节点找空位，不为一次布局引入额外依赖或覆盖用户已移动坐标。[React Flow layouting](https://reactflow.dev/learn/layouting/layouting)
 
 ## 分级结论
 
@@ -309,7 +309,7 @@ React Flow 本身不替业务安排节点布局；映序继续使用列式排布
 
 ## 两层故事导航（2026-10-04，本轮替代方案）
 
-用户故事：进入映序时，左栏先让我选择故事或创建新故事；选定后只显示该故事的菜单和章节。点击顶部“‹ 我的故事”即可回到故事列表，编辑中的内容保持原样。
+用户故事：进入 Inkseq 时，左栏先让我选择故事或创建新故事；选定后只显示该故事的菜单和章节。点击顶部“‹ 我的故事”即可回到故事列表，编辑中的内容保持原样。
 
 | 验收条件 | 实现与证据状态 |
 |---|---|

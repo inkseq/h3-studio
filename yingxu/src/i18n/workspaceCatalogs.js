@@ -514,7 +514,7 @@ export const workspaceCatalogs = {
     'workspace.copy5': '登录并继续',
     'workspace.copy6': '重新检查连接',
     'workspace.copy7': '跳到聊天创作',
-    'workspace.copy8': '映序',
+    'workspace.copy8': 'Inkseq',
     'workspace.copy9': '新建创作',
     'workspace.copy10': 'API Key 与 Agent ↗',
     'workspace.copy11': '改名',
@@ -622,8 +622,8 @@ export const workspaceCatalogs = {
     'workspace.copy113': '选择结果，再决定怎么改',
     'workspace.copy114': '快速创作 · 连接 AI 助手',
     'workspace.copy115': '快速创作 · 云项目与账户',
-    'workspace.copy116': '映序 · 快速视频创作',
-    'workspace.copy117': '映序 · 开始创作',
+    'workspace.copy116': 'Inkseq · 快速视频创作',
+    'workspace.copy117': 'Inkseq · 开始创作',
     'workspace.copy118': '云端会话、素材和任务按账户隔离。退出不取消已接受任务。',
     'workspace.copy119': '先选的文件仍是本地待上传；登录后将保存到新创作，原故事不受影响。',
     'workspace.copy120': '本地隔离测试登录，不代表公网认证方式。',
@@ -827,7 +827,7 @@ export const workspaceCatalogs = {
     'workspace.agentDetail7': '查看任务与结果',
     'workspace.agentDetail8': '提交视频生成',
     'workspace.agentDetail9': '调用文本助手',
-    'workspace.agentDetail10': '请连接映序，使用公开 Skill 与 API 帮助我创作。',
+    'workspace.agentDetail10': '请连接 Inkseq，使用公开 Skill 与 API 帮助我创作。',
     'workspace.agentDetail11':
       '使用公开连接 helper 在我的本地 OS 安全凭据库保存你自己生成的正式 Key，再兑换此连接码；生产使用 TLS，本地仅 loopback HTTP 例外。不要打印正式 Key、连接码或 verifier；不要写进 URL、普通 JSON 或日志。',
     'workspace.agentDetail12':

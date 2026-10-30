@@ -965,7 +965,7 @@ function ProjectList({ currentId, onSelect }) {
           <p>{t('story.copy125')}</p>
           <Button
             onClick={() =>
-              download(new Blob([raw], { type: 'text/plain' }), '映序-项目列表恢复.txt')
+              download(new Blob([raw], { type: 'text/plain' }), 'Inkseq-项目列表恢复.txt')
             }
           >
             {t('story.copy126')}

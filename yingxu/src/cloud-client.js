@@ -512,6 +512,7 @@ export function createCloudClient({
       }),
     plan: (payload, key) => request('/v1/generation-plans', { method: 'POST', body: payload, key }),
     renderPlan: (payload) => request('/v1/render-plans', { method: 'POST', body: payload }),
+    enhancePlan: (payload) => request('/v1/enhance-plans', { method: 'POST', body: payload }),
     submit: (planId, key) =>
       request('/v1/jobs', { method: 'POST', body: { plan_id: planId }, key }),
     jobs: (projectId, { limit = 100, offset = 0 } = {}) =>

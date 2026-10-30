@@ -540,7 +540,7 @@ export const accountCatalogs = {
     'account.status4': '包含生成任务权限；仍需满足服务能力、预算和预检。',
     'account.status5': '只读与查看',
     'account.status6': '读取故事、素材和任务；不修改作品。',
-    'account.status7': '请使用映序的公开 Skill 与 API，帮助我完成创作。',
+    'account.status7': '请使用 Inkseq 的公开 Skill 与 API，帮助我完成创作。',
     'account.status8': '本次先处理链接定位的内容；更改其他部分前与我确认。',
     'account.status9': '本次只处理链接中的快速创作，准备这个视频的提示词与参考素材。',
     'account.status10': '本次只处理链接中的故事。',
@@ -658,20 +658,20 @@ export const accountCatalogs = {
     'account.interface12': '已同步',
     'account.interface13':
       '它通过 API 准备这个视频的提示词和参考素材，你在这里看进展、选结果，再继续调整。',
-    'account.interface14': '它通过 API 写入故事，你在映序里看进展、选结果，再继续调整。',
+    'account.interface14': '它通过 API 写入故事，你在 Inkseq 里看进展、选结果，再继续调整。',
     'account.interface15':
       '说明中有使用方法和当前视频的位置。告诉 AI 你想要的画面、动作和声音，让它准备提示词与参考素材。',
     'account.interface16':
       '说明中有使用方法和当前工作位置。接下来，直接告诉 AI 你想改哪一段、想看到什么效果。',
     'account.interface17':
-      '现在也可以让 AI 先了解映序。当前复制的只是公开入门说明；保存快速创作后再复制工作位置。',
+      '现在也可以让 AI 先了解 Inkseq。当前复制的只是公开入门说明；保存快速创作后再复制工作位置。',
     'account.interface18':
-      '现在也可以让 AI 先了解映序。当前复制的只是公开入门说明；保存云故事后再复制工作位置。',
+      '现在也可以让 AI 先了解 Inkseq。当前复制的只是公开入门说明；保存云故事后再复制工作位置。',
     'account.interface19': 'Key 管理暂未打开。请到云工作室中的 Agent API Key 管理继续。',
     'account.fragment1': '当前账户：',
     'account.fragment2': '定位到：',
     'account.fragment3': '云版本 ',
     'account.fragment4': '把工作链接交给 Codex 或其他 Agent。',
-    'account.fragment5': '映序当前不提供内置 AI 编剧、图像 / 音乐生成或多人实时协作。',
+    'account.fragment5': 'Inkseq 当前不提供内置 AI 编剧、图像 / 音乐生成或多人实时协作。',
   },
 };
