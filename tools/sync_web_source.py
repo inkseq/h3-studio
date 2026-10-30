@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Create/check the one-way, source-only Yingxu release snapshot.
+"""Create/check the one-way, source-only web release snapshot.
 
-Canonical edits remain in ../video-studio-design/studio-app. Never edit yingxu/
+Canonical edits remain in ../video-studio-design/studio-app. Never edit inkseq-web/
 directly. Run --check before a release; --write explicitly refreshes owned files.
 No user media, browser storage, environments, credentials or build output is read.
 """
@@ -78,7 +78,7 @@ def source_files(source):
 
 
 def expected_manifest(files):
-    return {"format": "yingxu-source-snapshot-v1", "canonical_source": SOURCE_REFERENCE,
+    return {"format": "inkseq-web-source-snapshot-v1", "canonical_source": SOURCE_REFERENCE,
             "direction": "canonical-to-release-only", "files": {name: hashlib.sha256(_source_bytes(path, binary=name in SOURCE_BINARIES)).hexdigest() for name, path in files.items()}}
 
 
@@ -89,7 +89,7 @@ def read_manifest(target):
     if path.is_symlink():
         raise ValueError("Snapshot manifest cannot be a symlink")
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("format") != "yingxu-source-snapshot-v1" or not isinstance(data.get("files"), dict):
+    if data.get("format") != "inkseq-web-source-snapshot-v1" or not isinstance(data.get("files"), dict):
         raise ValueError("Snapshot manifest format is invalid")
     for name, checksum in data["files"].items():
         _safe_relative(name)
@@ -167,7 +167,7 @@ def main():
     repo = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, default=repo.parent / "video-studio-design" / "studio-app")
-    parser.add_argument("--target", type=Path, default=repo / "yingxu")
+    parser.add_argument("--target", type=Path, default=repo / "inkseq-web")
     modes = parser.add_mutually_exclusive_group(required=True)
     modes.add_argument("--check", action="store_true", help="Check canonical source and committed snapshot")
     modes.add_argument("--write", action="store_true", help="Refresh only allowlisted snapshot files")
@@ -176,8 +176,8 @@ def main():
     try:
         manifest = verify_snapshot(args.target) if args.verify_snapshot else synchronize(args.source, args.target, write=args.write)
     except (OSError, ValueError, json.JSONDecodeError) as error:
-        parser.exit(1, f"Yingxu snapshot check failed: {error}\n")
-    print(f"Yingxu source snapshot verified: {len(manifest['files'])} managed files")
+        parser.exit(1, f"Web snapshot check failed: {error}\n")
+    print(f"Web source snapshot verified: {len(manifest['files'])} managed files")
 
 
 if __name__ == "__main__":

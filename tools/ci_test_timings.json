@@ -255,7 +255,7 @@
     "test_workflow_schema": 0.002038,
     "test_workflow_spike295": 0.035478,
     "test_workflow_state": 5.4e-05,
-    "test_yingxu_snapshot": 0.084451
+    "test_web_snapshot": 0.084451
   },
   "postgres": {
     "test_alert_http": 0.427349,

@@ -64,7 +64,7 @@ asset初始化、派生、plan、batch均需请求去重，尤其不能重复产
 ```json
 {
   "client_ref": {
-    "project_id": "yingxu-project-example",
+    "project_id": "inkseq-project-example",
     "chapter_id": "chapter-01",
     "scene_id": "scene-03",
     "shot_id": "shot-08",

@@ -57,9 +57,9 @@ docs/PLANNING-INDEX.zh-CN.md docs/UNIFIED-BACKEND-API-PLAN.zh-CN.md docs/REUSE-A
 workflow/owner-changes.md
 """.split())
 
-FRONTEND_ROOT = frozenset({"yingxu/index.html", "yingxu/package.json", "yingxu/package-lock.json",
-                           "yingxu/vite.config.js", "yingxu/source-manifest.json",
-                           "yingxu/src/NOVICE-STORIES-AC.md"})
+FRONTEND_ROOT = frozenset({"inkseq-web/index.html", "inkseq-web/package.json", "inkseq-web/package-lock.json",
+                           "inkseq-web/vite.config.js", "inkseq-web/source-manifest.json",
+                           "inkseq-web/src/NOVICE-STORIES-AC.md"})
 # Reviewed backend changes run both suites and the platform image; only the
 # explicit slow-module dependency list can narrow unrelated CPU integration.
 # Security, money, queue and provider code falls back to every current check.
@@ -192,7 +192,7 @@ def path_kind(path: str) -> str:
             and not re.search(r"(?:^|[._/-])(?:security|auth|credentials?|secrets?)(?:[._/-]|$)",
                               path, re.IGNORECASE)):
         return "docs"
-    if path in FRONTEND_ROOT or re.fullmatch(r"yingxu/src/(?:[\w.-]+/)*[\w.-]+\.(?:js|jsx|css|json)", path):
+    if path in FRONTEND_ROOT or re.fullmatch(r"inkseq-web/src/(?:[\w.-]+/)*[\w.-]+\.(?:js|jsx|css|json)", path):
         return "frontend"
     if path in {f"studio_platform/{name}.py" for name in BACKEND_MODULES}:
         return "backend"

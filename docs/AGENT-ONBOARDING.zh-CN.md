@@ -32,7 +32,7 @@
 ## 代码与验收
 
 - 后端：`studio_platform/agent_discovery.py`、`project_activity.py`、`guided.py`、`api.py`。
-- 前端 canonical：`../video-studio-design/studio-app/src/AgentConnect.jsx`、`AgentLink.jsx`、`ProjectActivity.jsx`，以及对应模型/测试。`yingxu/` 是同步生成的源码快照。
+- 前端 canonical：`../video-studio-design/studio-app/src/AgentConnect.jsx`、`AgentLink.jsx`、`ProjectActivity.jsx`，以及对应模型/测试。`inkseq-web/` 是同步生成的源码快照。
 - 公开发现、权限、事务、幂等、目标定位、旧库升级测试覆盖于 `test_agent_discovery.py` 与 `test_platform_project_activity.py`；后者加入 PostgreSQL CI。
 - 本地前端 236 项通过，Vite 构建通过；定向后端 62 项通过。
 - 本地全套 936 项中 12 跳过，已有媒体下载超时测试在 80ms 截止前未进入发送导致 1 次失败；单独重跑整个 admission-review 模块 8 项通过。发布仍须等待确切提交 CI / PostgreSQL 验收，不把这次时序失败隐藏为全绿。
