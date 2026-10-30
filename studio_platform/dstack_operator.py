@@ -86,7 +86,7 @@ def preferred_download_offer(offer):
     )
 
 
-PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
+PROVIDERS = {"vastai": "vast", "runpod": "runpod", "lium": "lium", "cloudrift": "cloudrift"}
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
 SCHEDULER_GPU_ALIASES = {
@@ -128,6 +128,15 @@ def _integer(value, minimum=1, maximum=9_000_000_000_000):
 
 def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
+
+
+def profile_backends(profile):
+    """The primary backend first, then the configured fallbacks, all supported."""
+    return [
+        backend
+        for backend in [profile["backend"], *profile.get("fallback_backends", [])]
+        if backend in PROVIDERS
+    ]
 
 
 def plan_offers(plan, request):
@@ -1290,7 +1299,9 @@ class DstackOperator:
         }
         require(
             required <= set(profile)
-            and not set(profile) - required - {"regions", "min_reliability"},
+            and not set(profile)
+            - required
+            - {"regions", "min_reliability", "fallback_backends"},
             "dstack_profile_fields_invalid",
             422,
         )
@@ -1352,6 +1363,17 @@ class DstackOperator:
                 for name in profile["gpu_names"]
             ),
             "dstack_native_gpu_binding_invalid",
+            422,
+        )
+        fallback = profile.get("fallback_backends", [])
+        require(
+            isinstance(fallback, list)
+            and len(fallback) == len(set(fallback))
+            and all(
+                backend in PROVIDERS and backend != profile["backend"]
+                for backend in fallback
+            ),
+            "dstack_profile_fields_invalid",
             422,
         )
         require(
@@ -1975,6 +1997,20 @@ class DstackOperator:
         offers = plan_offers(
             self.capacity.plan(request, self.config["ssh_public_key"]), request
         )
+        # One intent always rents from exactly one backend. When the primary
+        # has nothing compatible, ask each configured fallback in order and
+        # bind the preview (and so the start) to the first one with offers.
+        for backend in profile.get("fallback_backends", []) if not offers else []:
+            candidate = replace(request, backend=backend, regions=())
+            offers = plan_offers(
+                self.capacity.plan(candidate, self.config["ssh_public_key"]),
+                candidate,
+            )
+            if offers:
+                request = candidate
+                profile["backend"] = backend
+                profile.pop("regions", None)
+                break
         require(bool(offers), "dstack_no_compatible_offers")
         if request.backend == "vastai":
             from .host_policy import FRESH_SECONDS, HostPolicyStore, selection
@@ -2262,13 +2298,12 @@ class DstackOperator:
                     "owner_id",
                     "project_id",
                     "pool",
-                    "backend",
                     "runtime_profile_id",
                     "mode",
                     "configuration_id",
                 )
             )
-            and selected.get("backend") in PROVIDERS
+            and profile.get("backend") in profile_backends(selected)
         )
         pool = None
         if bound_profile:
@@ -2294,7 +2329,9 @@ class DstackOperator:
                 admitted = current_snapshot
             elif capacity_snapshot == current_snapshot and isinstance(request, dict):
                 expected = {
-                    "backend": selected["backend"],
+                    "backend": request.get("backend")
+                    if request.get("backend") in profile_backends(selected)
+                    else selected["backend"],
                     "profile_id": selected["runtime_profile_id"],
                     "mode": selected["mode"],
                     "model_id": selected["model_id"],

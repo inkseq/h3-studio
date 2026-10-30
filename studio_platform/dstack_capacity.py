@@ -29,7 +29,7 @@ from .inference.wangp_contract import HostReadiness, safe_model_progress
 from .capacity_memory import vast_ram_floor
 
 DSTACK_VERSION = "0.22.5"
-BACKENDS = frozenset({"vastai", "runpod"})
+BACKENDS = frozenset({"vastai", "runpod", "lium", "cloudrift"})
 OWNER = "sixnine"
 SHA256 = re.compile(r"[0-9a-f]{64}")
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,200}")
@@ -39,6 +39,12 @@ RUN_STATUSES = TERMINAL | frozenset(
 )
 VAST_INSTANCES_URL = "https://console.vast.ai/api/v1/instances/"
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
+LIUM_PODS_URL = "https://lium.io/api/pods"
+CLOUDRIFT_INSTANCES_URL = "https://api.cloudrift.ai/api/v1/instances/list"
+# The CloudRift API version pinned by upstream dstack 0.22.5+ (#4380).
+CLOUDRIFT_API_VERSION = "2026-10-12"
+# Lium and CloudRift authenticate with an API-key header; Vast and RunPod use Bearer.
+KEY_HEADER_URLS = frozenset({LIUM_PODS_URL, CLOUDRIFT_INSTANCES_URL})
 PROVIDER_READ_ATTEMPTS = 3
 PROVIDER_READ_MAX_DELAY = 5.0
 NATIVE_REASON_CODES = frozenset(
@@ -621,6 +627,8 @@ class DstackClient:
             in {
                 ("GET", VAST_INSTANCES_URL),
                 ("POST", RUNPOD_GRAPHQL_URL),
+                ("GET", LIUM_PODS_URL),
+                ("POST", CLOUDRIFT_INSTANCES_URL),
                 ("POST", "https://console.vast.ai/api/v0/bundles/"),
                 ("GET", "https://console.vast.ai/api/v0/charges/"),
             }
@@ -653,7 +661,9 @@ class DstackClient:
                 with self._provider_session.stream(
                     method,
                     url,
-                    headers={"Authorization": "Bearer " + key},
+                    headers={"X-API-Key": key}
+                    if url in KEY_HEADER_URLS
+                    else {"Authorization": "Bearer " + key},
                     json=body,
                     params=params,
                     timeout=remaining,
@@ -1080,6 +1090,61 @@ class DstackClient:
                     params["after_token"] = cursor
                 else:
                     raise DstackError("dstack_provider_inventory_unconfirmed")
+            elif backend == "lium":
+                document = read("GET", LIUM_PODS_URL)
+                _require(
+                    isinstance(document, list) and len(document) <= 4096,
+                    "dstack_provider_inventory_unconfirmed",
+                )
+                for row in document:
+                    _require(
+                        isinstance(row, dict)
+                        and isinstance(row.get("id"), str)
+                        and IDENTIFIER.fullmatch(row["id"]),
+                        "dstack_provider_inventory_unconfirmed",
+                    )
+                    ids.append(row["id"])
+                    # Before Lium returns a pod ID, dstack records the pod name.
+                    name = row.get("pod_name") or row.get("name")
+                    if isinstance(name, str) and IDENTIFIER.fullmatch(name):
+                        ids.append(name)
+                ids = list(dict.fromkeys(ids))
+            elif backend == "cloudrift":
+                document = read(
+                    "POST",
+                    CLOUDRIFT_INSTANCES_URL,
+                    body={
+                        "version": CLOUDRIFT_API_VERSION,
+                        "data": {
+                            "selector": {
+                                "ByStatus": {
+                                    "statuses": [
+                                        "Initializing",
+                                        "Active",
+                                        "Deactivating",
+                                    ]
+                                }
+                            }
+                        },
+                    },
+                )
+                data = document.get("data") if isinstance(document, dict) else None
+                rows = data.get("instances") if isinstance(data, dict) else None
+                _require(
+                    isinstance(rows, list) and len(rows) <= 4096,
+                    "dstack_provider_inventory_unconfirmed",
+                )
+                for row in rows:
+                    _require(
+                        isinstance(row, dict)
+                        and isinstance(row.get("id"), str)
+                        and IDENTIFIER.fullmatch(row["id"]),
+                        "dstack_provider_inventory_unconfirmed",
+                    )
+                    ids.append(row["id"])
+                _require(
+                    len(set(ids)) == len(ids), "dstack_provider_inventory_unconfirmed"
+                )
             else:
                 document = read(
                     "POST",

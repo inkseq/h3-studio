@@ -22,6 +22,7 @@ from sqlalchemy import or_, select
 
 from .control import WorkerControl, worker_spec_payload
 from .dstack_capacity import (
+    BACKENDS,
     idle_action,
     assert_run_owned,
     terminal_no_allocation_shape,
@@ -439,14 +440,20 @@ class DstackController:
             )
             if not isinstance(rows, list) or len(rows) >= 100:
                 raise ValueError("incomplete_active_runs")
+            nodes = self._nodes()
+            # Always sweep the original two accounts; newer backends are swept
+            # once any retained node has used them.
+            swept = {"vastai", "runpod"} | {
+                node["payload"].get("dstack", {}).get("backend") for node in nodes
+            }
             providers = {
-                name: client.provider_inventory(name) for name in ("vastai", "runpod")
+                name: client.provider_inventory(name)
+                for name in sorted(swept & BACKENDS)
             }
             if not all(value["complete"] is True for value in providers.values()):
                 raise ValueError("incomplete_provider_inventory")
             known = {name: set() for name in providers}
             known_runs = set()
-            nodes = self._nodes()
             for node in nodes:
                 binding = node["payload"].get("dstack", {})
                 if binding.get("backend") in known and binding.get(
