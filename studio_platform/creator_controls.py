@@ -5,6 +5,7 @@ import copy
 TAOMATE = "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
 # Same TaoMate creator policy on the CUDA 13 + sage2 runtime (#794).
 TAOMATE_V8 = "h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8"
+TAOMATE_V9 = "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9"
 POLICY = "taomate-creator-v1"
 CONTROLS_V6 = "h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6"
 V6_POLICY = "controls-v6-creator-v1"
@@ -16,7 +17,7 @@ CREATOR_CONTROLS = frozenset(
 
 
 def policy_for_profile(profile_id):
-    if profile_id in (TAOMATE, TAOMATE_V8):
+    if profile_id in (TAOMATE, TAOMATE_V8, TAOMATE_V9):
         return POLICY
     if profile_id == CONTROLS_V6:
         return V6_POLICY

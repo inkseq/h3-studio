@@ -18,12 +18,12 @@ from studio_platform.inference.wangp_contract import (
 from studio_platform.runtime_hosts.wangp_receipts import ReceiptJournal
 
 
-def manifest():
+def manifest(revision=UPSTREAM_REVISION):
     return EngineManifest.from_dict(
         {
             "engine": "wangp",
             "protocol_version": PROTOCOL_VERSION,
-            "source_revision": UPSTREAM_REVISION,
+            "source_revision": revision,
             "compiler_id": "synthetic-compiler-v1",
             "profile_id": "synthetic-fl-v1",
             "runtime_digest": "synthetic-runtime-only",
@@ -48,6 +48,14 @@ def prepared(*, tag="attempt-1", audio=True):
         canonical_json({"width": 832, "height": 480, "fps": 24, "frame_count": 124}),
         audio,
     )
+
+
+class ManifestRevisionTests(unittest.TestCase):
+    def test_supported_revisions_only_each_with_its_own_digest(self):
+        upgraded = manifest("9cb2bcdafa7b41d2a1c30d2571cea4bc104657fb")
+        self.assertNotEqual(upgraded.digest, manifest().digest)
+        with self.assertRaisesRegex(ValueError, "manifest_revision_mismatch"):
+            manifest("f" * 40)
 
 
 class ReceiptTests(unittest.TestCase):
