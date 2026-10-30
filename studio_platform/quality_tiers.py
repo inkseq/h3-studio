@@ -13,7 +13,11 @@ from .execution_profiles import read_profiles
 from .execution_policy import authority_current
 
 MAPPING_REVISION = "quality-tiers-v1"
-TIERS = ("fast", "standard", "refine")
+TIERS = ("fast", "standard", "natural", "refine")
+# Public quality options that bill as another tier's model class. Natural is the
+# Pika accelerator on the Standard model (owner 2026-10-30); its extra GPU time
+# is a profile credit multiplier, not a separate rate.
+BILLING_TIERS = MappingProxyType({"natural": "standard"})
 MODE_RECIPES = MappingProxyType({"fl": "h3-base-fl2va-v1", "ref": "h3-base-ref2va-v1"})
 PROFILE_TIERS = MappingProxyType(
     {
@@ -31,7 +35,7 @@ PROFILE_TIERS = MappingProxyType(
         "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7": "standard",
         "h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8": "standard",
         "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9": "standard",
-        "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9": "standard",
+        "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9": "natural",
         "h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2": "standard",
         "h3-unpruned33b-int8-sdpa-p3-controls-v2": "refine",
         "h3-unpruned33b-bf16-sdpa-p3-controls-v3": "refine",
@@ -56,6 +60,10 @@ class QualitySelectionError(Exception):
 
 def profile_tier(profile_id):
     return PROFILE_TIERS.get(profile_id) if isinstance(profile_id, str) else None
+
+
+def billing_tier(tier):
+    return BILLING_TIERS.get(tier, tier)
 
 
 def model_tier(model_id):

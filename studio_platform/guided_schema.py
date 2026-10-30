@@ -220,7 +220,7 @@ def operation_schemas():
     from .quality_tiers import recipe_alias
 
     recipe_ids = list(RECIPES) + [recipe_alias(mode) for mode in ("fl", "ref")]
-    tier = {"enum": ["fast", "standard", "refine"]}
+    tier = {"enum": ["fast", "standard", "natural", "refine"]}
     mode = {"enum": ["fl", "ref"]}
 
     source_range = {

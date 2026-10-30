@@ -171,7 +171,7 @@ CardControls = create_model("CardControls", __base__=_ControlsBase, **_control_f
 class CreateCardRequest(AuthoringObject):
     prompt: Annotated[StrictStr, Field(min_length=1, max_length=12000)]
     recipe_id: Literal[tuple(RECIPES) + ("video-fl-v1", "video-ref-v1")] | None = None
-    tier: Literal["fast", "standard", "refine"] | None = None
+    tier: Literal["fast", "standard", "natural", "refine"] | None = None
     mode: Literal["fl", "ref"] | None = None
     controls: CardControls
     inputs: CardInputs

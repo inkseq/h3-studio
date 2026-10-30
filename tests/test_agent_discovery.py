@@ -218,7 +218,7 @@ class AgentDiscoveryTests(unittest.TestCase):
 
         guide = self.client.get("/for-agents/guide.json").json()
         quality = guide["video_quality"]
-        self.assertEqual(set(quality["tiers"]), {"standard", "refine", "fast"})
+        self.assertEqual(set(quality["tiers"]), {"standard", "natural", "refine", "fast"})
         self.assertEqual(quality["modes"], ["fl", "ref"])
         self.assertIn("Currently unavailable", quality["fast"])
         self.assertEqual(quality["preferred_input"], {"tier": "standard", "mode": "fl"})

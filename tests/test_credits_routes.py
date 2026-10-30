@@ -226,7 +226,7 @@ class CreditsRouteTests(LedgerCase):
 
     def test_quote_checks_server_profile_identity_not_caller_quality_provenance(self):
         self.enable()
-        from studio_platform.quality_tiers import PROFILE_TIERS
+        from studio_platform.quality_tiers import PROFILE_TIERS, billing_tier
         from studio_platform.runtime_catalog import get_profile
 
         for identity, tier in PROFILE_TIERS.items():
@@ -236,9 +236,11 @@ class CreditsRouteTests(LedgerCase):
                 quality_selection={"tier": "fast", "mapping_revision": "caller"},
             )
             frozen = self.get_quote(compiled)
-            self.assertEqual(frozen["tier"], tier)
+            self.assertEqual(frozen["tier"], billing_tier(tier))
             # The multiplier applies before the single round-up: 4 credits/s x 124/24 s.
-            base = Fraction(4 if tier == "standard" else 12) * Fraction(124, 24)
+            base = Fraction(4 if billing_tier(tier) == "standard" else 12) * Fraction(
+                124, 24
+            )
             multiplier = PROFILE_CREDIT_MULTIPLIERS.get(identity, 1)
             self.assertEqual(frozen["credits"], math.ceil(base * multiplier))
         for identity, model in (

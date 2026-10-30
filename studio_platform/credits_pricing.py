@@ -354,7 +354,7 @@ def aggregate_quotes(plans, *, complete=True):
 
 def get_tier(compiled, *, execution=None):
     """Classify a fresh server compilation, never caller labels or step counts."""
-    from .quality_tiers import model_tier, profile_tier
+    from .quality_tiers import billing_tier, model_tier, profile_tier
     from .render_plans import RECIPE as RENDER_RECIPE
 
     if (
@@ -369,7 +369,7 @@ def get_tier(compiled, *, execution=None):
     if identity is not None:
         from .runtime_catalog import get_profile
 
-        if profile_tier(identity) != tier:
+        if billing_tier(profile_tier(identity)) != tier:
             raise PricingError(
                 "credit_quote_invalid", "Compiled quality is unavailable."
             )
