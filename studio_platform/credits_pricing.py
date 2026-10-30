@@ -407,11 +407,18 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         and isinstance(execution, dict)
         and execution.get("backend") == "cpu-render"
     )
+    from . import enhance_plans
+
+    enhance = (
+        compiled.get("recipe_id") == enhance_plans.RECIPE
+        and isinstance(execution, dict)
+        and execution.get("backend") == enhance_plans.BACKEND
+    )
     output = compiled.get("output_spec", {})
     # CPU chapter/Film compilers use frame_count; generation still requires
     # its original frames contract, even when a caller supplies a render tier.
     frame_key, other_key = (
-        ("frame_count", "frames") if render else ("frames", "frame_count")
+        ("frame_count", "frames") if render or enhance else ("frames", "frame_count")
     )
     frames, fps = output.get(frame_key), output.get("fps", FPS)
     if (
@@ -427,16 +434,26 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         raise PricingError(
             "credit_quote_invalid", "Compiled output duration is unavailable."
         )
-    tier = get_tier(compiled, execution=execution)
+    if enhance:
+        # Owner 2026-10-30 (#795): fixed credits per clip, then per extra second.
+        tier = "enhance-" + compiled.get("request", {}).get("tier", "")
+        if tier[len("enhance-") :] not in enhance_plans.PRICES:
+            raise PricingError("credit_quote_invalid", "Enhance tier is unavailable.")
+    else:
+        tier = get_tier(compiled, execution=execution)
     multiplier, resolution = (
-        (1, {}) if render else resolution_price(price["configuration"], output)
+        (1, {})
+        if render or enhance
+        else resolution_price(price["configuration"], output)
     )
-    rate = 0 if render else price["rates"][tier] * multiplier
+    rate = 0 if render or enhance else price["rates"][tier] * multiplier
     from .reference_video_pricing import price as reference_price
 
     amount, reference = (
         (0, {})
         if render
+        else (enhance_plans.credits(tier[len("enhance-") :], frames / fps), {})
+        if enhance
         else reference_price(
             price["configuration"],
             compiled,

@@ -1,0 +1,79 @@
+"""Enhance plans and credits (#795); no provider, GPU or network."""
+
+import unittest
+
+from studio_platform.enhance_plans import RECIPE, compile_enhance, credits
+
+PROJECT = {
+    "id": "project-1",
+    "entities": [
+        {"id": "take-1", "type": "video", "data": {"cloudArtifactId": "artifact-1"}},
+        {"id": "upload-1", "type": "video", "data": {"cloudAssetId": "asset-1"}},
+        {"id": "audio-1", "type": "audio", "data": {"cloudArtifactId": "a"}},
+    ],
+}
+
+
+def source(**changes):
+    return {
+        "kind": "video",
+        "duration": 124 / 24,
+        "source_job_id": "job-1",
+        "artifact_id": "artifact-1",
+        "object": {"key": "k", "size_bytes": 20 * 1024**2, "sha256": "a" * 64},
+        "simulation": False,
+        **changes,
+    }
+
+
+def body(tier="2k", entity="take-1"):
+    return {
+        "client_ref": {"project_id": "project-1", "entity_id": entity},
+        "tier": tier,
+    }
+
+
+class EnhancePlanTests(unittest.TestCase):
+    def test_owner_prices_per_clip_then_per_started_extra_second(self):
+        self.assertEqual(credits("1080p", 124 / 24), 100)
+        self.assertEqual(credits("2k", 124 / 24), 150)
+        self.assertEqual(credits("1080p", 5.25), 100)
+        self.assertEqual(credits("1080p", 5.26), 110)
+        self.assertEqual(credits("2k", 10.0), 150 + 30 * 5)
+
+    def test_compiles_only_a_validated_generated_take(self):
+        compiled, display = compile_enhance(body(), PROJECT, lambda e, k: source())
+        self.assertEqual(compiled["recipe_id"], RECIPE)
+        self.assertEqual(
+            compiled["output_spec"],
+            {
+                "width": 2560,
+                "height": 1440,
+                "fps": 24,
+                "frame_count": 124,
+                "actual_duration": 124 / 24,
+            },
+        )
+        worker = compiled["request"]["enhance"]
+        self.assertEqual(
+            (worker["res"], worker["steps"], worker["sigma"]), ("2k", 3, 0.8)
+        )
+        self.assertEqual(worker["source_artifact_id"], "artifact-1")
+        self.assertEqual(display["credits"], 150)
+        refused = [
+            ({"tier": "2k"}, lambda e, k: source()),
+            (body(tier="4k"), lambda e, k: source()),
+            (body(entity="upload-1"), lambda e, k: source()),
+            (body(entity="audio-1"), lambda e, k: source()),
+            (body(entity="missing"), lambda e, k: source()),
+            (body(), lambda e, k: source(duration=31)),
+            (body(), lambda e, k: source(artifact_id=None)),
+            (body(), lambda e, k: source(object={"key": "k", "size_bytes": 0})),
+        ]
+        for value, resolver in refused:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                compile_enhance(value, PROJECT, resolver)
+
+
+if __name__ == "__main__":
+    unittest.main()
