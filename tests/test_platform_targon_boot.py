@@ -170,12 +170,16 @@ class CandidateProfileTests(unittest.TestCase):
             (v7, 'NVIDIA RTX PRO 6000 Blackwell Server Edition', 96),
             (v8, 'NVIDIA RTX PRO 6000 Blackwell Server Edition', 32),
             (v8, 'NVIDIA GeForce RTX 5090', 96),
+            (v8, 'NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition', 96),
         ):
             with (
                 self.subTest(profile=profile, name=name, size=size),
                 self.assertRaisesRegex(ValueError, 'gpu_mismatch'),
             ):
                 device(profile, name, size)
+        # Outside Modal an L40S (cc 8.9) never passes, even for v8.
+        with self.assertRaisesRegex(ValueError, 'gpu_mismatch'):
+            device(v8, 'NVIDIA L40S', 48, (8, 9))
 
 
 class VMMemoryTests(unittest.TestCase):

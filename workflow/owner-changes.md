@@ -876,3 +876,13 @@ products to their purchased credit amounts and "Valid for 12 months."
 No price, Price ID, product creation, grant, payment or expiry-policy change.
 Production needs one no-running-job check and one read-back; report <=5 lines
 on #374 when both fixes are live. No other work is in this slice.
+
+### 2026-10-30 — v8 on RTX PRO 6000 and sage2 on cc 12.x (#794, #839)
+Owner approved a v8 acceptance on RTX PRO 6000; all six outputs (sdpa and sage2)
+passed the frame check. PRO 6000 is admitted for v8 through the session's device
+check (cc 12.0, Server/Workstation Edition, own VRAM window; Max-Q excluded until
+measured) and v8 gpu_models, not a new hardware_admission binding: under the
+early-stage mode the immutable-binding rule is a cautious-era guard, and a v9
+profile, rebinding, default switch and Modal change are not worth one measured
+sm120 GPU. Attention resolves per device: sage2 on cc 12.x, sdpa elsewhere;
+Modal stays L40S/sdpa.
