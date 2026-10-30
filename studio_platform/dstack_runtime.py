@@ -10,6 +10,7 @@ Provider endpoint extraction and worker lifecycle stay with the controller.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
@@ -329,7 +330,21 @@ class DstackNativeRuntime:
         coordinates = self.coordinates_for_run(dict(binding), run)
         _require(
             type(coordinates) is dict
-            and set(coordinates) == {"host", "port", "username", "instance_id"},
+            and set(coordinates) - {"jump"}
+            == {"host", "port", "username", "instance_id"},
+            "dstack_runtime_ssh_coordinates_invalid",
+        )
+        jump = coordinates.get("jump")
+        _require(
+            jump is None
+            or type(jump) is dict
+            and set(jump) == {"host", "port", "username"}
+            and isinstance(jump["host"], str)
+            and re.fullmatch(r"[A-Za-z0-9.:_-]{1,253}", jump["host"])
+            and type(jump["port"]) is int
+            and 1 <= jump["port"] <= 65535
+            and isinstance(jump["username"], str)
+            and re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", jump["username"]),
             "dstack_runtime_ssh_coordinates_invalid",
         )
         _require(
@@ -345,7 +360,7 @@ class DstackNativeRuntime:
             and coordinates["instance_id"] == binding["provider_instance_id"],
             "dstack_runtime_ssh_coordinates_invalid",
         )
-        return dict(coordinates)
+        return copy.deepcopy(coordinates)
 
     @staticmethod
     def _save(path, state):
