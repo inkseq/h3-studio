@@ -802,8 +802,12 @@ class DstackCapacityTests(unittest.TestCase):
     def test_supported_backend_never_falls_back(self):
         config = request(backend="runpod").run_spec(PUB)["configuration"]
         self.assertEqual(config["backends"], ["runpod"])
+        for backend in ("lium", "cloudrift"):
+            config = request(backend=backend).run_spec(PUB)["configuration"]
+            self.assertEqual(config["backends"], [backend])
+            self.assertNotIn("backend_options", config)
         with self.assertRaisesRegex(DstackError, "dstack_backend_unsupported"):
-            request(backend="lium")
+            request(backend="targon")
 
     def test_resource_floors_and_optional_regions_use_pinned_range_semantics(self):
         config = request().run_spec(PUB)["configuration"]
@@ -1116,6 +1120,38 @@ class DstackLiveUsageTests(unittest.TestCase):
             [self.node] if nodes is None else nodes,
             provider_inventory=self.inventory,
             clock=lambda: self.now,
+        )
+
+    def test_nodes_from_another_control_plane_settle_only_by_provider_absence(self):
+        # A Sky client reads history that ran on the local server (no binding field).
+        self.client.endpoint = "https://sky.dstack.ai"
+        self.client.get = Mock(
+            side_effect=AssertionError("foreign run must not be read")
+        )
+        result = self.usage()
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_foreign_provider_absent"
+        )
+        self.assertEqual(result["instances"], 0)
+        self.inventory.return_value = {
+            **self.inventory.return_value,
+            "instance_ids": [self.node["payload"]["dstack"]["provider_instance_id"]],
+        }
+        result = self.usage()
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_foreign_unconfirmed"
+        )
+        self.assertTrue(result["observations"][0]["counted"])
+        # Its own control plane reads the run as before.
+        self.node["payload"]["dstack"]["control_plane"] = "https://sky.dstack.ai"
+        self.client.get = Mock(side_effect=lambda **_: copy.deepcopy(self.run))
+        self.inventory.return_value = {
+            **self.inventory.return_value,
+            "instance_ids": [],
+        }
+        self.assertEqual(
+            self.usage()["observations"][0]["reason_code"],
+            "dstack_terminal_provider_absent",
         )
 
     def test_owned_terminal_and_fresh_provider_absence_free_capacity_not_billing(self):

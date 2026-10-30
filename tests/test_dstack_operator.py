@@ -78,6 +78,9 @@ class Client:
             ],
         }
 
+    def configured_backends(self):
+        return frozenset({"vastai", "runpod"})
+
     def vast_offer_mapping(self, request, *, clock):
         return {
             "observed_at": clock(),
