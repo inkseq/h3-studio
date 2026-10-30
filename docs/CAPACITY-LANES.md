@@ -58,6 +58,24 @@ queue ──> router (one rules table) ──┬─> pod lane        (dstack: Va
 
 Money paths (submit, budget and settlement of serverless calls) are Tier 2 and get one Codex review per step.
 
+## Open-source options considered (2026-10-30)
+
+| Project | What it does | Why not, as our router |
+|---|---|---|
+| dstack (already used) | Multi-provider pod provisioning, fleets, offers | Already our pod lane. It does not route to Modal/RunPod Serverless, and its service autoscaling scales HTTP replicas by request rate, not our pull queue. |
+| SkyPilot (~10.8k★) | Multi-cloud jobs/serving, spot recovery, failover | Same layer as dstack, and a weaker fit for Vast/Lium. Switching gains nothing at this layer. |
+| KEDA (~10.7k★), Kueue (~3.1k★) | Queue-length autoscaling and job queueing | Kubernetes-only. We run no cluster, and rented GPUs are not k8s nodes. |
+| Modal / RunPod SDKs | Per-call execution with platform autoscaling | Used *inside* the serverless adapters, not as the router. |
+
+**Decision.** The heavy parts stay open source:
+- provisioning: dstack;
+- queue and workflows: Postgres/DBOS;
+- execution: the platform SDKs.
+
+The router itself is our own small pure function. It encodes business policy: credits, budgets, provider price ceilings, and which lane pays off for a given queue. Existing tools don't cover that across pods plus serverless.
+
+We adopt the KEDA pattern (scale from queue length with a lookahead) and SkyPilot's ordered failover idea, without the dependency.
+
 ## Not changing
 
 - The queue/DBOS ownership.
