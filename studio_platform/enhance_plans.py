@@ -87,7 +87,9 @@ def compile_enhance(body, project, source_resolver):
     ):
         raise ValueError("成片来源的镜头信息无效")
     (width, height), settings = TIERS[tier]
-    frames = round(duration * FPS)
+    # The regenerate workflow keeps 8k+1 frames (124 in -> 121 out, staging
+    # #795), so plan, validate and charge the frames the worker returns.
+    frames = (round(duration * FPS) - 1) // 8 * 8 + 1
     compiled = {
         "recipe_id": RECIPE,
         "client_ref": {**ref, **shot},
@@ -118,13 +120,13 @@ def compile_enhance(body, project, source_resolver):
             "height": height,
             "fps": FPS,
             "frame_count": frames,
-            "actual_duration": duration,
+            "actual_duration": frames / FPS,
         },
         "simulation": bool(source.get("simulation")),
     }
     return compiled, {
         "tier": tier,
-        "duration": duration,
+        "duration": frames / FPS,
         "width": width,
         "height": height,
         "credits": credits(tier, frames / FPS),

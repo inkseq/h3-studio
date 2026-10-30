@@ -66,10 +66,16 @@ class EnhancePlanTests(unittest.TestCase):
                 "width": 2560,
                 "height": 1440,
                 "fps": 24,
-                "frame_count": 124,
-                "actual_duration": 124 / 24,
+                "frame_count": 121,
+                "actual_duration": 121 / 24,
             },
         )
+        # The workflow keeps 8k+1 frames: a 124-frame take comes back as 121.
+        for seconds, frames in ((121 / 24, 121), (241 / 24, 241), (15, 353)):
+            spec = compile_enhance(
+                body(), PROJECT, lambda e, k: source(duration=seconds)
+            )[0]["output_spec"]
+            self.assertEqual(spec["frame_count"], frames)
         worker = compiled["request"]["enhance"]
         self.assertEqual(
             (worker["res"], worker["steps"], worker["sigma"]), ("2k", 3, 0.8)
