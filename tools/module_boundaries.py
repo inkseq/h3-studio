@@ -83,6 +83,8 @@ DOMAINS = (
             "wangp_bootstrap",
             "worker_boot",
             "worker_tunnel",
+            "worker_grant",
+            "dialout_",
         ),
     ),
     (

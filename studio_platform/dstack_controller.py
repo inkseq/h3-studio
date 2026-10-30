@@ -1391,7 +1391,9 @@ def main(argv=None):
         service = from_environment(repo, settings)
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
-        runtime, work_dir = create_runtime(repo, service.capacity.store)
+        runtime, work_dir = create_runtime(
+            repo, service.capacity.store, settings=settings
+        )
         modal_extension = load_extension(service, work_dir)
         if settings.generation_queue == "dbos":
             from .dbos_transport import DurableExecutor
