@@ -11,7 +11,9 @@ import time
 
 V7 = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
 V8 = 'h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8'
-PROFILES = (V7, V8)
+# v9: v8 on WanGP 9cb2bcd (#844). On L40S it still runs sdpa (#839).
+V9 = 'h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9'
+PROFILES = (V7, V8, V9)
 # Inside a Modal container the image names the one profile it was built for;
 # images built before this variable existed are the v7 runtime.
 PROFILE = os.environ.get('INKSEQ_MODAL_PROFILE', V7)
