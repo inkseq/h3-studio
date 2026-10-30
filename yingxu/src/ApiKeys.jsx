@@ -42,6 +42,16 @@ const date = (value, locale = 'zh') =>
       )
     : translate(locale, 'account.more.unused');
 
+// A connection hand-off may pre-fill the form; anything unknown falls back to defaults.
+function initialForm(grant) {
+  return {
+    profile: Object.hasOwn(profiles, grant?.profile) ? grant.profile : 'edit',
+    allProjects: grant?.allProjects ?? true,
+    selected: grant?.projectIds || [],
+    days: grant?.expiresInDays || 7,
+  };
+}
+
 export default function ApiKeys({
   account,
   projects = [],
@@ -54,15 +64,14 @@ export default function ApiKeys({
     api.setAccount(account);
     return api;
   }, [account]);
+  const initial = useMemo(() => initialForm(initialGrant), [initialGrant]);
   const live = useRef(false),
     [keys, setKeys] = useState([]),
     [name, setName] = useState(''),
-    [profile, setProfile] = useState(
-      Object.hasOwn(profiles, initialGrant?.profile) ? initialGrant.profile : 'edit',
-    ),
-    [allProjects, setAllProjects] = useState(initialGrant?.allProjects ?? true),
-    [selected, setSelected] = useState(initialGrant?.projectIds || []),
-    [days, setDays] = useState(initialGrant?.expiresInDays || 7),
+    [profile, setProfile] = useState(initial.profile),
+    [allProjects, setAllProjects] = useState(initial.allProjects),
+    [selected, setSelected] = useState(initial.selected),
+    [days, setDays] = useState(initial.days),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState(''),

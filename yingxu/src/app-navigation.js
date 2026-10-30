@@ -112,25 +112,21 @@ export function createAppNavigation(browser) {
     }
     return true;
   }
+  // A left click with no modifier on a same-tab, non-download, non-external link.
+  const plainClick = (event) =>
+    !event.defaultPrevented &&
+    event.button === 0 &&
+    !(event.metaKey || event.ctrlKey || event.shiftKey || event.altKey);
+  const inPageAnchor = (anchor) =>
+    Boolean(anchor) &&
+    !anchor.hasAttribute('download') &&
+    !(anchor.getAttribute('target') && !/^_self$/i.test(anchor.getAttribute('target'))) &&
+    !anchor.relList?.contains('external');
   function intercept(event) {
-    if (
-      event.defaultPrevented ||
-      event.button !== 0 ||
-      event.metaKey ||
-      event.ctrlKey ||
-      event.shiftKey ||
-      event.altKey
-    )
-      return false;
+    if (!plainClick(event)) return false;
     const element = event.target?.closest ? event.target : event.target?.parentElement;
     const anchor = element?.closest?.('a[href]');
-    if (
-      !anchor ||
-      anchor.hasAttribute('download') ||
-      (anchor.getAttribute('target') && !/^_self$/i.test(anchor.getAttribute('target'))) ||
-      anchor.relList?.contains('external')
-    )
-      return false;
+    if (!inPageAnchor(anchor)) return false;
     const href = anchor.getAttribute('href');
     if (!href || href.startsWith('#')) return false;
     let url;

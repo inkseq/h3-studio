@@ -98,15 +98,7 @@ export function operatorNodeStatus(node, now = Date.now()) {
   const removal = nodeRemovalConfirmation(node);
   if (removal) return { label: removal.label, tone: removal.tone };
   if (historicalNode(node)) return { label: '历史记录 · 已结束', tone: 'neutral' };
-  const observed = epochMs(node?.observed_at);
-  if (
-    node?.stale ||
-    observed === null ||
-    observed > now ||
-    now - observed > 60000 ||
-    ['unknown', 'observation_failed'].includes(node?.runtime_state)
-  )
-    return { label: '状态待核对', tone: 'warn' };
+  if (unconfirmedObservation(node, now)) return { label: '状态待核对', tone: 'warn' };
   const boot = operatorBootstrap(node, now),
     phase = boot.slots.find((slot) => phaseLabels[slot.phase]);
   if (
@@ -126,13 +118,26 @@ export function operatorNodeStatus(node, now = Date.now()) {
   }
   return {
     label: stateLabel(node?.runtime_state || node?.state),
-    tone: ['ready', 'busy'].includes(node?.runtime_state)
-      ? 'good'
-      : ['blocked', 'failed'].includes(node?.runtime_state)
-        ? 'warn'
-        : 'neutral',
+    tone: stateTone(node?.runtime_state),
   };
 }
+// Stale, missing, future or more than a minute old: the state cannot be shown as current.
+function unconfirmedObservation(node, now) {
+  const observed = epochMs(node?.observed_at);
+  return (
+    node?.stale ||
+    observed === null ||
+    observed > now ||
+    now - observed > 60000 ||
+    ['unknown', 'observation_failed'].includes(node?.runtime_state)
+  );
+}
+const stateTone = (state) =>
+  ['ready', 'busy'].includes(state)
+    ? 'good'
+    : ['blocked', 'failed'].includes(state)
+      ? 'warn'
+      : 'neutral';
 export function operatorCapacitySummary(snapshot, now = Date.now()) {
   const groups = operatorNodeGroups(snapshot?.nodes),
     current = [...groups.current, ...groups.pending_review];
