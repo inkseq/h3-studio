@@ -60,6 +60,7 @@ from .repository import (
     scaler_actions,
     scaler_receipts,
 )
+from .dstack_inventory import fallbacks_valid, profile_backends
 from .runtime_catalog import engine_manifest, get_profile
 
 BACKEND_MARKER = "dstack-v1"
@@ -133,15 +134,6 @@ def _integer(value, minimum=1, maximum=9_000_000_000_000):
 
 def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
-
-
-def profile_backends(profile):
-    """The primary backend first, then the configured fallbacks, all supported."""
-    return [
-        backend
-        for backend in [profile["backend"], *profile.get("fallback_backends", [])]
-        if backend in PROVIDERS
-    ]
 
 
 def plan_offers(plan, request):
@@ -1370,16 +1362,8 @@ class DstackOperator:
             "dstack_native_gpu_binding_invalid",
             422,
         )
-        fallback = profile.get("fallback_backends", [])
         require(
-            isinstance(fallback, list)
-            and len(fallback) == len(set(fallback))
-            and all(
-                backend in PROVIDERS and backend != profile["backend"]
-                for backend in fallback
-            ),
-            "dstack_profile_fields_invalid",
-            422,
+            fallbacks_valid(profile, PROVIDERS), "dstack_profile_fields_invalid", 422
         )
         require(
             _integer(profile["extra_reservation_microusd"], 0)
@@ -2322,7 +2306,7 @@ class DstackOperator:
                     "configuration_id",
                 )
             )
-            and profile.get("backend") in profile_backends(selected)
+            and profile.get("backend") in profile_backends(selected, PROVIDERS)
         )
         pool = None
         if bound_profile:
@@ -2349,7 +2333,7 @@ class DstackOperator:
             elif capacity_snapshot == current_snapshot and isinstance(request, dict):
                 expected = {
                     "backend": request.get("backend")
-                    if request.get("backend") in profile_backends(selected)
+                    if request.get("backend") in profile_backends(selected, PROVIDERS)
                     else selected["backend"],
                     "profile_id": selected["runtime_profile_id"],
                     "mode": selected["mode"],
