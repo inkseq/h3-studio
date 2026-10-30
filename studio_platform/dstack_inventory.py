@@ -1,7 +1,8 @@
 """Complete account reads for RunPod, Lium and CloudRift, and backend fallback rules.
 
 Vast's paginated read stays in dstack_capacity. Each reader receives the caller's
-allowlisted `read(method, url, body=...)` and returns (instance_ids, aliases).
+allowlisted `read(method, url, body=...)` and returns (instance_ids, aliases,
+labels); labels is None where the provider has no instance names (CloudRift).
 A malformed reply raises InventoryUnconfirmed; it is never read as empty.
 """
 
@@ -49,12 +50,13 @@ def read_ids(backend, read):
         ids = _ids(rows)
         # Before Lium returns a pod ID, dstack records the pod name: keep names
         # only as aliases for pending bindings, never as extra allocations.
-        aliases = {}
+        aliases, labels = {}, []
         for row in rows:
             name = row.get("pod_name") or row.get("name")
             if isinstance(name, str) and IDENTIFIER.fullmatch(name):
                 aliases[name] = row["id"]
-        return ids, aliases
+            labels.append(name if isinstance(name, str) else None)
+        return ids, aliases, labels
     if backend == "cloudrift":
         body = {
             "version": CLOUDRIFT_API_VERSION,
@@ -62,8 +64,8 @@ def read_ids(backend, read):
         }
         document = read("POST", CLOUDRIFT_INSTANCES_URL, body=body)
         data = document.get("data") if isinstance(document, dict) else None
-        return _ids(data.get("instances") if isinstance(data, dict) else None), {}
-    query = {"query": "query { myself { pods { id } } }"}
+        return _ids(data.get("instances") if isinstance(data, dict) else None), {}, None
+    query = {"query": "query { myself { pods { id name } } }"}
     document = read("POST", RUNPOD_GRAPHQL_URL, body=query)
     _check(isinstance(document, dict) and set(document) == {"data"})
     data = document["data"]
@@ -74,7 +76,10 @@ def read_ids(backend, read):
         and isinstance(myself, dict)
         and set(myself) == {"pods"}
     )
-    return _ids(myself["pods"], exact_keys={"id"}), {}
+    pods = myself["pods"]
+    ids = _ids(pods, exact_keys={"id", "name"})
+    _check(all(row["name"] is None or isinstance(row["name"], str) for row in pods))
+    return ids, {}, [row["name"] for row in pods]
 
 
 OPTIONAL_PROFILE_FIELDS = {
