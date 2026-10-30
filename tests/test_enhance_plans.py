@@ -75,6 +75,9 @@ class EnhancePlanTests(unittest.TestCase):
             (worker["res"], worker["steps"], worker["sigma"]), ("2k", 3, 0.8)
         )
         self.assertEqual(worker["source_artifact_id"], "artifact-1")
+        self.assertNotIn("prompt", worker)
+        prompted, _ = compile_enhance(body(), PROJECT, lambda e, k: source(prompt="p"))
+        self.assertEqual(prompted["request"]["enhance"]["prompt"], "p")
         self.assertEqual(display["credits"], 150)
         refused = [
             ({"tier": "2k"}, lambda e, k: source()),

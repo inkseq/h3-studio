@@ -42,6 +42,8 @@ def register_routes(app):
                 "height": height,
                 # The enhanced take joins the source take's shot (its versions list).
                 "shot": {k: ref[k] for k in ("shot_id", "shot_version") if k in ref},
+                # The take's own prompt guides the regenerate pass (#795 runs).
+                "prompt": (job["request"].get("request") or {}).get("prompt"),
             }
 
         try:

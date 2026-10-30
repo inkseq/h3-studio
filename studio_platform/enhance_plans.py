@@ -102,6 +102,12 @@ def compile_enhance(body, project, source_resolver):
                 "unet": "int8",
                 "source_artifact_id": source["artifact_id"],
                 "source_job_id": source["source_job_id"],
+                **(
+                    {"prompt": source["prompt"]}
+                    if isinstance(source.get("prompt"), str)
+                    and 0 < len(source["prompt"]) <= 8000
+                    else {}
+                ),
             },
         },
         "sources": {
