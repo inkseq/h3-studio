@@ -121,6 +121,31 @@ class EnhanceRouteTests(unittest.TestCase):
                     client.get("/v1/capabilities").json()["enhance"]["enabled"]
                 )
 
+    def test_reviewed_terms_are_frozen_into_the_plan_before_the_job(self):
+        # A reviewed policy with accepted terms: the plan must freeze the same
+        # acceptance /v1/jobs recomputes, or the job is refused with 409.
+        accepted = {"version": "terms-v1", "accepted_at": 1.0, "policy_revision": "r"}
+        with patch(
+            "studio_platform.content_policy.require_generation_terms",
+            return_value=accepted,
+        ):
+            plan = self.plan("1080p").json()
+            job = self.client.post(
+                "/v1/jobs",
+                json={"plan_id": plan["plan_id"]},
+                headers={"Idempotency-Key": "enhance-terms"},
+            )
+        self.assertEqual(job.status_code, 202, job.text)
+        from sqlalchemy import select
+
+        from studio_platform.repository import plans
+
+        with self.app.state.repository.engine.connect() as connection:
+            execution = connection.execute(
+                select(plans.c.execution_plan).where(plans.c.id == plan["plan_id"])
+            ).scalar_one()
+        self.assertEqual(execution["terms_acceptance"], accepted)
+
     def test_enhanced_or_oversized_sources_are_refused(self):
         for job in (source_job("enhance-v1"), source_job(width=1920, height=1088)):
             self.job = job

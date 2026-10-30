@@ -66,6 +66,13 @@ def register_routes(app):
             )
         if credit_quote is not None:
             admission.execution["credit_quote"] = credit_quote
+        from .generation_services import freeze_generation_policy
+
+        # Moderation and accepted terms are frozen like every other plan;
+        # /v1/jobs re-checks them before any credit hold.
+        freeze_generation_policy(
+            repo, settings.tenant_id, principal.owner, compiled, admission.execution
+        )
         plan = repo.create_plan(
             scope,
             compiled,
