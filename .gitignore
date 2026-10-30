@@ -1036,3 +1036,4 @@ inventory.json
 !studio_platform/dstack_control_plane.py
 !tests/test_dstack_providers.py
 !studio_platform/dstack_inventory.py
+!renovate.json
