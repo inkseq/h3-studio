@@ -212,6 +212,30 @@ _TAOMATE_LORA = (
     "sha256",
     "de9663d974a884b477556748239c6f28239f7ca1825be270f98f023ff5dab6a7",
 )
+_VAE_ORIGINAL = next(
+    row
+    for row in _LOCATOR_FILES
+    if row[0] == "minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors"
+)
+# Newer immutable files fetched from their own revision (per-file locator). Each
+# row is approved only at exactly this path, size, hash and revision (#844).
+_DIRECT_FILES = {
+    # v9 (WanGP 9cb2bcd): the same VAE with ConvRot file-level format metadata,
+    # the file 9cb2bcd was measured with (2026-10-11, +72 bytes).
+    (
+        "minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors",
+        2811065256,
+        "sha256",
+        "0cb8161a12166fb049a2c1295e6a4833fdc571effdab9ac0ed074b10f2d6646d",
+    ): "98b5288b174fe08f6d54f9af0dc46ee8bb58b225",
+}
+_V9_VAE = next(row for row in _DIRECT_FILES if row[0] == _VAE_ORIGINAL[0])
+
+
+def _with_v9_vae(rows):
+    return tuple(_V9_VAE if row == _VAE_ORIGINAL else row for row in rows)
+
+
 _FULL_CONTROL_LOCATOR_FILES = {
     "fl": (
         tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
@@ -221,6 +245,16 @@ _FULL_CONTROL_LOCATOR_FILES = {
             *(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
             _TAOMATE_LORA,
         ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["ref"]
+                ),
+                _TAOMATE_LORA,
+            )
+        ),
     ),
     "ref": (
         tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
@@ -229,6 +263,16 @@ _FULL_CONTROL_LOCATOR_FILES = {
         (
             *(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
             _TAOMATE_LORA,
+        ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["fl"]
+                ),
+                _TAOMATE_LORA,
+            )
         ),
     ),
 }
@@ -386,15 +430,24 @@ def _content_preserving_revision(document, expected_digest, records):
             raise ValueError("model_download_locator_invalid") from None
         full_controls = True
     if manifests.get(mode) != expected_digest or any(
-        repo != _LOCATOR_REPOSITORY or revision != _LOCATOR_ORIGINAL
+        repo != _LOCATOR_REPOSITORY
+        or revision not in {_LOCATOR_ORIGINAL, *_DIRECT_FILES.values()}
         for _, repo, revision, _, _ in records
     ):
         raise ValueError("model_download_locator_invalid")
-    files = []
+    files, direct = [], {}
     for component in document["components"].values():
         for item in component["files"]:
             kind = "sha256" if "sha256" in item else "git_blob_sha1"
-            files.append((item["path"], item["size_bytes"], kind, item[kind]))
+            row = (item["path"], item["size_bytes"], kind, item[kind])
+            files.append(row)
+            # A direct row and only a direct row names its own newer revision.
+            if (component["revision"] != _LOCATOR_ORIGINAL) != (row in _DIRECT_FILES):
+                raise ValueError("model_download_locator_invalid")
+            if row in _DIRECT_FILES:
+                if component["revision"] != _DIRECT_FILES[row]:
+                    raise ValueError("model_download_locator_invalid")
+                direct[row[0]] = _DIRECT_FILES[row]
     if full_controls:
         expected_sets = _FULL_CONTROL_LOCATOR_FILES[mode]
     elif document.get("deployment_profile_id") in {
@@ -409,6 +462,11 @@ def _content_preserving_revision(document, expected_digest, records):
         sorted(files) == sorted(expected_files) for expected_files in expected_sets
     ):
         raise ValueError("model_download_locator_invalid")
+    if direct:
+        return {
+            filename: direct.get(filename, _LOCATOR_REVISION)
+            for _, _, _, filename, _ in records
+        }
     return _LOCATOR_REVISION
 
 
@@ -564,7 +622,9 @@ def fetch_files(
                 returned = downloader(
                     repo_id=repo,
                     filename=filename,
-                    revision=locator_revision or revision,
+                    revision=locator_revision.get(filename)
+                    if isinstance(locator_revision, dict)
+                    else locator_revision or revision,
                     local_dir=str(root),
                     token=False,
                     endpoint=ENDPOINT,

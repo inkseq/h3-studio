@@ -2,13 +2,13 @@
 
 import copy
 
-from .creator_controls import TAOMATE, TAOMATE_V8
+from .creator_controls import TAOMATE, TAOMATE_V8, TAOMATE_V9
 from .runtime_catalog import get_profile
 
 GIB = 1024**3
 TAOMATE_HEADROOM_GIB = 12
 # v8 is the same models and LoRA on CUDA 13 + sage2, so it keeps the #716 floor.
-TAOMATE_PROFILES = (TAOMATE, TAOMATE_V8)
+TAOMATE_PROFILES = (TAOMATE, TAOMATE_V8, TAOMATE_V9)
 
 
 def planning_ram_gib(profile_id, configured):
