@@ -557,7 +557,9 @@ jobs:
             --migration-selection h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8:fl \
             --migration-selection h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8:ref \
             --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9:fl \
-            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9:ref "${retained_args[@]}"
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9:ref \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9:fl \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9:ref "${retained_args[@]}"
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
