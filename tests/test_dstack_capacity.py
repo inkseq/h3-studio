@@ -321,6 +321,82 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.client.stop_count, 0)
 
+    def test_stock_no_capacity_settles_only_when_the_account_lacks_this_run(self):
+        # dstack Sky runs stock dstack: no typed Vast rejections exist (#868).
+        self.start()
+        self.client.run = no_capacity_run(self.client.run)
+        for submission in (
+            self.client.run["latest_job_submission"],
+            self.client.run["jobs"][0]["job_submissions"][0],
+        ):
+            submission["finished_at"] = "2026-10-30T12:00:00Z"
+        terminal = 1793361600.0  # 2026-10-30T12:00:00Z
+        marker = self.client.run["run_spec"]["run_name"][:16]
+        labels = ["dstack-inkseq-production-sixnine-ffffffff-0-0-ab", None]
+        read_at = [terminal + 300]
+
+        def inventory(backend):
+            return {
+                "backend": backend,
+                "complete": True,
+                "observed_at": read_at[0],
+                "instance_ids": [str(i) for i in range(len(labels))],
+                "labels": list(labels),
+            }
+
+        self.client.provider_inventory = inventory
+        # A live instance whose name carries this run keeps billing pending,
+        # whatever project prefix or truncation dstack applied.
+        labels[1] = "dstack-another-project-" + marker + "-0-0-x"
+        pending = self.capacity.observe(INTENT)
+        self.assertEqual(pending["billing_state"], "unsettled")
+        self.assertEqual(pending["reason_code"], "dstack_no_capacity_billing_pending")
+        labels[1] = None
+        # A create that timed out may still land: no proof inside the window.
+        read_at[0] = terminal + 299
+        self.assertEqual(self.capacity.observe(INTENT)["billing_state"], "unsettled")
+        read_at[0] = terminal + 300
+        from studio_platform.dstack_allocation_proof import from_account_absence
+
+        # A project name long enough to truncate the run marker away is refused.
+        self.assertIsNone(
+            from_account_absence(
+                self.client.run, self.store.load(INTENT), inventory("vastai"), "p" * 28
+            )
+        )
+        settled = self.capacity.observe(INTENT)
+        self.assertEqual(
+            (settled["billing_state"], settled["reason_code"]),
+            ("no_charge_confirmed", "dstack_never_allocated"),
+        )
+        from studio_platform.dstack_allocation_proof import validate_proof
+
+        proof = self.store.load(INTENT).get("no_allocation_proof") or settled.get(
+            "no_allocation_proof"
+        )
+        self.assertEqual(proof["source"], "provider_account_absent_v1")
+        self.assertEqual(proof["attempts"][0]["label_prefix"], marker)
+        self.assertIsNotNone(validate_proof(proof, self.store.load(INTENT)))
+        for change in ({"matched": 1}, {"observed_at": terminal + 10}):
+            tampered = {**proof, "attempts": [{**proof["attempts"][0], **change}]}
+            self.assertIsNone(validate_proof(tampered, self.store.load(INTENT)))
+        self.native.assert_not_called()
+        self.assertEqual(self.client.apply_count, 1)
+
+    def test_stock_no_capacity_without_instance_names_stays_pending(self):
+        self.capacity.start(request(backend="cloudrift"), PUB)
+        self.client.run = no_capacity_run(self.client.run)
+        self.client.provider_inventory = lambda backend: {
+            "backend": backend,
+            "complete": True,
+            "observed_at": 21.0,
+            "instance_ids": [],
+        }
+        value = self.capacity.observe(INTENT)
+        self.assertEqual(value["billing_state"], "unsettled")
+        self.client.provider_inventory = Mock(side_effect=DstackError("x"))
+        self.assertEqual(self.capacity.observe(INTENT)["billing_state"], "unsettled")
+
     def test_terminal_runpod_create_unknown_never_reapplies_or_settles(self):
         original = request(backend="runpod")
         self.capacity.start(original, PUB)
@@ -1978,11 +2054,14 @@ class DstackRESTTests(unittest.TestCase):
             self.assertEqual(
                 str(req.url).split("?")[0], "https://console.vast.ai/api/v1/instances/"
             )
-            self.assertEqual(req.url.params["select_cols"], '["id"]')
+            self.assertEqual(req.url.params["select_cols"], '["id","label"]')
             self.assertEqual(req.url.params["limit"], "25")
             if len(seen) == 1:
                 self.assertNotIn("after_token", req.url.params)
-                rows, cursor = [{"id": 123}, {"id": 456}], "next-page-token"
+                rows, cursor = (
+                    [{"id": 123, "label": "dstack-a"}, {"id": 456}],
+                    "next-page-token",
+                )
             else:
                 self.assertEqual(req.url.params["after_token"], "next-page-token")
                 rows, cursor = [{"id": 789}], None
@@ -2007,6 +2086,7 @@ class DstackRESTTests(unittest.TestCase):
                 "complete": True,
                 "observed_at": 20.0,
                 "instance_ids": ["123", "456", "789"],
+                "labels": ["dstack-a", None, None],
             },
         )
         self.assertNotIn("secret", json.dumps(result))
@@ -2069,19 +2149,22 @@ class DstackRESTTests(unittest.TestCase):
             ):
                 self.provider_client("vastai", read).provider_inventory("vastai")
 
-    def test_runpod_unpaginated_account_query_projects_ids_only(self):
+    def test_runpod_unpaginated_account_query_projects_ids_and_names(self):
         def read(req):
             self.assertEqual(req.method, "POST")
             self.assertEqual(str(req.url), "https://api.runpod.io/graphql")
             self.assertEqual(
-                json.loads(req.content), {"query": "query { myself { pods { id } } }"}
+                json.loads(req.content),
+                {"query": "query { myself { pods { id name } } }"},
             )
             return httpx.Response(
-                200, json={"data": {"myself": {"pods": [{"id": "pod-123"}]}}}
+                200,
+                json={"data": {"myself": {"pods": [{"id": "pod-123", "name": "x"}]}}},
             )
 
         result = self.provider_client("runpod", read).provider_inventory("runpod")
         self.assertEqual(result["instance_ids"], ["pod-123"])
+        self.assertEqual(result["labels"], ["x"])
         for bad in (
             {
                 "data": {"myself": {"pods": []}},
@@ -2089,6 +2172,7 @@ class DstackRESTTests(unittest.TestCase):
             },
             {"data": {"myself": {"pods": [], "pageInfo": {"hasNextPage": True}}}},
             {"data": {"myself": {"pods": [{"id": "same"}, {"id": "same"}]}}},
+            {"data": {"myself": {"pods": [{"id": "pod-1", "name": 7}]}}},
         ):
             with (
                 self.subTest(bad=bad),
