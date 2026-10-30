@@ -34,6 +34,8 @@ Setup unless stated: talk clip, 121 frames; ComfyUI v0.42.1 + Open-H3-Regenerate
 
 | Date | GPU (arch) | Setting | Time | Frames | Verdict |
 |---|---|---|---|---|---|
+| 2026-10-30 | RTX PRO 6000 (sm120), Lium | **WanGP 9cb2bcd native regenerate (#866)** on the existing talk clip -> 2560x1440, sage2, v9 runtime config (profile 4). FL2VA `GV` + denoise 0.7 + `K` (draft audio kept), 2 phases: phase 1 sigmas `0.9,0.05,0.03,0.01` (source re-injected, ~passthrough), phase 2 regenerate LoRA `0;1` at the preset sigmas 0.909/0.857/0.667 or 0.8/0.533/0.267. No sharp-curve LoRA, no fast VAE (WanGP has neither). | 446 s (preset) / 463 s (σ0.8) warm, 1015 s cold; phase 2 = 3 x 95-98 s, 2K source encode ~60 s. Peak 17.4 GiB VRAM | clean, but **identity drifts** (σ0.909 adds glasses), mouth/expression change, crunchy over-sharp texture | **Keep ComfyUI.** 2.6x slower than ComfyUI (170 s) and worse. Phase 2 is forced to silent audio when the regenerate LoRA is on, so dialogue lips drift. Works on an existing clip only via the `GV` denoise path; deterministic (two runs byte-identical). |
+| 2026-10-30 | RTX 5090 (sm120), Lium, 26 GiB container RAM | Same WanGP regenerate run | — | — | **Container OOM-killed while loading** (21 GB transformer + 12.45 GB regenerate LoRA in host RAM). The v9 profile admits hosts from 31.1 GB RAM, so this path would need a higher RAM floor. |
 | 2026-10-30 | RTX PRO 6000 (sm120), RunPod | 1080 Std, sage | 56.5 s | clean | **Best fit for enhance.** |
 | 2026-10-30 | RTX PRO 6000 (sm120), RunPod | 2K Enh, sage | 170 s | clean | ″ |
 | 2026-10-30 | RTX PRO 6000 (sm120), RunPod | 2K Enh, sdpa | 271 s | clean | sage is faster and just as clean on sm120. |
