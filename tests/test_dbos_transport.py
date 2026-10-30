@@ -230,6 +230,33 @@ class DurableDomainTests(LedgerCase):
                 self.assertEqual(worker["state"], "ready")
                 self.assertEqual(worker["expires_at"], self.now + 3600)
 
+    def test_enhance_slot_registers_ready_without_provider_polling(self):
+        from studio_platform.settings import Settings
+
+        settings = Settings(
+            self.directory, auth_mode="local-test", enhance_enabled=True
+        )
+        with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
+            slots.add_render_slots()
+            slots.add_enhance_slot()
+            self.assertEqual(set(slots._slots), {"dbos-runpod-enhance-v1"})
+            self.assertEqual(slots.children, {})
+            worker = self.control.get("dbos-runpod-enhance-v1")
+            self.assertEqual(worker["state"], "ready")
+            self.assertEqual(worker["expires_at"], self.now + 3600)
+
+    def test_enhance_slot_failure_leaves_the_executor_running(self):
+        from studio_platform.settings import Settings
+
+        settings = Settings(
+            self.directory, auth_mode="local-test", enhance_enabled=True
+        )
+        with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
+            with patch.object(slots, "ensure", side_effect=ValueError("boom")):
+                slots.add_enhance_slot()
+            self.assertEqual(slots._slots, {})
+            slots.add_render_slots()
+
     def test_startup_v5_claim_is_exact_and_all_versions_share_the_cpu_fence(self):
         from studio_platform.render_plans import CONFIGURATIONS, MODEL, POOL, RECIPE
         from studio_platform.settings import Settings
