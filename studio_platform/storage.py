@@ -949,7 +949,9 @@ class S3ObjectStore:
                 )
             params["ResponseContentDisposition"] = disposition
         if method == "PUT":
-            params.update(ContentType=headers["Content-Type"], IfNoneMatch="*")
+            params["ContentType"] = headers["Content-Type"]
+            if "If-None-Match" in headers:
+                params["IfNoneMatch"] = headers["If-None-Match"]
             if "Content-Length" in headers:
                 params["ContentLength"] = int(headers["Content-Length"])
             if "Content-MD5" in headers:
