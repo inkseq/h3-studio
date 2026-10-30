@@ -10,6 +10,7 @@ PROJECT = {
         {"id": "take-1", "type": "video", "data": {"cloudArtifactId": "artifact-1"}},
         {"id": "upload-1", "type": "video", "data": {"cloudAssetId": "asset-1"}},
         {"id": "audio-1", "type": "audio", "data": {"cloudArtifactId": "a"}},
+        {"id": "broken-1", "type": "video", "data": "artifact-1"},
     ],
 }
 
@@ -22,6 +23,9 @@ def source(**changes):
         "artifact_id": "artifact-1",
         "object": {"key": "k", "size_bytes": 20 * 1024**2, "sha256": "a" * 64},
         "simulation": False,
+        "recipe_id": "h3-default",
+        "width": 1376,
+        "height": 768,
         **changes,
     }
 
@@ -66,7 +70,14 @@ class EnhancePlanTests(unittest.TestCase):
             (body(entity="upload-1"), lambda e, k: source()),
             (body(entity="audio-1"), lambda e, k: source()),
             (body(entity="missing"), lambda e, k: source()),
-            (body(), lambda e, k: source(duration=31)),
+            (body(entity="broken-1"), lambda e, k: source()),
+            (body(), lambda e, k: source(duration=16)),
+            # Only generated takes: no re-enhance, no chapter render, no 2K input.
+            (body(), lambda e, k: source(recipe_id=RECIPE)),
+            (body(), lambda e, k: source(recipe_id="chapter-roughcut-v1")),
+            (body(), lambda e, k: source(recipe_id=None)),
+            (body(), lambda e, k: source(width=2560, height=1440)),
+            (body(), lambda e, k: source(width=None, height=None)),
             (body(), lambda e, k: source(artifact_id=None)),
             (body(), lambda e, k: source(object={"key": "k", "size_bytes": 0})),
         ]

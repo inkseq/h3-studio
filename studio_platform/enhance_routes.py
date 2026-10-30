@@ -9,6 +9,7 @@ from fastapi import HTTPException, Request
 
 from .enhance_plans import compile_enhance
 from .generation_admission import reject_managed
+from .inference.outputs import _shape
 from .repository import request_hash
 
 
@@ -23,17 +24,23 @@ def register_routes(app):
             "payload"
         ]
         reject_managed(project)
+        scope = state.scope(principal, project_id)
+
+        def resolve(entity, kind):
+            source = state.resolve_render_source(principal, project_id, entity, kind)
+            # The source job's recipe and frame size decide what may be enhanced.
+            job = state.repository.get_job(scope, source["source_job_id"])
+            try:
+                width, height, _, _ = _shape(job)
+            except Exception:
+                width = height = None
+            recipe = job["request"].get("recipe_id")
+            return {**source, "recipe_id": recipe, "width": width, "height": height}
+
         try:
-            compiled, display = compile_enhance(
-                body,
-                project,
-                lambda entity, kind: state.resolve_render_source(
-                    principal, project_id, entity, kind
-                ),
-            )
+            compiled, display = compile_enhance(body, project, resolve)
         except ValueError as error:
             raise HTTPException(422, str(error)) from None
-        scope = state.scope(principal, project_id)
         policies = state.generation_admission.policies
         admission = policies.evaluate(compiled, scope, request_hash(compiled))
         from .credits_pricing import public_quote

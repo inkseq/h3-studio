@@ -15,7 +15,11 @@ MODEL = "open-h3-regenerate-2k"
 CONFIGURATION = "runpod-enhance-v1"
 FPS = 24
 MAX_SOURCE_BYTES = 512 * 1024**2
-MAX_DURATION_S = 30
+# Generated takes only: at most 15 s and the generation size cap. A render or an
+# enhance output is never a source (no 2K -> 2K re-enhance).
+MAX_DURATION_S = 15
+MAX_SOURCE_SIDE = 1536
+NOT_SOURCES = {RECIPE, "chapter-roughcut-v1"}
 # tier -> (output size, worker settings) from the #795 measurements.
 TIERS = {
     "1080p": ((1920, 1080), {"res": "1080", "steps": 2, "sigma": 0.0}),
@@ -54,7 +58,8 @@ def compile_enhance(body, project, source_resolver):
     if (
         entity is None
         or entity.get("type") != "video"
-        or not entity.get("data", {}).get("cloudArtifactId")
+        or not isinstance(entity.get("data"), dict)
+        or not entity["data"].get("cloudArtifactId")
     ):
         raise ValueError("只能为已生成的视频成片提升清晰度")
     source = source_resolver(entity, "video")
@@ -65,6 +70,12 @@ def compile_enhance(body, project, source_resolver):
         or type(duration) not in (int, float)
         or not 0 < duration <= MAX_DURATION_S
         or not 0 < source["object"]["size_bytes"] <= MAX_SOURCE_BYTES
+        or not isinstance(source.get("recipe_id"), str)
+        or source["recipe_id"] in NOT_SOURCES
+        or not all(
+            type(source.get(side)) is int and 0 < source[side] <= MAX_SOURCE_SIDE
+            for side in ("width", "height")
+        )
     ):
         raise ValueError("成片格式、时长或大小不符合提升清晰度要求")
     (width, height), settings = TIERS[tier]
@@ -102,5 +113,5 @@ def compile_enhance(body, project, source_resolver):
         "duration": duration,
         "width": width,
         "height": height,
-        "credits": credits(tier, duration),
+        "credits": credits(tier, frames / FPS),
     }
