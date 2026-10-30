@@ -26,6 +26,7 @@ def source(**changes):
         "recipe_id": "h3-default",
         "width": 1376,
         "height": 768,
+        "shot": {"shot_id": "shot-1", "shot_version": 3},
         **changes,
     }
 
@@ -48,6 +49,17 @@ class EnhancePlanTests(unittest.TestCase):
     def test_compiles_only_a_validated_generated_take(self):
         compiled, display = compile_enhance(body(), PROJECT, lambda e, k: source())
         self.assertEqual(compiled["recipe_id"], RECIPE)
+        self.assertEqual(
+            compiled["client_ref"],
+            {
+                "project_id": "project-1",
+                "entity_id": "take-1",
+                "shot_id": "shot-1",
+                "shot_version": 3,
+            },
+        )
+        loose, _ = compile_enhance(body(), PROJECT, lambda e, k: source(shot={}))
+        self.assertEqual(set(loose["client_ref"]), {"project_id", "entity_id"})
         self.assertEqual(
             compiled["output_spec"],
             {
@@ -78,6 +90,8 @@ class EnhancePlanTests(unittest.TestCase):
             (body(), lambda e, k: source(recipe_id=None)),
             (body(), lambda e, k: source(width=2560, height=1440)),
             (body(), lambda e, k: source(width=None, height=None)),
+            (body(), lambda e, k: source(shot={"shot_id": 7})),
+            (body(), lambda e, k: source(shot={"other": "x"})),
             (body(), lambda e, k: source(artifact_id=None)),
             (body(), lambda e, k: source(object={"key": "k", "size_bytes": 0})),
         ]

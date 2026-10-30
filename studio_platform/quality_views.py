@@ -57,6 +57,8 @@ PRIVATE_SELECTION = frozenset(
     }
 )
 RENDER_RECIPE = "chapter-roughcut-v1"
+# Recipes with no video quality selection; their IDs name no model.
+PLAIN_RECIPES = {RENDER_RECIPE, "enhance-v1"}
 
 
 def is_admin(principal):
@@ -170,7 +172,7 @@ def _identities(result, original):
     }.intersection(original)
     if not identity_fields or (
         identity_fields <= {"recipe_id", "recipeId"}
-        and all(original[field] == RENDER_RECIPE for field in identity_fields)
+        and all(original[field] in PLAIN_RECIPES for field in identity_fields)
     ):
         # Revision summaries, controls-only drafts and CPU renders have no
         # video quality selection. Preserve their existing response shape.

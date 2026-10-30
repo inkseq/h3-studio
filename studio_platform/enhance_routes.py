@@ -34,8 +34,15 @@ def register_routes(app):
                 width, height, _, _ = _shape(job)
             except Exception:
                 width = height = None
-            recipe = job["request"].get("recipe_id")
-            return {**source, "recipe_id": recipe, "width": width, "height": height}
+            ref = job["request"].get("client_ref") or {}
+            return {
+                **source,
+                "recipe_id": job["request"].get("recipe_id"),
+                "width": width,
+                "height": height,
+                # The enhanced take joins the source take's shot (its versions list).
+                "shot": {k: ref[k] for k in ("shot_id", "shot_version") if k in ref},
+            }
 
         try:
             compiled, display = compile_enhance(body, project, resolve)

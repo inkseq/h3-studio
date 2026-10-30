@@ -8,7 +8,7 @@ prices. It never contacts a provider.
 
 import math
 
-RECIPE = "h3-enhance-v1"
+RECIPE = "enhance-v1"  # Public: users may see it; MODEL stays internal.
 POOL = "enhance"
 BACKEND = "runpod-enhance"
 MODEL = "open-h3-regenerate-2k"
@@ -78,11 +78,19 @@ def compile_enhance(body, project, source_resolver):
         )
     ):
         raise ValueError("成片格式、时长或大小不符合提升清晰度要求")
+    shot = source.get("shot") or {}
+    if not (
+        isinstance(shot, dict)
+        and set(shot) <= {"shot_id", "shot_version"}
+        and isinstance(shot.get("shot_id", ""), str)
+        and type(shot.get("shot_version", 0)) is int
+    ):
+        raise ValueError("成片来源的镜头信息无效")
     (width, height), settings = TIERS[tier]
     frames = round(duration * FPS)
     compiled = {
         "recipe_id": RECIPE,
-        "client_ref": ref,
+        "client_ref": {**ref, **shot},
         "request": {
             "model": MODEL,
             "tier": tier,
