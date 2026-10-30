@@ -32,6 +32,8 @@ QUEUE = "inkseq-generation-v1"
 WORKFLOW = "inkseq.generation.v1"
 POLL_SECONDS = 10
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
+# Slots without a native GPU node: no dstack demand, kept alive by heartbeat_cpu.
+LOCAL_BACKENDS = frozenset({"cpu-render", "runpod-enhance"})
 ACTIVE = frozenset(
     {
         "queued",
@@ -312,13 +314,13 @@ class DurableSlots:
             return {
                 key: item
                 for key, item in self._slots.items()
-                if item.spec.backend != "cpu-render"
+                if item.spec.backend not in LOCAL_BACKENDS
             }
 
     def heartbeat_cpu(self):
         with self._lock:
             for slot in self._slots.values():
-                if slot.spec.backend == "cpu-render":
+                if slot.spec.backend in LOCAL_BACKENDS:
                     worker = slot.runner.control.get(slot.spec.worker_id)
                     if worker["expires_at"] > self.repo.clock() and worker[
                         "state"
@@ -349,6 +351,29 @@ class DurableSlots:
                 "cpu-render",
             )
             self.ensure(worker, SlotConfig(spec, enabled=True))
+        self.heartbeat_cpu()
+
+    def add_enhance_slot(self):
+        """One CPU slot that submits enhance jobs to RunPod Serverless (#795)."""
+        if not getattr(self.settings, "enhance_enabled", False):
+            return
+        from .control import WorkerSpec
+        from .fleet import SlotConfig
+        from . import enhance_plans as plan
+
+        worker = "dbos-" + plan.CONFIGURATION
+        spec = WorkerSpec(
+            worker,
+            plan.POOL,
+            "runpod",
+            worker,
+            (),
+            (plan.RECIPE,),
+            plan.MODEL,
+            plan.CONFIGURATION,
+            plan.BACKEND,
+        )
+        self.ensure(worker, SlotConfig(spec, enabled=True))
         self.heartbeat_cpu()
 
     @contextmanager
@@ -421,7 +446,7 @@ class DurableSlots:
             # observation. Idle DBOS slots have no WorkerRunner turn to renew
             # registration. Keep only an already-live lease/fence; expiry or
             # UNKNOWN still needs explicit native idle proof in the controller.
-            if slot.spec.backend != "cpu-render":
+            if slot.spec.backend not in LOCAL_BACKENDS:
                 worker = current.runner.control.get(slot.spec.worker_id)
                 if worker["expires_at"] > self.repo.clock() and worker["state"] not in {
                     "unknown",
@@ -489,7 +514,7 @@ class DurableSlots:
                     finally:
                         if cpu:
                             slot.runner.backend._operation_fence_fd = None
-                if cpu:
+                if slot.spec.backend in LOCAL_BACKENDS:
                     worker = slot.runner.control.get(slot.spec.worker_id)
                     if worker["expires_at"] > self.repo.clock() and worker[
                         "state"
@@ -602,6 +627,7 @@ class DurableExecutor:
         try:
             configure_producer(self.repo)
             self.slots.add_render_slots()
+            self.slots.add_enhance_slot()
             # The configured environment is stable across ordinary releases.
             environment = (
                 "staging"
