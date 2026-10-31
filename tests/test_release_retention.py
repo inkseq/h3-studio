@@ -135,6 +135,7 @@ class RetentionTests(unittest.TestCase):
             }
         )
         self.s3, self.image_details, self.containers, self.calls = {}, [], [], []
+        self.timeouts = []
         for commit in (self.current, self.previous, self.old, *self.extras):
             self.platform(commit)
         os.utime(self.root / 'releases' / self.old, ns=(1, 1))
@@ -256,6 +257,7 @@ class RetentionTests(unittest.TestCase):
 
     def command(self, args, *, environment, timeout=180):
         self.calls.append(args)
+        self.timeouts.append((args[:2], timeout))
         if args[:2] == ['ps', '--all']:
             return ('\n'.join(item['Id'] for item in self.containers)).encode()
         if args[0] == 'inspect':
@@ -268,6 +270,15 @@ class RetentionTests(unittest.TestCase):
 
     def plan(self):
         return retention.plan_locked(self.root, api=self.api, command=self.command)
+
+    def test_inventory_allows_slow_docker_on_a_full_compact_disk(self):
+        self.plan()
+        inventory = [
+            t for args, t in self.timeouts if args[0] in {'ps', 'inspect', 'image'}
+        ]
+        self.assertTrue(inventory)
+        # 416 images took 37 s to inspect on staging; 30 s failed every run.
+        self.assertTrue(all(t >= 180 for t in inventory))
 
     def test_default_plan_is_read_only_and_keeps_independent_rollback(self):
         value = self.plan()
