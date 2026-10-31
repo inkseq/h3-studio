@@ -23,6 +23,16 @@ from .repository import (
 )
 
 
+# GPU -> (floor, ceiling) of one host's hourly quote: the GPU plus four
+# physical cores and 41 GiB at non-preemptible Sandbox rates (~$1.552/h).
+# Owner 2026-10-31: Blackwell only for new hosts; L40S stays for the live v8
+# backstop until it is retired. RTX PRO 6000 is ~$3.031/h on Modal.
+HOURLY_BOUNDS = {
+    'L40S': (3_503_340, 4_000_000),
+    'RTX-PRO-6000': (4_583_340, 5_200_000),
+}
+
+
 @dataclass(frozen=True)
 class HostSpec:
     app_id: str
@@ -54,8 +64,10 @@ class HostSpec:
             # and 41 GiB at non-preemptible memory/CPU rates. A qualified quote
             # must cover this floor; the shared USD50 task ceiling is unchanged.
             type(self.max_hourly_microusd) is not int
-            or not 3_503_340 <= self.max_hourly_microusd <= 4_000_000
-            or self.gpu != 'L40S'
+            or self.gpu not in HOURLY_BOUNDS
+            or not HOURLY_BOUNDS[self.gpu][0]
+            <= self.max_hourly_microusd
+            <= HOURLY_BOUNDS[self.gpu][1]
             or self.memory_mib != 41 * 1024
             or self.cpu_limit != 4
             or self.max_containers != 2

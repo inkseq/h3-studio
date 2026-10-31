@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import time
 import traceback
 
@@ -21,6 +22,21 @@ from .runtime_catalog import engine_manifest, runtime_config
 STATE = Path('/run/inkseq-modal')
 MODELS = Path('/ckpts/ckpts')
 RUNTIME = Path('/opt/workspace-internal/Wan2GP')
+
+
+def gpu_is_l40s(*, run=subprocess.run):
+    """The L40S admission applies only on an L40S; unknown keeps the old rule."""
+    try:
+        name = run(
+            ['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=True,
+        ).stdout.splitlines()[0]
+    except Exception:
+        return True
+    return 'L40S' in name
 
 
 def launch_document(path):
@@ -129,7 +145,8 @@ def main(argv=None):
         # Cache population is a separate, recorded qualification operation.
         # Never let concurrent GPU hosts write/download into a shared Volume.
         # The launcher repeats full source/dependency/model verification before
-        # it loads the model; the explicit hardware hook admits only one L40S.
+        # it loads the model. An L40S needs the explicit L40S admission; a
+        # Blackwell card (RTX PRO 6000) is admitted by the profile itself.
         return native_main(
             [
                 '--runtime-root',
@@ -149,7 +166,7 @@ def main(argv=None):
                 '--create-journal',
             ],
             host_factory=host_factory,
-            session_factory=partial(create_session, modal_l40s=True),
+            session_factory=partial(create_session, modal_l40s=gpu_is_l40s()),
             serve=serve,
         )
     except Exception as error:
