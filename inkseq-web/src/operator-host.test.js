@@ -13,6 +13,7 @@ import {
   hostInventoryConfirmed,
   hostPolicyBody,
   hostPolicyReceipt,
+  hostReasonText,
   inventoryError,
   inventoryOutcome,
   referenceHostOffers,
@@ -770,3 +771,13 @@ function renderWithLocale(module, element, locale = 'zh') {
     else delete globalThis.localStorage;
   }
 }
+
+test('host policy reasons read as words in both languages; unknown codes stay visible', () => {
+  assert.equal(hostReasonText('automatic_slow_download', 'zh'), '自动禁止：模型下载太慢');
+  assert.equal(
+    hostReasonText('automatic_slow_download', 'en'),
+    'denied automatically: model download too slow',
+  );
+  assert.equal(hostReasonText('operator_host_denied', 'zh'), '管理员禁止');
+  assert.equal(hostReasonText('some_future_reason', 'zh'), 'some_future_reason');
+});

@@ -16,6 +16,17 @@ export const hostText = (value, locale = 'zh') =>
   !/[\r\n]/.test(value)
     ? value
     : translate(locale, 'operatorPanel.unknown');
+// Known policy reasons read as words; anything else shows its code (h3-studio#901).
+const HOST_REASONS = [
+  'operator_host_default',
+  'operator_host_preferred',
+  'operator_host_denied',
+  'automatic_slow_download',
+];
+export const hostReasonText = (value, locale = 'zh') =>
+  HOST_REASONS.includes(value)
+    ? translate(locale, 'operatorPanel.reason.' + value)
+    : hostText(value, locale);
 const nonnegative = (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const count = (value) => Number.isSafeInteger(value) && value >= 0;
 const snapshot = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
