@@ -138,7 +138,9 @@ class RunPodServerlessClient:
             try:
                 os.link(temporary, path)
             except FileExistsError:
-                raise DstackError("dstack_existing_run_requires_reconciliation") from None
+                raise DstackError(
+                    "dstack_existing_run_requires_reconciliation"
+                ) from None
             finally:
                 temporary.unlink()
         else:

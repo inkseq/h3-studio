@@ -103,7 +103,9 @@ def main(argv=None):
         made = http.post("/endpoints", json=dict(endpoint, templateId=template_id))
         if made.status_code >= 300:
             raise SystemExit("endpoint create failed: HTTP %d" % made.status_code)
-        print(json.dumps({"template_id": template_id, "endpoint_id": made.json()["id"]}))
+        print(
+            json.dumps({"template_id": template_id, "endpoint_id": made.json()["id"]})
+        )
     return 0
 
 
