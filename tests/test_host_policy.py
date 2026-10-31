@@ -144,6 +144,40 @@ class HostPolicyTests(ledger.LedgerCase):
         with self.assertRaisesRegex(ValueError, "host_failure_invalid"):
             failure(invalid, now=1200)
 
+    def test_slow_download_deny_persists_until_an_admin_restores_the_host(self):
+        store = HostPolicyStore(self.repo, self.scope.tenant_id)
+        with self.repo.transaction() as conn:
+            self.assertTrue(
+                store.deny_slow_download(conn, "19492", node_id="node-one", now=1000)
+            )
+            # A repeat for the same denied host writes nothing new.
+            self.assertFalse(
+                store.deny_slow_download(conn, "19492", node_id="node-two", now=1001)
+            )
+        host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]
+        self.assertEqual(
+            {k: host["policy"][k] for k in ("manual", "effective", "reason_code")},
+            {
+                "manual": "deny",
+                "effective": "deny",
+                "reason_code": "automatic_slow_download",
+            },
+        )
+        self.assertIsNone(host["policy"]["expires_at"])  # Never expires by itself.
+        [event] = self.service.audit(self.owner)["events"]
+        self.assertEqual(event["actor_id"], "system:download-speed-gate")
+        self.assertEqual(event["reason_code"], "automatic_slow_download")
+        self.assertTrue(isinstance(event["command_id"], str) and event["command_id"])
+        # The ordinary admin write is the release; it is audited separately.
+        result = self.service.policy(self.owner, self.body("default"), "release")
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["policy"]["effective"], "default")
+        self.assertEqual(len(self.service.audit(self.owner)["events"]), 2)
+        with self.repo.transaction() as conn:
+            self.assertTrue(
+                store.deny_slow_download(conn, "19492", node_id="node-three", now=1002)
+            )
+
     def test_unknown_lookup_is_not_fabricated_and_policy_audit_replay(self):
         host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]
         self.assertFalse(host["identity_confirmed"])

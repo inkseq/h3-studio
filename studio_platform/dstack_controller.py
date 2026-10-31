@@ -30,7 +30,7 @@ from .dstack_capacity import (
 )
 from .capacity_policy import cold_unadmitted_runtime, window_open
 from .demand_wakeup import IDLE_SAFETY_SECONDS
-from .dstack_preparation import download_timebox_due
+from .dstack_preparation import download_timebox_due, download_too_slow
 from .dstack_operator import (
     BACKEND_MARKER,
 )
@@ -52,6 +52,11 @@ from .slot_lock import slot_lock
 from .telemetry import NullTelemetry, configured_telemetry
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
+# Cold download stops, checked in order: a stall, then a measured slow host.
+DOWNLOAD_STOP_CHECKS = {
+    "dstack_download_timebox_exceeded": download_timebox_due,
+    "dstack_download_too_slow": download_too_slow,
+}
 
 
 def _terminal_review_candidate(run, binding, project):
@@ -621,7 +626,7 @@ class DstackController:
                     )
                     if matching_dstack_queued_jobs(connection, intent, current):
                         return False
-                elif reason_code == "dstack_download_timebox_exceeded":
+                elif reason_code in DOWNLOAD_STOP_CHECKS:
                     intent = self.repo._locked(
                         connection,
                         select(instance_intents).where(
@@ -651,7 +656,7 @@ class DstackController:
                     ids = [worker_id, *[worker["id"] for worker in workers]]
                     record = getattr(self.service, "record_download_timebox", None)
                     if (
-                        not download_timebox_due(
+                        not DOWNLOAD_STOP_CHECKS[reason_code](
                             binding,
                             now,
                             fresh_seconds=self.service.policy[
@@ -678,7 +683,9 @@ class DstackController:
                         or not callable(record)
                     ):
                         return False
-                    payload = record(connection, current, intent, now)
+                    payload = record(
+                        connection, current, intent, now, reason_code=reason_code
+                    )
                     if not isinstance(payload, dict):
                         return False
                 payload["stop_reason_code"] = reason_code
@@ -964,24 +971,20 @@ class DstackController:
             }
         payload = current["payload"]
         now = self.repo.clock()
-        if (
-            current["desired_state"] == "running"
-            and download_timebox_due(
-                binding,
-                now,
-                fresh_seconds=self.service.policy["observation_fresh_seconds"],
-            )
-            and self._request_stop(
-                current, reason_code="dstack_download_timebox_exceeded"
-            )
-        ):
-            # Fence this exact cold host first. The next tick uses the original
-            # begin_stop checks; no worker is launched and the queued job stays.
-            return {
-                "node_id": intent_id,
-                "state": "draining",
-                "code": "dstack_download_timebox_exceeded",
-            }
+        for code, due in DOWNLOAD_STOP_CHECKS.items():
+            if (
+                current["desired_state"] == "running"
+                and due(
+                    binding,
+                    now,
+                    fresh_seconds=self.service.policy["observation_fresh_seconds"],
+                )
+                and self._request_stop(current, reason_code=code)
+            ):
+                # Fence this exact cold host first. The next tick uses the
+                # original begin_stop checks; no worker is launched and the
+                # queued job stays.
+                return {"node_id": intent_id, "state": "draining", "code": code}
         observed = binding.get("observed_at")
         fresh = (
             type(observed) in (int, float)
