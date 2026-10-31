@@ -257,16 +257,21 @@ def keep_policy(root, containers):
     return kept | set(extras), observed, extras
 
 
+# A batch inspect of ~400 images took 37 s on the compact staging host while
+# its disk was nearly full; a 30 s cap failed every scheduled run (2026-10-30).
+INVENTORY_TIMEOUT = 180
+
+
 def docker_snapshot(command=release.command):
-    ids = command(['ps', '--all', '--quiet', '--no-trunc'], environment=ENV, timeout=30).decode().split()
+    ids = command(['ps', '--all', '--quiet', '--no-trunc'], environment=ENV, timeout=INVENTORY_TIMEOUT).decode().split()
     release.require(len(ids) <= 128 and all(re.fullmatch(r'[0-9a-f]{64}', value) for value in ids),
                     'retention_container_inventory_invalid')
-    containers = json.loads(command(['inspect', *ids], environment=ENV, timeout=30)) if ids else []
-    images = command(['image', 'ls', '--all', '--quiet', '--no-trunc'], environment=ENV, timeout=30).decode().split()
+    containers = json.loads(command(['inspect', *ids], environment=ENV, timeout=INVENTORY_TIMEOUT)) if ids else []
+    images = command(['image', 'ls', '--all', '--quiet', '--no-trunc'], environment=ENV, timeout=INVENTORY_TIMEOUT).decode().split()
     release.require(len(images) <= 512 and all(IMAGE.fullmatch(value) for value in images),
                     'retention_image_inventory_invalid')
     images = sorted(set(images))
-    details = json.loads(command(['image', 'inspect', *images], environment=ENV, timeout=30)) if images else []
+    details = json.loads(command(['image', 'inspect', *images], environment=ENV, timeout=INVENTORY_TIMEOUT)) if images else []
     release.require(type(containers) is list and len(containers) == len(ids)
         and type(details) is list and len(details) == len(images), 'retention_docker_inventory_incomplete')
     return containers, details
