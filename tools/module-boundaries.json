@@ -32,7 +32,7 @@
   "platform -> creation": 36,
   "platform -> identity": 25,
   "platform -> jobs": 25,
-  "platform -> media": 27
+  "platform -> media": 28
  },
  "edges": [
   "account_deletion -> artifact_writer",
@@ -255,6 +255,7 @@
   "dstack_workspace_routes -> stage_metrics",
   "enhance_backend -> media",
   "enhance_routes -> credits_pricing",
+  "everyframe_backend -> media",
   "execution_policy -> budget_policy",
   "execution_policy -> capabilities",
   "execution_policy -> capacity",
