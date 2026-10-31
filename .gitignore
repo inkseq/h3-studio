@@ -1054,3 +1054,9 @@ inventory.json
 !tests/test_dstack_providers.py
 !studio_platform/dstack_inventory.py
 !renovate.json
+
+# RunPod Serverless dial-out workers (#859)
+!studio_platform/runpod_serverless.py
+!tools/runpod_serverless_endpoint.py
+!deploy/runpod-serverless/
+!deploy/runpod-serverless/handler.py

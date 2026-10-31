@@ -44,6 +44,22 @@ Why chisel: MIT licensed; WebSocket over our existing :443; per-user allowed-rem
 5. Default to dial-out, then delete controller SSH, the #858 jump hop and host-key pinning.
 6. Serverless lane: Modal and RunPod Serverless start the same worker and dial out the same way.
 
+## RunPod Serverless lane
+
+The serverless lane (order step 6) rents through RunPod Serverless instead of dstack. Everything above the client is unchanged: demand start, budget, the test guard, dial-out boot, readiness and idle stop all treat it as one more backend.
+
+- **Controller.** `studio_platform/runpod_serverless.py`:
+  - `RunPodServerlessClient` implements the dstack client calls the capacity path uses. `plan` offers the endpoint's GPU, `apply` POSTs `/run`, `get` reads `/status`, `stop` POSTs `/cancel`, and `provider_inventory` cross-checks live jobs against `/health`.
+  - A private journal binds each run name to its run id, job id and exact spec. A job whose id was never journaled reads as unknown, never absent. A terminal status is journaled once, because RunPod expires job status.
+  - `RoutedClient` sends `backend: "runpod-serverless"` runs there and everything else to dstack.
+  - It is enabled by the operator config key `serverless_file`, a protected JSON file.
+- **Worker.** The endpoint template runs the same pinned WanGP image. Its start command installs the pinned RunPod SDK and runs `deploy/runpod-serverless/handler.py`. Each job input is the run spec's single boot command plus its three boot variables, and the handler refuses anything else. The job lives until the controller cancels it.
+- **Endpoint.** `tools/runpod_serverless_endpoint.py`:
+  - scales to zero (workersMin 0) and requires a CUDA 13 driver (`minCudaVersion: 13.0`) for the cu130 image;
+  - takes the API key from the central registry and never prints it.
+- **Profiles.** `backend: "runpod-serverless"` with `transport: "dialout"`. Jobs bill to the RunPod provider account.
+- **Local check.** `test_dialout_e2e.test_runpod_serverless_job_boots_through_the_real_handler` runs the real handler in a container behind a fake RunPod API, through `DstackCapacity.observe`, then cancels the job.
+
 ## Local end-to-end check
 
 `tests/test_dialout_e2e.py` runs the whole path on one machine in about 30 seconds, without renting a GPU:
