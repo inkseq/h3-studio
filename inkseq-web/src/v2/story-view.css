@@ -925,16 +925,9 @@ body.sb-resizing-y video {
 .ruler span:first-of-type {
   transform: none;
 }
-.ruler-knob {
-  position: absolute;
-  top: -6px;
-  width: 11px;
-  height: 11px;
-  margin-left: -5px;
-  border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 0 2px var(--surface);
-  pointer-events: none;
+/* The last label ends at the bar's end instead of hanging off it. */
+.ruler span:last-of-type:not(:first-of-type) {
+  transform: translateX(-100%);
 }
 .ruler:focus-visible {
   outline: 2px solid var(--accent);
@@ -1365,21 +1358,25 @@ body.sb-resizing-y video {
 .script-windows-list q {
   color: var(--ink-2);
 }
-/* A playhead you can see and grab on any picture (owner, 2026-10-26): a light line with a
-   dark edge, a round grip on top, and a wider invisible hit area. It stays inside the track
-   (owner, 2026-10-29) so at 0:00 it never covers the play button above. */
-/* A small gutter at both ends, for the track and its ruler alike, so the playhead and its
-   grip at 0:00 or the last frame sit beside the picture instead of on it (owner 2026-10-29). */
+/* The playhead is one element (owner 2026-10-31: the old line + top grip + ruler knob were
+   three pieces that covered the picture and the 0:00 label). Its grip sits in a lane above the
+   pictures, so it never covers a frame, a label or the play button; the line runs down the
+   track; a wider invisible strip makes it easy to grab. A small gutter at both ends keeps the
+   line at 0:00 and at the last frame beside the picture. */
 .dock-right .timeline {
   padding-inline: 8px;
 }
+.timeline:has(> .track.video > .playhead) {
+  padding-top: 12px;
+}
 .timeline .track.video .playhead {
-  top: 0;
+  top: -12px;
   bottom: 0;
   width: 3px;
   /* Drawn just before its time, so at 0:00 the line sits in the gutter, off the picture. */
   margin-left: -2px;
   background: var(--white);
+  border-radius: 0 0 2px 2px;
   box-shadow:
     0 0 0 1px rgba(0, 0, 0, 0.55),
     0 0 6px rgba(0, 0, 0, 0.35);
@@ -1396,15 +1393,13 @@ body.sb-resizing-y video {
 .timeline .track.video .playhead::after {
   content: '';
   position: absolute;
-  top: 2px;
+  top: 0;
   left: 50%;
-  width: 11px;
-  height: 11px;
+  width: 13px;
+  height: 12px;
   transform: translateX(-50%);
-  border-radius: 50%;
   background: var(--accent);
-  border: 2px solid var(--white);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  clip-path: polygon(0 0, 100% 0, 100% 55%, 50% 100%, 0 55%);
 }
 .timeline .track.video .playhead:active {
   cursor: grabbing;

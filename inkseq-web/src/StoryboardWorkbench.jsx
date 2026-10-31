@@ -24,6 +24,15 @@ function versionTime(value, locale, t) {
       })
     : t('workbench.unknownStatus');
 }
+// The take in use is a green dot; its words show on hover (owner 2026-10-31).
+function ChosenDot() {
+  const { t } = useI18n();
+  return (
+    <em className="chosen-dot" title={t('takes.selected')}>
+      <span>{t('takes.selected')}</span>
+    </em>
+  );
+}
 // Quality and length over the thumbnail, e.g. "1080P · 5s" (owner 2026-10-31, #890).
 function TakeQualityBadge({ version }) {
   const { t } = useI18n();
@@ -338,7 +347,6 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                         {index ? 'B' : 'A'} ·{' '}
                         {takeName(
                           row?.title,
-                          v,
                           Number.isInteger(v?.n)
                             ? 'v' + v.n
                             : versionTime(row?.created_at, locale, t),
@@ -405,13 +413,12 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                   <span>
                     {takeName(
                       row.title,
-                      v,
                       Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t),
                     )}
                     {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
                   </span>
                   <ReviewBadges review={reviewOf(row.id)} />
-                  {row.selected && <em>{t('takes.selected')}</em>}
+                  {row.selected && <ChosenDot />}
                   {hasSubtitles(row) && (
                     <em className="ver-warn" title={t('takes.subtitlesHelp')}>
                       {t('takes.subtitles')}
@@ -448,7 +455,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                 className="take-thumb"
                 role="button"
                 tabIndex={0}
-                aria-label={takeName(row.title, v, versionTime(row.created_at, locale, t))}
+                aria-label={takeName(row.title, versionTime(row.created_at, locale, t))}
                 onClick={preview}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -470,7 +477,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                 <TakeQualityBadge version={v} />
               </div>
               <div className="take-top">
-                {row.selected && <em>{t('takes.selected')}</em>}
+                {row.selected && <ChosenDot />}
                 {row.aliased && <em className="ver-legacy">{t('workbench.fromQuickCreate')}</em>}
                 {comparing && compare.includes(row.id) && (
                   <em className="cmp-n">{compare.indexOf(row.id) === 0 ? 'A' : 'B'}</em>
@@ -493,7 +500,6 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                   <b>
                     {takeName(
                       row.title,
-                      v,
                       Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t),
                     )}
                   </b>
