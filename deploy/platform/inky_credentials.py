@@ -77,7 +77,7 @@ def import_existing(api, loader):
     keys = {}
     for service, (profile, origin) in PROFILES.items():
         cfg = loader(service, profile=profile)
-        configured = cfg.base_url or (origin if service == "openrouter" else None)
+        configured = cfg.base_url or (origin if service == "openai" else None)
         if configured != origin:
             raise ValueError("inky_profile_invalid")
         keys[service] = cfg.api_key
