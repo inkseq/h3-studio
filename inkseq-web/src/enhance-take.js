@@ -22,3 +22,13 @@ export function takeName(title, version, fallback) {
   const tier = version?.enhanced && TIER_LABELS[version.effectiveRequest?.tier];
   return tier ? name + ' · ' + tier : name;
 }
+
+// The size a take plays at: an enhanced copy by its tier, others by their short side
+// (480P/768P/1080P; 1440 and up is 2K). Unknown sizes show nothing.
+export function takeQuality(version) {
+  const tier = version?.enhanced && TIER_LABELS[version.effectiveRequest?.tier];
+  if (tier) return tier;
+  const side = Math.min(Number(version?.width), Number(version?.height));
+  if (!(side > 0)) return '';
+  return side >= 1440 ? '2K' : side + 'P';
+}

@@ -144,6 +144,8 @@ function shotVersions(project, s, jobs) {
       artifactId: artifact?.id,
       asset: entity ? { fileId: entity.data.fileId, entity, kind: 'video' } : null,
       duration: artifact?.metadata?.duration ?? artifact?.metadata?.duration_seconds,
+      width: artifact?.metadata?.width,
+      height: artifact?.metadata?.height,
       error: j.error_code || j.message || '',
       audio: j.artifacts?.find((a) => a.kind === 'audio'),
       effectiveRequest: j.effective_request,
@@ -168,6 +170,8 @@ function shotVersions(project, s, jobs) {
         ),
         asset: { fileId: e.data.fileId, entity: e, kind: 'video' },
         duration: e.data.metadata?.duration,
+        width: e.data.metadata?.width,
+        height: e.data.metadata?.height,
       });
   }
   return versions;
