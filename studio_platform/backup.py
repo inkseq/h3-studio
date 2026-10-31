@@ -8,9 +8,10 @@ never exported. Recovery is an isolated, disabled copy, not automatic failover.
 from __future__ import annotations
 
 from .asset_objects import ASSET_OBJECT_ROLES
+from .backup_missing import missing_object
+from .backup_loss_policy import EXPECTED_MISSING, valid_classification
 from .schema_version import (
     PAYMENT_REVISION,
-    PAYMENT_REVISIONS,
     LIVE_PAYMENT_REVISION,
     CREDIT_ADMISSION_REVISIONS,
 )
@@ -71,7 +72,7 @@ def _schemas(
 ):
     # Register the same additive business tables as the application, without
     # constructing services or creating/migrating a source schema.
-    from . import operator_capacity, capacity_market, dstack_workspace
+    from . import operator_capacity, capacity_market, dstack_workspace  # noqa: F401 -- register additive backup schema tables
     from .repository import metadata
     from .assets import metadata as assets
     from .storage_asset_journal import _schema as quota
@@ -396,9 +397,9 @@ def _export_business_db(snapshot, destination):
                 counts[name] = 0
                 continue
             columns = ",".join('"' + c.name + '"' for c in table.columns)
-            select_sql = 'SELECT ' + columns + ' FROM "' + name + '"'
+            select_sql = 'SELECT ' + columns + ' FROM "' + name + '"'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
             insert_sql = (
-                'INSERT INTO "'
+                'INSERT INTO "'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                 + name
                 + '" ('
                 + columns
@@ -682,22 +683,13 @@ def _publish_media_backup(
         try:
             info = store.stat(key)
         except ObjectNotFound:
-            if not allow_missing_media or provider != "r2":
+            if not allow_missing_media:
                 raise
-            absent = dict(
-                item,
-                reason="source_object_not_found",
-                observation="head",
-                observed_at=time.time(),
-            )
-            if classify_expected_deletions:
-                absent.update(
-                    classification="expected_deleted"
-                    if key in evidence
-                    else "unexpected_missing",
-                    deletion_evidence=evidence.get(key, []),
+            missing.append(
+                missing_object(
+                    item, store, evidence if classify_expected_deletions else None
                 )
-            missing.append(absent)
+            )
             continue
         # Presigned GPU PUTs lack optional HEAD SHA metadata. Every body still
         # must match the original DB/receipt SHA and size before publication.
@@ -941,18 +933,16 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                         continue
                     actual_columns = columns.get(name, [])
                     expected_columns = [column.name for column in table.columns]
-                    # Additive historical migrations can change physical order.
-                    # Both queries below explicitly use canonical column names.
+                    # Explicit columns tolerate historical physical ordering.
                     if len(actual_columns) != len(expected_columns) or set(
                         actual_columns
                     ) != set(expected_columns):
                         raise BackupError("backup_database_version_mismatch")
                     relation = '"' + schema + '"."' + name + '"'
-                    # Bound a row before fetching it into client memory. The
-                    # read-only snapshot is established by the inventory query.
+                    # Inventory fixed the read-only snapshot; bound rows before fetching.
                     count, size, largest = source.execute(
                         text(
-                            "SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM "
+                            "SELECT count(*),COALESCE(sum(octet_length(row_to_json(t)::text)),0),COALESCE(max(octet_length(row_to_json(t)::text)),0) FROM "  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                             + relation
                             + " t"
                         )
@@ -978,8 +968,9 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                         for name, marker in json_nulls.items()
                     )
                     query_fields = fields + (("," + markers) if markers else "")
+                    batch_rows = min(200, max(1, 4 * MIB // max(1, int(largest))))
                     insert_sql = (
-                        'INSERT INTO "'
+                        'INSERT INTO "'  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                         + name
                         + '" ('
                         + fields
@@ -990,15 +981,15 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                     actual = 0
                     with source.execute(
                         text(
-                            "SELECT " + query_fields + " FROM " + relation
-                        ).execution_options(stream_results=True, max_row_buffer=200)
+                            "SELECT " + query_fields + " FROM " + relation  # noqa: S608 -- identifiers from fixed schema metadata, not user input
+                        ).execution_options(
+                            stream_results=True, max_row_buffer=batch_rows
+                        )
                     ) as rows:
-                        while batch := rows.mappings().fetchmany(200):
+                        while batch := rows.mappings().fetchmany(batch_rows):
                             if time.monotonic() > deadline:
                                 raise BackupError("backup_snapshot_size_or_time_limit")
-                            # JSON null and SQL NULL both arrive as Python None;
-                            # preserve the distinction instead of silently
-                            # changing later IS NULL/query behavior on recovery.
+                            # Markers distinguish JSON null from SQL NULL (both None).
                             values = [
                                 tuple(
                                     json.dumps(
@@ -1015,6 +1006,7 @@ def _export_postgres_business_db(engine, destination, *, schema="public", timeou
                             ]
                             output.exec_driver_sql(insert_sql, values)
                             actual += len(batch)
+                            del values, batch  # Release before the next fetch.
                     if actual != count:
                         raise BackupError("backup_snapshot_count_mismatch")
                     counts[name] = actual
@@ -1238,7 +1230,7 @@ def _coverage(objects, missing, *, classified=False):
         missing_bytes=missing_bytes,
     )
     if classified:
-        expected = [x for x in missing if x['classification'] == 'expected_deleted']
+        expected = [x for x in missing if x['classification'] in EXPECTED_MISSING]
         result.update(
             expected_missing_objects=len(expected),
             expected_missing_bytes=sum(x['size_bytes'] for x in expected),
@@ -1275,9 +1267,9 @@ def verify_local(directory, *, allow_incomplete=False):
         if missing and not allow_incomplete:
             raise BackupError("backup_incomplete_requires_explicit_opt_in")
         if 'workflow_state' in manifest:
-            from .workflow_backup import read
+            from .workflow_backup import verify
 
-            read(directory, manifest['workflow_state'])
+            verify(directory, manifest['workflow_state'])
         elif (directory / 'workflow-state.json').exists():
             raise BackupError('backup_workflow_state_unreferenced')
         if 'hosted_users' in manifest:
@@ -1315,7 +1307,7 @@ def verify_local(directory, *, allow_incomplete=False):
             # Verify its original table set, then create safe empty additions
             # only inside the NEW restoration target.
             counts = {
-                name: db.execute('SELECT count(*) FROM "' + name + '"').fetchone()[0]
+                name: db.execute('SELECT count(*) FROM "' + name + '"').fetchone()[0]  # noqa: S608 -- identifiers from fixed schema metadata, not user input
                 for name in _tables()
                 if name in existing
             }
@@ -1347,9 +1339,11 @@ def verify_local(directory, *, allow_incomplete=False):
                         if manifest["version"] == 3
                         else set()
                     )
-                    or item.get("provider") != "r2"
                     or item["reason"] != "source_object_not_found"
-                    or item["observation"] != "head"
+                    or item["observation"]
+                    != {'r2': 'head', 'local': 'local_absent'}.get(
+                        item.get('provider', 'local')
+                    )
                     or type(item["observed_at"]) not in (int, float)
                     or not math.isfinite(item["observed_at"])
                     or item["observed_at"] <= 0
@@ -1359,8 +1353,7 @@ def verify_local(directory, *, allow_incomplete=False):
                 ):
                     raise BackupError("backup_manifest_reference_mismatch")
                 if manifest['version'] == 3 and (
-                    item['classification']
-                    != ('expected_deleted' if key in evidence else 'unexpected_missing')
+                    not valid_classification(item, evidence)
                     or item['deletion_evidence'] != evidence.get(key, [])
                     or any(
                         p['completed_at'] > item['observed_at']

@@ -1,0 +1,1304 @@
+/* Real business forms and dialogs inside the prototype's page view layer. */
+.ops-adapter [hidden],
+.ops-dialog [hidden] {
+  display: none !important;
+}
+.ops-tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ops-adapter .ops-page-tabs {
+  margin: 0 0 18px;
+  max-width: 100%;
+  overflow-x: auto;
+  justify-content: flex-start;
+}
+.ops-adapter .ops-page-tabs > button {
+  flex: none;
+  white-space: nowrap;
+}
+.ops-adapter .ops-gpu-page,
+.ops-adapter .spanel,
+.ops-adapter .snav {
+  min-width: 0;
+}
+.ops-adapter .mrow {
+  grid-template-columns: 22px minmax(0, 1.2fr) minmax(180px, 1fr) auto;
+}
+.ops-adapter .mrow-main b,
+.ops-adapter .mrow-main small {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .mrow-main b {
+  font-size: 14px;
+}
+.ops-adapter .mrow-main small,
+.ops-adapter .mrow .mode,
+.ops-adapter .mrow .q,
+.ops-adapter .mrow .pill {
+  font-size: 11px;
+}
+.ops-adapter .mrow-state {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .mrow-actions {
+  max-width: 250px;
+}
+.ops-adapter .p4-keep {
+  display: inline;
+  white-space: normal;
+}
+.ops-adapter .mgroup > header {
+  flex-wrap: wrap;
+}
+.ops-adapter .p4-inventorybar {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ops-adapter .p4-inventorybar > label {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 180px;
+  max-width: 360px;
+  font-size: 12px;
+}
+.ops-adapter .p4-offers {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+.ops-adapter .p4-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+.ops-adapter .p4-offer > .p4-pill {
+  align-self: flex-start;
+}
+.ops-adapter .p4-offer h2 {
+  font-size: 16px;
+  margin: 8px 0 0;
+}
+.ops-adapter .p4-offer > small,
+.ops-adapter .p4-offer .p4-kv small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .p4-offer-price {
+  font-size: 26px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  margin: 8px 0;
+}
+.ops-adapter .p4-offer-price small {
+  margin-left: 4px;
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--muted);
+}
+.ops-adapter .p4-offer .p4-kv {
+  font-size: 12px;
+}
+.ops-adapter .p4-offer > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .p4-accountspend > section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ops-adapter .p4-accountspend strong {
+  font-size: 24px;
+  font-weight: 650;
+}
+.ops-adapter .p4-accountspend small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .settings-page .spanel > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ops-adapter .trash-row {
+  grid-template-columns: 22px 44px minmax(0, 1fr) auto auto;
+}
+.ops-adapter .trash-row .name small,
+.ops-adapter .trash-row .left {
+  font-size: 11px;
+}
+.ops-adapter .trash-filter {
+  max-width: 100%;
+  overflow-x: auto;
+  justify-content: flex-start;
+}
+.ops-adapter .trash-filter > button {
+  white-space: nowrap;
+  flex: none;
+}
+.ops-tools {
+  margin: 12px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.ops-tools > div {
+  margin-top: 10px;
+}
+.ops-tools select {
+  width: auto;
+  max-width: 100%;
+}
+.account-password form,
+.assistant-connections form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.account-password label,
+.assistant-connections label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.account-password h2 {
+  font-size: 14px;
+}
+.ops-item-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ops-item-row > div {
+  flex: 1;
+  min-width: 0;
+}
+.account-password h2,
+.account-password p {
+  margin-top: 0;
+}
+.account-password form > button {
+  align-self: flex-end;
+}
+.assistant-connections {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.assistant-connections > h2,
+.assistant-connections > h3 {
+  margin: 0;
+}
+.assistant-connections > form:not(.ui-form),
+.assistant-connections > article,
+.assistant-connections > aside,
+.assistant-connections > details {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+}
+.assistant-connections form,
+.assistant-connections fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.assistant-connections fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.assistant-connections legend {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.assistant-connections label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.assistant-connections small,
+.assistant-connections p {
+  color: var(--muted);
+  line-height: 1.6;
+}
+.assistant-connections article h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.assistant-connections article[hidden] {
+  display: none !important;
+}
+.assistant-connections .assistant-inactive-toggle {
+  height: 32px;
+  min-height: 32px;
+  align-self: flex-start;
+  max-width: 100%;
+}
+.assistant-connection-created {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.assistant-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.assistant-badge {
+  display: inline-flex;
+  color: var(--accent);
+  font-size: 11px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) > footer > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.ops-adapter :is(.p4-dialog, .op-dialog) fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.ops-adapter .p4-primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+.ops-adapter .p4-text {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-2);
+}
+
+.ops-adapter .p4-formgrid,
+.ops-adapter .p4-configfields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ops-adapter .p4-configfields {
+  grid-template-columns: minmax(0, 2fr) minmax(100px, 1fr) 70px minmax(110px, 1fr);
+}
+.ops-adapter .p4-config,
+.ops-adapter .p4-panel,
+.budget-account,
+.budget-admin-row,
+.ops-adapter .p4-host-record {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 16px;
+  margin: 12px 0;
+  min-width: 0;
+}
+.ops-adapter .p4-config > header,
+.ops-adapter .p4-between,
+.operator-budget > header,
+.ops-adapter .p4-hosts > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ops-adapter .p4-config > header {
+  margin-bottom: 14px;
+}
+.ops-adapter .p4-config > header > div,
+.ops-adapter .p4-policies,
+.ops-adapter .p4-policy-extra {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ops-adapter .p4-policies [aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.ops-adapter .p4-policy-extra {
+  margin-top: 10px;
+}
+.ops-adapter .p4-policy-extra label {
+  flex: 1;
+  min-width: 150px;
+}
+.ops-adapter .p4-fieldheading {
+  margin: 18px 0 10px;
+}
+.ops-adapter .p4-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 0;
+}
+.ops-adapter .p4-note,
+.ops-adapter .p4-meta,
+.ops-adapter :is(.p4-dialog, .op-dialog) small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ops-adapter .p4-preview,
+.ops-adapter .p4-start-results {
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  padding: 14px;
+  margin: 12px 0;
+}
+.ops-adapter .p4-checklist > div,
+.ops-adapter .p4-start-results > div {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+.ops-adapter .p4-kv,
+.ops-adapter .p4-metrics,
+.ops-adapter .p4-host-summary,
+.budget-accounts,
+.ops-adapter .p4-accountspend {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.ops-adapter .p4-kv > div,
+.ops-adapter .p4-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: var(--r-sm);
+  overflow-wrap: anywhere;
+}
+.ops-adapter .p4-pill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line-2);
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
+  font-size: 11px;
+}
+.ops-adapter .p4-pill.good {
+  color: var(--good);
+  background: var(--good-soft);
+}
+.ops-adapter .p4-pill.warm,
+.ops-adapter .ops-warning,
+.ops-adapter .p4-warning {
+  color: var(--warn);
+  background: var(--warn-soft);
+}
+.ops-adapter .p4-error,
+.ops-adapter [role='alert'] {
+  color: var(--bad);
+}
+.ops-adapter .ops-warning,
+.ops-adapter .p4-warning {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: 12px;
+}
+.ops-adapter .p4-progress-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  margin-top: 6px;
+}
+.ops-adapter .p4-progress-diagnostic {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .p4-progress-amount {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+.ops-adapter progress {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.ops-adapter .p4-preparation-steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 0;
+  list-style: none;
+}
+.ops-adapter .p4-preparation-steps li {
+  padding: 6px 8px;
+  border-bottom: 2px solid var(--line);
+}
+.ops-adapter .p4-preparation-steps li.current {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.ops-adapter .p4-preparation-steps small {
+  display: block;
+}
+.ops-adapter .p4-admin-jobs-table,
+.ops-adapter .p4-host-samples {
+  overflow: auto;
+  max-width: 100%;
+}
+.ops-adapter table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ops-adapter th,
+.ops-adapter td {
+  text-align: start;
+  vertical-align: top;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.ops-adapter td small {
+  display: block;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ops-adapter .p4-admin-machine {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.ops-adapter .p4-admin-machine > .mrow {
+  flex: 1;
+}
+.ops-adapter .p4-jobs-actions,
+.ops-adapter .p4-host-policy,
+.ops-adapter .p4-host-lookup form,
+.budget-admin-row form {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+.ops-adapter .p4-jobs-actions label,
+.ops-adapter .p4-host-policy label,
+.ops-adapter .p4-host-lookup label,
+.budget-admin-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 140px;
+}
+.budget-account dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.budget-account dd {
+  margin: 4px 0;
+  font-weight: 600;
+}
+.budget-account dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+.ops-adapter .ui-empty form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 360px;
+  margin: 16px auto;
+}
+.ops-adapter .ui-empty label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.trash-notice {
+  position: fixed;
+  bottom: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100vw - 24px);
+  padding: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  z-index: 130;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  box-shadow: var(--shadow);
+}
+.item-menu {
+  position: relative;
+  display: inline-flex;
+}
+
+@media (min-width: 761px) and (max-width: 1220px) {
+  .ops-adapter .mrow {
+    grid-template-columns: 22px minmax(0, 1.2fr) minmax(180px, 1fr);
+  }
+  .ops-adapter .mrow-actions {
+    grid-column: 2 / -1;
+    justify-self: start;
+    max-width: none;
+  }
+  .ops-adapter .p4-offers {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .ops-adapter .p4-page-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'title refresh' 'observed launch';
+    align-items: center;
+    gap: 8px 10px;
+  }
+  .ops-adapter .p4-page-title {
+    grid-area: title;
+    min-width: 0;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    line-height: 1.2;
+  }
+  .ops-adapter .p4-page-title > small {
+    align-self: center;
+    margin: 0;
+  }
+  .ops-adapter .p4-observed-at {
+    grid-area: observed;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    line-height: 1.4;
+    font-size: 11px;
+  }
+  .ops-adapter .p4-page-refresh {
+    grid-area: refresh;
+    justify-self: end;
+  }
+  .ops-adapter .p4-page-launch {
+    grid-area: launch;
+    justify-self: end;
+    max-width: 100%;
+  }
+  .ops-adapter .p4-page-heading > .spacer {
+    display: none;
+  }
+  .ops-adapter .mrow {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+  }
+  .ops-adapter .mrow-state,
+  .ops-adapter .mrow-actions {
+    grid-column: 2;
+    max-width: none;
+    justify-content: flex-start;
+  }
+  .ops-adapter .p4-offers {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter .p4-inventorybar > label {
+    min-width: 0;
+    max-width: none;
+    flex-basis: 100%;
+  }
+  .ops-adapter .snav {
+    position: static;
+  }
+  .ops-adapter .trash-row {
+    grid-template-columns: 22px 36px minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px;
+  }
+  .ops-adapter .trash-row .thumb {
+    width: 36px;
+  }
+  .ops-adapter .trash-row .left,
+  .ops-adapter .trash-row .acts {
+    grid-column: 3;
+  }
+  .ops-adapter .p4-configfields,
+  .ops-adapter .p4-formgrid,
+  .ops-adapter .p4-kv,
+  .ops-adapter .p4-metrics,
+  .budget-accounts,
+  .ops-adapter .p4-accountspend {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter :is(.p4-dialog, .op-dialog) > footer {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .ops-adapter :is(.p4-dialog, .op-dialog) > footer > div {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .ops-adapter .p4-admin-machine {
+    flex-wrap: wrap;
+  }
+  .ops-adapter .p4-admin-machine > .mrow {
+    flex-basis: 100%;
+  }
+}
+
+/* #277: active real-service page controls use the same three sizes as the demo.
+   Machine rows are navigable content surfaces, not toolbar-sized buttons. */
+.ops-adapter :is(.p4-page-launch, .assistant-connect) {
+  height: 36px;
+  min-height: 36px;
+}
+.ops-adapter .mrow-main[data-ui-surface] {
+  height: auto;
+  min-height: 0;
+  border-radius: 0;
+}
+.ops-adapter .settings-page {
+  grid-template-columns: 200px minmax(0, 1fr);
+}
+.ops-adapter .settings-page .snav {
+  top: 0;
+  align-self: start;
+}
+.ops-adapter .settings-page .spanel {
+  min-width: 0;
+}
+.ops-adapter .settings-page .limits {
+  background: var(--surface);
+  color: var(--ink);
+  padding: 16px;
+}
+.assistant-badge {
+  align-items: center;
+  gap: 4px;
+}
+.assistant-usage {
+  color: var(--ink-2);
+  font-size: 12px;
+}
+.budget-cost-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  min-height: 32px;
+  align-content: center;
+}
+.ops-adapter .ops-tools > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  cursor: pointer;
+  list-style: none;
+}
+.ops-adapter .trash-tab-count {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 760px) {
+  .ops-adapter .settings-page {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter .settings-page .snav {
+    position: static;
+    flex-direction: row;
+    overflow-x: auto;
+  }
+  .ops-adapter .trash-row {
+    grid-template-columns: 20px 32px minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+  .ops-adapter .trash-row .left {
+    grid-column: 3;
+    grid-row: 2;
+  }
+  .ops-adapter .trash-row .acts {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+  }
+  .ops-adapter .trash-row .thumb {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* The desktop timestamp also needs an explicit floor; browser small defaults are 10.833px. */
+.ops-adapter .p4-observed-at {
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.spend-breakdown {
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.spend-breakdown-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.spend-breakdown-heading small {
+  font-size: 11px;
+  color: var(--muted);
+}
+.spend-breakdown-buckets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.spend-breakdown-buckets > div {
+  min-width: 0;
+}
+.spend-breakdown dt {
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.spend-breakdown dd {
+  margin: 3px 0 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.spend-breakdown-buckets dd {
+  font-size: 20px;
+  font-weight: 600;
+}
+.spend-breakdown-unavailable {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.spend-breakdown-warning {
+  border-inline-start: 2px solid var(--accent);
+  padding-inline-start: 8px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.spend-breakdown-details > summary {
+  min-height: 32px;
+  align-content: center;
+  cursor: pointer;
+  font-size: 12px;
+}
+.spend-breakdown-details dl {
+  margin: 8px 0;
+  display: grid;
+  gap: 8px;
+}
+.spend-breakdown-details dl > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 16px;
+  align-items: start;
+}
+.spend-breakdown-details dd {
+  margin: 0;
+  max-width: 140px;
+}
+.spend-admission {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.ops-adapter .billing-admin {
+  margin: 20px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  font-size: 12px;
+  min-width: 0;
+}
+.ops-adapter .billing-admin h3,
+.ops-adapter .billing-admin h4 {
+  margin: 0 0 8px;
+}
+.ops-adapter .billing-admin p {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .billing-owner,
+.ops-adapter .billing-selection {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ops-adapter .billing-selection {
+  align-items: center;
+  margin: 12px 0;
+}
+.ops-adapter .billing-owner label {
+  flex: 1;
+  min-width: 160px;
+}
+.ops-adapter .billing-admin label {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.ops-adapter .billing-admin :is(input:not([type='checkbox']), select, textarea) {
+  width: 100%;
+  min-width: 0;
+}
+.ops-adapter .billing-admin textarea {
+  resize: vertical;
+}
+.ops-adapter .billing-row {
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.ops-adapter .billing-rows {
+  max-height: 520px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.ops-adapter .billing-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+.ops-adapter .billing-row-title label,
+.ops-adapter .billing-confirm {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.5;
+}
+.ops-adapter .billing-row-title span {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.ops-adapter .billing-admin dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 16px;
+  margin: 10px 0;
+}
+.ops-adapter .billing-admin dt,
+.ops-adapter .billing-admin dd {
+  margin: 3px 0 0;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.ops-adapter .billing-admin summary {
+  min-height: 32px;
+  align-content: center;
+  cursor: pointer;
+}
+.ops-adapter .billing-action-form,
+.ops-adapter .billing-item-inputs {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+.ops-adapter .billing-item-inputs {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.ops-adapter .billing-preview {
+  margin-top: 16px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--surface-3);
+}
+.ops-adapter .billing-preview > button {
+  margin-top: 12px;
+}
+@media (max-width: 760px) {
+  .ops-adapter .billing-admin {
+    padding: 12px;
+  }
+  .ops-adapter .billing-admin dl,
+  .ops-adapter .billing-item-inputs {
+    grid-template-columns: 1fr;
+  }
+  .ops-adapter .billing-owner {
+    align-items: stretch;
+  }
+  .ops-adapter .billing-owner label {
+    flex-basis: 100%;
+  }
+  .ops-adapter .billing-selection button {
+    max-width: 100%;
+    white-space: normal;
+    text-align: start;
+  }
+}
+@media (max-width: 760px) {
+  .spend-breakdown-buckets {
+    gap: 8px;
+  }
+  .spend-breakdown-buckets dd {
+    font-size: 16px;
+  }
+  .spend-breakdown-details dl > div {
+    gap: 6px 10px;
+  }
+  .spend-breakdown-details dd {
+    max-width: 110px;
+  }
+}
+
+.p4-demand-start {
+  padding: 20px;
+  margin-bottom: 24px;
+  display: grid;
+  gap: 16px;
+}
+.p4-demand-start > header {
+  align-items: flex-start;
+}
+.p4-demand-state {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.p4-demand-state.on {
+  background: var(--accent);
+  color: var(--bg);
+}
+.p4-demand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.p4-demand-grid > div {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.p4-demand-grid dt,
+.p4-demand-grid small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.p4-demand-grid dd {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.p4-demand-grid dd.p4-demand-reason {
+  font-size: 15px;
+}
+.p4-demand-start > button {
+  width: fit-content;
+}
+.p4-demand-confirm {
+  display: grid;
+  gap: 10px;
+}
+.p4-demand-confirm label {
+  display: grid;
+  gap: 6px;
+}
+
+/* Launch dialog (owner, 2026-10-22): mode is a segmented control, so its column needs real
+   width; the idle box is a small number field, not a full-width input. */
+.ops-adapter .p4-configfields {
+  grid-template-columns: minmax(0, 1.6fr) minmax(230px, auto) 76px minmax(124px, auto);
+  align-items: start;
+}
+.ops-adapter .p4-configfields > label,
+.ops-adapter .p4-configfields > .p4-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+.ops-adapter .p4-field-label {
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ops-adapter .p4-engine {
+  margin-top: 12px;
+}
+.ops-adapter .p4-engine > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.ops-adapter .p4-engine-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 6px;
+}
+.ops-adapter .p4-engine-tag {
+  color: var(--accent);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+/* The idle box holds at most four digits; let the explanation take the rest of the row. */
+.ops-adapter .p4-policy-extra label {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+.ops-adapter .p4-policy-extra input[type='number'] {
+  width: 84px;
+}
+.ops-adapter .p4-policy-note {
+  flex: 1 1 100%;
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+@media (max-width: 900px) {
+  .ops-adapter .p4-configfields {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+/* An admin must see other accounts' live machines, not only their own (owner, 2026-10-22). */
+.ops-adapter .p4-fleet-note {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+/* While a refresh is due the last totals stay visible, muted (owner 2026-10-28). */
+.ops-adapter .stats.stale b {
+  opacity: 0.45;
+}
+
+/* #232 (#34): one line per assistant; cost breakdown, cap and IDs live under Details. */
+.assistant-connections .assistant-row {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.assistant-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.assistant-row-head > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-row-scope {
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.assistant-row-head > .assistant-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+  flex: none;
+}
+.assistant-status {
+  flex: none;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.assistant-status.connected {
+  background: color-mix(in srgb, var(--good) 22%, transparent);
+  color: var(--good);
+}
+.assistant-status.paused,
+.assistant-status.pending {
+  background: color-mix(in srgb, var(--warn) 22%, transparent);
+  color: var(--warn);
+}
+.assistant-row-details > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+.assistant-row-details[open] {
+  display: grid;
+  gap: 8px;
+}
+.assistant-label-help i {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  font-size: 10px;
+  font-style: normal;
+  color: var(--muted);
+  cursor: help;
+}
+.assistant-inactive-toggle.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font-size: 12px;
+  text-decoration: underline;
+  justify-self: start;
+}
+/* AI assistant details (owner, 2026-10-26): tidy rows; the daily cap sits on one line. */
+.assistant-row {
+  display: grid;
+  gap: 8px;
+}
+.assistant-row-details[open] {
+  gap: 12px;
+  padding-top: 4px;
+}
+.assistant-row-details > p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.assistant-row-details > .spend-breakdown {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.assistant-row-details > .spend-breakdown .spend-breakdown-buckets {
+  margin: 10px 0 4px;
+}
+.assistant-row-details > .spend-breakdown .spend-breakdown-buckets dd {
+  font-size: 16px;
+}
+.assistant-row-details > form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+.assistant-row-details > form > label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.assistant-row-details > form input {
+  width: 140px;
+}
+.assistant-row-details > form > button,
+.assistant-row-details > button {
+  justify-self: start;
+}
+
+/* Assistant forms use the shared settings rows (owner, 2026-10-26): compact controls,
+   buttons at their own width. */
+.assistant-connections > form.ui-form,
+.assistant-connections .assistant-defaults > form.ui-form {
+  display: block;
+}
+.assistant-connections > .assistant-refresh,
+.assistant-connections > button {
+  align-self: flex-start;
+}
+.assistant-connections .assistant-defaults > summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+.assistant-connections .assistant-defaults[open] > summary {
+  margin-bottom: 12px;
+}
+
+/* Host history cards (owner 2026-10-28): six facts in one row of three, tighter boxes, and
+   the run/failure counts as a compact line, so each host fits on about half a screen. */
+.ops-adapter .p4-host-record .p4-kv {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.ops-adapter .p4-host-record .p4-kv > div {
+  padding: 8px 10px;
+  gap: 2px;
+}
+.ops-adapter .p4-host-record .p4-host-summary {
+  grid-template-columns: repeat(4, minmax(0, max-content));
+  gap: 4px 20px;
+  font-size: 12px;
+}
+@media (max-width: 760px) {
+  .ops-adapter .p4-host-record .p4-kv,
+  .ops-adapter .p4-host-record .p4-host-summary {
+    grid-template-columns: 1fr 1fr;
+  }
+}

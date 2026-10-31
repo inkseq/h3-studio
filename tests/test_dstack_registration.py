@@ -694,3 +694,28 @@ class RegistrationCapacityTests(LedgerCase):
                 self.assertNotIn("PRIVATE", str(result))
         with self.assertRaises(fixture.OperatorError):
             self.store.record_registration(node, "known-worker", "PRIVATE-SECRET")
+
+
+class ObservedRegistrationClientTests(LedgerCase):
+    def test_prelaunch_reads_through_the_same_control_plane(self):
+        from types import SimpleNamespace
+
+        from studio_platform.dstack_control_plane import control_plane
+        from studio_platform.dstack_operator import DstackOperator
+
+        client = Mock(project="inkseq-staging", endpoint="https://sky.dstack.ai")
+        service = SimpleNamespace(
+            capacity=SimpleNamespace(client=client),
+            provider_inventory=None,
+            repo=SimpleNamespace(clock=lambda: 10.0),
+            policy={"observation_fresh_seconds": 30},
+        )
+        with patch(
+            "studio_platform.dstack_operator.live_capacity_usage",
+            return_value={"observations": []},
+        ) as live:
+            DstackOperator._observed_registration_usage(service, [])
+        observed = live.call_args.args[0]
+        # Without the endpoint, Sky would read local-server history as its own.
+        self.assertEqual(control_plane(observed), "https://sky.dstack.ai")
+        self.assertEqual(observed.project, "inkseq-staging")

@@ -1,0 +1,102 @@
+/* Works-page refinements; story opening/creation still use the original commands. */
+.works-page .home-search-row > .item-menu {
+  flex: none;
+}
+.works-page :is(.v2-home-new, .v2-home-quick) {
+  height: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding-block: 0;
+  border-radius: var(--r-sm);
+}
+.works-page .v2-home-search {
+  flex: 0 1 240px;
+  min-width: 180px;
+  height: 36px;
+  min-height: 36px;
+  box-sizing: border-box;
+}
+.works-page .story-card {
+  min-width: 0;
+  overflow: visible;
+}
+/* The card stays unclipped (menus), so the cover rounds its own top corners to sit
+   inside the card's 1px border (owner, 2026-10-24). */
+.works-page .story-card .cover {
+  border-radius: calc(var(--r-lg) - 1px) calc(var(--r-lg) - 1px) 0 0;
+}
+.works-page .story-card > small.story-logline {
+  font-weight: 400;
+  min-height: 1.5em;
+}
+.works-page .story-card > small.story-logline.muted {
+  color: var(--muted);
+}
+.works-page .story-card > small.story-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.5;
+  min-height: 3.4em;
+  font-size: 11px;
+}
+.works-page .story-card-meta > time {
+  white-space: nowrap;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.story-library-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.story-library-create-form > label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--ink-2);
+}
+.story-library-create-form > button {
+  align-self: flex-end;
+}
+@media (max-width: 760px) {
+  .works-page .home-head {
+    gap: 10px;
+  }
+  .works-page .home-search-row {
+    width: 100%;
+    min-width: 0;
+  }
+  .works-page :is(.v2-home-new, .v2-home-quick) {
+    width: 36px;
+    min-width: 36px;
+  }
+  .works-page .story-card > small.story-card-meta {
+    font-size: 11px;
+  }
+}
+/* Sort menu beside the search box (#232 #57). */
+.works-page .v2-home-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 4px 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--muted);
+}
+.works-page .v2-home-sort select {
+  width: auto;
+}
+/* The search row sizes to its controls (search, sort, refresh) instead of a fixed 320px,
+   so nothing overlaps Quick Create (owner review, 2026-10-26). */
+.works-page .home-search-row {
+  width: auto;
+  flex: 0 1 auto;
+}

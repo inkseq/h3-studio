@@ -160,6 +160,72 @@ class FullCompilerTests(unittest.TestCase):
         compiler.validate_prepared(p, binding)
         compiler.validate_prepared_media(p, binding, m)
 
+    def test_pika_v9_pins_per_mode_adapter_sampler_and_six_steps(self):
+        # Owner 2026-10-30 (#844): Pika H3 Flex as an optional accelerator on v9.
+        identity = 'h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9'
+        loras = {
+            'fl': 'loras/pika_h3_flex_fl2va_6step_v1_bf16.safetensors',
+            'ref': 'loras/pika_h3_flex_ref2va_6step_v1_bf16.safetensors',
+        }
+        for mode, other in (('fl', 'ref'), ('ref', 'fl')):
+            schema = compiler.control_schema(identity, mode)
+            self.assertEqual(
+                (schema['steps']['minimum'], schema['steps']['maximum']), (6, 6)
+            )
+            components = engine_manifest(identity, mode).document['components']
+            self.assertEqual(
+                components['turbo_lora_' + mode]['files'][0]['path'], loras[mode]
+            )
+            self.assertNotIn('turbo_lora_' + other, components)
+        r, m = case(images=['image'], duration=5)
+        output = native_output_spec(r)
+        handles = {i: 'handle-' + i for i in m}
+        s = compiler.compile_settings(r, m, output, handles, identity)
+        self.assertEqual(
+            (s['num_inference_steps'], s['sample_solver'], s['activated_loras']),
+            (6, 'pika_renoise', [loras['ref']]),
+        )
+        self.assertEqual((s['loras_multipliers'], s['guidance_scale']), ('1.0', 1.0))
+        fl, fm = case(mode='fl', duration=5)
+        f = compiler.compile_settings(fl, fm, native_output_spec(fl), {}, identity)
+        self.assertEqual(f['activated_loras'], [loras['fl']])
+        # TaoMate on the same runtime keeps the creator sampler.
+        tao = compiler.compile_settings(
+            r,
+            m,
+            output,
+            handles,
+            'h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9',
+        )
+        self.assertEqual(tao['sample_solver'], 'euler')
+        s['output_filename'] = 'sixnine-test'
+        binding = engine_manifest(identity, 'ref')
+        p = PreparedRequest(
+            'job',
+            'test',
+            'a' * 64,
+            binding.digest,
+            canonical_json(s),
+            canonical_json(output),
+            True,
+            tuple(
+                InputDescriptor(i, 'handle-' + i, v['kind'], 'b' * 64, 4)
+                for i, v in m.items()
+            ),
+        )
+        # The read-back maps pika_renoise to the euler control it compiles from.
+        compiler.validate_prepared(p, binding)
+        with tempfile.TemporaryDirectory() as root:
+            target = Path(root) / loras['ref']
+            target.parent.mkdir()
+            target.write_bytes(b'lora')
+            staged = SimpleNamespace(
+                full_input=lambda d, **kw: (Path(root) / d.handle, m[d.asset_id]),
+            )
+            with patch.object(compiler, 'validate_prepared_media'):
+                resolved = resolve_inputs(p, staged, binding, model_root=root)
+            self.assertEqual(resolved['activated_loras'], [str(target.resolve())])
+
     def test_taomate_v7_pins_lora_and_five_steps(self):
         # Owner default 2026-10-25: TaoMate rank-19 LoRA, 5 steps, guidance 1.
         identity = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
@@ -461,6 +527,7 @@ class FullCompilerTests(unittest.TestCase):
                 'reference_images': 9,
                 'reference_videos': 3,
                 'reference_audios': 0,
+                'reference_video_frames': 168,
             },
         )
         p, binding = prepare(r, m)

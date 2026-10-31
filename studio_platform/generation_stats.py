@@ -13,7 +13,7 @@ from fastapi import Query, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 
-from .operator_capacity import operator_nodes
+from .operator_capacity import operator_commands, operator_nodes
 from .repository import artifacts, attempts, jobs
 from .telemetry import _bands
 
@@ -176,7 +176,56 @@ def generation_stats(repo, tenant_id, *, days, now):
             }
         )
     summary.sort(key=lambda g: (-g["count"], g["gpu_type"], g["mode"]))
-    return {"days": days, "count": len(items), "groups": summary, "recent": items[:200]}
+    return {
+        "days": days,
+        "count": len(items),
+        "groups": summary,
+        "recent": items[:200],
+        "overview": overview(repo, tenant_id, items, since=since),
+    }
+
+
+MANUAL_KINDS = ("dstack_start", "dstack_stop", "dstack_hold")
+
+
+def overview(repo, tenant_id, items, *, since):
+    """#819 top line: outcomes, waits, GPU cost per clip, hands-on operations."""
+    with repo.engine.connect() as connection:
+        outcomes = dict(
+            connection.execute(
+                select(jobs.c.status, func.count())
+                .where(
+                    jobs.c.tenant_id == tenant_id,
+                    jobs.c.created_at >= since,
+                    jobs.c.status.in_(("succeeded", "failed", "cancelled")),
+                )
+                .group_by(jobs.c.status)
+            ).all()
+        )
+        # Queue-driven starts use the dstack-demand actor; every other machine
+        # start/stop/hold was a person (or an agent acting for one).
+        manual = connection.execute(
+            select(func.count()).where(
+                operator_commands.c.created_at >= since,
+                operator_commands.c.kind.in_(MANUAL_KINDS),
+                ~operator_commands.c.actor.like("dstack-demand:%"),
+            )
+        ).scalar_one()
+    finished = outcomes.get("succeeded", 0) + outcomes.get("failed", 0)
+    waits = [i["wait_seconds"] for i in items if _number(i["wait_seconds"])]
+    costs = [i["cost_microusd"] for i in items if i["cost_microusd"] is not None]
+    return {
+        "succeeded": outcomes.get("succeeded", 0),
+        "failed": outcomes.get("failed", 0),
+        "cancelled": outcomes.get("cancelled", 0),
+        "success_rate": round(outcomes.get("succeeded", 0) / finished, 3)
+        if finished
+        else None,
+        "wait_seconds": _summary(waits) if waits else None,
+        "median_cost_microusd": int(statistics.median(costs)) if costs else None,
+        "total_cost_microusd": sum(costs) if costs else 0,
+        "manual_operations": manual,
+    }
 
 
 def register_routes(app):

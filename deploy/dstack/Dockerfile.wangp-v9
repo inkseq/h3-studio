@@ -1,0 +1,22 @@
+# v9 runtime: the v8 image (CUDA 13.0 stack, sage2, cu13 ldconfig) with WanGP upgraded from 0e58385 to 9cb2bcd
+# (2026-10-29, adds H3 Pika H3 Flex support and runs TaoMate 15-45% faster on the same stack, #844).
+# Upstream requirements are installed except the pinned CUDA stack, which must stay exactly as in v8.
+ARG BASE_IMAGE=public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:2d09de71382b424175b42d0a76947c628ade6686e5d20fbb646ed0fb7502bde7
+FROM ${BASE_IMAGE}
+ARG WANGP_REVISION=9cb2bcdafa7b41d2a1c30d2571cea4bc104657fb
+RUN git -C /opt/workspace-internal/Wan2GP fetch --quiet origin \
+    && git -C /opt/workspace-internal/Wan2GP checkout --quiet --force ${WANGP_REVISION} \
+    && git -C /opt/workspace-internal/Wan2GP clean -fdq -e '*.pyc' \
+    && grep -viE '^(torch|torchvision|torchaudio|triton|sageattention)([<>=~ ;]|$)' \
+        /opt/workspace-internal/Wan2GP/requirements.txt > /tmp/wangp-requirements.txt \
+    && /venv/main/bin/python -m pip install --no-cache-dir -r /tmp/wangp-requirements.txt \
+    && rm /tmp/wangp-requirements.txt
+RUN test "$(git -C /opt/workspace-internal/Wan2GP rev-parse HEAD)" = "9cb2bcdafa7b41d2a1c30d2571cea4bc104657fb" \
+    && test -z "$(git -C /opt/workspace-internal/Wan2GP status --porcelain --untracked-files=no)" \
+    && test -f /opt/workspace-internal/Wan2GP/models/minimax_h3/pika.py \
+    && /venv/main/bin/python -c "import torch, triton, sageattention, importlib.metadata as m; \
+assert torch.__version__ == '2.10.0+cu130' and torch.version.cuda == '13.0', torch.__version__; \
+assert triton.__version__ == '3.6.0' and m.version('sageattention').startswith('2.2.0'); print('ok')" \
+    && ldconfig -p | grep -q "libnvrtc-builtins.so.13.0 .*nvidia/cu13/lib"
+WORKDIR /workspace
+CMD ["sleep", "infinity"]

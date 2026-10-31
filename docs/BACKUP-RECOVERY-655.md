@@ -141,3 +141,227 @@ still fails visibly after the original business-copy receipt is saved.
    today's upload. Preserve its original receipts and report actual data dates.
 6. Sentry wiring is a separate #655 follow-up through the existing deployment config
    path and acceptance gates. Charging/Checkout remain off.
+
+## Confirmed fresh-capture OOM, 2026-10-26 UTC
+
+The original 10-19 copy completed (SSM `e64cb9bb-020d-4391-83d3-491078b41004`).
+Its S3 completion version is `I8UkNyXtrq._wi_MAdY_kVzbbKf6obrs`, SHA256
+`e71866a66d2a15a7fdf4467197c1fb8aff5c0ef7131258f05de2f5076c158b33`.
+This is an old snapshot copied today, not a fresh capture or restore proof.
+
+The one subsequent daily invocation `3849a3e9-2d95-416c-b78d-f0c527aee51f`
+passed zero-work and release checks but the kernel killed backup Python in the
+application's 512 MiB memory cgroup at 18:25:30 UTC. Read-only evidence
+`1f0b4d16-e0e2-4735-a57a-de6735c1724a` records 408116 KiB anonymous RSS.
+Application health remained healthy, restart count zero, and jobs zero. Original
+operation `9f8335d4-2da3-42ac-81c0-4f4104af2ee8` has only its intent, phase records
+and partial SQLite/journal, no manifest or transfer. S3 version history for that
+exact prefix was empty. The files and hashes are pinned by the new helper; none
+was removed, renamed, reset or represented as a completed snapshot.
+
+The source fix selects a table's export batch from its already measured largest
+row: at most 200 rows and approximately 4 MiB serialized bytes, with a minimum of
+one row. The existing 16 MiB individual-row / 256 MiB total / time limits remain.
+Decoded JSON and serialized values are released before the next fetch. A single
+large row can exceed 4 MiB; this is a batching bound, not an absolute process-RSS
+guarantee. A local PostgreSQL export of 96 synthetic 1 MiB documents plus one small
+document measured 397972 KiB peak RSS before, 112560 KiB after, in separate 512 MiB
+containers with no swap. Nine real PostgreSQL backup regressions passed.
+
+### One reviewed recovery, without promoting or raising memory limits
+
+This changes the reviewed recovery behavior and needs one new Tier2 PR review.
+The source fix goes through ordinary staging; Claude remains the production
+promoter. Do not clear #193 hold until the fresh copy is reconciled.
+
+1. Adopt only two **new** root-owned mode-0644 files, recording hashes and an
+   exclusive install intent under the existing release lock: this PR's
+   `deploy/platform/business_backup_oom_recovery.py` as
+   `/opt/inkseq-business-backup-v1/business_backup_oom_recovery.py`, and the exact
+   `studio_platform/backup.py` as `backup_capture_runtime.py` in that directory.
+   Refuse either existing path or changed installed #657 helper/config/release
+   hashes; retain rollback evidence. Do not alter the app image, app filesystem,
+   credentials, memory limit, existing helpers, unit or timer. The runtime hash
+   is pinned in the recovery script and tested against the tracked source bytes.
+2. Run the helper without arguments to qualify only. It pins production fd2ae3af,
+   its approved archive/image, original source hash, configuration, exact failed
+   intent/partial-file hashes, zero jobs, no writer, failed/inactive unit and no
+   original-nonce transport container. It requires at least 5 GiB free disk and
+   the original UTC capture day; another date requires a reviewed adjustment,
+   never silent redating. Independently recheck that original S3 prefix still has
+   no versions or deletion markers before executing.
+3. Invoke `python3 -B business_backup_oom_recovery.py --execute` **once**, with a
+   5700-second outer bound. Snapshot/handoff/transfer bounds remain 2400/900/1800s.
+   The exclusive fsynced recovery intent precedes all writes. A fresh private
+   `-oom-recapture` directory receives a new read-only database snapshot. The
+   previous partial directory stays untouched and its hashes are rechecked.
+   The known-reviewed module is passed on stdin to a separate Python subprocess
+   in the existing app container; source and runtime hashes must match. This
+   replaces no running application module/file and uses only its existing
+   explicit DB/storage identity. No generic script or destination argument is
+   accepted. Capture failure/timeout preserves the fence and never retries.
+4. Freeze a private host handoff and use the existing verified conditional-copy
+   transport to the **original nonce**. This is the first remote write for that
+   operation, not a replay or new upload prefix. Record the actual S3 receipt,
+   root receipt hash and completion once. Hosted-user unavailability can still
+   fail after a genuine business-copy completion; reconcile that receipt rather
+   than rerunning. A copy is never represented as a verified restore.
+5. Read back S3's exact completion version and local receipt/digests, report both
+   dated copies on #655, then clear #193's hold for Claude. Keep daily-preserve;
+   the old partial and new recapture paths are intentionally retained. Existing
+   retention will refuse the old partial tree's inventory mismatch, not delete
+   unverified files. Any later cleanup needs its own verified plan. Claude's
+   normal promotion of this source fix makes subsequent daily captures bounded
+   without using this one-operation helper again.
+
+## Workflow sidecar memory follow-up after the one-shot attempt
+
+Recovery `719e7d8c-5135-4452-87d9-f98a0cfc5b3a` failed during capture on
+2026-10-26 at 21:50 UTC. Kernel read-back `66d6083c` confirms a second cgroup OOM;
+application health and restart count were unaffected. The original failed partial,
+new 116,178,944-byte SQLite file, and both exclusive operation fences are retained.
+There is no workflow sidecar, manifest, handoff, or new S3 completion. The installed
+one-off helper and its historical runtime digest remain immutable and exhausted;
+this source change neither rearms it nor authorizes a repeat invocation.
+
+Aggregate-only inspection found 130,937 workflow output rows (55.7 MB serialized)
+and 8,682 notifications (4.0 MB). The business batch fix did not bound the next
+stage: workflow export retained decoded dictionaries and sort keys for every row,
+then encoded the entire document. It also called the generic manifest writer's
+16 MiB limit despite the sidecar's existing 64 MiB contract.
+
+The follow-up streams rows into a private disposable SQLite sorting spool and
+writes the same v1 JSON structure in canonical row order. It keeps the original
+read-only repeatable-read source transaction, exact catalog, row/byte/time limits,
+NULL/text values, duplicate rows and workflow execution hold. Verification and
+manifest inspection now validate one row at a time and hash every original byte.
+Legacy whitespace/key order/UTF-8 remain readable. Explicit isolated restoration's
+materializing `read` API is unchanged. No data retention or schema change occurs.
+The spool alone is removed on normal exit; incomplete backups and receipts stay
+intact. A kill/OOM can leave a private `.workflow-sort-*` directory inside the
+failed capture. It is temporary sorting state, not snapshot content or a completed
+backup; preserve it with the failed capture for reconciliation. Do not include it
+in a verified manifest or remove it during an automatic retry.
+
+Validation includes a 131,000-row sidecar larger than 16 MiB inside a 256 MiB,
+no-swap, network-none container, plus malformed/tampered/legacy format coverage
+and real PostgreSQL same-snapshot/restore-hold tests. A new production recovery
+requires an explicit reviewed path that preserves both failed attempts. Do not
+change their dates, remove their fences, reuse the exhausted helper, or substitute
+an old snapshot for a fresh backup. Claude owns the normal source-fix promotion.
+
+## Explicit terminal capture reconciliation for the next daily copy
+
+After Claude promoted 66061643, read-only SSM
+`31dd0cd9-5b90-40f5-88f6-994622a75402` confirmed that the installed host helper
+still requires every prior day to have `completed.json`. The exhausted October26
+operation has no completion. Therefore the October27 timer will refuse before
+capture despite the deployed memory fixes. Merely waiting for the timer is not
+a recovery plan. No timer or failed recovery was invoked to establish this.
+
+The smallest change is a **separate, root-attested terminal capture failure** for
+that exact day/nonce. It is not a successful backup, not a restored snapshot,
+not a waiver for arbitrary failures and not permission to retry October26.
+The normal daily-preserve path can subsequently create its own fresh day once;
+all other incomplete operations retain the existing hard refusal. Unknown uploads
+cannot use this path. The old helpers, fences and both failed partial directories
+remain untouched; existing completion/alerts/retention readers do not treat this
+acknowledgement as `completed.json`. Normal automatic cleanup is not enabled.
+
+This is Tier2 production-host machinery: one Claude PR review before adopting.
+The source addition alone does nothing until the explicit acknowledgement exists.
+Operator adoption, under the existing #193 hold and zero-work gate:
+
+1. Re-read the actual production release/image, approved manifests and backup
+   configuration. CAS-pin current/previous markers, neighboring helper hashes and
+   container identities. Qualify only, then repeat under `release.lock` before
+   writing. A promotion between qualification and apply must refuse; do not use
+   fd2-era pins after the 6606 promotion.
+2. Reconcile the **original** failed commands `3849a3e9-2d95-416c-b78d-f0c527aee51f`
+   and `719e7d8c-5135-4452-87d9-f98a0cfc5b3a`, their OOM evidence and final process
+   state. Check zero nonterminal jobs, no surviving capture writer, no original
+   nonce transport container and inactive/failed backup service. Do not stop work
+   to force this check. Hash/preserve both original and OOM partial trees.
+3. Read **all** object versions and delete markers for
+   `business-backups/9f8335d4-2da3-42ac-81c0-4f4104af2ee8/` in the configured
+   production bucket, owner829135631045. Both must be empty, not an access error
+   or incomplete listing. This wake's read returned empty; refresh immediately
+   before adoption. Any object, transport evidence or unknown writer blocks the
+   acknowledgement and requires original-operation reconciliation instead.
+4. CAS-install the reviewed `business_backup.py` with rollback outside the dated
+   history tree. All other helper files, units/timers and application containers
+   remain unchanged. Then exclusively create and fsync root0600
+   `/var/lib/inkseq-business-backup/2026-10-26/failed-capture-reconciled.json`.
+   Preserve the six original metadata files, whose hashes are fixed in
+   `FAILED_CAPTURE_FILES` (read-back `d1ee71ed-4520-4881-817d-56dfeccb8701`).
+   The code accepts exactly these keys, with no generic skip flag:
+
+   - `version: 1`, `state: "failed_capture_reconciled_not_completed"`, original
+     `day: "2026-10-26"` and `operation_id`, `evidence: FAILED_CAPTURE_FILES`.
+   - `bucket: "sixnine-business-backup-829135631045-ap-southeast-1"`, exact original
+     `prefix`, integer `versions: 0` and `delete_markers: 0`.
+   - `checked_at`: actual timezone-aware UTC read-back time; `release` and `image`:
+     exact verified current SHA and Docker image ID, never a tag or guessed pin.
+   - `zero_work: true`, `no_writer_or_transport: true`, `partials_preserved: true`,
+     `automatic_retry: false`. These are operator attestations from steps1–3,
+     not fields the application may supply or self-certify.
+
+5. Read back the installed bytes/acknowledgement, unchanged original hashes and
+   partials, and unchanged neighboring runtime identities. The history reader
+   must reject the same/earlier day and any unrelated failed day; it may permit
+   a later day only on the configured production host/bucket. No backup execution
+   belongs in this install step. If adoption is uncertain, reconcile its original
+   command and files; never recreate the acknowledgement or clear a fence.
+6. Observe the next normal daily-preserve run. Only its real S3 completion
+   version/hash proves a new backup. Report October26 as **failed, preserved,
+   reconciled without upload**, never as a second completed copy. Clearing the
+   remaining hold must explicitly account for that dated failure and the actual
+   fresh-copy receipt. No claim of a restore follows from a successful copy.
+
+Regression tests cover absent/forged/transplanted acknowledgements, changed or
+extra handoff/transfer evidence, boolean counts, pending original outcomes,
+same-day retry refusal, wrong environment/bucket, malformed pins/timestamps,
+protected-file rejection, preserved bytes and unchanged completion validation.
+They do not themselves attest production S3 emptiness or authorize a host write.
+
+## October 27 capture-only reconciliation (#710)
+
+The normal October 27 operation `8e51de50-8b9d-4338-beda-c02b94d06aca`
+terminated at 16:32:02 UTC, exit 1, before handoff/transfer. Read-only SSM
+`536f0f66-83c5-449b-8e91-3b4df1ebc378` captured the three original metadata
+hashes now pinned in `OCT27_CAPTURE_FILES`. Binding-qualified read-only inspection
+`a07bdaf9-44da-4cb5-ada8-8a994cb06155` found the first referenced Local object
+absent. This is not the October 26 OOM, and its exhausted recovery helpers must
+not be invoked. #709 fixes the explicit incomplete-media capture path.
+
+The existing history reader now recognizes exactly two receipt-bound failures;
+the October 26 acknowledgment and evidence remain unchanged. October 27 needs
+its own exclusive root acknowledgment with the same closed fields above, but
+`day: 2026-10-27`, its own operation ID/prefix, and `OCT27_CAPTURE_FILES` evidence.
+Its only original entries are intent, snapshot-started and snapshot-unknown.
+Any additional handoff, output, transport or recovery entry refuses. The first
+negative original-prefix ListObjectVersions read was 2026-10-27T16:34:49.278933Z;
+an earlier acknowledgment cannot qualify. **Renew the complete listing directly
+before adoption**, not from this old receipt.
+
+Adoption is Tier2 and depends on one review of the #710 change plus Claude's qualified
+production promotion of #709. Under a new #193 release hold, repeat the zero-work
+release/image/source/helper/container CAS procedure above. Verify the deployed
+`backup.py` and `backup_missing.py` bytes against the reviewed fixed release;
+never acknowledge the failure while a later capture would still use the known
+broken reader. Reconcile the original automatic unit, require no writer or
+original-prefix transport, and hash/preserve the entire original partial at
+`/srv/sixnine/platform-data/business-backups/8e51de50-8b9d-4338-beda-c02b94d06aca`.
+Record both original days' unchanged evidence and the existing October 26 ack.
+
+CAS-install only the reviewed history helper with rollback kept outside dated
+history, then exclusively create/fsync root0600 October 27's
+`failed-capture-reconciled.json`. Read back helper/ack hashes, both originals,
+unchanged partial trees and runtime identities before clearing the hold. A
+changed release, nonempty/incomplete version listing, active writer, new evidence
+or unknown install outcome requires read-only reconciliation, never replay.
+
+This allows only a later normal daily-preserve to take its own fresh snapshot.
+It cannot rerun either failed date, produce `completed.json`, enable cleanup or
+prove a successful backup. Report October 27 as failed/preserved/reconciled,
+and report the next real S3 completion or exact refusal separately on #655.

@@ -8,6 +8,8 @@ from pathlib import Path
 
 import httpx
 
+from .llm_tracing import clip, digest, generation, usage as traced_usage
+
 ORIGIN = "https://generativelanguage.googleapis.com"
 PROFILE = "gemini--user-supplied"
 MODELS = {"gemma-4-31b-it": "Gemma 4 31B IT", "gemini-3.8-flash": "Gemini 3.8 Flash"}
@@ -190,6 +192,28 @@ class GoogleChatClient:
         json_mode=False,
     ):
         body = payload(model, messages, instruction, max_tokens, json_mode)
+        with generation(
+            "gemini-generate",
+            model=model,
+            input=clip(messages[-1]["text"]),
+            model_parameters={"max_tokens": max_tokens, "json_mode": json_mode},
+            metadata={"instruction": digest(instruction), "turns": len(messages)},
+        ) as traced:
+            result = self._generate(model, body)
+            usage = result["usage"]
+            traced.update(
+                output=clip(result["text"]),
+                usage_details=traced_usage(
+                    usage.get("promptTokenCount", 0),
+                    usage.get("candidatesTokenCount", 0)
+                    + usage.get("thoughtsTokenCount", 0),
+                    usage.get("cachedContentTokenCount", 0),
+                ),
+                metadata={"finish_reason": result["finish_reason"]},
+            )
+        return result
+
+    def _generate(self, model, body):
         started = time.monotonic()
         data = self._request(
             "POST", "/v1beta/models/" + model + ":generateContent", body
@@ -220,6 +244,7 @@ class GoogleChatClient:
                     "promptTokenCount",
                     "candidatesTokenCount",
                     "thoughtsTokenCount",
+                    "cachedContentTokenCount",
                     "totalTokenCount",
                 )
                 if k in usage

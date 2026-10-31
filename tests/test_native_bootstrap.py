@@ -333,6 +333,80 @@ class SSHRecoveryTests(unittest.TestCase):
         )
         host.start.assert_not_called()
 
+    def test_jump_host_pins_both_hops_and_reconnects_without_new_trust(self):
+        from studio_platform.native_bootstrap import SSHHost
+        import tempfile
+
+        class Transport:
+            active = True
+
+            def is_active(self):
+                return self.active
+
+            def is_authenticated(self):
+                return self.active
+
+            def open_channel(self, kind, destination, source, timeout=None):
+                channels.append((kind, destination))
+                return 'channel-%d' % len(channels)
+
+        class Client:
+            def __init__(self):
+                self.transport = Transport()
+                self.policy = None
+                clients.append(self)
+
+            def load_host_keys(self, path):
+                pass
+
+            def set_missing_host_key_policy(self, policy):
+                self.policy = policy
+
+            def connect(self, host, **kw):
+                logins.append((host, kw['port'], kw['username'], kw.get('sock')))
+
+            def get_transport(self):
+                return self.transport
+
+            def close(self):
+                self.transport.active = False
+
+        clients, logins, channels = [], [], []
+        coordinates = {
+            'host': 'localhost',
+            'port': 10022,
+            'username': 'root',
+            'jump': {'host': '203.0.113.9', 'port': 22, 'username': 'riftuser'},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            config = SimpleNamespace(
+                known_hosts_file=root / 'known',
+                ssh_key_file=root / 'key',
+                trust_first_host_key=True,
+            )
+            with patch('paramiko.SSHClient', Client):
+                host = SSHHost(config, coordinates)
+                clients[1].transport.active = False
+                host.ensure_connected()
+                host.close()
+        # The jump hop logs in first; the container hop rides its channel.
+        self.assertEqual(
+            logins,
+            [
+                ('203.0.113.9', 22, 'riftuser', None),
+                ('localhost', 10022, 'root', 'channel-1'),
+                ('203.0.113.9', 22, 'riftuser', None),
+                ('localhost', 10022, 'root', 'channel-2'),
+            ],
+        )
+        self.assertEqual(channels, [('direct-tcpip', ('localhost', 10022))] * 2)
+        self.assertEqual(
+            [type(c.policy).__name__ for c in clients],
+            ['AutoAddPolicy', 'AutoAddPolicy', 'RejectPolicy', 'RejectPolicy'],
+        )
+        self.assertFalse(any(c.transport.active for c in clients))
+
     def test_existing_tunnel_reuses_pinned_connection_without_replaying_start(self):
         from studio_platform.native_bootstrap import SSHHost
         import tempfile

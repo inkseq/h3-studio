@@ -4,20 +4,21 @@ Keep the legacy H3 fallback and CPU-render validation during extraction. This
 module does not select engines, rewrite accepted requests, or start inference.
 """
 
+from fractions import Fraction
 import math
 
 from .protocol import BackendError
 
 from .native_outputs import (
-    NATIVE_DELIVERY,
-    GPU_R2_DELIVERY,
-    NATIVE_POLICIES,
-    NATIVE_EVIDENCE_FIELDS,
-    validate_delivery_policy,
-    native_delivery_spec,
-    delivery_spec,
-    gpu_delivery,
-    validate_delivery_evidence,
+    NATIVE_DELIVERY,  # noqa: F401 -- public compatibility re-export
+    GPU_R2_DELIVERY,  # noqa: F401 -- public compatibility re-export
+    NATIVE_POLICIES,  # noqa: F401 -- public compatibility re-export
+    NATIVE_EVIDENCE_FIELDS,  # noqa: F401 -- public compatibility re-export
+    validate_delivery_policy,  # noqa: F401 -- public compatibility re-export
+    native_delivery_spec,  # noqa: F401 -- public compatibility re-export
+    delivery_spec,  # noqa: F401 -- public compatibility re-export
+    gpu_delivery,  # noqa: F401 -- public compatibility re-export
+    validate_delivery_evidence,  # noqa: F401 -- public compatibility re-export
 )
 
 
@@ -32,6 +33,15 @@ def _shape(job):
 
         shape = validate_render_request(job["request"], owner_id=job.get("owner_id"))
         return shape["width"], shape["height"], shape["duration"], shape["audio"]
+    if job["request"].get("recipe_id") == "enhance-v1":
+        # 1080P/2K enhance of a validated take; the MP4 keeps its draft audio.
+        from ..enhance_plans import TIERS
+
+        size, _ = TIERS[_request(job)["tier"]]
+        spec = job["request"]["output_spec"]
+        if (spec["width"], spec["height"]) != size:
+            raise BackendError("invalid_output_requirements")
+        return spec["width"], spec["height"], float(spec["actual_duration"]), True
     from comfy_workflow import native_output_spec
 
     request = _request(job)
@@ -50,3 +60,27 @@ def _shape(job):
     ):
         raise BackendError("invalid_output_requirements")
     return width, height, duration, bool(request.get("generate_audio", True))
+
+
+# Probed facts about a finished upstream output: collecting the same file again
+# can never pass, so the worker settles the job instead of retrying (#795).
+OUTPUT_REJECTED = frozenset({"output_dimensions_mismatch", "output_too_short"})
+
+
+def output_rejected(error):
+    args = error.args if isinstance(error, BackendError) else ()
+    return len(args) == 1 and args[0] in OUTPUT_REJECTED
+
+
+def _validate_native_timing(stream, delivery):
+    """Reject an unexpected native timeline instead of coercing its frame rate."""
+    try:
+        if (
+            Fraction(stream["avg_frame_rate"]) != delivery["fps"]
+            or int(stream["nb_frames"]) != delivery["frame_count"]
+            or abs(float(stream["duration"]) - delivery["duration_s"]) > 0.001
+            or abs(float(stream.get("start_time", 0))) > 0.001
+        ):
+            raise ValueError
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        raise BackendError("native_output_timing_mismatch") from None

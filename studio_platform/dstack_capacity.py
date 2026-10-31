@@ -10,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import argparse
 import copy
-from email.utils import parsedate_to_datetime
 import hashlib
 import importlib
 import json
@@ -26,9 +25,22 @@ from uuid import UUID
 import httpx
 
 from .inference.wangp_contract import HostReadiness, safe_model_progress
+from .dstack_control_plane import control_plane, foreign_usage, provider_retry_after
+from .worker_boot import boot_commands, boot_env, boot_record, boot_valid
+from .capacity_memory import vast_ram_floor
+
+from .dstack_inventory import (
+    CLOUDRIFT_INSTANCES_URL,
+    KEY_HEADER_URLS,
+    LIUM_PODS_URL,
+    RUNPOD_GRAPHQL_URL,
+    SUPPORTED,
+    InventoryUnconfirmed,
+    read_ids,
+)
 
 DSTACK_VERSION = "0.22.5"
-BACKENDS = frozenset({"vastai", "runpod"})
+BACKENDS = SUPPORTED
 OWNER = "sixnine"
 SHA256 = re.compile(r"[0-9a-f]{64}")
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,200}")
@@ -37,7 +49,6 @@ RUN_STATUSES = TERMINAL | frozenset(
     {"pending", "submitted", "provisioning", "running", "terminating", "stopping"}
 )
 VAST_INSTANCES_URL = "https://console.vast.ai/api/v1/instances/"
-RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
 PROVIDER_READ_ATTEMPTS = 3
 PROVIDER_READ_MAX_DELAY = 5.0
 NATIVE_REASON_CODES = frozenset(
@@ -127,6 +138,7 @@ def native_preparation(value):
                 key: download.get(key)
                 for key in (
                     "bytes_complete",
+                    "bytes_received",
                     "bytes_total",
                     "files_complete",
                     "files_total",
@@ -174,21 +186,6 @@ class DstackReadRateLimited(DstackError):
     def __init__(self, retry_after=None):
         super().__init__("dstack_provider_rate_limited")
         self.retry_after = min(86400, max(1, math.ceil(retry_after or 1)))
-
-
-def _provider_retry_after(value):
-    if not isinstance(value, str) or len(value) > 128:
-        return None
-    value = value.strip()
-    if re.fullmatch(r"[0-9]{1,8}", value):
-        return float(value)
-    try:
-        parsed = parsedate_to_datetime(value)
-        if parsed.tzinfo is not None:
-            return max(0.0, parsed.timestamp() - time.time())
-    except (ValueError, TypeError, OverflowError):
-        pass
-    return None
 
 
 def _require(condition, code):
@@ -239,9 +236,12 @@ class CapacityRequest:
     host_selection: dict | None = None
     test_max_duration_s: int | None = None
     test_task_id: str | None = None
+    boot_token: str | None = None
+    boot_url: str | None = None
 
     def __post_init__(self):
         _uuid(self.intent_id)
+        _require(boot_valid(self.boot_token, self.boot_url), "dstack_boot_invalid")
         _require(self.backend in BACKENDS, "dstack_backend_unsupported")
         _require(self.mode in {"fl", "ref"}, "dstack_mode_invalid")
         for identity in (self.profile_id, self.model_id, self.configuration_id):
@@ -366,7 +366,7 @@ class CapacityRequest:
             "type": "task",
             "name": self.run_name,
             "image": self.image,
-            "commands": ["exec sleep infinity"],
+            "commands": boot_commands(self.boot_token),
             "backends": [self.backend],
             "resources": {
                 "cpu": {"arch": "x86", "count": f"{self.cpu_count}.."},
@@ -388,7 +388,7 @@ class CapacityRequest:
             "retry": False,
             "spot_policy": "on-demand",
             "dstack": False,
-            "env": {},
+            "env": boot_env(self.intent_id, self.boot_token, self.boot_url),
             "ports": [],
             "stop_duration": 300,
             "regions": list(self.regions) if self.regions else None,
@@ -446,6 +446,7 @@ class CapacityRequest:
             value["lifecycle_version"] = 2
         if self.host_selection is not None:
             value["host_selection"] = copy.deepcopy(self.host_selection)
+        value.update(boot_record(self.boot_token, self.created_at))
         return value
 
 
@@ -620,6 +621,8 @@ class DstackClient:
             in {
                 ("GET", VAST_INSTANCES_URL),
                 ("POST", RUNPOD_GRAPHQL_URL),
+                ("GET", LIUM_PODS_URL),
+                ("POST", CLOUDRIFT_INSTANCES_URL),
                 ("POST", "https://console.vast.ai/api/v0/bundles/"),
                 ("GET", "https://console.vast.ai/api/v0/charges/"),
             }
@@ -652,7 +655,9 @@ class DstackClient:
                 with self._provider_session.stream(
                     method,
                     url,
-                    headers={"Authorization": "Bearer " + key},
+                    headers={"X-API-Key": key}
+                    if url in KEY_HEADER_URLS
+                    else {"Authorization": "Bearer " + key},
                     json=body,
                     params=params,
                     timeout=remaining,
@@ -661,7 +666,7 @@ class DstackClient:
                     # These exact allowlisted endpoints are reads, including
                     # search/GraphQL POSTs. Mutations use _post and never retry.
                     if response.status_code == 429:
-                        retry_after = _provider_retry_after(
+                        retry_after = provider_retry_after(
                             response.headers.get("Retry-After")
                         )
                     else:
@@ -742,13 +747,13 @@ class DstackClient:
             "reliability2": {"gte": request.min_reliability},
             "inet_down": {"gte": 1000},
             "verified": {"eq": True},
-            "cuda_max_good": {"gte": 12.8},
+            "cuda_max_good": {"gte": 13.0},
             "compute_cap": {"gte": 600},
             "rentable": {"eq": True},
             "rented": {"eq": False},
             "num_gpus": {"eq": 1},
             "cpu_cores": {"gte": request.cpu_count},
-            "cpu_ram": {"gte": request.memory_gib * 1000},
+            "cpu_ram": {"gte": vast_ram_floor(request)},
             "gpu_ram": {"gte": request.gpu_memory_gib * 1024 * 0.93},
             "disk_space": {"gte": request.disk_gib},
             "dph_total": {"lte": request.max_price_microusd / 1_000_000},
@@ -1007,11 +1012,11 @@ class DstackClient:
                     timeout=min(15, self.timeout, remaining),
                 )
 
-            ids = []
+            ids, aliases, labels = [], {}, []
             if backend == "vastai":
                 params = {
                     "limit": 25,
-                    "select_cols": '["id"]',
+                    "select_cols": '["id","label"]',
                     "order_by": '[{"col":"id","dir":"asc"}]',
                 }
                 cursors, total = set(), None
@@ -1055,6 +1060,7 @@ class DstackClient:
                             "dstack_provider_inventory_unconfirmed",
                         )
                         ids.append(str(row["id"]))
+                        labels.append(row.get("label"))
                     _require(
                         len(set(ids)) == len(ids) and len(ids) <= total,
                         "dstack_provider_inventory_unconfirmed",
@@ -1080,55 +1086,40 @@ class DstackClient:
                 else:
                     raise DstackError("dstack_provider_inventory_unconfirmed")
             else:
-                document = read(
-                    "POST",
-                    RUNPOD_GRAPHQL_URL,
-                    body={"query": "query { myself { pods { id } } }"},
-                )
-                _require(
-                    isinstance(document, dict) and set(document) == {"data"},
-                    "dstack_provider_inventory_unconfirmed",
-                )
-                data = document["data"]
-                myself = data.get("myself") if isinstance(data, dict) else None
-                _require(
-                    isinstance(data, dict)
-                    and set(data) == {"myself"}
-                    and isinstance(myself, dict)
-                    and set(myself) == {"pods"}
-                    and isinstance(myself["pods"], list)
-                    and len(myself["pods"]) <= 4096,
-                    "dstack_provider_inventory_unconfirmed",
-                )
-                for row in myself["pods"]:
-                    _require(
-                        isinstance(row, dict)
-                        and set(row) == {"id"}
-                        and isinstance(row["id"], str)
-                        and IDENTIFIER.fullmatch(row["id"]),
-                        "dstack_provider_inventory_unconfirmed",
-                    )
-                    ids.append(row["id"])
-                _require(
-                    len(set(ids)) == len(ids), "dstack_provider_inventory_unconfirmed"
-                )
-            return {
+                try:
+                    ids, aliases, labels = read_ids(backend, read)
+                except InventoryUnconfirmed:
+                    raise DstackError("dstack_provider_inventory_unconfirmed") from None
+            result = {
                 "backend": backend,
                 "complete": True,
                 "observed_at": observed_at,
                 "instance_ids": ids,
             }
+            if aliases:
+                result["aliases"] = aliases
+            if labels is not None:  # dstack instance names, for #868 proofs
+                result["labels"] = labels
+            return result
         except DstackError:
             raise
         except Exception:
             raise DstackError("dstack_provider_inventory_unavailable") from None
 
+    def configured_backends(self):
+        """Supported backends configured on this dstack project (names only)."""
+        project = self._post(f"/api/projects/{self.project}/get", {})
+        rows = project.get("backends") if isinstance(project, dict) else None
+        _require(isinstance(rows, list), "dstack_provider_inventory_unconfirmed")
+        names = {row.get("name") for row in rows if isinstance(row, dict)}
+        return frozenset(names & BACKENDS)
+
     def plan(self, spec):
-        # 0.22.5 ordinary planning selects an existing fleet. This endpoint is
-        # our advisory global stock query; it does not create a fleet or run.
+        # Use the same fleet selection as apply. Global stock browsing can
+        # offer machines that the configured native fleet cannot place (#659).
         return self._post(
             f"/api/project/{self.project}/runs/get_plan",
-            {"run_spec": spec, "max_offers": 100, "for_offers_only": True},
+            {"run_spec": spec, "max_offers": 100, "for_offers_only": False},
         )
 
     def apply(self, spec):
@@ -1336,24 +1327,9 @@ _terminal_no_allocation_shape = terminal_no_allocation_shape
 
 
 def terminal_no_allocation(run, binding):
-    """Pinned no-capacity failure, not missing-identity or billing evidence.
+    from .dstack_allocation_proof import terminal_no_allocation as qualify
 
-    A task has one job and retry is disabled. Require its complete original
-    submission as well as explicit null allocation/runtime fields. Historical
-    allocation, omitted fields or another submission cannot use this exemption.
-    Call only after the exact owned run/spec has been validated.
-    """
-    if not terminal_no_allocation_shape(run, binding):
-        return False
-    latest = run["latest_job_submission"]
-    message = latest.get("termination_reason_message")
-    if isinstance(message, str) and message.startswith("sixnine_vast_attempts_v1:"):
-        # New native outcomes distinguish explicit rejection from an unknown
-        # PUT/returned contract. Unknown never establishes a zero-charge proof.
-        from .dstack_allocation_proof import from_terminal_run
-
-        return from_terminal_run(run, binding) is not None
-    return True
+    return qualify(run, binding, shape_check=terminal_no_allocation_shape)
 
 
 def live_capacity_usage(
@@ -1426,7 +1402,13 @@ def live_capacity_usage(
                     and observed > 0,
                     "dstack_provider_inventory_unconfirmed",
                 )
-                inventories[backend] = (observed, frozenset(ids))
+                aliases = document.get("aliases", {})
+                _require(
+                    isinstance(aliases, dict)
+                    and all(value in ids for value in aliases.values()),
+                    "dstack_provider_inventory_unconfirmed",
+                )
+                inventories[backend] = (observed, frozenset(ids) | frozenset(aliases))
             except Exception:
                 inventories[backend] = None
         inventory = inventories[backend]
@@ -1474,6 +1456,10 @@ def live_capacity_usage(
             and binding.get("billing_state") == "no_charge_confirmed"
         ):
             included, reason = False, "dstack_never_applied"
+        elif (
+            foreign := foreign_usage(binding, client, provider_absent, BACKENDS)
+        ) is not None:
+            included, reason = foreign
         elif binding.get("apply_started") is True:
             try:
                 run = (
@@ -1671,6 +1657,7 @@ class DstackCapacity:
             "dstack_window_expired",
         )
         binding = request.binding(ssh_key_pub)
+        binding["control_plane"] = control_plane(self.client)
         prior = self.store.load(request.intent_id)
         _require(isinstance(prior, dict), "dstack_intent_missing")
         if prior.get("spec_digest"):
@@ -1966,6 +1953,18 @@ class DstackCapacity:
                 state="stopped", reason_code="dstack_run_terminal_billing_pending"
             )
             message = submission.get("termination_reason_message")
+            if (
+                binding.get("backend") == "runpod"
+                and isinstance(message, str)
+                and message.startswith("sixnine_runpod_outcome_v1:")
+            ):
+                # The original create may have allocated. A terminal native job
+                # is not provider absence, a free slot, or permission to reapply.
+                value.update(
+                    state="creation_unknown",
+                    reason_code="dstack_allocation_requires_reconciliation",
+                )
+                return value
             if isinstance(message, str) and message.startswith(
                 "sixnine_vast_attempts_v1:"
             ):
@@ -1979,9 +1978,11 @@ class DstackCapacity:
                     return value
             if terminal_no_allocation(run, binding):
                 value["reason_code"] = "dstack_no_capacity_billing_pending"
-                from .dstack_allocation_proof import from_terminal_run
+                from .dstack_allocation_proof import account_absence, from_terminal_run
 
-                proof = from_terminal_run(run, binding)
+                proof = from_terminal_run(run, binding) or account_absence(
+                    self.client, run, binding
+                )
                 if proof is not None:
                     value["no_allocation_proof"] = proof
                     value.update(

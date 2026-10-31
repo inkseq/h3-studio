@@ -457,6 +457,13 @@ def worker_window_reason(
     connection, worker, now, *, expected_runtime_s=None, deployment_profile_id=None
 ):
     """Unmanaged slots retain the existing intent TTL gate; managed slots add proof."""
+    if worker['provider'] == 'modal':
+        from .modal_budget import worker_reason
+        from .modal_dispatch import consumer_reason
+
+        return worker_reason(
+            connection, worker, now, expected_runtime_s
+        ) or consumer_reason(connection, worker, now)
     from .operator_capacity import operator_nodes
 
     managed = operator_nodes.name in inspect(connection).get_table_names()

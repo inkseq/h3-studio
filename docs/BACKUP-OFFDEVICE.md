@@ -20,6 +20,18 @@ published keys and verifies provider, owner-bound key, size and SHA before
 publishing a manifest. It neither constructs the app nor migrates the source.
 There is no fallback to a default AWS identity or Local file when R2 fails.
 Local and R2 references may coexist only when both original stores are present.
+With explicit `--allow-missing-media`, a missing Local object is recorded only
+when its immutable object directory is absent (`observation: local_absent`).
+An existing directory with missing metadata or body remains corruption and
+refuses capture, as do access errors and unsafe paths. R2 absence still requires
+the existing `head` observation. Neither observation proves an intentional
+deletion: classification still requires evidence from the same snapshot;
+otherwise coverage is incomplete and `loss_alert_required` remains true.
+Strict capture and restore remain the defaults. Explicit incomplete restore
+retains the missing-object inventory and keeps execution disabled. Readers from
+before this change refuse archives containing `local_absent`; use the qualified
+updated reader. This does not authorize retrying a failed capture, changing its
+partial directory, or clearing a daily-preserve history guard.
 Isolated restore preserves the original manifest/database, copies verified bytes
 to Local, and changes only the restored asset/artifact provider locators before
 applying the existing execution hold. No R2 write/versioning API is called.

@@ -19,7 +19,6 @@ from .repository import (
     documents,
     jobs,
     artifacts,
-    plans,
     request_hash,
 )
 from .content_lifecycle import owner_reference_gate, assert_project_writable
@@ -635,6 +634,10 @@ class StoryboardVersions:
                     ),
                     "created_at": row["created_at"],
                     "kind": row["metadata"].get("kind"),
+                    # An enhanced take (#795) says its tier and is never enhanced again.
+                    "enhanced_to": row["request"].get("request", {}).get("tier")
+                    if row["request"].get("recipe_id") == "enhance-v1"
+                    else None,
                     **public_quality(row["metadata"]),
                     "content_url": f'/v1/artifacts/{row["id"]}/content',
                     **public_artifact_renditions(row),

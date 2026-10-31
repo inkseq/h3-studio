@@ -1,0 +1,150 @@
+import { quickViewCatalogs } from './quickViewCatalogs.js';
+import { storyChatCatalogs } from './storyChatCatalogs.js';
+import { capacityCatalogs } from './capacityCatalogs.js';
+import { filmCatalogs } from './filmCatalogs.js';
+import { editorCatalogs } from './editorCatalogs.js';
+import { landingCatalogs } from './landingCatalogs.js';
+import { sessionTakeCatalogs } from './sessionTakeCatalogs.js';
+import { storyOpenCatalogs } from './storyOpenCatalogs.js';
+import { v2Catalogs } from './v2Catalogs.js';
+import { libraryCatalogs } from './libraryCatalogs.js';
+import { trashCatalogs } from './trashCatalogs.js';
+import { workbenchCatalogs } from './workbenchCatalogs.js';
+import { assistantCatalogs } from './assistantCatalogs.js';
+import { takesCatalogs } from './takesCatalogs.js';
+import { enhanceCatalogs } from './enhanceCatalogs.js';
+import { inkyCatalogs } from '../inky/inkyCatalogs.js';
+import { adjunctCatalogs } from './adjunctCatalogs.js';
+import { accountDetailCatalogs } from './accountDetailCatalogs.js';
+import { operatorPanelCatalogs } from './operatorPanelCatalogs.js';
+import { h3MoreCatalogs } from './h3MoreCatalogs.js';
+import { operatorReasonCatalogs } from './operatorReasonCatalogs.js';
+import { operatorDetailCatalogs } from './operatorDetailCatalogs.js';
+import { legacyOperatorCatalogs } from './legacyOperatorCatalogs.js';
+import { operatorErrorCatalogs } from './operatorErrorCatalogs.js';
+import { storyCatalogs } from './storyCatalogs.js';
+import { operatorCatalogs } from './operatorCatalogs.js';
+import { accountCatalogs } from './accountCatalogs.js';
+import { workspaceCatalogs } from './workspaceCatalogs.js';
+import { settingsCatalogs } from './settingsCatalogs.js';
+import { creditsCatalogs } from './creditsCatalogs.js';
+import { adminCatalogs } from './adminCatalogs.js';
+import { clientCatalogs } from './clientCatalogs.js';
+import { storyboardCatalogs } from './storyboardCatalogs.js';
+import { legacyCatalogs } from './legacyCatalogs.js';
+export const catalogs = {
+  en: {
+    ...filmCatalogs.en,
+    ...editorCatalogs.en,
+    ...landingCatalogs.en,
+    ...sessionTakeCatalogs.en,
+    ...storyOpenCatalogs.en,
+    ...v2Catalogs.en,
+    ...quickViewCatalogs.en,
+    ...storyChatCatalogs.en,
+    ...capacityCatalogs.en,
+    ...libraryCatalogs.en,
+    ...trashCatalogs.en,
+    ...workbenchCatalogs.en,
+    ...takesCatalogs.en,
+    ...enhanceCatalogs.en,
+    ...inkyCatalogs.en,
+    ...assistantCatalogs.en,
+    'workspace.closeHistory': 'Close creation history',
+    ...adjunctCatalogs.en,
+    ...h3MoreCatalogs.en,
+    ...operatorPanelCatalogs.en,
+    ...legacyOperatorCatalogs.en,
+    ...operatorErrorCatalogs.en,
+    ...operatorDetailCatalogs.en,
+    ...operatorReasonCatalogs.en,
+    ...accountDetailCatalogs.en,
+    ...storyCatalogs.en,
+    ...operatorCatalogs.en,
+    ...accountCatalogs.en,
+    ...workspaceCatalogs.en,
+    ...settingsCatalogs.en,
+    ...creditsCatalogs.en,
+    ...adminCatalogs.en,
+    ...clientCatalogs.en,
+    ...storyboardCatalogs.en,
+    ...legacyCatalogs.en,
+    'app.name': 'Inkseq',
+    'app.libraryTitle': 'Inkseq · Works',
+    'app.storyTitle': 'Inkseq · Story workspace',
+    'nav.skipWorkspace': 'Skip to workspace',
+    'nav.library': 'Library',
+    'nav.mobile': 'Main navigation',
+    'storyboard.modelUnloaded': 'Model capabilities have not been loaded',
+    'storyboard.closeEditor': 'Close shot editor',
+    'storyboard.changeFailed': 'This change did not complete. The original record is retained.',
+    'storyboard.operationUnknown': 'This operation is unconfirmed. Reconcile its original record.',
+    'nav.quickCreate': 'Quick Create',
+    'nav.storyboard': 'Storyboard',
+    'nav.guided': 'Guided workflow',
+    'nav.canvas': 'Canvas',
+    'nav.workspaceMode': 'Workspace mode',
+    'nav.chapter': 'Current chapter',
+    'loading.operator': 'Opening GPU console…',
+    'loading.quickCreate': 'Opening Quick Create…',
+    'locale.switchToChinese': 'Switch to Chinese',
+    'locale.switchToEnglish': 'Switch to English',
+  },
+  zh: {
+    ...filmCatalogs.zh,
+    ...editorCatalogs.zh,
+    ...landingCatalogs.zh,
+    ...sessionTakeCatalogs.zh,
+    ...storyOpenCatalogs.zh,
+    ...v2Catalogs.zh,
+    ...quickViewCatalogs.zh,
+    ...storyChatCatalogs.zh,
+    ...capacityCatalogs.zh,
+    ...libraryCatalogs.zh,
+    ...trashCatalogs.zh,
+    ...workbenchCatalogs.zh,
+    ...takesCatalogs.zh,
+    ...enhanceCatalogs.zh,
+    ...inkyCatalogs.zh,
+    ...assistantCatalogs.zh,
+    'workspace.closeHistory': '关闭创作记录',
+    ...adjunctCatalogs.zh,
+    ...h3MoreCatalogs.zh,
+    ...operatorPanelCatalogs.zh,
+    ...legacyOperatorCatalogs.zh,
+    ...operatorErrorCatalogs.zh,
+    ...operatorDetailCatalogs.zh,
+    ...operatorReasonCatalogs.zh,
+    ...accountDetailCatalogs.zh,
+    ...storyCatalogs.zh,
+    ...operatorCatalogs.zh,
+    ...accountCatalogs.zh,
+    ...workspaceCatalogs.zh,
+    ...settingsCatalogs.zh,
+    ...creditsCatalogs.zh,
+    ...adminCatalogs.zh,
+    ...clientCatalogs.zh,
+    ...storyboardCatalogs.zh,
+    ...legacyCatalogs.zh,
+    'app.name': 'Inkseq',
+    'app.libraryTitle': 'Inkseq · 作品库',
+    'app.storyTitle': 'Inkseq · 故事工作台',
+    'nav.skipWorkspace': '跳到工作区',
+    'nav.library': '作品库',
+    'nav.mobile': '主要导航',
+    'storyboard.modelUnloaded': '服务能力尚未读取',
+    'storyboard.closeEditor': '关闭镜头编辑',
+    'storyboard.changeFailed': '这次修改没有完成，原记录已保留。',
+    'storyboard.operationUnknown': '这次操作尚未确认，请核对原记录。',
+    'nav.quickCreate': '快速创作',
+    'nav.storyboard': '分镜',
+    'nav.guided': '七步引导',
+    'nav.canvas': '画布',
+    'nav.workspaceMode': '工作方式',
+    'nav.chapter': '当前章节',
+    'loading.operator': '正在打开 GPU 控制台…',
+    'loading.quickCreate': '正在打开聊天创作…',
+    'locale.switchToChinese': '切换为中文',
+    'locale.switchToEnglish': '切换为英文',
+  },
+};

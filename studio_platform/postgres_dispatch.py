@@ -29,6 +29,10 @@ def record_consumer(repo, control, backend, worker_id):
     with repo.transaction() as connection:
         repo._lock_capacity(connection)
         worker = control._worker(connection, worker_id, lock=True)
+        if worker['provider'] == 'modal':
+            from .modal_dispatch import record
+
+            return record(repo, connection, worker, backend)
         node = (
             connection.execute(
                 select(operator_nodes).where(
@@ -81,6 +85,10 @@ def withdraw_consumer(repo, control, backend, worker_id, observation):
     with repo.transaction() as connection:
         repo._lock_capacity(connection)
         worker = control._worker(connection, worker_id, lock=True)
+        if worker['provider'] == 'modal':
+            from .modal_dispatch import withdraw
+
+            return withdraw(repo, connection, worker, backend, observation)
         node = repo._locked(
             connection,
             select(operator_nodes).where(

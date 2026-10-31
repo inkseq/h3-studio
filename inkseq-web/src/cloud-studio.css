@@ -1,0 +1,165 @@
+.cloud-actions,
+.cloud-section-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.cloud-projects {
+  display: grid;
+  gap: 14px;
+}
+.cloud-projects form {
+  display: grid;
+  gap: 12px;
+}
+.cloud-projects label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+}
+.cloud-projects p {
+  line-height: 1.65;
+  margin: 0;
+}
+.cloud-section-head {
+  justify-content: space-between;
+}
+.cloud-section-head h3 {
+  margin: 0;
+}
+.cloud-project-list {
+  display: grid;
+  gap: 6px;
+}
+.cloud-project-list > div > button {
+  justify-content: space-between;
+}
+.cloud-project-list span {
+  display: grid;
+  gap: 5px;
+}
+.cloud-project-list small {
+  color: var(--muted);
+}
+.cloud-error {
+  color: var(--bad) !important;
+}
+.cloud-warning {
+  background: var(--warn-soft);
+  color: var(--ink);
+  padding: 11px;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.cloud-badge {
+  font-size: 10px;
+  color: var(--good);
+  background: var(--good-soft);
+  padding: 5px 8px;
+  border-radius: 20px;
+}
+
+.cloud-job-list {
+  display: grid;
+  gap: 8px;
+  margin: 15px 0;
+}
+.cloud-job-list article {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  padding: 12px;
+  font-size: 12px;
+}
+.cloud-job-list article > div {
+  display: grid;
+  gap: 4px;
+}
+.cloud-job-list code {
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
+.cloud-job-list small {
+  color: var(--muted);
+}
+
+.cloud-production .cloud-actions {
+  flex-wrap: wrap;
+}
+@media (max-width: 700px) {
+  .cloud-actions {
+    flex-wrap: wrap;
+  }
+}
+
+.shot-prompt-draft p {
+  font-size: 12px;
+  line-height: 1.7;
+}
+.shot-prompt-options {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.shot-prompt-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  font-size: 12px;
+}
+.shot-prompt-preview {
+  padding: 12px;
+  margin-top: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+}
+.shot-prompt-draft pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  max-height: 240px;
+  overflow: auto;
+}
+.cloud-warning > button {
+  display: block;
+  margin: 8px 0 0;
+}
+
+.service-status {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--panel, var(--ink));
+  color: var(--ink, var(--surface-4));
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.service-status summary {
+  font-weight: 700;
+  cursor: pointer;
+}
+.service-status.simulation,
+.service-status.offline,
+.service-status.unknown {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.service-status p,
+.service-status li {
+  line-height: 1.65;
+}
+.service-status code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.api-integration {
+  margin-top: 10px;
+}

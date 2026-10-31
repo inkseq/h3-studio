@@ -1,6 +1,7 @@
 """Official SDK signing and closed Managed Payments/test-mode boundaries."""
 
 from dataclasses import replace
+import copy
 import hashlib
 import hmac
 import json
@@ -49,6 +50,8 @@ def session(**changes):
         "livemode": False,
         "mode": "payment",
         "amount_total": 500,
+        "amount_subtotal": 500,
+        "total_details": {"amount_tax": 0, "amount_discount": 0, "amount_shipping": 0},
         "currency": "usd",
         "payment_status": "unpaid",
         "url": "https://checkout.stripe.com/c/pay/cs_test_original#opaque",
@@ -88,7 +91,7 @@ class StripeClientTests(unittest.TestCase):
             "type": "one_time",
             "unit_amount": 500,
             "currency": "usd",
-            "tax_behavior": "inclusive",
+            "tax_behavior": "exclusive",
         }
         self.client.v1.checkout.sessions.create.return_value = session()
         self.factory = Mock(return_value=self.client)
@@ -168,6 +171,44 @@ class StripeClientTests(unittest.TestCase):
 
     def live_payment(self):
         return {**payment(), "account_scope": "acct_liveaccount", "livemode": True}
+
+    def original_charge_session(
+        self, *, live=False, behavior="inclusive", gross=500, tax=0
+    ):
+        """Actual single-Price expansion, including archived accepted Prices."""
+        original = (self.live_session if live else session)(
+            payment_status="paid",
+            amount_total=gross,
+            total_details={
+                "amount_tax": tax,
+                "amount_discount": 0,
+                "amount_shipping": 0,
+            },
+            payment_intent={"id": "pi_original", "latest_charge": "ch_original"},
+            line_items={
+                "has_more": False,
+                "data": [
+                    {
+                        "quantity": 1,
+                        "price": {
+                            "id": "price_starter",
+                            "livemode": live,
+                            "currency": "usd",
+                            "unit_amount": 500,
+                            "type": "one_time",
+                            "tax_behavior": behavior,
+                            "active": False,
+                        },
+                    }
+                ],
+            },
+        )
+        self.client.v1.checkout.sessions.list.return_value = {
+            "has_more": False,
+            "data": [{"id": original["id"]}],
+        }
+        self.client.v1.checkout.sessions.retrieve.return_value = original
+        return original
 
     def test_live_hosted_checkout_is_exact_mode_account_and_canonical_origin_bound(
         self,
@@ -272,6 +313,7 @@ class StripeClientTests(unittest.TestCase):
         with self.assertRaisesRegex(StripeGatewayError, "event_invalid"):
             gateway.resolve_event(verified)
         self.client.v1.charges.retrieve.return_value["livemode"] = True
+        self.original_charge_session(live=True)
         self.assertEqual(gateway.resolve_event(verified)["object"]["amount_cents"], 500)
 
     def test_readonly_configuration_can_inspect_inert_live_but_never_bypass_checkout_webhook(
@@ -348,7 +390,7 @@ class StripeClientTests(unittest.TestCase):
         for key, value in (
             ("unit_amount", 600),
             ("currency", "aud"),
-            ("tax_behavior", "exclusive"),
+            ("tax_behavior", "inclusive"),
             ("active", False),
             ("livemode", True),
         ):
@@ -362,6 +404,27 @@ class StripeClientTests(unittest.TestCase):
                     self.gateway.checkout(payment(), idempotency_key="original")
                 price[key] = old
         self.client.v1.checkout.sessions.create.assert_not_called()
+
+    def test_managed_checkout_prefills_email_in_test_and_live(self):
+        for live in (False, True):
+            with self.subTest(live=live):
+                gateway = self.live_gateway() if live else self.gateway
+                self.client.v1.prices.retrieve.return_value["livemode"] = live
+                self.client.v1.checkout.sessions.create.return_value = (
+                    self.live_session() if live else session()
+                )
+                gateway.checkout(
+                    self.live_payment() if live else payment(),
+                    idempotency_key="original-email",
+                    customer_email="buyer@example.test",
+                )
+                params = self.client.v1.checkout.sessions.create.call_args.kwargs[
+                    "params"
+                ]
+                self.assertEqual(params["customer_email"], "buyer@example.test")
+                self.assertEqual(params["managed_payments"], {"enabled": True})
+                self.assertNotIn("customer", params)
+                self.assertNotIn("receipt_email", params["payment_intent_data"])
 
     def test_signature_precedes_normalization_and_no_http_or_pii_persistence(self):
         obj = session(
@@ -444,6 +507,8 @@ class StripeClientTests(unittest.TestCase):
                                 "livemode": False,
                                 "currency": "usd",
                                 "tax_behavior": "inclusive",
+                                "unit_amount": 500,
+                                "type": "one_time",
                             },
                         }
                     ],
@@ -484,6 +549,8 @@ class StripeClientTests(unittest.TestCase):
                             "livemode": False,
                             "currency": "usd",
                             "tax_behavior": "inclusive",
+                            "unit_amount": 500,
+                            "type": "one_time",
                         },
                     }
                 ],
@@ -521,9 +588,115 @@ class StripeClientTests(unittest.TestCase):
             "currency": "usd",
             "payment_intent": "pi_original",
         }
+        self.original_charge_session()
         self.assertEqual(
             self.gateway.resolve_event(verified)["object"]["amount_cents"], 500
         )
+
+    def test_exclusive_full_refund_resolves_the_original_gross_and_base(self):
+        original = self.original_charge_session(behavior="exclusive", gross=550, tax=50)
+        charge = {
+            "object": "charge",
+            "id": "ch_original",
+            "livemode": False,
+            "amount": 550,
+            "amount_refunded": 550,
+            "currency": "usd",
+            "payment_intent": "pi_original",
+            "metadata": original["metadata"],
+        }
+        verified = self.gateway.verify_event(
+            *self.signed(charge, kind="charge.refunded")
+        )
+        self.assertNotIn("base_amount_cents", verified["object"])
+        proof = self.gateway.resolve_event(verified)
+        self.assertEqual(proof["object"]["amount_cents"], 550)
+        self.assertEqual(proof["object"]["amount_refunded"], 550)
+        self.assertEqual(proof["object"]["base_amount_cents"], 500)
+        self.assertEqual(proof["object"]["tax_amount_cents"], 50)
+        self.assertTrue(
+            all(
+                proof["object"][key] == value
+                for key, value in verified["object"].items()
+            )
+        )
+        self.client.v1.checkout.sessions.list.assert_called_once_with(
+            params={"payment_intent": "pi_original", "limit": 2}
+        )
+        self.client.v1.checkout.sessions.create.assert_not_called()
+
+    def test_refund_original_lookup_refuses_missing_ambiguous_or_foreign_sessions(self):
+        original = self.original_charge_session(behavior="exclusive", gross=550, tax=50)
+        charge = {
+            "object": "charge",
+            "id": "ch_original",
+            "livemode": False,
+            "amount": 550,
+            "amount_refunded": 550,
+            "currency": "usd",
+            "payment_intent": "pi_original",
+            "metadata": copy.deepcopy(original["metadata"]),
+        }
+        verified = self.gateway.verify_event(
+            *self.signed(charge, kind="charge.refunded")
+        )
+        for data, more in (
+            ([], False),
+            ([{"id": original["id"]}] * 2, False),
+            ([{"id": original["id"]}], True),
+        ):
+            self.client.v1.checkout.sessions.list.return_value = {
+                "has_more": more,
+                "data": data,
+            }
+            with (
+                self.subTest(data=data, more=more),
+                self.assertRaises(StripeGatewayError),
+            ):
+                self.gateway.resolve_event(verified)
+        self.client.v1.checkout.sessions.list.return_value = {
+            "has_more": False,
+            "data": [{"id": original["id"]}],
+        }
+        changes = (
+            {"id": "cs_test_foreign"},
+            {"livemode": True},
+            {"currency": "aud"},
+            {"payment_intent": {"id": "pi_foreign", "latest_charge": "ch_original"}},
+            {"payment_intent": {"id": "pi_original", "latest_charge": "ch_foreign"}},
+            {
+                "metadata": {
+                    **original["metadata"],
+                    "payment_id": "33333333-3333-4333-8333-333333333333",
+                }
+            },
+            {"amount_total": 549},
+        )
+        for changed in changes:
+            self.client.v1.checkout.sessions.retrieve.return_value = {
+                **copy.deepcopy(original),
+                **changed,
+            }
+            with self.subTest(changed=changed), self.assertRaises(StripeGatewayError):
+                self.gateway.resolve_event(verified)
+        self.client.v1.checkout.sessions.create.assert_not_called()
+
+    def test_new_checkout_keeps_gross_tax_separate_from_credit_pack_base(self):
+        self.client.v1.checkout.sessions.create.return_value = session(
+            amount_total=550,
+            total_details={
+                "amount_tax": 50,
+                "amount_discount": 0,
+                "amount_shipping": 0,
+            },
+        )
+        result = self.gateway.checkout(
+            payment(), idempotency_key="original-taxed-checkout"
+        )
+        self.assertEqual(result["object"]["amount_cents"], 550)
+        self.assertEqual(result["object"]["base_amount_cents"], 500)
+        self.assertEqual(result["object"]["tax_behavior"], "exclusive")
+        self.assertEqual(result["object"]["tax_amount_cents"], 50)
 
     def test_provider_error_and_redirect_host_are_sanitized(self):
         self.client.v1.checkout.sessions.create.side_effect = stripe.APIConnectionError(

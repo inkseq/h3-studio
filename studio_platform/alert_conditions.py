@@ -13,12 +13,17 @@ DEFAULTS = {
     "cpu_percent": 70, "memory_percent": 85, "host_sustain_seconds": 900,
     "health_down_seconds": 120, "http_5xx_min": 3, "http_5xx_ratio": .05,
     "max_sample_gap_seconds": 180, "terminal_reservation_seconds": 3600,
+    "payment_fulfillment_seconds": 300, "payment_processing_seconds": 300,
+    "payment_window_seconds": 300, "payment_failure_count": 1,
 }
 CODES = frozenset({"gpu_runtime_exceeded", "gpu_idle_stop_overdue", "test_spend_80",
     "test_spend_100", "job_stuck", "job_repeated_wake", "host_cpu_sustained",
     "host_memory_sustained", "host_disk_80", "host_disk_90", "host_process_unhealthy", "retention_service_failed",
-    "business_backup_failed", "business_backup_missing", "business_backup_unobservable",
-    "health_down", "http_5xx_rate", "generation_failure", "terminal_reservation_stale"})
+    "business_backup_failed", "business_backup_missing", "business_backup_unobservable", "business_backup_loss",
+    "health_down", "http_5xx_rate", "generation_failure", "terminal_reservation_stale",
+    "payment_fulfillment_stalled", "payment_processing_stalled", "payment_failed",
+    "payment_refunded", "payment_disputed", "payment_monitor_unavailable",
+    "payment_webhook_signature_failed", "payment_webhook_receipt_failed"})
 STATES = frozenset({"waiting_capacity", "queued", "claimed", "submitting", "running",
     "submission_unknown", "cancel_requested", "collecting", "recovery_hold", "starting", "upstream_status_unknown"})
 
@@ -41,6 +46,8 @@ def _configuration(overrides):
     if any(not finite(v) or v <= 0 for v in config.values()):
         raise ValueError("alert_thresholds_invalid")
     if config["http_5xx_ratio"] > 1 or config["cpu_percent"] > 100 or config["memory_percent"] > 100:
+        raise ValueError("alert_thresholds_invalid")
+    if type(config["payment_window_seconds"]) is not int or not 60 <= config["payment_window_seconds"] <= 3600:
         raise ValueError("alert_thresholds_invalid")
     return config
 
@@ -187,10 +194,41 @@ def evaluate(snapshot, previous_state, *, environment, now, host=None, threshold
         state["database_gap"] = False
     else:
         state["database_gap"] = True
+    payment = snapshot.get("payments") if isinstance(snapshot, dict) else None
+    payment_complete = (complete and isinstance(payment, dict) and payment.get("complete") is True
+        and isinstance(payment.get("fulfillment"), list) and isinstance(payment.get("processing"), list)
+        and isinstance(payment.get("activity"), dict))
+    condition("payment_monitor_unavailable", None,
+        not payment_complete if complete and isinstance(payment, dict) else None)
+    if payment_complete:
+        payment_codes = {"payment_fulfillment_stalled", "payment_processing_stalled"}
+        for name, code, threshold in (("fulfillment", "payment_fulfillment_stalled", "payment_fulfillment_seconds"),
+                ("processing", "payment_processing_stalled", "payment_processing_seconds")):
+            for item in payment[name]:
+                resource, since = identity(item.get("id")), item.get("since")
+                if resource is not None:
+                    condition(code, resource,
+                        now-since >= config[threshold] if finite(since) and 0 <= since <= now else None,
+                        since=since)
+        for code in ("payment_failed", "payment_refunded", "payment_disputed"):
+            activity = payment["activity"].get(code, {})
+            count, since = activity.get("count"), activity.get("since")
+            condition(code, None, count >= config["payment_failure_count"]
+                if type(count) is int and count >= 0 else None, since=since)
+        # Only a complete payment read may resolve disappeared purchase incidents.
+        for key, current in list(state["conditions"].items()):
+            if key not in considered and current["code"] in payment_codes:
+                condition(current["code"], current["resource_id"], False)
+                del state["conditions"][key]
     host = host if isinstance(host, dict) else {}
+    for field, code in (("payment_signature_failures", "payment_webhook_signature_failed"),
+            ("payment_receipt_failures", "payment_webhook_receipt_failed")):
+        count = host.get(field)
+        condition(code, None, count >= config["payment_failure_count"]
+            if type(count) is int and count >= 0 else None)
     retention_failed = host.get("retention_service_failed")
     condition("retention_service_failed", None, retention_failed if type(retention_failed) is bool else None)
-    for code in ("business_backup_failed", "business_backup_missing", "business_backup_unobservable"):
+    for code in ("business_backup_failed", "business_backup_missing", "business_backup_unobservable", "business_backup_loss"):
         value = host.get(code)
         condition(code, None, value if type(value) is bool else None)
     disk = host.get("disk_used_percent")

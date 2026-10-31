@@ -17,11 +17,13 @@ from pathlib import Path
 import stat
 import threading
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 
+from . import workflow_status
 from .repository import Conflict, Scope, identifier, jobs
+from .domain_turns import DomainTurns
 from .workflow_schema import (
-    INKSEQ_WORKFLOW_SCHEMA as SCHEMA,
+    INKSEQ_WORKFLOW_SCHEMA as SCHEMA,  # noqa: F401 -- public workflow-schema compatibility export
     WORKFLOW_APPLICATION_NAME as APPLICATION,
     WORKFLOW_APPLICATION_VERSION as VERSION,
 )
@@ -30,6 +32,8 @@ QUEUE = "inkseq-generation-v1"
 WORKFLOW = "inkseq.generation.v1"
 POLL_SECONDS = 10
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
+# Slots without a native GPU node: no dstack demand, kept alive by heartbeat_cpu.
+LOCAL_BACKENDS = frozenset({"cpu-render", "runpod-enhance"})
 ACTIVE = frozenset(
     {
         "queued",
@@ -87,26 +91,7 @@ class GenerationTransport:
         base = workflow_id(
             row["tenant_id"], row["owner_id"], row["project_id"], row["id"]
         )
-        # Explicit schema name is a source constant, never a user identifier.
-        params = {
-            "id": base,
-            "prefix": base + "/%",
-            "application": APPLICATION,
-            "name": WORKFLOW,
-        }
-        active = (
-            connection.execute(
-                text(
-                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
-                    "AND application_name=:application AND name=:name "
-                    "AND status IN ('PENDING','ENQUEUED','DELAYED') LIMIT 2"
-                ),
-                params,
-            )
-            .scalars()
-            .all()
-        )
+        active = workflow_status.open_ids(connection, base, APPLICATION, WORKFLOW)
         if len(active) > 1:
             raise Conflict("workflow_original_job_binding_ambiguous")
         if active:
@@ -114,14 +99,9 @@ class GenerationTransport:
         else:
             if row["status"] not in ACTIVE:
                 return  # Historical/planned/terminal records do not acquire workflows.
-            previous = connection.execute(
-                text(
-                    "SELECT 1 FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
-                    "AND application_name=:application AND name=:name LIMIT 1"
-                ),
-                params,
-            ).first()
+            previous = workflow_status.latest_id(
+                connection, base, APPLICATION, WORKFLOW
+            )
             if previous and event_type not in {
                 "job.queued",
                 "job.waiting_capacity",
@@ -245,21 +225,9 @@ class GenerationTransport:
         from .film_runs import VERSION as FILM_VERSION
 
         base = "inkseq-film-" + workflow_id(tenant, owner, project, run_id)[11:]
-        return connection.execute(
-            text(
-                "SELECT status FROM inkseq_workflows.workflow_status "
-                "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) "
-                "AND application_name=:application AND application_version=:version "
-                "AND name=:name ORDER BY created_at DESC,workflow_uuid DESC LIMIT 1"
-            ),
-            {
-                "id": base,
-                "prefix": base + "/%",
-                "application": APPLICATION,
-                "version": VERSION,
-                "name": FILM_VERSION,
-            },
-        ).scalar()
+        return workflow_status.latest_status(
+            connection, base, APPLICATION, VERSION, FILM_VERSION
+        )
 
     def enqueue_film(self, connection, tenant, owner, project, run_id):
         from .film_runs import VERSION as FILM_VERSION
@@ -267,37 +235,15 @@ class GenerationTransport:
 
         assert_execution_allowed(connection)
         base = "inkseq-film-" + workflow_id(tenant, owner, project, run_id)[11:]
-        params = {
-            "id": base,
-            "prefix": base + "/%",
-            "application": APPLICATION,
-            "name": FILM_VERSION,
-        }
-        rows = (
-            connection.execute(
-                text(
-                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) AND application_name=:application "
-                    "AND name=:name AND status IN ('ENQUEUED','PENDING','DELAYED') LIMIT 2"
-                ),
-                params,
-            )
-            .scalars()
-            .all()
-        )
+        rows = workflow_status.open_ids(connection, base, APPLICATION, FILM_VERSION)
         if len(rows) > 1:
             raise Conflict("workflow_film_binding_ambiguous")
         if rows:
             ident = rows[0]
         else:
-            previous = connection.execute(
-                text(
-                    "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
-                    "WHERE (workflow_uuid=:id OR workflow_uuid LIKE :prefix) AND application_name=:application "
-                    "AND name=:name ORDER BY created_at DESC,workflow_uuid DESC LIMIT 1"
-                ),
-                params,
-            ).scalar()
+            previous = workflow_status.latest_id(
+                connection, base, APPLICATION, FILM_VERSION
+            )
             # Called only by original confirmed submit/explicit resume, never a
             # timer. A transport epoch retains the same frozen run/jobs/holds.
             ident = (
@@ -368,13 +314,13 @@ class DurableSlots:
             return {
                 key: item
                 for key, item in self._slots.items()
-                if item.spec.backend != "cpu-render"
+                if item.spec.backend not in LOCAL_BACKENDS
             }
 
     def heartbeat_cpu(self):
         with self._lock:
             for slot in self._slots.values():
-                if slot.spec.backend == "cpu-render":
+                if slot.spec.backend in LOCAL_BACKENDS:
                     worker = slot.runner.control.get(slot.spec.worker_id)
                     if worker["expires_at"] > self.repo.clock() and worker[
                         "state"
@@ -405,6 +351,35 @@ class DurableSlots:
                 "cpu-render",
             )
             self.ensure(worker, SlotConfig(spec, enabled=True))
+        self.heartbeat_cpu()
+
+    def add_enhance_slot(self):
+        """One CPU slot that submits enhance jobs to RunPod Serverless (#795)."""
+        if not getattr(self.settings, "enhance_enabled", False):
+            return
+        from .control import WorkerSpec
+        from .fleet import SlotConfig
+        from . import enhance_plans as plan
+
+        worker = "dbos-" + plan.CONFIGURATION
+        spec = WorkerSpec(
+            worker,
+            plan.POOL,
+            "runpod",
+            worker,
+            (),
+            (plan.RECIPE,),
+            plan.MODEL,
+            plan.CONFIGURATION,
+            plan.BACKEND,
+        )
+        try:
+            self.ensure(worker, SlotConfig(spec, enabled=True))
+        except Exception:
+            # Optional: enhance stays unavailable (its plans read "not ready")
+            # and the controller keeps running everything else.
+            print("dbos_enhance_slot_unavailable", flush=True)
+            return
         self.heartbeat_cpu()
 
     @contextmanager
@@ -477,7 +452,7 @@ class DurableSlots:
             # observation. Idle DBOS slots have no WorkerRunner turn to renew
             # registration. Keep only an already-live lease/fence; expiry or
             # UNKNOWN still needs explicit native idle proof in the controller.
-            if slot.spec.backend != "cpu-render":
+            if slot.spec.backend not in LOCAL_BACKENDS:
                 worker = current.runner.control.get(slot.spec.worker_id)
                 if worker["expires_at"] > self.repo.clock() and worker["state"] not in {
                     "unknown",
@@ -508,6 +483,15 @@ class DurableSlots:
             }
         with self._lock:
             candidates = list(self._slots.values())
+        # Existing attempts stay with their original worker. New work tries
+        # dedicated capacity first; its original claim gates decide eligibility.
+        candidates.sort(
+            key=lambda slot: (
+                slot.spec.worker_id != job['lease_worker_id']
+                if job.get('lease_worker_id')
+                else slot.spec.provider == 'modal'
+            )
+        )
         for slot in candidates:
             if slot.spec.pool != job["pool"] or not slot.lock.acquire(blocking=False):
                 continue
@@ -536,7 +520,7 @@ class DurableSlots:
                     finally:
                         if cpu:
                             slot.runner.backend._operation_fence_fd = None
-                if cpu:
+                if slot.spec.backend in LOCAL_BACKENDS:
                     worker = slot.runner.control.get(slot.spec.worker_id)
                     if worker["expires_at"] > self.repo.clock() and worker[
                         "state"
@@ -597,7 +581,8 @@ class DurableSlots:
         self.close()
 
 
-def register_generation_workflow(DBOS, slots):
+def register_generation_workflow(DBOS, slots, *, domain_turns=None):
+    domain_turns = domain_turns or DomainTurns()
     operation_limit = asyncio.Semaphore(4)
 
     @DBOS.step(name="inkseq.generation.domain-turn.v1", retries_allowed=False)
@@ -605,7 +590,7 @@ def register_generation_workflow(DBOS, slots):
         # DBOS persists this result. A process failure before that persistence
         # re-enters the ORIGINAL lease/attempt/native-tag reconciliation path.
         async with operation_limit:
-            return await asyncio.to_thread(slots.turn, tenant, owner, project, job_id)
+            return await domain_turns.call(slots.turn, tenant, owner, project, job_id)
 
     @DBOS.workflow(name=WORKFLOW, max_recovery_attempts=None)
     async def generation(tenant, owner, project, job_id):
@@ -622,12 +607,22 @@ class DurableExecutor:
     """One existing-controller executor. Shutdown leaves native work untouched."""
 
     def __init__(
-        self, repo, settings, work_dir, *, film_setup=None, account_services=None
+        self,
+        repo,
+        settings,
+        work_dir,
+        *,
+        film_setup=None,
+        account_services=None,
+        runner_context=None,
     ):
         self.repo, self.settings = repo, settings
-        self.slots = DurableSlots(repo, settings, work_dir)
+        self.slots = DurableSlots(
+            repo, settings, work_dir, runner_context=runner_context
+        )
         self.film_setup = film_setup
         self.account_services = account_services
+        self.domain_turns = DomainTurns()
         self._DBOS = None
 
     def __enter__(self):
@@ -638,6 +633,7 @@ class DurableExecutor:
         try:
             configure_producer(self.repo)
             self.slots.add_render_slots()
+            self.slots.add_enhance_slot()
             # The configured environment is stable across ordinary releases.
             environment = (
                 "staging"
@@ -655,16 +651,21 @@ class DurableExecutor:
             self.repo.generation_transport.client.register_queue(
                 QUEUE, polling_interval_sec=POLL_SECONDS
             )
-            register_generation_workflow(DBOS, self.slots)
+            register_generation_workflow(
+                DBOS, self.slots, domain_turns=self.domain_turns
+            )
             from .payments_workflows import register_payment_workflows
 
-            register_payment_workflows(DBOS, self.repo, self.settings)
+            register_payment_workflows(
+                DBOS, self.repo, self.settings, domain_turns=self.domain_turns
+            )
             from .account_workflows import register_account_workflows
 
             register_account_workflows(
                 DBOS,
                 self.repo,
                 self.settings,
+                domain_turns=self.domain_turns,
                 **(
                     {
                         "sessions": self.account_services[0],
@@ -675,10 +676,11 @@ class DurableExecutor:
                 ),
             )
             if self.film_setup is not None:
-                self.film_setup(DBOS)
+                self.film_setup(DBOS, self.domain_turns)
             DBOS.launch()
             self._DBOS = DBOS
         except BaseException:
+            self.domain_turns.drain()
             DBOS.destroy(destroy_registry=True)
             self.slots.close()
             raise
@@ -717,13 +719,13 @@ class DurableExecutor:
 
     def close(self):
         self.slots._closing = True
+        self.domain_turns.drain()
         if self._DBOS is not None:
-            # SDK waits for whole workflows, capped within the existing210s
-            # controller grace. A durable wait may outlast this timeout; the
-            # original lease/native tag/CPU process fence then owns recovery.
-            self._DBOS.destroy(
-                destroy_registry=True, workflow_completion_timeout_sec=180
-            )
+            # Finite domain calls have drained; durable sleeps need not finish.
+            # SDK cancellation leaves them recoverable, not business-cancelled.
+            # Keep slot/native fences until the executor has stopped. Existing
+            # container grace remains the fallback for a stuck external I/O.
+            self._DBOS.destroy(destroy_registry=True, workflow_completion_timeout_sec=0)
             self._DBOS = None
         self.slots.close()
 

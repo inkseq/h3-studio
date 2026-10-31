@@ -40,6 +40,22 @@ LEGACY_HELPER_PAIRS = {commit: (
         "07da40322559ee5a12829be6884c541c401d852a")}
 # Exact retained current/previous helper bytes before the staging upgrade.
 RETAINED_DSTACK_HELPER_PAIRS = {
+    # #684 SSM3dd45659: exact staging current/previous pair before Inky adoption.
+    '0c1dfeceb015f34f2593783953ef00f5aea00468': ('135cbf73dfd467ddd870197d650ff66514e17b0808f403623e26ac01a7bffbef', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'ff30d5aa9ceafc8693cf8a64fae92a8f8e35624a': ('135cbf73dfd467ddd870197d650ff66514e17b0808f403623e26ac01a7bffbef', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    # Current/rollback readback5be9e18b; no generic compatibility fallback.
+    '6606164343b612d3c99acd6f688ad54dad0d49af': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'e63e64f093bc2e343b8a4128e62de9cf68ae964f': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    # Exact main source pairs for a474 staging and queued backup-fix6b2; host CAS still required.
+    'a47462f08257af8682a4b72e194028efa1597054': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '6b2dae1d1ca7c9298c05e3e32bfb0799af953b85': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    # #524 host readback a8c7478c: exact staging/production current and rollback.
+    # ce49754 is the queued main candidate, not a runtime acceptance claim.
+    '7beb62ac0799c96b965f52dea941a720be79b6c5': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    '55cb0ff2c979ffec56b968eda0f99b23250f3ead': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'fd2ae3af0922395639f26a4718b1b5f33994b652': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'b78510e6991f5acccb0996981e8016be5434693f': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
+    'ce49754dbcacc162bcd83a46cd3cd29028b549f4': ('bb8fc2b756ed4b04f77197c3e53eb16360223ef5465e031f76cdbab68c600416', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     'feeb1c1e8c34921546908f7a9f6a9dd67d5c0f4d': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     '9f8736ba036108dd078c983c3301fc8c3996a41e': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     '1c659727d5490cba1480979f95f3be7d0227815d': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
@@ -112,6 +128,7 @@ LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 # Closed stock tuples: current build and the exact retained rollback only.
 DSTACK_STOCK = {'0.22.3': ('009e2916e335d4c9e02d961bc68f704951f5db20', 'dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8', '731ee908299af3f4592b3bfd1542e8f00fa59bb3fc24506a9f32d73a5fc274ba'), '0.22.5': ('e59a6caa6d3d76f8b8c3430b7e8eeb7271138065', 'dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4', 'b12e1157da5a13102899132e41c4a7950b3a2dfad4a0a5b52960e1cd86078c5e')}
 DSTACK_SHARED_SOURCE_HASHES = {'dstack/_internal/core/backends/vastai/api_client.py': '9a8a68d3bd00b995901af7a66b58511ff4451be8122135e6f7b1a534d4e3c685', 'dstack/_internal/core/backends/vastai/compute.py': '3d6466c87ad37ce3125d54feadff54287f82131425e80bbc57ccf0bec8acdea9', 'gpuhunt/providers/vastai.py': 'f3cefc3a20f6f05d2cce911cd8e61ff980c6af2a42ed16e4a8f290bc0e5f76db', 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py': 'a68386172ebdf5fe28bd08f61e18ecdfd6a4a1310e9782c8147ce3a96e8eeaac', 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py': '158bc7bee1a5cadc4d7a1efa2512701edda39707ae5dda33b8cd71bcd342d092'}
+DSTACK_RUNPOD_SOURCE_HASHES = {'dstack/_internal/core/backends/runpod/api_client.py': 'ba0d804987d70242ecedca00938215e7d23474d1874da1b828827f65d5058a6d', 'dstack/_internal/core/backends/runpod/compute.py': '8b0ac5dc44c052bbb83a20fe9d394b8e0b61a1634eb8352786cfb26eb4a130c4'}
 DSTACK_BASE_IMAGE = DSTACK_STOCK["0.22.5"][1]
 LEGACY_DSTACK_BASE_IMAGE = DSTACK_STOCK["0.22.3"][1]
 DSTACK_SOURCE_PATHS = frozenset({*DSTACK_SHARED_SOURCE_HASHES, "dstack/_internal/server/services/backends/__init__.py"})
@@ -122,13 +139,17 @@ folder=Path('/opt/sixnine/native-vast')
 stock={'0.22.3': ('009e2916e335d4c9e02d961bc68f704951f5db20', 'dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8', '731ee908299af3f4592b3bfd1542e8f00fa59bb3fc24506a9f32d73a5fc274ba'), '0.22.5': ('e59a6caa6d3d76f8b8c3430b7e8eeb7271138065', 'dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4', 'b12e1157da5a13102899132e41c4a7950b3a2dfad4a0a5b52960e1cd86078c5e')}
 shared={'dstack/_internal/core/backends/vastai/api_client.py': '9a8a68d3bd00b995901af7a66b58511ff4451be8122135e6f7b1a534d4e3c685', 'dstack/_internal/core/backends/vastai/compute.py': '3d6466c87ad37ce3125d54feadff54287f82131425e80bbc57ccf0bec8acdea9', 'gpuhunt/providers/vastai.py': 'f3cefc3a20f6f05d2cce911cd8e61ff980c6af2a42ed16e4a8f290bc0e5f76db', 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py': 'a68386172ebdf5fe28bd08f61e18ecdfd6a4a1310e9782c8147ce3a96e8eeaac', 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py': '158bc7bee1a5cadc4d7a1efa2512701edda39707ae5dda33b8cd71bcd342d092'}
 value=json.loads((folder/'installed-provenance.json').read_text())
-assert set(value)=={'patched_sources','dstack_version','upstream_commit','original_sources','helper_sha256','sources'} and value['patched_sources']==6
+assert set(value)=={'patched_sources','dstack_version','upstream_commit','original_sources','helper_sha256','sources'}
 original=json.loads((folder/'native-vast-provenance.json').read_text())
-assert set(original)=={'version','dstack_version','dstack_upstream_commit','base_image','sources'} and original['version']==1
+assert set(original)=={'version','dstack_version','dstack_upstream_commit','base_image','sources'} and type(original['version']) is int and original['version'] in {1,2}
 selected=stock[original['dstack_version']]
 assert value['dstack_version']==original['dstack_version']==importlib.metadata.version('dstack')
 assert value['upstream_commit']==original['dstack_upstream_commit']==selected[0] and original['base_image']==selected[1]
 expected={**shared,'dstack/_internal/server/services/backends/__init__.py':selected[2]}
+if original['version']==2:
+ assert original['dstack_version']=='0.22.5'
+ expected.update({'dstack/_internal/core/backends/runpod/api_client.py': 'ba0d804987d70242ecedca00938215e7d23474d1874da1b828827f65d5058a6d', 'dstack/_internal/core/backends/runpod/compute.py': '8b0ac5dc44c052bbb83a20fe9d394b8e0b61a1634eb8352786cfb26eb4a130c4'})
+assert value['patched_sources']==len(expected)
 assert original['sources']=={name:{'sha256':digest} for name,digest in expected.items()}
 assert value['original_sources']==expected and set(value['sources'])==set(expected)
 assert all(hashlib.sha256((root/name).read_bytes()).hexdigest()==digest for name,digest in value['sources'].items())
@@ -149,7 +170,7 @@ PATH_FIELDS = frozenset({"SIXNINE_EXECUTION_PROFILES_SECRET_FILE", "SIXNINE_GRAF
 OTHER_FIELDS = frozenset({"SIXNINE_OPERATOR_CAPACITY_OWNERS", "SIXNINE_HATCHET_POSTGRES_VOLUME",
     "SIXNINE_HATCHET_CONFIG_VOLUME", "SIXNINE_MIGRATION_GENERATION_ENABLED",
     "SIXNINE_MIGRATION_EXECUTION_BACKEND", "SIXNINE_DEFAULT_DEPLOYMENT_PROFILE_ID"})
-OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE", "INKSEQ_STRIPE_CONFIG_FILE"})
+OPTIONAL_PATH_FIELDS = frozenset({"SIXNINE_STAGE_QUERY_CONFIG_FILE", "SIXNINE_STORAGE_CREDENTIAL_FILE", "INKSEQ_WORKOS_CONFIG_FILE", "INKSEQ_STRIPE_CONFIG_FILE", "INKSEQ_INKY_CONFIG_FILE"})
 STORAGE_FIELDS = frozenset({"SIXNINE_STORAGE_PROVIDER", "SIXNINE_STORAGE_ENDPOINT", "SIXNINE_STORAGE_REGION",
     "SIXNINE_STORAGE_BUCKET", "SIXNINE_STORAGE_PROFILE", "SIXNINE_STORAGE_CREDENTIAL_FILE"})
 OPTIONAL_FIELDS = frozenset({"SIXNINE_OPERATOR_ADMIN_OWNERS", "SIXNINE_STORYBOARD_OWNERS", 'INKSEQ_DEPLOYMENT_TARGET',
@@ -231,12 +252,15 @@ def dstack_provenance(directory, value):
     installed = proof["installed"]
     selected = next(item for item in DSTACK_STOCK.values() if item[1] == proof["base_image"])
     version = next(version for version, item in DSTACK_STOCK.items() if item == selected)
+    expected_sources = {**DSTACK_SHARED_SOURCE_HASHES,
+        "dstack/_internal/server/services/backends/__init__.py": selected[2]}
+    if type(installed) is dict and installed.get("patched_sources") == 8 and version == "0.22.5":
+        expected_sources.update(DSTACK_RUNPOD_SOURCE_HASHES)
     release.require(type(installed) is dict and set(installed) == {"patched_sources", "dstack_version", "upstream_commit", "original_sources", "helper_sha256", "sources"}
-        and installed["patched_sources"] == 6 and installed["helper_sha256"] == proof["helper_sha256"]
+        and installed["patched_sources"] == len(expected_sources) and installed["helper_sha256"] == proof["helper_sha256"]
         and installed["dstack_version"] == version and installed["upstream_commit"] == selected[0]
-        and installed["original_sources"] == {**DSTACK_SHARED_SOURCE_HASHES,
-            "dstack/_internal/server/services/backends/__init__.py": selected[2]}
-        and type(installed["sources"]) is dict and set(installed["sources"]) == DSTACK_SOURCE_PATHS
+        and installed["original_sources"] == expected_sources
+        and type(installed["sources"]) is dict and set(installed["sources"]) == set(expected_sources)
         and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in installed["sources"].values()),
         "migration_dstack_provenance_invalid")
     return {k: proof[k] for k in ("installed", "helper_sha256", "installer_sha256", "source_provenance_sha256")}
@@ -488,6 +512,7 @@ def settings_document(value):
         elif key.endswith("_VOLUME"):
             release.require(re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", text), "migration_volume_reference_invalid")
     env = value["environment"]
+    deployment_target.inky_environment(env)
     release.require(env.get('INKSEQ_SENTRY_DSN', '') in {'', release.SENTRY_DSN},
         'migration_api_error_monitoring_destination_invalid')
     release.require(not env.get('INKSEQ_SENTRY_DSN') or env.get('INKSEQ_DEPLOYMENT_TARGET') in {'staging', 'production'},

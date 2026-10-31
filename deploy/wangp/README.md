@@ -179,6 +179,29 @@ within that preparation. HTTP fallback supports SDK resume; native Xet byte reus
 across interruption is **not qualified by the fake SDK tests**. New ephemeral
 GPU instances do not gain a persistent model cache from this change.
 
+The child sets `HF_HUB_DISABLE_XET=1`, so the SDK downloads over plain HTTPS
+from the Hub CDN even though `hf_xet` is installed. On 2026-10-31 a staging Lium
+host on native Xet averaged ~8.5 MB/s (28 GB in ~55 min) and hit
+`capacity_startup_timeout`; the next Lium host over HTTPS sustained ~38 MB/s.
+The completed-file counter in progress receipts does not move while one large
+file transfers, so it is not a stall signal on its own.
+
+Download speed gate (#885). With Xet disabled, the child also reports
+`bytes_received`: completed files plus the size of the SDK's `.incomplete` HTTP
+partials under `<model-root>/.cache/huggingface/download`. A ticker rewrites the
+receipt every 10 s. The field is omitted until a partial is seen, and whenever
+Xet is enabled. The controller latches it on its own clock:
+
+- After a 180 s measurement window, a host averaging under 50 MB/s is stopped as
+  `dstack_download_too_slow`. A bound Vast `machine_id` is then set to manual
+  `deny` with reason `automatic_slow_download`. It stays denied until an admin
+  sets it back to default on the operator hosts page; the change is audited.
+  Hosts with no bound physical identity are stopped but not denied.
+- Download time with byte progress is credited against the fixed cold-start
+  window (`capacity_startup_timeout`), up to 1800 s. A stall or a slow rate
+  earns no credit.
+- Byte progress also feeds the existing no-progress timebox.
+
 The parent watches a two-hour model-transfer deadline, free disk headroom and the
 isolated Hub/Xet cache (a watched 1 GiB threshold, not a filesystem quota, with
 chunk/shard caches disabled). The child

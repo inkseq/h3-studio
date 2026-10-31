@@ -27,6 +27,7 @@ from .payment_schema import (
     recognized_revision,
 )
 from .repository import request_hash
+from .payment_tax import original_price_amount, refund_base_amount
 
 EVENT_TYPES = frozenset(
     {
@@ -55,6 +56,9 @@ OBJECT_FIELDS = frozenset(
         "currency",
         "payment_status",
         "amount_refunded",
+        "base_amount_cents",
+        "tax_amount_cents",
+        "tax_behavior",
         "receipt_url",
         "expires_at",
         "checkout_url",
@@ -170,9 +174,22 @@ def _object(value, *, livemode=False):
     for key in ("pack_id", "pack_revision"):
         if key in value:
             _identifier(value[key], 64)
-    for key in ("credits", "amount_cents", "amount_refunded"):
+    for key in (
+        "credits",
+        "amount_cents",
+        "amount_refunded",
+        "base_amount_cents",
+        "tax_amount_cents",
+    ):
         if key in value:
-            _integer(value[key], positive=key != "amount_refunded")
+            _integer(
+                value[key], positive=key not in {"amount_refunded", "tax_amount_cents"}
+            )
+    _require(
+        "tax_behavior" not in value
+        or type(value["tax_behavior"]) is str
+        and value["tax_behavior"] in {"inclusive", "exclusive"}
+    )
     _require("currency" not in value or value["currency"] == "usd")
     _require(
         "payment_status" not in value
@@ -469,7 +486,19 @@ class PaymentCore:
             or "payment_status" not in obj
         ):
             raise PaymentError("payment_original_proof_missing", 409)
-        if any(key in obj and obj[key] != value for key, value in expected.items()):
+        try:
+            amount = original_price_amount(obj)
+        except ValueError:
+            raise PaymentError("payment_original_mismatch", 409) from None
+        if (
+            any(
+                key in obj and obj[key] != value
+                for key, value in expected.items()
+                if key != "amount_cents"
+            )
+            or "amount_cents" in obj
+            and amount != row["amount_cents"]
+        ):
             raise PaymentError("payment_original_mismatch", 409)
         columns = {
             "session_id": "stripe_checkout_session_id",
@@ -697,7 +726,14 @@ class PaymentCore:
             now=self.repo.clock(),
             create=True,
         )
-        actual = min(credits, account["balance"] - account["held"])
+        from .credit_expiry import safe, refundable_purchase
+
+        actual = min(
+            credits,
+            safe(
+                refundable_purchase, connection, account, row["id"], self.repo.clock()
+            ),
+        )
         if actual:
             _change(
                 connection,
@@ -904,6 +940,7 @@ class PaymentCore:
                         idempotency_key="stripe-purchase:" + obj["session_id"],
                         now=now,
                         kind="purchase",
+                        issued_at=value["created"],
                         reference_type="payment",
                         reference_id=row["id"],
                         origin="stripe-live" if row["livemode"] else "stripe-test",
@@ -926,6 +963,16 @@ class PaymentCore:
                             "credits": row["credits"],
                             "amount_cents": row["amount_cents"],
                             "currency": row["currency"],
+                            "gross_amount_cents": obj["amount_cents"],
+                            **{
+                                key: obj[key]
+                                for key in (
+                                    "base_amount_cents",
+                                    "tax_amount_cents",
+                                    "tax_behavior",
+                                )
+                                if key in obj
+                            },
                         },
                         now,
                     )
@@ -944,7 +991,13 @@ class PaymentCore:
                         "payment_refund_proof_missing",
                         row["id"],
                     )
-                if obj["amount_refunded"] > row["amount_cents"]:
+                try:
+                    refunded = refund_base_amount(obj)
+                except ValueError as error:
+                    return self._finish_event(
+                        connection, event, "review", str(error), row["id"]
+                    )
+                if refunded > row["amount_cents"]:
                     return self._finish_event(
                         connection,
                         event,
@@ -952,7 +1005,7 @@ class PaymentCore:
                         "payment_refund_exceeds_original",
                         row["id"],
                     )
-                cumulative = max(row["refunded_cents"], obj["amount_refunded"])
+                cumulative = max(row["refunded_cents"], refunded)
                 target = (row["credits"] * cumulative + row["amount_cents"] - 1) // row[
                     "amount_cents"
                 ]
@@ -975,6 +1028,8 @@ class PaymentCore:
                         "payment refund recorded",
                         {
                             "refunded_cents": cumulative,
+                            "gross_refunded_cents": obj["amount_refunded"],
+                            "gross_amount_cents": obj["amount_cents"],
                             "refund_credits": target,
                             "clawed_back_credits": row["clawed_back_credits"],
                             "unmet_credits": row["unmet_credits"],

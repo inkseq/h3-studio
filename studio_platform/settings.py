@@ -92,6 +92,15 @@ def database_url_from_environment():
         raise ValueError("Database credential file is unavailable or invalid") from None
 
 
+def enhance_switch(value, data_dir):
+    """Enhance (#795) is on when explicitly set, or, unset, once the host has
+    installed its RunPod credential into the data volume (root-only, per target)
+    without a release-helper change. "0" always keeps it off."""
+    if value is not None:
+        return value == "1"
+    return (Path(data_dir) / "runtime-secrets" / "runpod-enhance.json").is_file()
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -122,12 +131,17 @@ class Settings:
     storyboard_owners: tuple[str, ...] = ()
     stage_query_config_file: Path | None = None
     render_enabled: bool = False
+    # Enhance a finished take to 1080P/2K on RunPod Serverless (#795).
+    enhance_enabled: bool = False
     recovery_backends: tuple[str, ...] = ()
     generation_queue: str = "postgres"
     capacity_no_progress_seconds: int = 600
     capacity_runtime_floor_seconds: int = 1800
     capacity_startup_timeout_seconds: int = 1200
     title_config_file: Path | None = None
+    inky_config_file: Path | None = None
+    # Model-call tracing (#770); absent leaves tracing off.
+    langfuse_config_file: Path | None = None
     workos_config_file: Path | None = None
     stripe_config_file: Path | None = None
     stripe_mode: str = "off"
@@ -235,6 +249,16 @@ class Settings:
             if not path.is_absolute() or ".." in path.parts:
                 raise ValueError("WorkOS credential path must be absolute")
             object.__setattr__(self, "workos_config_file", path)
+        if self.inky_config_file is not None:
+            path = Path(self.inky_config_file)
+            if not path.is_absolute() or ".." in path.parts:
+                raise ValueError("Inky credential path must be absolute")
+            object.__setattr__(self, "inky_config_file", path)
+        if self.langfuse_config_file is not None:
+            path = Path(self.langfuse_config_file)
+            if not path.is_absolute() or ".." in path.parts:
+                raise ValueError("Langfuse credential path must be absolute")
+            object.__setattr__(self, "langfuse_config_file", path)
         if type(self.title_use_central) is not bool or (
             self.title_config_file is not None and self.title_use_central
         ):
@@ -485,6 +509,10 @@ class Settings:
             if os.environ.get("SIXNINE_STAGE_QUERY_CONFIG_FILE")
             else None,
             render_enabled=os.environ.get("SIXNINE_RENDER_ENABLED", "0") == "1",
+            enhance_enabled=enhance_switch(
+                os.environ.get("INKSEQ_ENHANCE_ENABLED"),
+                Path(os.environ.get("SIXNINE_DATA", str(default))),
+            ),
             recovery_backends=tuple(
                 x.strip()
                 for x in os.environ.get("SIXNINE_RECOVERY_BACKENDS", "").split(",")
@@ -492,6 +520,12 @@ class Settings:
             ),
             title_config_file=Path(os.environ["SIXNINE_TITLE_CONFIG_FILE"])
             if os.environ.get("SIXNINE_TITLE_CONFIG_FILE")
+            else None,
+            inky_config_file=Path(os.environ["INKSEQ_INKY_CONFIG_FILE"])
+            if os.environ.get("INKSEQ_INKY_CONFIG_FILE")
+            else None,
+            langfuse_config_file=Path(os.environ["INKSEQ_LANGFUSE_CONFIG_FILE"])
+            if os.environ.get("INKSEQ_LANGFUSE_CONFIG_FILE")
             else None,
             workos_config_file=Path(os.environ["INKSEQ_WORKOS_CONFIG_FILE"])
             if os.environ.get("INKSEQ_WORKOS_CONFIG_FILE")

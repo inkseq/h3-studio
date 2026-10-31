@@ -446,16 +446,8 @@ class StoryChatTests(unittest.TestCase):
         value = response.json()
         self.assertEqual([c["name"] for c in value["cards"]["characters"]], ["Mia"])
         self.assertTrue(all(zib not in s["cast"] for s in value["cards"]["shots"]))
-        self.assertEqual(
-            {k: v for k, v in value["turn"]["proposal"].items() if k != "risk_review"},
-            {
-                "kind": "generate",
-                "shot_ids": [s["id"] for s in value["cards"]["shots"]],
-            },
-        )
-        self.assertEqual(
-            value["turn"]["proposal"]["risk_review"]["status"], "incomplete"
-        )
+        self.assertIsNone(value["turn"]["proposal"])
+        self.assertIn("references", value["messages"][-1]["text"])
         self.assertEqual(self.jobs(), before)
 
     def test_reply_format_is_enforced_and_picture_is_only_proposed(self):
@@ -475,13 +467,75 @@ class StoryChatTests(unittest.TestCase):
             chat, "redraw zib and make it", turn_id="turn-0020", plan=plan
         ).json()
         proposal = value["turn"]["proposal"]
-        self.assertEqual(proposal["picture_card_ids"], [zib])
-        self.assertEqual(len(proposal["shot_ids"]), 3)
+        self.assertIsNone(proposal)
+        self.assertIn("Picture generation is off", value["messages"][-1]["text"])
         self.assertEqual(self.jobs(), before)
         project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
             "project"
         ]
         self.assertFalse(any(e["type"] == "image" for e in project["entities"]))
+
+    def test_photo_sent_without_a_card_goes_on_the_card_it_shows(self):
+        # #798 B6: "use this photo's cat" puts the photo on the (new) cat card.
+        import io
+
+        from PIL import Image
+
+        chat = self.start()
+        pid = chat["project_id"]
+        raw = io.BytesIO()
+        Image.new("RGB", (640, 480), (220, 140, 60)).save(raw, format="PNG")
+        asset = self.client.post(
+            "/v1/assets",
+            data={"client_project_id": pid},
+            files={"file": ("cat.png", raw.getvalue(), "image/png")},
+        )
+        self.assertEqual(asset.status_code, 201, asset.text)
+        asset_id = asset.json()["asset_id"]
+        current = self.client.get(f"/v1/projects/{pid}").json()
+        attached = self.client.post(
+            f"/v1/projects/{pid}/actions",
+            json={
+                "expected_version": current["version"],
+                "actions": [
+                    {
+                        "op": "asset.attach",
+                        "asset_id": asset_id,
+                        "entity_id": "asset-" + asset_id,
+                        "title": "cat.png",
+                    }
+                ],
+            },
+        )
+        self.assertEqual(attached.status_code, 200, attached.text)
+        plan = {
+            "reply": "Your cat is on its card.",
+            "actions": [
+                {
+                    "tool": "upsert_character",
+                    "ref": "new:cat",
+                    "name": "Ginger",
+                    "description": "Orange tabby cat",
+                },
+                {
+                    "tool": "set_card_photo",
+                    "ref": "new:cat",
+                    "photo": "asset-" + asset_id,
+                },
+            ],
+        }
+        response = self.turn(chat, "use the cat in this photo", plan=plan)
+        self.assertEqual(response.status_code, 200, response.text)
+        prompt = self.model.calls[-1]["messages"][-1]["text"]
+        self.assertIn('"photos": [{"id": "asset-' + asset_id, prompt)
+        cat = response.json()["cards"]["characters"][0]
+        self.assertEqual(cat["image_entity_id"], "asset-" + asset_id)
+        missing = {
+            "reply": "x",
+            "actions": [{"tool": "set_card_photo", "ref": cat["id"], "photo": "nope"}],
+        }
+        refused = self.turn(chat, "again", turn_id="turn-0002", plan=missing)
+        self.assertEqual(refused.status_code, 409, refused.text)
 
     def test_a_different_story_is_proposed_not_mixed_in(self):
         chat = self.start()

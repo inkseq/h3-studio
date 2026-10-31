@@ -37,6 +37,7 @@ from .auth import Principal
 from .capabilities import RECIPES, VERSION, version_matches
 from .content_policy import ContentPolicyError
 from .credits import CreditError
+from .creator_controls import default_chat_profile
 from .generation_draft import (
     input_entries,
     prepare_patch,
@@ -72,8 +73,6 @@ from .content_lifecycle import (
     assert_project_writable,
     assert_reference_payload,
 )
-
-
 from .assistant_models import DEFAULT_MODEL, resolve as resolve_assistant
 
 EMPTY_INPUTS = {
@@ -1024,7 +1023,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
             # Validate syntax and type even for a currently disabled reference.
             candidate = {**item, "enabled": True}
             refs = self._inputs([candidate])
-            prepare_patch({"inputs": refs}, lambda _ident: self._source(value))
+            prepare_patch({"inputs": refs}, lambda _ident: self._source(value))  # noqa: B023 -- prepare_patch calls the resolver synchronously
             prepared.append(canonical(item))
         self._inputs(prepared)
         with self.repo.transaction() as conn:
@@ -1088,6 +1087,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
         }
 
     def _card_snapshot(self, principal, session, body):
+        body = default_chat_profile(self.settings, body)
         settings_check(
             {
                 k: body[k]
@@ -1351,7 +1351,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
                 + uuid.uuid5(uuid.NAMESPACE_URL, revision_id + ":" + str(index)).hex
             )
             shot_id = "shot-" + uuid.uuid5(uuid.NAMESPACE_URL, item_id).hex
-            shot = new_entity(
+            new_entity(
                 project,
                 {
                     "id": shot_id,
@@ -2145,7 +2145,7 @@ class QuickChatService(QuickChatTakesMixin, QuickChatHistoryMixin, QuickChatTitl
         *,
         allow_blocked=False,
     ):
-        session = self._access(principal, session_id, "jobs:write")
+        self._access(principal, session_id, "jobs:write")
         if self.hooks is None:
             raise QuickChatError(
                 "execution_adapter_unavailable", "执行入口尚未配置；确认记录保留。", 503

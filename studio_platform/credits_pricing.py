@@ -12,6 +12,12 @@ from .credit_schema import CreditSchemaError, prices, ready
 from .identity_schema import users
 
 DEFAULT_RATES = {"fast": 2, "standard": 4, "refine": 12}
+# Runtime profiles that cost more GPU time than their tier's rate covers. Users
+# see only the larger usage, never a per-clip price (owner 2026-10-30): Pika's
+# accelerator measured about +30% GPU time against TaoMate on the same runtime.
+PROFILE_CREDIT_MULTIPLIERS = {
+    "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9": Fraction(13, 10),
+}
 RECOMMENDED_IMAGE_CREDITS = 5
 DEFAULT_CONFIGURATION = {
     "cost_multiplier": 3,
@@ -67,11 +73,15 @@ def _number(value, minimum, maximum):
 def configuration(value):
     if (
         type(value) is not dict
+        or not set(DEFAULT_CONFIGURATION) <= set(value)
         or set(value)
-        not in (
-            set(DEFAULT_CONFIGURATION),
-            set(DEFAULT_CONFIGURATION) | {"image_credits"},
-        )
+        - set(DEFAULT_CONFIGURATION)
+        - {
+            "image_credits",
+            "resolution_multipliers",
+            "expiry_policy",
+            "reference_video_surcharge_bps_per_second",
+        }
         or (
             "image_credits" in value
             and (
@@ -90,7 +100,54 @@ def configuration(value):
         raise PricingError(
             "credit_prices_invalid", "Credit price configuration is invalid."
         )
+    if "resolution_multipliers" in value:
+        multipliers = value["resolution_multipliers"]
+        if (
+            type(multipliers) is not dict
+            or set(multipliers) != {"480P", "768P"}
+            or any(
+                type(n) is not int or not 1 <= n <= 100 for n in multipliers.values()
+            )
+            or multipliers["768P"] < multipliers["480P"]
+        ):
+            raise PricingError(
+                "credit_prices_invalid", "Resolution prices are invalid."
+            )
+    if "expiry_policy" in value:
+        from .credit_lots import POLICY
+
+        if (
+            type(value["expiry_policy"]) is not dict
+            or value["expiry_policy"] != POLICY
+            or any(type(n) is not int for n in value["expiry_policy"].values())
+        ):
+            raise PricingError(
+                "credit_prices_invalid", "Credit expiry policy is invalid."
+            )
+    from .reference_video_pricing import validate
+
+    validate(value)
     return copy.deepcopy(value)
+
+
+def resolution_price(config, output):
+    """Apply only an adopted revision to trusted compiled dimensions, not labels."""
+    multipliers = config.get("resolution_multipliers")
+    if multipliers is None:
+        return 1, {}
+    width, height = output.get("width"), output.get("height")
+    if (
+        type(width) is not int
+        or type(height) is not int
+        or min(width, height) <= 0
+        or min(width, height) > 768
+    ):
+        raise PricingError(
+            "credit_quote_invalid", "Compiled resolution is unavailable."
+        )
+    resolution = "480P" if min(width, height) <= 480 else "768P"
+    multiplier = multipliers[resolution]
+    return multiplier, {"resolution": resolution, "resolution_multiplier": multiplier}
 
 
 def current(connection, tenant):
@@ -131,7 +188,18 @@ def current(connection, tenant):
 
 def public_prices(connection, tenant):
     value = current(connection, tenant)
-    return {key: value[key] for key in ("revision", "rates")}
+    result = {key: value[key] for key in ("revision", "rates")}
+    if "resolution_multipliers" in value["configuration"]:
+        result["resolution_multipliers"] = copy.deepcopy(
+            value["configuration"]["resolution_multipliers"]
+        )
+    if "expiry_policy" in value["configuration"]:
+        result["expiry_policy"] = copy.deepcopy(value["configuration"]["expiry_policy"])
+    from .reference_video_pricing import FIELD
+
+    if FIELD in value["configuration"]:
+        result[FIELD] = copy.deepcopy(value["configuration"][FIELD])
+    return result
 
 
 def image_price(connection, tenant):
@@ -153,14 +221,14 @@ def image_price(connection, tenant):
 
 
 def admin_margin_estimate(price, catalog):
-    """Tax-inclusive estimate, never a fee invoice or a customer charge.
+    """Tax-exclusive pack estimate, never a fee invoice or customer charge.
 
     Pack credits already INCLUDE the published bonus. Existing immutable price
     configurations and accepted quotes are not rewritten by this projection.
     Missing measured GPU prices remain unknown, with useful break-even bounds.
     """
     config = price["configuration"]
-    tax = Fraction(1, 4)
+    tax = Fraction(0)
     fee = max(Fraction(7, 100), Fraction(str(config["fee_rate"])))
     fixed_fee = Fraction(1, 5)
     packs = []
@@ -234,11 +302,11 @@ def admin_margin_estimate(price, catalog):
         "currency": "usd",
         "pack_revision": catalog["revision"],
         "assumptions": {
-            "tax_inclusive": True,
+            "tax_inclusive": False,
             "consumer_tax_rate": float(tax),
             "processing_and_mor_fee_rate": float(fee),
             "fixed_fee_usd_per_pack": float(fixed_fee),
-            "source": "owner_20261020_estimated_ceiling_not_actual_invoice",
+            "source": "owner_CR74_exclusive_estimated_fees_not_actual_invoice",
             "pack_credits_include_bonus": True,
         },
         "packs": packs,
@@ -286,7 +354,7 @@ def aggregate_quotes(plans, *, complete=True):
 
 def get_tier(compiled, *, execution=None):
     """Classify a fresh server compilation, never caller labels or step counts."""
-    from .quality_tiers import model_tier, profile_tier
+    from .quality_tiers import billing_tier, model_tier, profile_tier
     from .render_plans import RECIPE as RENDER_RECIPE
 
     if (
@@ -301,7 +369,7 @@ def get_tier(compiled, *, execution=None):
     if identity is not None:
         from .runtime_catalog import get_profile
 
-        if profile_tier(identity) != tier:
+        if billing_tier(profile_tier(identity)) != tier:
             raise PricingError(
                 "credit_quote_invalid", "Compiled quality is unavailable."
             )
@@ -339,11 +407,18 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         and isinstance(execution, dict)
         and execution.get("backend") == "cpu-render"
     )
+    from . import enhance_plans
+
+    enhance = (
+        compiled.get("recipe_id") == enhance_plans.RECIPE
+        and isinstance(execution, dict)
+        and execution.get("backend") == enhance_plans.BACKEND
+    )
     output = compiled.get("output_spec", {})
     # CPU chapter/Film compilers use frame_count; generation still requires
     # its original frames contract, even when a caller supplies a render tier.
     frame_key, other_key = (
-        ("frame_count", "frames") if render else ("frames", "frame_count")
+        ("frame_count", "frames") if render or enhance else ("frames", "frame_count")
     )
     frames, fps = output.get(frame_key), output.get("fps", FPS)
     if (
@@ -359,9 +434,34 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         raise PricingError(
             "credit_quote_invalid", "Compiled output duration is unavailable."
         )
-    tier = get_tier(compiled, execution=execution)
-    rate = 0 if render else price["rates"][tier]
-    amount = math.ceil(Fraction(rate * frames, fps))
+    if enhance:
+        # Owner 2026-10-30 (#795): fixed credits per clip, then per extra second.
+        tier = "enhance-" + compiled.get("request", {}).get("tier", "")
+        if tier[len("enhance-") :] not in enhance_plans.PRICES:
+            raise PricingError("credit_quote_invalid", "Enhance tier is unavailable.")
+    else:
+        tier = get_tier(compiled, execution=execution)
+    multiplier, resolution = (
+        (1, {})
+        if render or enhance
+        else resolution_price(price["configuration"], output)
+    )
+    rate = 0 if render or enhance else price["rates"][tier] * multiplier
+    from .reference_video_pricing import price as reference_price
+
+    amount, reference = (
+        (0, {})
+        if render
+        else (enhance_plans.credits(tier[len("enhance-") :], frames / fps), {})
+        if enhance
+        else reference_price(
+            price["configuration"],
+            compiled,
+            Fraction(rate * frames, fps)
+            * PROFILE_CREDIT_MULTIPLIERS.get(compiled.get("deployment_profile_id"), 1),
+            resolution.get("resolution"),
+        )
+    )
     seconds = frames / fps
     result = {
         "version": 1,
@@ -374,6 +474,8 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         "frames": frames,
         "fps": fps,
         "takes": 1,
+        **resolution,
+        **reference,
         "breakdown": [
             {
                 "tier": tier,
@@ -382,6 +484,8 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
                 "frames": frames,
                 "fps": fps,
                 "credits": amount,
+                **resolution,
+                **reference,
             }
         ],
     }

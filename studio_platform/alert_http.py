@@ -5,6 +5,8 @@ import threading
 import time
 import uuid
 
+from .payment_http import PATH as PAYMENT_PATH
+
 PATH = "/internal/alert-counters"
 WINDOW_SECONDS = 300
 
@@ -52,7 +54,7 @@ class AlertCountersMiddleware:
         if scope.get("type") != "http":
             return await self.app(scope, receive, send)
         path = scope.get("path")
-        if path == PATH:
+        if path in {PATH, PAYMENT_PATH}:
             peer = scope.get("client")
             # Never accept proxy assertions. This also refuses proxy middleware
             # rewriting scope.client from any forwarded header to loopback.
@@ -72,11 +74,31 @@ class AlertCountersMiddleware:
                 if scope.get("method") != "GET"
                 else 200
             )
-            value = (
-                self.counters.snapshot()
-                if status == 200
-                else {"code": "alert_counters_unavailable"}
-            )
+            value = {"code": "alert_counters_unavailable"}
+            if status == 200 and path == PATH:
+                value = self.counters.snapshot()
+            elif status == 200:
+                try:
+                    from .payment_http import WINDOW_SECONDS
+
+                    query = scope.get("query_string", b"")
+                    if query:
+                        name, separator, raw_window = query.partition(b"=")
+                        if (
+                            name != b"window_seconds"
+                            or not separator
+                            or not raw_window.isdigit()
+                            or len(raw_window) > 4
+                        ):
+                            raise ValueError("payment_counter_query_invalid")
+                        window = int(raw_window)
+                    else:
+                        window = WINDOW_SECONDS
+                    value = scope["app"].state.payments.payment_alert_counters.snapshot(
+                        window_seconds=window
+                    )
+                except (AttributeError, KeyError, TypeError, ValueError):
+                    status = 503
             body = json.dumps(value, separators=(",", ":")).encode("ascii")
             await send(
                 {

@@ -37,6 +37,15 @@ work, while `steps=50` remains invalid for TaoMate and remains permitted by v6
 on that explicit internal path. All profiles other than these two exact IDs are
 unchanged. Invalid creator output choices still fail native validation.
 
+New Quick Chat card snapshots that omit `deployment_profile_id` also pin the
+configured, enabled server default and apply its creator-control policy. This
+includes human-admin API cards: omission does not mean an explicit internal
+model override. A configured but unavailable default refuses authoring instead
+of falling back to legacy MiniMax defaults. Explicit selectors (including an
+explicit legacy null) retain their existing normalization rules; installations
+without a configured default keep their legacy behavior. Idempotent card
+replays and saved revisions never resolve today's default again.
+
 ## #659 staging acceptance boundary
 
 The fd2ae3af acceptance in #193 comment6420872383 exercised v6 output choices,

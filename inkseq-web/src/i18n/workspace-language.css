@@ -1,0 +1,53 @@
+.qc-dialog button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.qc-dialog-head h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .qc-dialog {
+    max-width: calc(100vw - 24px);
+  }
+  .qc-field {
+    min-width: 0;
+  }
+  .qc-dialog input,
+  .qc-dialog select {
+    max-width: 100%;
+  }
+}
+.account-settings-link {
+  display: inline-flex;
+  padding: 8px 12px;
+  min-height: 36px;
+  align-items: center;
+}
+.api-key-form label {
+  min-width: 0;
+}
+.cloud-projects button {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .api-key-options,
+  .cloud-actions {
+    flex-wrap: wrap;
+  }
+  .api-key-form input,
+  .api-key-form select {
+    max-width: 100%;
+  }
+}
+
+.qc-availability-mode,
+.qc-availability-actions {
+  flex-wrap: wrap;
+}
+.qc-availability-mode,
+.qc-deployment-field {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}

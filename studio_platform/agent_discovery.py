@@ -61,7 +61,7 @@ MAX_SKILL_BYTES = 512 * 1024
 def video_quality_contract():
     """Static video authoring identity; availability still requires live reads."""
     return {
-        "tiers": ["standard", "refine", "fast"],
+        "tiers": ["standard", "natural", "refine", "fast"],
         "modes": ["fl", "ref"],
         "preferred_input": {"tier": "standard", "mode": "fl"},
         "compatibility_aliases": {
@@ -238,6 +238,7 @@ def public_guide():
     from .take_redo import contract as take_redo_contract
 
     from .product_feedback import contract as feedback_contract
+    from .inky_routes import contract as inky_contract
     from .caption_server import MAX_LINE_CHARACTERS
     from .story_risk import contract as story_risk_contract
 
@@ -255,6 +256,7 @@ def public_guide():
         "take_reviews": take_reviews_contract(),
         "take_redo": take_redo_contract(),
         "feedback": feedback_contract(),
+        "inky": inky_contract(),
         "story_film": {
             "capability": "GET /v1/capabilities → story_film.enabled",
             "preflight": "POST /v1/projects/{project_id}/films/preflights; Idempotency-Key; {expected_version,resolution,aspect?,burn_subtitles}",
@@ -631,7 +633,7 @@ The production origin is https://inkseq.com. Browser users sign in there once be
 
 After authorization, read GET /v1/agent-guide, /v1/guided-schema, /v1/capabilities and /openapi.json. Static documentation is not proof that generation is enabled. An actual plan may be blocked; do not invent successful media.
 
-Before choosing a tier/mode, preflight and a new submission, GET authenticated /v1/generation-availability (PAT jobs:read or jobs:write; the helper availability command performs only this read). Match the exact quality:standard/refine/fast alias and modes.fl/ref with video-fl-v1/video-ref-v1; never borrow another tier/mode's readiness. Missing/expired observations and unknown historical quality stay unknown. Observe expires_at and poll_after_seconds. ready/busy remain subject to current capabilities and preflight; busy may queue. starting waits without another rental. unavailable/disabled needs an administrator to configure that choice; unknown needs a refresh. Fast currently has no supported route: do not substitute fewer steps, another tier or a different GPU. Existing uncertain jobs always use their original receipt/key. Public discovery contains no live availability.
+Before choosing a tier/mode, preflight and a new submission, GET authenticated /v1/generation-availability (PAT jobs:read or jobs:write; the helper availability command performs only this read). Match the exact quality:standard/natural/refine/fast alias and modes.fl/ref with video-fl-v1/video-ref-v1; never borrow another tier/mode's readiness. Missing/expired observations and unknown historical quality stay unknown. Observe expires_at and poll_after_seconds. ready/busy remain subject to current capabilities and preflight; busy may queue. starting waits without another rental. unavailable/disabled needs an administrator to configure that choice; unknown needs a refresh. Fast currently has no supported route: do not substitute fewer steps, another tier or a different GPU. Existing uncertain jobs always use their original receipt/key. Public discovery contains no live availability.
 
 ## Edit, generate, return control
 Read the current project/version; use atomic guided actions with expected_version and stable Idempotency-Key. On 409 fetch and reconcile. Upload references to the same story. Inspect a generation plan's blockers/estimate before submitting within the user's authorization. Poll the original job; an unknown outcome is never a reason to issue a new paid request.

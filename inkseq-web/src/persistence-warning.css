@@ -1,0 +1,23 @@
+.persistence-warning {
+  margin: 10px 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  background: var(--warn-soft);
+  color: var(--ink);
+  font-size: 13px;
+}
+.persistence-warning p {
+  margin: 7px 0;
+  line-height: 1.6;
+}
+.persistence-warning > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.persistence-warning a {
+  color: inherit;
+  text-decoration: underline;
+}

@@ -1,0 +1,582 @@
+/* Only real-service/accessibility adapters. Page appearance comes from demo-v2.css. */
+/* Shell headers keep their natural size; only the page body scrolls. */
+.home {
+  min-height: 0;
+  overflow: hidden;
+}
+.hbar {
+  flex-shrink: 0;
+}
+.home > main {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.home > .libp {
+  overflow: hidden;
+}
+#root {
+  width: 100%;
+  min-width: 0;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+[hidden] {
+  display: none !important;
+}
+.app > [data-app-route] {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+}
+[data-app-route][hidden] {
+  display: none !important;
+}
+.v2-story-view {
+  height: 100%;
+  min-height: 0;
+}
+
+/* Export and cloud-status triggers sit in the story header; their panels are the shared
+   ui/Menu and ui/Popover (#514 phase 2). */
+.v2-export-trigger,
+.wbar .v2-autosave {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+}
+.v2-cloud-status-panel p {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.visually-hidden,
+.skip {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.skip:focus {
+  clip: auto;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 8px;
+  background: var(--surface);
+  z-index: 200;
+}
+.hbar .logo {
+  color: var(--ink);
+  text-decoration: none;
+}
+.hbar > .avatar {
+  padding: 0;
+  border: 0;
+}
+.hbar .language-switch {
+  border: 0;
+  background: transparent;
+  font-weight: 600;
+  padding: 6px;
+}
+dialog {
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: calc(100vw - 24px);
+  max-height: 90dvh;
+  overflow: auto;
+  padding: 20px;
+}
+dialog::backdrop {
+  background: var(--media-scrim);
+  backdrop-filter: blur(3px);
+}
+.inline-error,
+[role='alert'] {
+  color: var(--warn);
+}
+.persistence-warning {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.story-recent-menu {
+  width: min(320px, 90vw);
+}
+.story-recent-menu > div > button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+}
+.story-recent-title {
+  font-weight: 600;
+}
+.story-recent .badge {
+  display: none;
+}
+
+.libp-tile .library-preview-error {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 4/3;
+  background: var(--surface-3);
+  color: var(--muted);
+  font-size: 11px;
+}
+.libp-tile > video {
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+}
+.libp-check {
+  padding: 0 !important;
+  min-width: 18px;
+  min-height: 18px;
+  justify-content: center;
+}
+
+.sb-workspace {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.sb-workspace > .layout {
+  width: 100%;
+}
+
+.sb-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 100;
+  background: var(--surface-3);
+  padding: 10px 18px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+}
+.sb-library-scrim {
+  display: none;
+}
+.workbench-select {
+  position: absolute;
+  left: 7px;
+  top: 7px;
+  z-index: 3;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  justify-content: center;
+  background: var(--media-scrim);
+}
+
+.drawer.workbench-expanded {
+  left: calc(var(--libw, 260px) + 8px);
+  width: auto !important;
+}
+.workbench-bulk {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.workbench-bulk label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.workbench-bulk select {
+  width: auto;
+  max-width: 160px;
+}
+.workbench-bulk > small {
+  display: none;
+}
+
+.home > main:has(> .home-main) {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.home-search-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  width: 320px;
+  min-width: 0;
+}
+.v2-home-search {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 7px;
+  padding: 0 10px;
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+}
+.v2-home-search svg {
+  flex: none;
+  color: var(--muted);
+}
+.v2-home-search:focus-within {
+  border-color: var(--accent);
+}
+
+.v2-home-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.story-library-note.signed-out {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 12px;
+}
+.story-card video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.story-wrap > .item-menu {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 2;
+}
+.home-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.home-foot > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  min-height: 36px;
+}
+.story-grid .new {
+  height: 100%;
+}
+.story-wrap > .story-card {
+  width: 100%;
+  height: 100%;
+}
+@media (max-width: 760px) {
+  .home {
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+  .hbar .avatar {
+    width: 36px;
+    height: 36px;
+  }
+  .hbar .logo {
+    min-height: 36px;
+  }
+  .home-head .home-search-row {
+    order: 3;
+    width: 100%;
+    flex-basis: 100%;
+    margin: 0;
+  }
+  .home-head .v2-home-quick,
+  .home-head > .v2-home-new {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    padding: 0;
+    justify-content: center;
+    border-radius: 999px;
+  }
+  .home-head .v2-home-quick > span,
+  .home-head > .v2-home-new > span {
+    display: none;
+  }
+
+  .story-card.new > small {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .drawer.workbench-expanded {
+    left: 0;
+    width: 100% !important;
+  }
+  .sb-workspace .layout {
+    padding-bottom: 0;
+  }
+  .sb-library-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 11;
+    background: var(--media-scrim);
+    border: 0;
+  }
+  .sb-workspace .layout > .library {
+    z-index: 12;
+  }
+  .sb-workspace .layout.library-collapsed {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+  .sb-workspace .layout.library-collapsed > .library {
+    display: none;
+  }
+  .sb-workspace .layout:not(.library-collapsed) > .library {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(300px, 84vw);
+    background: var(--surface);
+    overflow: auto;
+  }
+  .workbench-select {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* Phone targets keep the approved compact geometry without shrinking controls. */
+@media (max-width: 760px) {
+  .ops-adapter details > summary {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+  }
+  .ui-empty > a {
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
+
+/* The header is shared by all creator pages; captions remain readable on mobile. */
+.hbar .chip {
+  font-size: 11px;
+}
+.hbar .avatar {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+}
+@media (max-width: 760px) {
+}
+
+/* Collapsed story library rail (#358): only the expand toggle shows. The matching rules in
+   storyboard-workspace.css are not loaded by any entry, so the rail leaked its search box,
+   tabs and character cards into a 44 px strip. */
+.sb-workspace .library.collapsed {
+  padding: 8px 5px;
+  overflow: hidden;
+}
+.sb-workspace .library.collapsed > :not(.lib-head) {
+  display: none;
+}
+.sb-workspace .library.collapsed .lib-head {
+  width: auto;
+  margin: 0;
+  justify-content: center;
+}
+
+/* Story library sidebar at narrow widths (#358 follow-up): the owner can drag it down to 140 px.
+   Profile cards keep the name on one line with an ellipsis, and below 240 px the tabs stack to one
+   column, the initial badge and the help tip hide, and buttons may wrap. */
+.sb-workspace .library:not(.collapsed) {
+  container: sb-library / inline-size;
+}
+.sb-workspace .library .pcard-body {
+  flex: 1;
+  min-width: 0;
+}
+.sb-workspace .library .pcard-body > :is(b, small) {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Fixed columns, so hiding the picture (narrow sidebar) never shifts the name into the
+   picture's 46 px slot or stretches the add button. */
+.sb-workspace .library .pcard {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.sb-workspace .library .pcard > :is(.athumb, .profile-initial) {
+  grid-column: 1;
+}
+.sb-workspace .library .pcard > .pcard-body {
+  grid-column: 2;
+}
+.sb-workspace .library .pcard > .pcard-open {
+  grid-column: 3;
+}
+/* The card's "…" menu floats over its top-right corner on hover or focus, so the name and
+   details keep the full width at any sidebar size; touch screens always show it. */
+.sb-workspace .library .pcard > .item-menu {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  opacity: 0;
+  transition: opacity var(--ease);
+}
+.sb-workspace .library .pcard:is(:hover, :focus-within) > .item-menu,
+.sb-workspace .library .pcard > .item-menu:has([aria-expanded='true']) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .sb-workspace .library .pcard > .item-menu {
+    opacity: 1;
+  }
+  .sb-workspace .library .pcard-body {
+    padding-right: var(--h-sm);
+  }
+}
+@container sb-library (max-width: 240px) {
+  /* Narrow: the name may take two lines instead of cutting to a few letters. */
+  .sb-workspace .library .pcard-body > b {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow-wrap: anywhere;
+  }
+  .sb-workspace .library .lib-tabs {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sb-workspace .library .pcard :is(.athumb, .profile-initial),
+  .sb-workspace .library .lib-tip {
+    display: none;
+  }
+
+  .sb-workspace .library .lib-head > small {
+    display: none;
+  }
+}
+
+/* Where two scrollbars meet, the browser paints a white square; keep it the page colour. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Ink-drop brand mark in the header replaces the old gradient square. */
+.hbar .logo::before {
+  content: none;
+  display: none;
+}
+.hbar .logo {
+  gap: 6px;
+}
+.hbar .logo > .ink-mark {
+  flex: none;
+  margin-left: -4px;
+}
+
+/* Story top bar: below laptop width the Connect AI and Settings buttons show icons only,
+   so the account menu stays on screen (tablet 768px overflowed). */
+@media (max-width: 1100px) {
+  .wbar .bar-label {
+    display: none;
+  }
+}
+
+/* #232 (#6): the collapsed / narrowest library is an icon rail — one icon per category with
+   its count; a click opens the library at that category. */
+.sb-workspace .library.collapsed > .lib-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.sb-workspace .library .lib-new {
+  margin-left: auto;
+}
+.sb-workspace .library .lib-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 18px 8px;
+  text-align: center;
+}
+/* Light / dark switch beside the language switch (owner, 2026-10-26). */
+.theme-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-2);
+}
+.theme-toggle:hover {
+  background: color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink);
+}
+/* Single actions in a settings card size to their words, not the card width. */
+.account-link-button {
+  align-self: flex-start;
+  width: auto;
+}
+/* Trash tabs: the count reads as a small badge after its label. */
+.trash-filter .trash-tab-count {
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+/* Story settings (owner, 2026-10-26): story actions live here, not in the account menu. */
+.story-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.story-settings-actions .trash-button-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Terms acceptance dialog (h3-studio#374): policy links read as links inside the sentence. */
+.terms-gate-consent a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

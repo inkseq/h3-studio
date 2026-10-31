@@ -1,0 +1,285 @@
+/* Admin capacity and spending settings (#456). Uses the settings page's theme tokens. */
+.cap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.cap .muted {
+  color: var(--muted);
+}
+.cap-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.cap-head h3 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+.cap-head p {
+  margin: 0;
+  max-width: 62ch;
+  font-size: 13px;
+}
+.cap-version {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.cap-today {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--r, 10px);
+  background: var(--surface);
+}
+.cap-today.warn {
+  border-left-color: var(--warn);
+}
+.cap-today.bad {
+  border-left-color: var(--bad);
+}
+.cap-today-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.cap-today-head small {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+}
+.cap-today-amount {
+  margin: 2px 0;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.cap-meter {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(
+    90deg,
+    var(--accent) calc(var(--used) * 100%),
+    var(--line) calc(var(--used) * 100%)
+  );
+}
+.cap-today.warn .cap-meter {
+  background: linear-gradient(90deg, var(--warn) calc(var(--used) * 100%), var(--line) 0);
+}
+.cap-today.bad .cap-meter {
+  background: linear-gradient(90deg, var(--bad) calc(var(--used) * 100%), var(--line) 0);
+}
+.cap-unresolved summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  color: var(--warn);
+  cursor: pointer;
+  font-size: 13px;
+}
+.cap-unresolved ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+.cap-unresolved code {
+  font-size: 11px;
+  word-break: break-all;
+}
+.cap-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 12px 14px;
+  border-radius: var(--r, 10px);
+  background: var(--warn-soft);
+  font-size: 13px;
+}
+.cap-banner p {
+  flex: 1 1 320px;
+  margin: 0;
+}
+.cap-fold > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.ui-settings-note {
+  margin: 0;
+  padding: 0 16px 8px;
+  font-size: 12px;
+}
+.cap-error-bar,
+.cap-notice {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: var(--r, 10px);
+  font-size: 13px;
+}
+.cap-error-bar {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+.cap-notice {
+  background: var(--accent-soft);
+}
+.cap-bar,
+.cap-actions {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 10px 0;
+  background: linear-gradient(transparent, var(--bg, var(--white)) 30%);
+}
+.cap-bar > span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+.cap-bar .keep-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.cap-review {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r, 10px);
+  background: var(--surface);
+}
+.cap-review h4 {
+  margin: 0;
+}
+.cap-diff,
+.cap-consequences {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+.cap-diff li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.cap-diff li span {
+  flex: 1 1 200px;
+}
+.cap-diff s {
+  color: var(--muted);
+}
+.cap-diff small {
+  color: var(--muted);
+}
+.cap-consequences li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line);
+  color: var(--ink-2, var(--ink));
+}
+.cap-consequences li.bad {
+  border-left-color: var(--bad);
+  color: var(--bad);
+  font-weight: 500;
+}
+.cap-consequences svg {
+  flex: none;
+  margin-top: 3px;
+}
+.cap-adopts {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--r-sm, 6px);
+  background: var(--warn-soft);
+  font-size: 13px;
+}
+.cap-reason {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.cap-reason textarea {
+  font-weight: 400;
+}
+.cap-reason small {
+  font-weight: 400;
+  font-size: 12px;
+}
+
+/* Machine start rules (h3-studio#695) share the settings layout. */
+.rules {
+  margin-top: 24px;
+}
+.rules-target {
+  margin: 0;
+}
+.rules-summary {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 13px;
+}
+.rules-diff,
+.rules-history {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+.rules-history > li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+}
+.rules-confirm {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.rules-confirm label {
+  display: grid;
+  gap: 6px;
+}
+.rules-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+/* Machine names are long and differ only at the end (pool); show them whole. */
+.ui-settings.rules .ui-setting-control select {
+  width: min(480px, 100%);
+}

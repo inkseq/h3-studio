@@ -212,7 +212,49 @@ class PaymentRouteTests(LedgerCase):
         self.gateway.checkout.assert_called_once_with(
             self.core.begin_checkout.return_value["payment"],
             idempotency_key="inkseq-original",
+            customer_email=None,
         )
+
+    def test_checkout_prefills_only_the_buyers_canonical_verified_email(self):
+        self.save()
+        self.core.begin_checkout.return_value = {
+            "payment": {"id": str(uuid.uuid4()), "request_fingerprint": "f" * 64},
+            "dispatch": True,
+            "stripe_idempotency_key": "inkseq-original",
+        }
+        self.core.bind_checkout.return_value = {
+            "checkout_url": "https://checkout.stripe.com/c/pay/original"
+        }
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == self.ids["other"])
+                .values(email="other@example.test", email_verified=1)
+            )
+        for verified, email, expected in (
+            (1, "buyer@example.test", "buyer@example.test"),
+            (0, "unverified@example.test", None),
+            (1, None, None),
+        ):
+            with self.subTest(verified=verified, email=email):
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        update(users)
+                        .where(users.c.id == self.ids["supervan"])
+                        .values(email=email, email_verified=verified)
+                    )
+                self.api.checkout(self.user, {"pack_id": "starter"}, key="prefill")
+                self.assertEqual(
+                    self.gateway.checkout.call_args.kwargs["customer_email"], expected
+                )
+        self.gateway.checkout.reset_mock()
+        with self.assertRaises(BillingError):
+            self.api.checkout(
+                self.user,
+                {"pack_id": "starter", "customer_email": "injected@example.test"},
+                key="injected-email",
+            )
+        self.gateway.checkout.assert_not_called()
 
     def test_original_bound_checkout_replay_has_no_second_provider_request(self):
         self.save()
@@ -339,21 +381,12 @@ class PaymentRouteTests(LedgerCase):
                 .where(payments.c.id == own[1])
                 .values(receipt_url="https://pay.stripe.com/receipts/test-receipt")
             )
-        with self.assertLogs(
-            "studio_platform.stripe_client", level="WARNING"
-        ) as logged:
-            first = self.api.history(self.user, limit=1)
-            second = self.api.history(self.user, before=first["next_cursor"], limit=1)
-        self.assertEqual(
-            logged.output,
-            ["WARNING:studio_platform.stripe_client:billing_receipt_url_omitted"],
-        )
+        first = self.api.history(self.user, limit=1)
+        second = self.api.history(self.user, before=first["next_cursor"], limit=1)
         projected = {row["id"]: row for row in first["payments"] + second["payments"]}
         self.assertIsNone(projected[own[0]]["receipt_url"])
-        self.assertEqual(
-            projected[own[1]]["receipt_url"],
-            "https://pay.stripe.com/receipts/test-receipt",
-        )
+        self.assertIsNone(projected[own[1]]["receipt_url"])
+        self.assertTrue(all(item["receipt"] is None for item in projected.values()))
         with self.repo.engine.connect() as connection:
             self.assertEqual(
                 connection.execute(
@@ -371,6 +404,107 @@ class PaymentRouteTests(LedgerCase):
             self.api.history(self.user, before=foreign)
         with self.assertRaises(BillingError):
             self.api.history(replace(self.user, machine=True))
+
+    def test_receipt_uses_frozen_payment_and_hides_provider_contacts(self):
+        core = self.real_core()
+        ident = core.begin_checkout(
+            self.user,
+            {**PACK, "revision": "original"},
+            "receipt",
+            account_scope="acct_testaccount",
+        )["payment"]["id"]
+        for actor in (self.user, self.admin, Principal("other", "browser:other")):
+            with self.assertRaisesRegex(BillingError, "billing_receipt_not_found"):
+                self.api.receipt(actor, ident)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(payments)
+                .where(payments.c.id == ident)
+                .values(
+                    status="refunded",
+                    paid_at=self.now,
+                    refunded_cents=125,
+                    receipt_url="https://pay.stripe.com/receipts/private-contact-details",
+                )
+            )
+            before = dict(
+                connection.execute(select(payments).where(payments.c.id == ident))
+                .mappings()
+                .one()
+            )
+        # A changed current pack must not rewrite the original paid facts.
+        self.save(packs=[{**PACK, "amount_cents": 900, "credits": 950}])
+        app = FastAPI()
+        register_routes(
+            app,
+            self.settings,
+            self.repo,
+            lambda _: self.user,
+            core=self.core,
+            gateway=self.gateway,
+        )
+        with TestClient(app) as client:
+            response = client.get(f"/v1/billing/payments/{ident}/receipt")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        receipt = response.json()["receipt"]
+        self.assertEqual(
+            receipt,
+            {
+                "payment_id": ident,
+                "pack_id": "starter",
+                "amount_cents": 500,
+                "credits": 500,
+                "currency": "usd",
+                "status": "refunded",
+                "refunded_cents": 125,
+                "paid_at": self.api.history(self.user)["payments"][0]["paid_at"],
+                "issuer": {
+                    "name": "Inkseq",
+                    "abn": "68 442 632 833",
+                    "support_email": "support@inkseq.com",
+                },
+            },
+        )
+        history = self.api.history(self.user)["payments"][0]
+        self.assertEqual(history["receipt"], receipt)
+        self.assertIsNone(history["receipt_url"])
+        self.assertNotIn("stripe.com", json.dumps(response.json()))
+        for actor in (self.admin, Principal("other", "browser:other")):
+            with self.assertRaisesRegex(BillingError, "billing_receipt_not_found"):
+                self.api.receipt(actor, ident)
+        for actor in (None, replace(self.user, machine=True)):
+            with self.assertRaisesRegex(BillingError, "human_account_required"):
+                self.api.receipt(actor, ident)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                before,
+                dict(
+                    connection.execute(select(payments).where(payments.c.id == ident))
+                    .mappings()
+                    .one()
+                ),
+            )
+        self.gateway.create_checkout.assert_not_called()
+        self.gateway.verify_event.assert_not_called()
+        with self.assertRaisesRegex(BillingError, "billing_receipt_not_found"):
+            self.api.receipt(self.user, str(uuid.uuid4()))
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(payments)
+                .where(payments.c.id == ident)
+                .values(tenant="foreign-tenant")
+            )
+        with self.assertRaisesRegex(BillingError, "billing_receipt_not_found"):
+            self.api.receipt(self.user, ident)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == self.ids["supervan"])
+                .values(status="suspended")
+            )
+        with self.assertRaisesRegex(BillingError, "account_unavailable"):
+            self.api.receipt(self.user, ident)
 
     def test_original_checkout_survives_admin_removing_pack(self):
         saved = self.save()
@@ -520,6 +654,8 @@ class PaymentRouteTests(LedgerCase):
                             "livemode": False,
                             "currency": "usd",
                             "tax_behavior": "inclusive",
+                            "unit_amount": 500,
+                            "type": "one_time",
                         },
                     }
                 ],

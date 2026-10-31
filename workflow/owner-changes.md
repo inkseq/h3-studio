@@ -586,6 +586,18 @@ Whole-take verdicts are explicit keep/redo/null with revision, CAS and actor kin
 picks, stars and range-change marks do not set them. v1 reads one owner at a time;
 all-owners aggregate is a later, content-free view. Frontend remains Claude's lane.
 
+## CR-20261026-68 — backend maintainability ratchets, advisory reports
+
+Owner, 2026-10-26, this session / #257: widen backend Ruff lint to F401, F841,
+bugbear B and C901 (complexity25), retaining fatal checks and recording per-rule
+debt counts that cannot increase. Clean trivial unused names without changing
+behavior; preserve deliberate registration/import compatibility. Reviewed B023
+and S608 false positives receive per-line reasons, not blanket exclusions.
+New backend modules are limited to1500 physical lines; existing oversized modules
+must not grow. Add weekly pip/GitHub Actions Dependabot and non-blocking pip-audit
+reports. Add coverage artifacts without a threshold; owner explicitly selected
+coverage.py over pytest-cov to retain existing unittest/load_tests semantics.
+This is Tier1 source/CI work only, with no production, GPU or charging action.
 ## CR-20261026-69 — creator model controls belong to the TaoMate profile
 
 Owner, 2026-10-26, backend follow-up to inkseq-design#266, tracked in #649:
@@ -628,3 +640,249 @@ Owner, 2026-10-27 (to Claude): too much time went to approvals and queues for sm
   (backup recovery, helper installs) posts a hold on #193; the promoter respects open holds.
 - Unchanged hard limits: ask the owner for budget overrun, permanent user-data deletion,
   credential/provider-account changes and charging/Checkout changes.
+
+## CR-20261027-71 — Xiaomo advises and navigates; contextual examples are bounded
+
+Owner directions recorded on #679:
+[6433837121](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433837121),
+[6433894374](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433894374),
+[6433915423](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433915423),
+and [6433954470](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6433954470).
+These supersede the issue body's v1 batch-edit proposal. Timing remains after the
+current batch ships; this record does not start or activate the feature.
+
+- Xiaomo v1 only advises and guides. Each item has a typed navigation target
+  `{project_id, step: story|storyboard|film, entity_id?, field?}`. Open/select/
+  focus/highlight take the user to the field; the user edits it. No mutation,
+  generation or spend tool is granted to Xiaomo. Agent editing is deferred.
+- Free code pre-checks precede batched Jev judgements on save and before generation.
+  V1 judgements cover description specificity, keyframe need and upload-to-card
+  suitability. Do not use Jev for likeness, identity/reference fidelity or
+  message-to-card targeting. Consistency checks compare structured fields.
+- Tip wording uses fixed zh/en templates; a matching scene-script quotation is
+  the free example path. The later contextual-guidance direction permits an LLM
+  only for Jev-flagged items: the top 1–3 per save, other items on click. Use minimal
+  shot fields, scene excerpt, card names and step; cache by target/version. A slow
+  or failed LLM falls back to the template/script quote. A per-story daily budget
+  applies; unrestricted background generation is not authorized.
+- The selected contextual model is GPT-6.1 Terra, configured server-side as
+  `gpt-6.1-terra`, with low reasoning effort; never show model controls/names to
+  creators. Resolve the exact upstream identifier and authorized existing registry
+  profile before implementation. A provider-qualified model identifier is not
+  interchangeable with the direct API identifier, and an evaluation receipt is
+  not deployment or credential authority. No new key, profile, payment or budget
+  increase is authorized by this documentation change.
+- At most three open items, per-target ignored-kind suppression and a mute switch.
+  Claude owns the navigation/moving mascot UI, reduced-motion behavior, mobile
+  placement, staging acceptance and production promotion. Codex owns the later
+  backend contract. No frontend or runtime change is included here.
+
+Claude's [evaluation6434231644](https://github.com/inkseq/h3-studio/issues/679#issuecomment-6434231644)
+is implementation evidence, not a broader owner decision: it recommends fixed
+tips with cast/script-bound examples and an explicit language field after one
+English input received a Chinese example. Verify those constraints in the feature
+tests; the evaluation does not establish universal accuracy or production readiness.
+
+## CR-20261027-72 — single priority queue (owner 2026-10-27)
+
+Owner instruction in the Claude session: keep the big plan moving. After each slice is **done** (merged, deployed or adopted, and read-back posted), take the next highest item without waiting for a prompt. Stop only for a hard owner limit or a needed Tier2 review; while waiting, work the next independent item. This queue supersedes #580 section 2. Unfinished #580 items fall under P3.
+
+- **P0 (interrupts anything):** #655 daily backup with S3 proof; #193 production health (no idle paid nodes or stuck jobs).
+- **P1 auto capacity:**
+  - #686 adoption → staging serves the #659 jobs (Claude accepts and does the production TaoMate switch);
+  - #688/#689 lookahead rule with a one-machine floor and keep-alive = t_boot;
+  - #688 Modal worker host running the existing worker loop (reference #690; spend cap; max 2 on staging);
+  - admin settings API for the start rules (preview, confirm, reason, history, measured p90); Claude builds the panel;
+  - production auto-start ON.
+- **P1 paid launch #374, in order:**
+  - 006 livemode schema → LIVE prices for the four packs ($5/$20/$50/$100) → LIVE webhook;
+  - our own Inkseq receipts (never send Stripe `receipt_url`). Public identity is Inkseq only, ABN 68 442 632 833, not GST-registered, support@inkseq.com;
+  - Claude staging acceptance → owner real-card loop → Stripe mode and credit charging ON.
+- **P2 Inky #684/#685:** staging SSM hydration, evaluator ON in staging only, fixtures #687; Claude accepts. Production needs a separate owner OK.
+- **P3:** #592 zero-job window, dependabot, #580 leftovers.
+
+Owner approvals dated 2026-10-27, and only these:
+- Inky credentials from the existing central profiles into SSM SecureString on staging;
+- Modal as a capped worker host, staging first;
+- the #374 Stripe LIVE preparation steps above, each external write with owner OK. Checkout and charging stay OFF until the final gate.
+
+All other no-new-credential, no-budget-increase and no-paid-infrastructure limits remain. Codex's watcher must match the real `→` (U+2192) or `->`, and comments whose first line is a heading, bold or plain text.
+
+## CR-20261027-73 — overnight launch authority (owner 2026-10-27, before sleeping)
+
+Owner, in the Claude session: "Spend money to test the queue's automatic GPU rental. Stripe can be turned on. When everything is ready, switch it on directly, then test the automatic machine start. Get it working as soon as possible so users can start using it."
+
+- **Auto-capacity testing budget:** up to **USD 50 in total tonight** for staging tests of demand-start, lookahead, floor and the Modal worker host. This replaces the USD 20 per-task line for these tests only. max_price, idle stop and stop-after-test still apply. Reconcile unknown reservations against original billing; never replay.
+- **Stripe LIVE prep (#374 steps 1–3) is pre-approved:** 006 livemode schema, the four LIVE pack prices ($5/$20/$50/$100), and the LIVE webhook with its secret into `/sixnine/platform/stripe`. No further per-step owner OK is needed tonight. Tier2 Claude review still applies to code and schema.
+- **Turn on payments and credit charging in production** as soon as all of these hold:
+  1. steps 1–3 are adopted with read-back;
+  2. our own Inkseq receipts are live (no Stripe `receipt_url`; public identity Inkseq, ABN 68 442 632 833, no GST);
+  3. Claude accepts an end-to-end TEST-mode loop on staging: checkout → webhook → credits granted → a generation deducts credits → refund path;
+  4. production has zero running jobs at the switch.
+
+  The owner waives the pre-launch real-card loop and will do one real purchase as a post-launch check.
+- **Then production auto-start ON** after Claude's staging acceptance of the capacity rule. Verify on production with one real queued job: a machine (or Modal) starts by itself and the job completes.
+- Still forbidden: other new credentials, deleting user data, changing pack prices or welcome credits, and any budget beyond the USD 50 above. Rollback must stay one switch away: Stripe mode off and charging off.
+
+## CR-20261028-74 — reviewed legal policy and tax-exclusive credit packs
+
+Owner decision recorded on #374 in
+[6459750785](https://github.com/inkseq/h3-studio/issues/374#issuecomment-6459750785),
+confirmed in this Codex session on 2026-10-28. This supersedes CR-73 only where
+the tax behavior or legal policy below differs; the CR-73 combined USD 50
+capacity-testing ceiling and existing credentials remain unchanged.
+
+- Stripe Managed Payments remains the merchant of record. Credit pack prices
+  become tax-exclusive, with tax added at Checkout. Base USD amounts and total
+  credits stay starter 500 cents/500, creator 2000/2100, studio 5000/5500 and
+  pro 10000/11500. Welcome credits remain unchanged.
+- Credit purchases are non-refundable except where the law requires, including
+  the ACL. Remove the 14-day unused-credit refund promise. Promotional credits
+  are free, may have their own conditions/expiry, and are clawed back with a
+  refunded purchase. Existing legally required refund processing remains intact.
+- Terms, Privacy and Content use version `2026-10-28`, status `reviewed`.
+  Privacy names categories rather than vendors/regions; Terms omit the business
+  location and use support@inkseq.com as the contact. Claude owns design#314
+  and its frontend synchronization.
+- Codex changes the backend Price contract to `tax_behavior=exclusive` and
+  uses a zero consumer-tax deduction in the tax-exclusive admin margin estimate.
+  This money change receives one Claude Tier2 PR review and green CI.
+- New exclusive Prices replace the four original inclusive Prices through the
+  existing audited catalog revision/CAS path, staging TEST first. Archive the
+  superseded Prices after the replacement is published and read back. LIVE
+  replacement is authorized only after the backend PR is merged and green;
+  no credential or webhook recreation is authorized.
+- At zero staging work, after design#314 is synced and deployed with the matching
+  page version, adopt Stripe TEST mode and publish the reviewed content policy
+  through `/v1/admin/content-policy`. Read back both, then hand Claude the TEST
+  loop; the owner enters the test card.
+- Production Stripe mode, charging and production policy publication remain
+  at Claude's existing charging-ON gate. This decision does not enable them.
+
+## CR-20261028-75 — membership prices, resolution pricing and credit expiry
+
+Owner confirmation relayed on #739 in
+[6463314183](https://github.com/inkseq/h3-studio/issues/739#issuecomment-6463314183).
+This supersedes prior never-expire and pack-price directions only as stated
+below. Tier2 review, existing credentials, CR73's combined USD50 test ceiling,
+zero-work gates and Claude's production promotion/charging authority remain.
+
+- Starter membership: USD12/month,960 credits/month; Creator: USD29/month,
+  2,400 credits/month with priority queue. The main non-member pack is USD29
+  once for2,200 credits. Other non-member packs are USD6.50/65/130 (+30%);
+  members retain member pack prices. Use real amounts on the pricing page.
+- The founding offer applies during the first four weeks after memberships
+  launch: first three months USD6 for Starter or USD14.50 for Creator.
+- Standard480P remains4 credits/second; Sharp768P becomes8 credits/second.
+  Publish the resolution factor through the existing audited price revision
+  path. Never reprice an accepted quote or edit its original ledger history.
+- Purchased packs expire12 months after purchase; welcome/campaign credits
+  expire30 days after grant. Membership credits roll over at most one month.
+  Spend the earliest-expiring credits first, using the existing `expire`
+  ledger kind. No silent retroactive balance deletion is authorized.
+- Expiry and Sharp pricing must be adopted before the first LIVE purchase.
+  The initial charging gate remains packs-only; membership execution follows.
+  Claude updates Terms and bumps the version before production publication,
+  removes obsolete never-expire/no-subscription copy, and displays upcoming
+  expiry in the credits page. Do not infer a new reviewed policy version.
+- Record each slice separately with Refs #739 / #374. Code merge does not
+  publish prices, enable subscriptions, mutate balances or turn charging ON.
+
+### 2026-10-28 reference-video addendum to CR-20261028-75
+
+Owner direction relayed by Claude on #739 in
+[6467342075](https://github.com/inkseq/h3-studio/issues/739#issuecomment-6467342075)
+supersedes the earlier benchmark pricing options. Retain every native reference
+slot, warn before submit, and charge a proportional video surcharge.
+
+- Credits = ceil(output seconds × base rate × (1 + k × used reference-video
+  seconds)). Standard base4/k0.10; Sharp base8/k0.25. Use compiled frames/24
+  after native trimming/caps. Count reference, in-context and excerpt videos;
+  exclude denoise controls and flag that unmeasured path. Images/audio have no
+  surcharge. Never reprice accepted jobs or rewrite their ledger.
+- At most one active Sharp reference-video job per user; later such jobs wait.
+  Other users and lighter work remain eligible; preserve uncertain originals.
+- Claude owns the pre-submit credit/wait estimate, reference complexity hint,
+  audio-without-dialogue hint, and Inky dialogue/language copy. User copy omits
+  model/step internals. Native image-reference cap9 is verified in #752 and
+  differs from the17-image resource envelope that also counts8 guide slots.
+- Measure Sharp15-second reference-video work on staging before production.
+  CR73's combined USD50 test ceiling and original evidence remain binding;
+  this is no new rental, credential or production-write permission.
+- Backend pricing/concurrency is a separate Tier2 slice: one Claude PR review,
+  audited adoption and existing zero-work gates. Production charging/promotion
+  remain Claude's gates; matching prices/terms must ship together.
+
+## CR-20261028-76 — fair waiting and Modal-first bursts within a global ceiling
+
+Owner decisions relayed by Claude on #745 in
+[6465171149](https://github.com/inkseq/h3-studio/issues/745#issuecomment-6465171149)
+and [6465218341](https://github.com/inkseq/h3-studio/issues/745#issuecomment-6465218341).
+The service target replaces a fixed two-container product rule; it does not
+silently change an existing deployment or authorize unbounded capacity.
+
+- Interleave customers' first pending shots before their later shots, retaining
+  per-customer order and the original queue, claims, fences and receipts.
+- Prefer ready dedicated capacity. Use Modal for bursts whose first-completion
+  projection exceeds180s, targeting first video within300s. For sustained work
+  beyond roughly15minutes, bring up cheaper dedicated capacity in parallel.
+- Global committed GPU capacity is bounded by20USD/hour across Modal and
+  dedicated hosts, including starting, unknown and stopping obligations.
+  Missing prices or uncertain removal cannot create headroom. Retain lower
+  adopted limits until an audited reviewed adoption; report honest ETA when
+  the cap binds. No always-on warm floor now; revisit near50daily active users.
+- The proposed Modal120s startup and40s/125s generation timings remain
+  unmeasured assumptions pending #688 qualification. They must not establish
+  guaranteed latency or substitute for measured capacity evidence.
+- CR73's combined50USD staging test ceiling, existing credentials, idle stop,
+  production gates and Claude promotion authority remain unchanged. Tier2
+  review covers paid-start planning/integration; source merge alone enables
+  no rollout, provider, capacity increase or customer charge.
+
+## CR-20261028-77 — first-completion and subsequent-completion targets
+
+Owner decision relayed on #745 in
+[6466418139](https://github.com/inkseq/h3-studio/issues/745#issuecomment-6466418139).
+`first_video_max_seconds` defaults to300 and measures the longest customer wait
+from submission to their first completed video, not a mean. While shots remain
+queued, `next_video_interval_seconds` defaults to120 between completions.
+Both are admin-tunable through the existing audited settings path.
+
+Project individual customer completions from compatible slots and tier/reference
+durations. Parallel shots may help the cadence, subject to existing admission
+and reference-heavy concurrency guards. Modal absorbs bursts, dedicated hosts
+serve sustained demand, always within the global hourly and original task caps.
+Measure actual first-video/interval p50 and p95 separately for #725; a prediction
+or CPU simulation is not an observed service-level receipt.
+
+## 2026-10-29 — Early-stage operating mode; AI layer and Modal to Claude
+Owner: Codex is too conservative for a product with almost no users. Until 100 paying users: staging changes need no proofs/receipts/approvals; production needs one zero-job check and one read-back; approvals only for spend > USD 50, user-data deletion, price changes or charging users; a Claude-assigned task within those limits is owner-authorized; prove the smallest end-to-end first; updates ≤ 5 lines; deploy-helper/server-config changes count only when live on both hosts. Claude owns the AI layer (backend included) and Modal (#688). See AGENTS.md.
+
+### 2026-10-29 — Forward-only backup loss policy (#655)
+Owner in this session: forget the Oct28 display derivatives; no repair, census,
+mapping or retroactive investigation. Regenerable derivatives are expected
+missing coverage; only missing originals (uploads/generated videos) raise
+business_backup_loss. Use a known one-line cause fix if available, otherwise
+regenerate only on demand. Install the monitor at zero production jobs, read
+back once, report at most five issue lines. No further approval is required
+under the early-stage mode (#778); preserve receipts and original media.
+
+### 2026-10-29 — Checkout email and LIVE product expiry copy (#374)
+Owner authorizes two small money-path fixes with one Claude Tier2 PR review,
+then production: prefill Checkout from the signed-in account's verified email,
+using Stripe's supported customer_email parameter; never invent or trust a
+browser-supplied email. Update only the descriptions of the four existing LIVE
+products to their purchased credit amounts and "Valid for 12 months."
+No price, Price ID, product creation, grant, payment or expiry-policy change.
+Production needs one no-running-job check and one read-back; report <=5 lines
+on #374 when both fixes are live. No other work is in this slice.
+
+### 2026-10-30 — v8 on RTX PRO 6000 and sage2 on cc 12.x (#794, #839)
+Owner approved a v8 acceptance on RTX PRO 6000; all six outputs (sdpa and sage2)
+passed the frame check. PRO 6000 is admitted for v8 through the session's device
+check (cc 12.0, Server/Workstation Edition, own VRAM window; Max-Q excluded until
+measured) and v8 gpu_models, not a new hardware_admission binding: under the
+early-stage mode the immutable-binding rule is a cautious-era guard, and a v9
+profile, rebinding, default switch and Modal change are not worth one measured
+sm120 GPU. Attention resolves per device: sage2 on cc 12.x, sdpa elsewhere;
+Modal stays L40S/sdpa.

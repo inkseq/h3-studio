@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-import hashlib
 import json
-from pathlib import Path
 import re
 import time
 from urllib.parse import quote
@@ -28,10 +26,10 @@ from starlette.concurrency import run_in_threadpool
 from .assets import AssetService, AssetNotFound
 from .media_renditions import public_renditions, RENDITIONS
 from .upload_route import AssetUploadRoute
-from .auth import Auth, AuthenticationError, SessionUnavailable
+from .auth import Auth, SessionUnavailable
 from .identity import require_admin
 from .capabilities import VERSION, capabilities, version_matches
-from .media import MediaError, MediaBusy
+from .media import MediaBusy
 from .repository import Repository, NotFound, Conflict, BudgetExceeded, artifacts, jobs
 from .settings import Settings
 from .storage import (
@@ -68,9 +66,9 @@ from .generation_services import GenerationAccess, GenerationPlanning, Generatio
 from .operator_capacity import (
     OperatorRegistry,
 )  # Register additive tables before create_schema.
-from . import capacity_market  # Read-only market cache; never authorizes capacity.
+from . import capacity_market  # Read-only market cache; never authorizes capacity.  # noqa: F401 -- register additive tables before schema creation
 from . import (
-    dstack_workspace,
+    dstack_workspace,  # noqa: F401 -- register presentation tables before schema creation
 )  # Account-owned presentation metadata before schema creation.
 
 # Session checks wait up to 2 s for a free slot before answering 429.
@@ -203,7 +201,7 @@ def create_app(
         generation_access.plan,
         generation_access.job,
     )
-    project_response, public_execution, public_job = (
+    _project_response, public_execution, public_job = (
         generation_read.project,
         generation_read.execution,
         generation_read.public_job,
@@ -1401,6 +1399,10 @@ def create_app(
 
     app.state.quick_chat_recovery = QuickChatRecovery(app.state.quick_chat)
     register_agent_connect_routes(app)
+    from . import enhance_routes, worker_boot
+
+    worker_boot.register_routes(app)
+    enhance_routes.register_routes(app)
     from .batches import register_routes
 
     register_routes(app)
@@ -1462,20 +1464,9 @@ def create_app(
     from .generation_stats import register_routes as register_generation_stats
 
     register_generation_stats(app)
-    from .review_loop import register_routes as register_review_loop
+    from .review_routes import register_routes as register_review_routes
 
-    register_review_loop(app)
-
-    from .take_reviews import register_routes as register_take_reviews
-
-    register_take_reviews(app)
-    from .take_redo import register_routes as register_take_redo
-
-    register_take_redo(app)
-
-    from .product_feedback import register_routes as register_product_feedback
-
-    register_product_feedback(app)
+    register_review_routes(app)
     from .operator_host_routes import register_routes as register_operator_host_routes
 
     register_operator_host_routes(app)
@@ -1526,8 +1517,8 @@ def create_app(
     from .library import register_routes as register_library_routes
 
     register_library_routes(app)
-    from .quality_http import install as install_quality_views
+    from .http_boundaries import install as install_http_boundaries
 
-    install_quality_views(app)
+    install_http_boundaries(app)
     app.add_middleware(GrantPreviewPrivacyMiddleware)
     return app

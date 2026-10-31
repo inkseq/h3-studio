@@ -229,8 +229,13 @@ class QualityViewTests(unittest.TestCase):
             with self.subTest(principal=principal):
                 self.assertEqual(views.envelope(card, principal), card)
                 self.assertEqual(views.revision(summary, principal), summary)
-                self.assertEqual(views.selection(h3, principal), h3)
-                self.assertEqual(views.entity(entity, principal), entity)
+                # Tuning such as steps is ours; creators see their own choices.
+                public_h3 = {"controls": {"resolution": "720P"}}
+                self.assertEqual(views.selection(h3, principal), public_h3)
+                self.assertEqual(
+                    views.entity(entity, principal),
+                    {**entity, "data": {"h3": public_h3}},
+                )
                 self.assertEqual(views.selection(cpu, principal), cpu)
                 unknown = views.selection(
                     {"recipe_id": "retired-video-recipe"}, principal
@@ -648,7 +653,13 @@ class QualityViewTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     configure["deployment_profile_id"]["enum"],
-                    ["quality:fast", "quality:standard", "quality:refine", None],
+                    [
+                        "quality:fast",
+                        "quality:standard",
+                        "quality:natural",
+                        "quality:refine",
+                        None,
+                    ],
                 )
                 defaults = shown["operation_schemas"]["storyboard.defaults"][
                     "properties"
@@ -779,16 +790,62 @@ class QualityViewTests(unittest.TestCase):
         original = copy.deepcopy(preflight)
         shown = views.envelope(preflight, USER)
         plan, job = shown["items"][0]["plan"], shown["items"][0]["job"]
-        self.assertEqual(plan["effective_request"]["controls"], published)
+        self.assertEqual(
+            plan["effective_request"]["controls"],
+            {k: v for k, v in published.items() if k in views.PUBLIC_CONTROLS},
+        )
+        self.assertNotIn("steps", plan["effective_request"]["controls"])
         self.assertEqual(plan["estimate"], original["items"][0]["plan"]["estimate"])
         self.assertEqual(plan["request_hash"], "immutable")
         self.assertEqual(plan["execution"]["remaining_window_s"], 99)
-        self.assertEqual(job["progress"], original["items"][0]["job"]["progress"])
+        self.assertEqual(job["progress"], {"stage": "sampling", "fraction": 0.33})
         self.assertEqual(job["remaining_wait_seconds"], 30)
         self.assertEqual(shown["items"][0]["shot_id"], "shot")
         self.assertNotIn(MODEL, json.dumps(shown))
         self.assertNotIn(PROFILE, json.dumps(shown))
         self.assertEqual(preflight, original)
+
+    def test_flat_tuning_and_failure_controls_stay_internal(self):
+        # Found in a qa-user's /v1/jobs (#898): flat requests carried steps and
+        # sampler shifts, failure diagnostics their controls.
+        raw = {
+            "jobs": [
+                {
+                    "id": "job",
+                    "status": "failed",
+                    "effective_request": {
+                        "prompt": "Prompt",
+                        "duration": 5,
+                        "seed": 7,
+                        "steps": 5,
+                        "sampler_name": "euler",
+                        "scheduler": "auto",
+                        "shift_video": 12,
+                        "shift_audio": 3,
+                        "step_skipping": "none",
+                    },
+                    "result": {
+                        "actual_cost_microusd": 517054,
+                        "billing_status": "settled",
+                        "failure_diagnostic": {
+                            "reason_code": "upstream_generation_failed",
+                            "controls": {"steps": 5, "seed": 7, "shift_video": 12},
+                        },
+                    },
+                }
+            ]
+        }
+        shown = views.envelope(raw, USER)["jobs"][0]
+        self.assertEqual(
+            shown["effective_request"], {"prompt": "Prompt", "duration": 5, "seed": 7}
+        )
+        # The job's own cost stays visible (USD admission bills it).
+        self.assertEqual(shown["result"]["actual_cost_microusd"], 517054)
+        self.assertEqual(shown["result"]["failure_diagnostic"]["controls"], {"seed": 7})
+        self.assertEqual(views.envelope(raw, ADMIN), raw)
+        self.assertNotIn(
+            "max_steps", views._envelope({"max_steps": 100, "max_pixels": 1})
+        )
 
     def test_nested_error_and_entity_envelopes_keep_user_text_and_hide_managed_details(
         self,

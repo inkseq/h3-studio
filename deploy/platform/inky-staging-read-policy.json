@@ -1,0 +1,19 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadOnlyExistingStagingInky684",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameters",
+      "Resource": [
+        "arn:aws:ssm:ap-southeast-1:829135631045:parameter/sixnine/staging/inky/typesafe",
+        "arn:aws:ssm:ap-southeast-1:829135631045:parameter/sixnine/staging/inky/openrouter"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": "ap-southeast-1"
+        }
+      }
+    }
+  ]
+}

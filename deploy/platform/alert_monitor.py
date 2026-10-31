@@ -34,7 +34,9 @@ BACKUP_STATE = Path('/var/lib/inkseq-business-backup')
 BACKUP_DEADLINE_MINUTE = 18 * 60 + 30
 THRESHOLD_FIELDS = frozenset({'gpu_max_seconds', 'stuck_seconds', 'wake_count', 'cpu_percent',
     'memory_percent', 'host_sustain_seconds', 'health_down_seconds', 'http_5xx_min',
-    'http_5xx_ratio', 'max_sample_gap_seconds', 'terminal_reservation_seconds'})
+    'http_5xx_ratio', 'max_sample_gap_seconds', 'terminal_reservation_seconds',
+    'payment_fulfillment_seconds', 'payment_processing_seconds', 'payment_window_seconds',
+    'payment_failure_count'})
 HTTP_PROBE = """import json,urllib.request
 result={'health_ok':False,'http_requests':None,'http_5xx':None}
 try:
@@ -46,6 +48,17 @@ try:
   c=json.loads(r.read(16384))
  if set(c)=={'epoch','window_seconds','requests','server_errors'} and c['window_seconds']==300 and type(c['requests']) is int and type(c['server_errors']) is int and 0<=c['server_errors']<=c['requests']:
   result.update(http_requests=c['requests'],http_5xx=c['server_errors'])
+except Exception: pass
+print(json.dumps(result))
+"""
+PAYMENT_HTTP_PROBE = """import json,urllib.request,sys
+result={'payment_signature_failures':None,'payment_receipt_failures':None}
+try:
+ w=int(sys.argv[1])
+ with urllib.request.urlopen('http://127.0.0.1:8845/internal/payment-alert-counters?window_seconds='+str(w),timeout=3) as r:
+  c=json.loads(r.read(16384))
+ if set(c)=={'epoch','window_seconds','signature_failures','processing_failures'} and c['window_seconds']==w and all(type(c[k]) is int and c[k]>=0 for k in ('signature_failures','processing_failures')):
+  result.update(payment_signature_failures=c['signature_failures'],payment_receipt_failures=c['processing_failures'])
 except Exception: pass
 print(json.dumps(result))
 """
@@ -67,7 +80,7 @@ def protected_directory(path):
                 'alert_directory_unprotected')
 
 
-def read_protected_bytes(path, *, missing=False, private=True):
+def read_protected_bytes(path, *, missing=False, private=True, max_bytes=MAX_BYTES):
     path = Path(path)
     protected_directory(path.parent)
     try:
@@ -80,15 +93,30 @@ def read_protected_bytes(path, *, missing=False, private=True):
         info = os.fstat(stream.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and info.st_nlink == 1
                 and not info.st_mode & (0o077 if private else 0o022)
-                and info.st_size <= MAX_BYTES, 'alert_file_unprotected')
-        raw = stream.read(MAX_BYTES + 1)
-        require(len(raw) <= MAX_BYTES, 'alert_file_too_large')
+                and info.st_size <= max_bytes, 'alert_file_unprotected')
+        raw = stream.read(max_bytes + 1)
+        require(len(raw) <= max_bytes, 'alert_file_too_large')
     return raw
 
 
 def read_protected(path, *, missing=False):
     raw = read_protected_bytes(path, missing=missing)
     return None if raw is None else json.loads(raw)
+
+
+def read_transport_manifest(operation):
+    # Transport owns this read-only copy (UID10001), behind a root-only parent.
+    # The caller binds these bytes to the original root receipt before use.
+    protected_directory(operation)
+    fd = os.open(operation / 'snapshot' / 'manifest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, 'rb') as stream:
+        info = os.fstat(stream.fileno())
+        require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+            and info.st_uid in {0, 10001} and not info.st_mode & 0o022
+            and info.st_size <= 16 * MAX_BYTES, 'alert_manifest_unprotected')
+        raw = stream.read(16 * MAX_BYTES + 1)
+        require(len(raw) <= 16 * MAX_BYTES, 'alert_manifest_too_large')
+        return raw
 
 
 def atomic(path, value):
@@ -142,6 +170,8 @@ def config(value, target):
         and all(thresholds.get(key, 1) <= limit for key, limit in
                 (('cpu_percent', 100), ('memory_percent', 100), ('http_5xx_ratio', 1))),
         'alert_thresholds_invalid')
+    window = thresholds.get('payment_window_seconds', 300)
+    require(type(window) is int and 60 <= window <= 3600, 'alert_thresholds_invalid')
     return value
 
 
@@ -245,8 +275,38 @@ def oneshot_failed(unit, *, runner=subprocess.run):
     return None
 
 
-def backup_copy_missing(*, now, root=BACKUP_STATE):
-    """Check at most two daily receipts, not media or S3. None means unobservable.
+def backup_coverage_loss(completed, receipt):
+    """Classify only the hash-bound coverage; legacy unclassified misses alert."""
+    version = completed['version']
+    if version == 1:
+        require('coverage' not in completed and 'coverage' not in receipt, 'alert_backup_coverage_invalid')
+        return False  # v1 only allowed complete media copies.
+    coverage = completed.get('coverage')
+    fields = {'status', 'referenced_objects', 'available_objects', 'missing_objects',
+        'referenced_bytes', 'available_bytes', 'missing_bytes'}
+    if version == 3:
+        fields |= {'expected_missing_objects', 'expected_missing_bytes',
+            'unexpected_missing_objects', 'unexpected_missing_bytes', 'loss_alert_required'}
+    require(type(coverage) is dict and set(coverage) == fields and encode(coverage) == encode(receipt.get('coverage'))
+        and all(type(coverage[key]) is int and coverage[key] >= 0
+            for key in fields - {'status', 'loss_alert_required'}), 'alert_backup_coverage_invalid')
+    require(coverage['status'] == ('incomplete' if coverage['missing_objects'] else 'complete')
+        and (coverage['missing_objects'] == 0) == (coverage['missing_bytes'] == 0)
+        and all(coverage['referenced_' + suffix] == coverage['available_' + suffix]
+            + coverage['missing_' + suffix] for suffix in ('objects', 'bytes')), 'alert_backup_coverage_invalid')
+    if version == 2:
+        return coverage['missing_objects'] > 0
+    require(type(coverage['loss_alert_required']) is bool
+        and coverage['loss_alert_required'] == (coverage['unexpected_missing_objects'] > 0)
+        and all(coverage['missing_' + suffix] == coverage['expected_missing_' + suffix]
+            + coverage['unexpected_missing_' + suffix] for suffix in ('objects', 'bytes'))
+        and all((coverage[kind + '_objects'] == 0) == (coverage[kind + '_bytes'] == 0)
+            for kind in ('expected_missing', 'unexpected_missing')), 'alert_backup_coverage_invalid')
+    return coverage['loss_alert_required']
+
+
+def backup_copy_observation(*, now, root=BACKUP_STATE):
+    """Check at most two receipts, not media/S3; None fields mean unobservable.
 
     Root-pinned completion plus receipt hash is copy evidence, never restore proof.
     Before today's deadline, yesterday is still the most recent due copy.
@@ -281,20 +341,39 @@ def backup_copy_missing(*, now, root=BACKUP_STATE):
                 and 1 <= len(value['completion_version_id']) <= 1024
                 and receipt.get('completion_version_id') == value['completion_version_id'],
                 'alert_backup_receipt_invalid')
-            return False
-        return True
-    except (OSError, ValueError, TypeError, OverflowError):
-        return None
+            loss = backup_coverage_loss(value, receipt)
+            if value['version'] in (2, 3):
+                # Apply today's policy to the hash-bound manifest, not live media.
+                try:
+                    from backup_loss_policy import original_loss
+                except ImportError:
+                    from studio_platform.backup_loss_policy import original_loss
+                manifest_raw = read_transport_manifest(operation)
+                require(hashlib.sha256(manifest_raw).hexdigest() == receipt.get('snapshot_manifest_sha256'),
+                    'alert_backup_manifest_changed')
+                manifest = json.loads(manifest_raw)
+                require(encode(manifest.get('coverage')) == encode(value['coverage']),
+                    'alert_backup_manifest_coverage_invalid')
+                loss = original_loss(manifest)
+            return {'missing': False, 'loss': loss}
+        return {'missing': True, 'loss': None}
+    except (OSError, ValueError, TypeError, OverflowError, KeyError):
+        return {'missing': None, 'loss': None}
+
+
+def backup_copy_missing(*, now, root=BACKUP_STATE):
+    return backup_copy_observation(now=now, root=root)['missing']
 
 
 def backup_observation(*, now, runner=subprocess.run):
     failed = oneshot_failed('inkseq-business-backup.service', runner=runner)
-    missing = backup_copy_missing(now=now)
+    observed = backup_copy_observation(now=now)
+    missing = observed['missing']
     return {'business_backup_failed': failed, 'business_backup_missing': missing,
-        'business_backup_unobservable': missing is None}
+        'business_backup_unobservable': missing is None, 'business_backup_loss': observed['loss']}
 
 
-def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
+def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_window_seconds=300):
     sample = proc_sample(proc=proc)
     cpu = None
     if previous_cpu is not None:
@@ -310,6 +389,7 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
     except (OSError, ValueError, AttributeError):
         pass  # An unknown disk observation never resolves an active alarm.
     snapshot = None
+    app = None
     try:
         found = containers(runner=runner)
         host['processes_ok'] = all(value is not None and value['ok'] for value in found.values())
@@ -324,10 +404,37 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc')):
                 host.update(probe)
             except (OSError, subprocess.SubprocessError, ValueError):
                 host['health_ok'] = False
-            snapshot = json.loads(docker(['exec', app['id'], 'python', '-B', '-m', 'studio_platform.alert_snapshot'], runner=runner))
+            snapshot = json.loads(docker(['exec', app['id'], 'python', '-B', '-m',
+                'studio_platform.alert_snapshot'], runner=runner))
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         # Unknown ledger state never fabricates a healthy observation or recovery.
         snapshot = None
+    if isinstance(snapshot, dict):
+        # Optional payment calls have independent subprocess deadlines. A slow
+        # payment DB/query or unavailable module cannot discard the GPU ledger.
+        snapshot['payments'] = {'complete': False}
+        try:
+            payment = json.loads(docker(['exec', app['id'], 'python', '-B', '-m',
+                'studio_platform.payment_alerts', '--window-seconds',
+                str(payment_window_seconds)], runner=runner))
+            require(type(payment) is dict
+                and set(payment) == {'complete', 'fulfillment', 'processing', 'activity', 'window_seconds'}
+                and type(payment['complete']) is bool
+                and payment['window_seconds'] == payment_window_seconds,
+                'payment_snapshot_invalid')
+            snapshot['payments'] = payment
+        except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+            pass
+    if app is not None:
+        try:
+            payment = json.loads(docker(['exec', app['id'], 'python', '-B', '-c',
+                PAYMENT_HTTP_PROBE, str(payment_window_seconds)], runner=runner))
+            require(type(payment) is dict and set(payment) == {'payment_signature_failures', 'payment_receipt_failures'}
+                and all(value is None or type(value) is int and value >= 0 for value in payment.values()),
+                'payment_counter_probe_invalid')
+            host.update(payment)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass  # Unknown payment counters must not change legacy host observations.
     return snapshot, host, {'total': sample['total'], 'idle': sample['idle']}
 
 
@@ -337,7 +444,10 @@ def notification(value, environment):
     # The core evaluator owns this finite code list. Keep a second boundary at SNS.
     require(value['code'] in {'gpu_runtime_exceeded', 'gpu_idle_stop_overdue', 'test_spend_80', 'test_spend_100',
             'job_stuck', 'job_repeated_wake', 'host_cpu_sustained', 'host_memory_sustained', 'host_disk_80', 'host_disk_90',
-            'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed',
+            'host_process_unhealthy', 'retention_service_failed', 'business_backup_failed', 'business_backup_loss',
+            'payment_fulfillment_stalled', 'payment_processing_stalled', 'payment_failed',
+            'payment_refunded', 'payment_disputed', 'payment_monitor_unavailable',
+            'payment_webhook_signature_failed', 'payment_webhook_receipt_failed',
             'business_backup_missing', 'business_backup_unobservable', 'health_down', 'http_5xx_rate', 'generation_failure', 'terminal_reservation_stale'}
             and value['environment'] == environment and value['transition'] in {'firing', 'resolved'}
             and (value['resource_id'] is None or type(value['resource_id']) is str
@@ -445,7 +555,8 @@ def main():
             if state is None:
                 state = initial_state(settings['environment'])
             validate_state(state, settings['environment'])
-            snapshot, host, cpu = observe(state['cpu'])
+            snapshot, host, cpu = observe(state['cpu'],
+                payment_window_seconds=settings['thresholds'].get('payment_window_seconds', 300))
             sns, cloudwatch = clients()
             tick(settings, state, snapshot, host, cpu, evaluator=evaluate, sns=sns, cloudwatch=cloudwatch,
                  save=lambda value: atomic(STATE, value), now=time.time())

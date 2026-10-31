@@ -1839,7 +1839,7 @@ class Repository:
             or lifecycle.get("version") != 2
             or request.get("lifecycle_version") != 2
             or binding.get("lifecycle_version") != 2
-            or intent["provider"] not in {"vast", "runpod"}
+            or intent["provider"] not in {"vast", "runpod", "lium", "cloudrift"}
             or intent["hard_deadline"] is not None
             or payload.get("hard_deadline") is not None
             or request.get("hard_deadline") is not None
@@ -3292,7 +3292,7 @@ class Repository:
         if type(continuing) is not bool or (
             continuing
             and (
-                provider not in {"vast", "runpod"}
+                provider not in {"vast", "runpod", "lium", "cloudrift"}
                 or hard_deadline is not None
                 or capacity_usage is None
             )
@@ -3307,28 +3307,19 @@ class Repository:
             raise Conflict("instance_deadline_expired")
         admitted_capacity = None
         if capacity_policy_snapshot is not None or capacity_provenance is not None:
-            from .capacity_settings import validate_snapshot
+            from .capacity_settings import reservation_provenance
 
-            admitted_capacity = validate_snapshot(capacity_policy_snapshot)
-            if (
-                not isinstance(capacity_provenance, dict)
-                or capacity_provenance
-                != {
-                    "capacity_backend": "dstack-v1",
-                    "lifecycle_version": 2,
-                    "tenant_id": scope.tenant_id,
-                    "owner_id": scope.owner_id,
-                    "project_id": scope.project_id,
-                    "pool": pool,
-                    "provider": provider,
-                }
-                or type(capacity_provenance.get("lifecycle_version")) is not int
-                or not continuing
-                or provider not in {"vast", "runpod"}
-                or physical_gpus != 1
-                or slots != 1
-            ):
-                raise ValueError("capacity_admission_provenance_invalid")
+            admitted_capacity = reservation_provenance(
+                capacity_policy_snapshot,
+                capacity_provenance,
+                scope,
+                pool,
+                provider,
+                continuing=continuing,
+                gpus=physical_gpus,
+                slots=slots,
+                usage=capacity_usage,
+            )
         request = dict(
             physical_gpus=physical_gpus,
             slots=slots,

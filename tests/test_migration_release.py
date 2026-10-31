@@ -127,7 +127,7 @@ class MigrationArtifacts(unittest.TestCase):
             )
         }
         checked["installed"] = {
-            "patched_sources": 6,
+            "patched_sources": 8,
             "dstack_version": "0.22.5",
             "upstream_commit": provenance["dstack_upstream_commit"],
             "helper_sha256": checked["helper_sha256"],
@@ -326,6 +326,10 @@ class MigrationArtifacts(unittest.TestCase):
                 **maintenance.DSTACK_SHARED_SOURCE_HASHES,
                 "dstack/_internal/server/services/backends/__init__.py": backend_hash,
             }
+            installed["patched_sources"] = 6
+            installed["sources"] = {
+                name: "e" * 64 for name in installed["original_sources"]
+            }
             path.write_text(json.dumps(valid))
             self.assertEqual(
                 maintenance.dstack_provenance(self.artifact, self.value)["installed"],
@@ -359,6 +363,55 @@ class MigrationArtifacts(unittest.TestCase):
                 ):
                     maintenance.dstack_provenance(self.artifact, self.value)
         path.write_text(json.dumps(original))
+
+    def test_runpod_derivative_accepts_only_complete_eight_source_225_tuple(self):
+        path = self.artifact / "dstack-native-provenance.json"
+        valid = json.loads(path.read_text())
+        self.assertEqual(
+            builder.DSTACK_RUNPOD_SOURCE_HASHES, maintenance.DSTACK_RUNPOD_SOURCE_HASHES
+        )
+        self.assertEqual(valid["installed"]["patched_sources"], 8)
+        self.assertEqual(
+            maintenance.dstack_provenance(self.artifact, self.value)["installed"],
+            valid["installed"],
+        )
+        for mutation in (
+            "old_stock",
+            "missing",
+            "extra",
+            "wrong_hash",
+            "count",
+            "patched_missing",
+        ):
+            value = copy.deepcopy(valid)
+            installed = value["installed"]
+            name = next(iter(maintenance.DSTACK_RUNPOD_SOURCE_HASHES))
+            if mutation == "old_stock":
+                commit, image, backend = maintenance.DSTACK_STOCK["0.22.3"]
+                value["base_image"] = image
+                installed.update(dstack_version="0.22.3", upstream_commit=commit)
+                installed["original_sources"][
+                    "dstack/_internal/server/services/backends/__init__.py"
+                ] = backend
+            elif mutation == "missing":
+                installed["original_sources"].pop(name)
+            elif mutation == "extra":
+                installed["original_sources"]["dstack/unreviewed.py"] = "a" * 64
+            elif mutation == "wrong_hash":
+                installed["original_sources"][name] = "a" * 64
+            elif mutation == "count":
+                installed["patched_sources"] = 7
+            else:
+                installed["sources"].pop(name)
+            path.write_text(json.dumps(value))
+            with (
+                self.subTest(mutation=mutation),
+                self.assertRaisesRegex(
+                    release.ReleaseError, "migration_dstack_provenance_invalid"
+                ),
+            ):
+                maintenance.dstack_provenance(self.artifact, self.value)
+        path.write_text(json.dumps(valid))
 
     def test_legacy_artifact_has_no_derivative_fallback_or_extra_file_acceptance(self):
         legacy = dict(self.value)
@@ -826,6 +879,15 @@ class MigrationArtifacts(unittest.TestCase):
         self,
     ):
         expected_commits = {
+            '6606164343b612d3c99acd6f688ad54dad0d49af',
+            'e63e64f093bc2e343b8a4128e62de9cf68ae964f',
+            'a47462f08257af8682a4b72e194028efa1597054',
+            '6b2dae1d1ca7c9298c05e3e32bfb0799af953b85',
+            '7beb62ac0799c96b965f52dea941a720be79b6c5',
+            '55cb0ff2c979ffec56b968eda0f99b23250f3ead',
+            'fd2ae3af0922395639f26a4718b1b5f33994b652',
+            'b78510e6991f5acccb0996981e8016be5434693f',
+            'ce49754dbcacc162bcd83a46cd3cd29028b549f4',
             'feeb1c1e8c34921546908f7a9f6a9dd67d5c0f4d',
             '9f8736ba036108dd078c983c3301fc8c3996a41e',
             '1c659727d5490cba1480979f95f3be7d0227815d',
@@ -876,6 +938,8 @@ class MigrationArtifacts(unittest.TestCase):
             'd67a76b70777874e74623f480d7ffbea9e3d3b88',
             'c08ea6d4595763195a3c9e15d428f93cf90e16c0',
             'f6c1972b904d6e0a4b9acccc405efb0d706c239e',
+            '0c1dfeceb015f34f2593783953ef00f5aea00468',
+            'ff30d5aa9ceafc8693cf8a64fae92a8f8e35624a',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
@@ -904,6 +968,17 @@ class MigrationArtifacts(unittest.TestCase):
             '20ab3dfd308800daad10a3ce8ac060da342b164a',
             '5c01b159781729b6c34379b4f4383b88364426fb',
             '32d1ec4f7e40adca65b2563b5ea11810dd223039',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '794921cab61dd3455aeb6cddf1ab1ec636d6b1251e5568946f934a275ce6dcf5',
+                    'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b',
+                ),
+            )
+        for commit in (
+            '32d1ec4f7e40adca65b2563b5ea11810dd223039',
+            '5c01b159781729b6c34379b4f4383b88364426fb',
         ):
             self.assertEqual(
                 maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],

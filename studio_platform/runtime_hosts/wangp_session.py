@@ -25,7 +25,6 @@ from ..inference.wangp_contract import (
     EngineManifest,
     RuntimeObservation,
     RuntimeOutput,
-    UPSTREAM_REVISION,
 )
 
 REQUIRED_CONFIG = {
@@ -145,7 +144,7 @@ The returned evidence contains no runtime environment or configuration values.
         from .wangp_environment import verify_bound_environment
 
         environment_evidence = verify_bound_environment(root, manifest.document)
-        revision = UPSTREAM_REVISION
+        revision = manifest.document["source_revision"]
     else:
         # Historical candidate manifests retain their exact verification path;
         # new cold bootstrap requires the fully bound package above.
@@ -155,7 +154,7 @@ The returned evidence contains no runtime environment or configuration values.
             capture_output=True,
             text=True,
         ).stdout.strip()
-        if revision != UPSTREAM_REVISION:
+        if revision != manifest.document["source_revision"]:
             raise ValueError("wangp_runtime_source_mismatch")
         # Pilot image modified installation metadata only; executable source and
         # the exact requirements bytes remain pinned for the new native profiles.
@@ -283,6 +282,19 @@ def _upstream_worker_alive():
     )
 
 
+def device_attention(torch, profile):
+    """The profile's attention on cc 12.x (5090, PRO 6000); None keeps the compiled sdpa.
+
+    sage2 is measured clean on sm120 for base generation and 2K enhance; on sm89/sm90
+    (L40S, H100, H200) its int8 QK corrupts long 2K sequences, and the Modal L40S
+    acceptance ran sdpa, so every other device stays on sdpa (#794, 2026-10-30).
+    """
+    mode = profile['runtime'].get('config', {}).get('attention_mode', 'sdpa')
+    if mode == 'sdpa' or torch.cuda.get_device_capability(0)[0] != 12:
+        return None
+    return mode
+
+
 def _lock_profile_device(torch, profile):
     """One explicit visible device and one owned process per physical GPU."""
     import fcntl
@@ -302,16 +314,20 @@ def _lock_profile_device(torch, profile):
             hardware['maximum_total_vram_bytes'],
         )
     else:
-        accepted = (
-            re.fullmatch(r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name)
-            if pruned
-            else re.fullmatch(
-                r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition',
-                name,
-            )
+        pro6000 = re.fullmatch(
+            r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition',
+            name,
         )
+        rtx5090 = pruned and re.fullmatch(
+            r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name
+        )
+        # A pruned profile runs on PRO 6000 only when it lists one in gpu_models
+        # (v8, measured clean on 2026-10-30, #794); older pruned profiles stay 5090-only.
+        if pruned and not any('PRO 6000' in m for m in profile.get('gpu_models', ())):
+            pro6000 = None
+        accepted = rtx5090 or pro6000
         capability = (12, 0)
-        low, high = (30, 34) if pruned else (90, 100)
+        low, high = (30, 34) if rtx5090 else (90, 100)
         minimum, maximum = low * 1024**3, high * 1024**3
     if (
         not accepted
@@ -396,6 +412,21 @@ def _profile_ram_limit(group):
     if not value.isdecimal() or int(value) <= 0:
         raise ValueError('wangp_profile_cgroup_invalid')
     return int(value)
+
+
+def _gvisor_sandbox(proc_root, group):
+    """A gVisor kernel whose v1 memory group lacks hierarchy/stat files (Modal)."""
+    try:
+        kernel = (proc_root / 'version').read_text()
+    except (OSError, UnicodeError):
+        return False
+    return (
+        'gvisor' in kernel
+        and not (group / 'memory.use_hierarchy').exists()
+        and not (group / 'memory.stat').exists()
+        and (group / 'memory.limit_in_bytes').is_file()
+        and (group / 'memory.usage_in_bytes').is_file()
+    )
 
 
 def _profile_v1_ram(proc_root, group_root):
@@ -486,6 +517,12 @@ def _profile_v1_ram(proc_root, group_root):
                 raise ValueError('wangp_profile_cgroup_invalid')
         capacity = None
         available = None
+        if _gvisor_sandbox(proc_root, group):
+            # Modal's gVisor sandbox exposes only limit/usage for its own group;
+            # that limit IS the reserved sandbox memory. No cache is credited.
+            limit = number(read(group / 'memory.limit_in_bytes').strip(), positive=True)
+            used = number(read(group / 'memory.usage_in_bytes').strip())
+            return limit, max(0, limit - used)
         while True:
             if group.is_symlink() or not group.is_dir():
                 raise ValueError('wangp_profile_cgroup_invalid')
@@ -650,19 +687,25 @@ def _profile_memory_admission(torch, profile):
             'free_vram_bytes': free,
         }
         ram_insufficient = capacity < minimum
+        ram_reason = 'ram_total'
         if metric == 'effective-total-and-available-v1':
             headroom = runtime['minimum_available_ram_bytes']
             if type(headroom) is not int or headroom <= 0:
                 raise ValueError('wangp_profile_available_ram_unconfirmed')
             observation['minimum_available_ram_bytes'] = headroom
-            ram_insufficient = ram_insufficient or available < headroom
+            if not ram_insufficient:
+                ram_insufficient = available < headroom
+                ram_reason = 'ram_available'
         print(json.dumps(observation), flush=True)
     elif metric == 'available-headroom-v1':
         ram_insufficient = available < runtime['minimum_available_ram_bytes']
+        ram_reason = 'ram_available'
     else:
         raise ValueError('wangp_profile_memory_admission_metric_invalid')
-    if ram_insufficient or free < profile['minimum_free_vram_bytes']:
-        raise ValueError('wangp_profile_memory_headroom_insufficient')
+    if ram_insufficient:
+        raise ValueError('wangp_profile_memory_headroom_insufficient_' + ram_reason)
+    if free < profile['minimum_free_vram_bytes']:
+        raise ValueError('wangp_profile_memory_headroom_insufficient_vram_free')
 
 
 def _audit_profile_runtime(session, manifest, requested, *, loaded=False):
@@ -1010,6 +1053,7 @@ class PinnedWanGPSession:
         result_audit=None,
         device_lock=None,
         model_progress=None,
+        attention=None,
     ):
         if not callable(quiesce) or not callable(worker_alive):
             raise ValueError("wangp_runtime_stop_probe_required")
@@ -1024,6 +1068,7 @@ class PinnedWanGPSession:
         )
         self.device_lock = device_lock
         self._model_progress = model_progress
+        self.attention = attention
         if manifest is not None:
             from ..runtime_catalog import validate_manifest
 
@@ -1065,6 +1110,10 @@ class PinnedWanGPSession:
                 self.before_submit()
             values = self.session.get_default_settings(model)
             values.update(copy.deepcopy(dict(settings)))
+            # Compiled tasks pin override_attention=sdpa, which WanGP ranks above the
+            # server's attention_mode; this device's resolved profile attention wins.
+            if self.attention and values.get("override_attention") == "sdpa":
+                values["override_attention"] = self.attention
             job = (
                 self.session.submit_task(values, callbacks=self._model_progress)
                 if self._model_progress is not None
@@ -1093,7 +1142,9 @@ class PinnedWanGPSession:
                 self.device_lock.close()
 
 
-def create_session(runtime_root, config_path, output_dir, *, manifest=None):
+def create_session(
+    runtime_root, config_path, output_dir, *, manifest=None, modal_l40s=False
+):
     """Call only after verify_runtime on an isolated, authorized engine process."""
     root = Path(runtime_root).resolve(strict=True)
     profile = None
@@ -1101,6 +1152,12 @@ def create_session(runtime_root, config_path, output_dir, *, manifest=None):
         from ..runtime_catalog import validate_manifest
 
         profile = validate_manifest(manifest)
+    if modal_l40s:
+        from ..modal_runtime import device_profile
+
+        if profile is None:
+            raise ValueError('modal_v7_profile_required')
+        profile = device_profile(profile)
     config = _check_config(
         config_path, deployment_profile_id=profile['id'] if profile else None
     )
@@ -1173,6 +1230,7 @@ def create_session(runtime_root, config_path, output_dir, *, manifest=None):
             result_audit=lambda: audit(loaded=True),
             device_lock=device_lock,
             model_progress=model_progress,
+            attention=device_attention(torch, profile),
         )
     return PinnedWanGPSession(
         session, output, quiesce=torch.cuda.synchronize, model_progress=model_progress

@@ -313,7 +313,7 @@ class NativeVastSafetyTests(unittest.TestCase):
     def test_source_provenance_is_closed_and_complete(self):
         data = json.loads((HERE / "native-vast-provenance.json").read_text())
         self.assertEqual(data["dstack_version"], "0.22.5")
-        self.assertEqual(len(data["sources"]), 6)
+        self.assertEqual(len(data["sources"]), 8)
         for path, source in data["sources"].items():
             self.assertNotIn("..", Path(path).parts)
             self.assertRegex(source["sha256"], "^[a-f0-9]{64}$")
@@ -332,6 +332,7 @@ class NativeVastSafetyTests(unittest.TestCase):
             ast.parse(sources[path])
         compute = sources["dstack/_internal/core/backends/vastai/compute.py"]
         self.assertIn('"inet_down": {"gte": 1000}', compute)
+        self.assertIn('"cuda_max_good": {"gte": 13.0}', compute)
         self.assertNotIn('"inet_down": {"gt": 128}', compute)
         native_read_guards(sources, self.advance)
         with tempfile.TemporaryDirectory() as temporary:
@@ -341,7 +342,7 @@ class NativeVastSafetyTests(unittest.TestCase):
                 original = next(cache / path.replace("/", "__") for cache in CACHES if (cache / path.replace("/", "__")).is_file())
                 target.write_bytes(original.read_bytes())
             with patch.object(installer.importlib.metadata, "version", return_value="0.22.5"):
-                self.assertEqual(installer.install(root, check_only=True), {"checked_sources": 6, "writes": 0})
+                self.assertEqual(installer.install(root, check_only=True), {"checked_sources": 8, "writes": 0})
                 before = {path: (root / path).read_bytes() for path in sources}
                 first = next(iter(sources));(root / first).write_bytes(b"drift")
                 with self.assertRaisesRegex(ValueError, "source_hash_mismatch"):
@@ -349,7 +350,7 @@ class NativeVastSafetyTests(unittest.TestCase):
                 self.assertTrue(all((root / path).read_bytes() == data for path, data in before.items() if path != first))
                 (root / first).write_bytes(before[first])
                 installed = installer.install(root)
-                self.assertEqual(installed["patched_sources"], 6)
+                self.assertEqual(installed["patched_sources"], 8)
                 with self.assertRaises(ValueError):installer.install(root)
         loop = native_loop(sources)
         for responses, expected_puts, expected in [

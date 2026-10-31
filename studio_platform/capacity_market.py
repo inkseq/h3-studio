@@ -15,6 +15,7 @@ from sqlalchemy import Column, Float, JSON, String, Table, insert, select, updat
 
 from .repository import metadata, request_hash
 from .runtime_catalog import get_profile
+from .capacity_memory import planning_ram_gib
 
 PROVIDERS = ("lium", "targon")
 FRESH_SECONDS = 120
@@ -286,7 +287,9 @@ def _filters(registry, chosen):
         return None, "unknown"
     hardware = profile["hardware_filters"]
     return {
-        "min_ram_gib": math.ceil(profile["minimum_ram_bytes"] / 1024**3),
+        "min_ram_gib": planning_ram_gib(
+            profile["id"], math.ceil(profile["minimum_ram_bytes"] / 1024**3)
+        ),
         "min_disk_gib": math.ceil(profile["minimum_disk_bytes"] / 1024**3),
         "min_download_mbps": hardware["minimum_download_mbps"],
         "max_price_per_gpu_hour_microusd": hardware[
@@ -353,7 +356,7 @@ def _candidate(row, registry, chosen, filters, now, matching_count):
         qualified = binding.enabled and binding.expires_at > now + chosen["ttl_seconds"]
         if not qualified:
             blockers.append("operator_deployment_not_qualified")
-    except ValueError as error:
+    except ValueError:
         qualified = False
         blockers.append(
             "operator_provider_start_unqualified"

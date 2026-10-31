@@ -25,9 +25,11 @@ from .dstack_capacity import (
     DstackCapacity,
     DstackClient,
     DstackError,
+    control_plane,
     live_capacity_usage,
 )
 from .capacity_policy import window_open, cold_unadmitted_runtime
+from .capacity_memory import configured_ram, require_preview_ram, catalog_resources
 
 # Compatibility names for retained callers; all current call sites use the contract.
 _window_open = window_open
@@ -59,6 +61,8 @@ from .repository import (
     scaler_actions,
     scaler_receipts,
 )
+from .dstack_inventory import OPTIONAL_PROFILE_FIELDS as OPTIONAL, fallbacks_valid
+from .dstack_inventory import profile_backends, request_options
 from .runtime_catalog import engine_manifest, get_profile
 
 BACKEND_MARKER = "dstack-v1"
@@ -85,10 +89,16 @@ def preferred_download_offer(offer):
     )
 
 
-PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
+PROVIDERS = {
+    "vastai": "vast",
+    "runpod": "runpod",
+    "lium": "lium",
+    "cloudrift": "cloudrift",
+}
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
 SCHEDULER_GPU_ALIASES = {
+    "RTXPRO6000": "RTX PRO 6000 Blackwell",
     "RTXPRO6000S": "RTX PRO 6000 Blackwell Server Edition",
     "RTXPRO6000WS": "RTX PRO 6000 Blackwell Workstation Edition",
 }
@@ -1246,7 +1256,8 @@ class DstackOperator:
                 raise OperatorError("dstack_test_guard_invalid", 422) from None
             require(
                 getattr(settings, "public_origin", None) == "https://staging.inkseq.com"
-                and self.config.get("project") == "sixnine-staging"
+                # Local server project, or the dstack Sky staging project.
+                and self.config.get("project") in {"sixnine-staging", "inkseq-staging"}
                 and self.policy.get("lifecycle_version") == 2
                 and _integer(self.policy.get("max_instances"), 1, 10)
                 and _integer(self.policy.get("max_physical_gpus"), 1, 10)
@@ -1288,8 +1299,7 @@ class DstackOperator:
             "budget_account_ids",
         }
         require(
-            required <= set(profile)
-            and not set(profile) - required - {"regions", "min_reliability"},
+            required <= set(profile) and not set(profile) - required - OPTIONAL,
             "dstack_profile_fields_invalid",
             422,
         )
@@ -1354,6 +1364,9 @@ class DstackOperator:
             422,
         )
         require(
+            fallbacks_valid(profile, PROVIDERS), "dstack_profile_fields_invalid", 422
+        )
+        require(
             _integer(profile["extra_reservation_microusd"], 0)
             and _integer(profile["max_ttl_seconds"], 120, 86400),
             "dstack_profile_limits_invalid",
@@ -1416,16 +1429,47 @@ class DstackOperator:
 
         return summary(self, connection, now)
 
-    def record_download_timebox(self, connection, current, intent, now):
+    def record_download_timebox(
+        self, connection, current, intent, now, *, reason_code=None
+    ):
         """Journal an owned cold stop on the original job and host history.
 
         The controller rechecks its cold/no-execution fence under this same
         capacity lock. This callback never starts/stops a provider or settles
-        money; the original stop path owns those operations.
+        money; the original stop path owns those operations. A measured slow
+        download is stopped even without a bound demand job or physical host;
+        with a bound Vast machine it is also denied until an admin restores it.
         """
+        from .dstack_demand_start import DOWNLOAD_TIMEBOX, DOWNLOAD_TOO_SLOW
+
+        reason_code = reason_code or DOWNLOAD_TIMEBOX
+        require(
+            reason_code in {DOWNLOAD_TIMEBOX, DOWNLOAD_TOO_SLOW},
+            "dstack_download_stop_reason_invalid",
+        )
+        payload = self._journal_download_stop(
+            connection, current, intent, now, reason_code
+        )
+        if reason_code != DOWNLOAD_TOO_SLOW:
+            return payload
+        from .host_policy import HostPolicyStore, bound_observation
+
+        physical = bound_observation(current, now=now)
+        if (
+            physical is not None
+            and physical['provider_instance_id'] == intent['provider_instance_id']
+        ):
+            HostPolicyStore(self.repo, self.settings.tenant_id).deny_slow_download(
+                connection,
+                physical['machine_id'],
+                node_id=current['intent_id'],
+                now=now,
+            )
+        return payload if payload is not None else copy.deepcopy(current['payload'])
+
+    def _journal_download_stop(self, connection, current, intent, now, reason_code):
         from .dstack_demand import profile_hash
         from .dstack_demand_start import (
-            DOWNLOAD_TIMEBOX,
             MAX_DOWNLOAD_REPLACEMENTS,
             _start_command,
             _start_key,
@@ -1508,7 +1552,7 @@ class DstackOperator:
             {
                 'version': 1,
                 'stage': 'model_download',
-                'reason_code': DOWNLOAD_TIMEBOX,
+                'reason_code': reason_code,
                 'at': existing['at'] if existing else now,
                 'qualified_start_failure': False,
             },
@@ -1519,7 +1563,7 @@ class DstackOperator:
             'job_id': job['id'],
             'machine_id': physical['machine_id'],
             'at': existing['at'] if existing else now,
-            'reason_code': DOWNLOAD_TIMEBOX,
+            'reason_code': reason_code,
         }
         self.repo._emit(
             connection,
@@ -1528,7 +1572,7 @@ class DstackOperator:
             {
                 'job_id': job['id'],
                 'machine_id': physical['machine_id'],
-                'reason_code': DOWNLOAD_TIMEBOX,
+                'reason_code': reason_code,
             },
         )
         return payload
@@ -1555,7 +1599,7 @@ class DstackOperator:
             manifest_digest=profile["manifest_digest"],
             image=profile["image"],
             gpu_names=tuple(profile["gpu_names"]),
-            memory_gib=profile["memory_gib"],
+            memory_gib=configured_ram(profile),
             disk_gib=profile["disk_gib"],
             gpu_memory_gib=profile["gpu_memory_gib"],
             cpu_count=profile["cpu_count"],
@@ -1563,8 +1607,7 @@ class DstackOperator:
             created_at=created_at,
             hard_deadline=deadline,
             max_duration_s=duration,
-            regions=tuple(profile.get("regions", [])),
-            min_reliability=profile.get("min_reliability", 0.9),
+            **request_options(profile, self),
             lifecycle_version=lifecycle_version,
             test_task_id=test_task_id,
             test_max_duration_s=(
@@ -1788,7 +1831,7 @@ class DstackOperator:
                     _, reason = self._execution_check(profile, observed_at)
                 profiles.append(
                     {
-                        **{key: copy.deepcopy(profile[key]) for key in fields},
+                        **catalog_resources(profile, fields),
                         "max_price_microusd": price["max_price_microusd"],
                         "price_ceiling_microusd": price["price_ceiling_microusd"],
                         "price_policy_snapshot": price["snapshot"],
@@ -1853,6 +1896,75 @@ class DstackOperator:
     def preview(self, principal, body):
         owner = self.authorize(principal)
         return self._preview_for_owner(owner, body)
+
+    def _vast_host_selection(self, request, offers, demand_job_id):
+        """Filter planned Vast offers by host policy/download speed; freeze the selector."""
+        from .host_policy import FRESH_SECONDS, HostPolicyStore, selection
+
+        mapper = getattr(self.capacity.client, "vast_offer_mapping", None)
+        require(callable(mapper), "host_identity_unconfirmed")
+        mapping = mapper(request, clock=self.repo.clock)
+        require(
+            isinstance(mapping, dict) and isinstance(mapping.get("offers"), list),
+            "host_identity_unconfirmed",
+        )
+        by_offer = {r["offer_id"]: r for r in mapping["offers"]}
+        store = HostPolicyStore(self.repo, self.settings.tenant_id)
+        with self.repo._budget_read() as connection:
+            from .host_policy import original_nodes
+
+            nodes = original_nodes(connection, self.settings.tenant_id)
+            excluded = set()
+            if demand_job_id is not None:
+                from .dstack_demand_start import excluded_download_machines
+
+                excluded = excluded_download_machines(
+                    connection, self.settings.tenant_id, demand_job_id
+                )
+            allowed = [
+                r
+                for r in offers
+                if r.get("offer_id") in by_offer
+                and by_offer[r['offer_id']]['machine_id'] not in excluded
+                and type(by_offer[r['offer_id']].get('advertised_download_mbps'))
+                in (int, float)
+                and math.isfinite(by_offer[r['offer_id']]['advertised_download_mbps'])
+                and by_offer[r['offer_id']]['advertised_download_mbps'] >= 1000
+                and store.read(
+                    connection, by_offer[r["offer_id"]]["machine_id"], nodes=nodes
+                )[0]["effective"]
+                != "deny"
+            ]
+            # Preference must not discard qualified ordinary fallback.
+            # instance_types freezes membership; the reviewed native Vast
+            # patch also preserves the explicit preferred-first order.
+            offers = sorted(
+                allowed,
+                key=lambda r: (
+                    not preferred_download_offer(by_offer[r['offer_id']]),
+                    store.read(
+                        connection,
+                        by_offer[r["offer_id"]]["machine_id"],
+                        nodes=nodes,
+                    )[0]["effective"]
+                    != "prefer",
+                ),
+            )[:MAX_HOST_CANDIDATES]
+            require(offers, "dstack_no_compatible_host_offers")
+            approved = [copy.deepcopy(by_offer[r["offer_id"]]) for r in offers]
+            # Plan/native assignment uses bundle IDs, not a display-only
+            # filtered offers list. The same selector is frozen below.
+            selected = selection(
+                {
+                    "version": 1,
+                    "observed_at": mapping["observed_at"],
+                    "expires_at": mapping["observed_at"] + FRESH_SECONDS,
+                    "policy_snapshot": store.admission_snapshot(connection, approved),
+                    "offers": approved,
+                },
+                now=self.repo.clock(),
+            )
+        return replace(request, host_selection=selected), offers, store
 
     def _preview_for_owner(self, owner, body, *, demand_job_id=None):
         self._enabled()
@@ -1971,81 +2083,38 @@ class DstackOperator:
             if lifecycle
             else None,
         )
-        offers = plan_offers(
-            self.capacity.plan(request, self.config["ssh_public_key"]), request
-        )
-        require(bool(offers), "dstack_no_compatible_offers")
-        if request.backend == "vastai":
-            from .host_policy import FRESH_SECONDS, HostPolicyStore, selection
-
-            mapper = getattr(self.capacity.client, "vast_offer_mapping", None)
-            require(callable(mapper), "host_identity_unconfirmed")
-            mapping = mapper(request, clock=self.repo.clock)
-            require(
-                isinstance(mapping, dict) and isinstance(mapping.get("offers"), list),
-                "host_identity_unconfirmed",
+        # One intent always rents from exactly one backend. Each backend in
+        # order (primary, then configured fallbacks) is planned and fully
+        # filtered; the first with eligible offers binds the preview and start.
+        backends = [request.backend, *profile.get("fallback_backends", [])]
+        store, offers = None, []
+        for index, backend in enumerate(backends):
+            candidate = (
+                request if index == 0 else replace(request, backend=backend, regions=())
             )
-            by_offer = {r["offer_id"]: r for r in mapping["offers"]}
-            store = HostPolicyStore(self.repo, self.settings.tenant_id)
-            with self.repo._budget_read() as connection:
-                from .host_policy import original_nodes
-
-                nodes = original_nodes(connection, self.settings.tenant_id)
-                excluded = set()
-                if demand_job_id is not None:
-                    from .dstack_demand_start import excluded_download_machines
-
-                    excluded = excluded_download_machines(
-                        connection, self.settings.tenant_id, demand_job_id
+            offers = plan_offers(
+                self.capacity.plan(candidate, self.config["ssh_public_key"]),
+                candidate,
+            )
+            if offers and backend == "vastai":
+                try:
+                    candidate, offers, store = self._vast_host_selection(
+                        candidate, offers, demand_job_id
                     )
-                allowed = [
-                    r
-                    for r in offers
-                    if r.get("offer_id") in by_offer
-                    and by_offer[r['offer_id']]['machine_id'] not in excluded
-                    and type(by_offer[r['offer_id']].get('advertised_download_mbps'))
-                    in (int, float)
-                    and math.isfinite(
-                        by_offer[r['offer_id']]['advertised_download_mbps']
-                    )
-                    and by_offer[r['offer_id']]['advertised_download_mbps'] >= 1000
-                    and store.read(
-                        connection, by_offer[r["offer_id"]]["machine_id"], nodes=nodes
-                    )[0]["effective"]
-                    != "deny"
-                ]
-                # Preference must not discard qualified ordinary fallback.
-                # instance_types freezes membership; the reviewed native Vast
-                # patch also preserves the explicit preferred-first order.
-                offers = sorted(
-                    allowed,
-                    key=lambda r: (
-                        not preferred_download_offer(by_offer[r['offer_id']]),
-                        store.read(
-                            connection,
-                            by_offer[r["offer_id"]]["machine_id"],
-                            nodes=nodes,
-                        )[0]["effective"]
-                        != "prefer",
-                    ),
-                )[:MAX_HOST_CANDIDATES]
-                require(offers, "dstack_no_compatible_host_offers")
-                approved = [copy.deepcopy(by_offer[r["offer_id"]]) for r in offers]
-                # Plan/native assignment uses bundle IDs, not a display-only
-                # filtered offers list. The same selector is frozen below.
-                selected = selection(
-                    {
-                        "version": 1,
-                        "observed_at": mapping["observed_at"],
-                        "expires_at": mapping["observed_at"] + FRESH_SECONDS,
-                        "policy_snapshot": store.admission_snapshot(
-                            connection, approved
-                        ),
-                        "offers": approved,
-                    },
-                    now=self.repo.clock(),
-                )
-            request = replace(request, host_selection=selected)
+                except OperatorError as error:
+                    if (
+                        error.code != "dstack_no_compatible_host_offers"
+                        or index == len(backends) - 1
+                    ):
+                        raise
+                    offers = []
+            if offers:
+                request = candidate
+                if index:
+                    profile["backend"] = backend
+                    profile.pop("regions", None)
+                break
+        require(bool(offers), "dstack_no_compatible_offers")
         # Reserve preparation and a complete job from the first paid request,
         # plus shutdown grace; continuing funding has no absolute lifetime.
         initial_seconds = lifecycle["reservation_seconds"] if continuing else ttl
@@ -2109,6 +2178,8 @@ class DstackOperator:
                 "dstack_price_policy_changed",
             )
             if request.host_selection is not None:
+                from .host_policy import selection
+
                 require(
                     store.admission_snapshot(
                         connection, request.host_selection["offers"]
@@ -2261,13 +2332,12 @@ class DstackOperator:
                     "owner_id",
                     "project_id",
                     "pool",
-                    "backend",
                     "runtime_profile_id",
                     "mode",
                     "configuration_id",
                 )
             )
-            and selected.get("backend") in PROVIDERS
+            and profile.get("backend") in profile_backends(selected, PROVIDERS)
         )
         pool = None
         if bound_profile:
@@ -2293,7 +2363,9 @@ class DstackOperator:
                 admitted = current_snapshot
             elif capacity_snapshot == current_snapshot and isinstance(request, dict):
                 expected = {
-                    "backend": selected["backend"],
+                    "backend": request.get("backend")
+                    if request.get("backend") in profile_backends(selected, PROVIDERS)
+                    else selected["backend"],
                     "profile_id": selected["runtime_profile_id"],
                     "mode": selected["mode"],
                     "model_id": selected["model_id"],
@@ -2350,7 +2422,7 @@ class DstackOperator:
         client = self.capacity.client
 
         class ObservedClient:
-            project = client.project
+            project, endpoint = client.project, getattr(client, "endpoint", None)
 
             def get(self, **identity):
                 run = client.get(**identity)
@@ -2368,22 +2440,9 @@ class DstackOperator:
 
     def prelaunch_capacity_usage(self, connection):
         """Use the same global overlay as registration under the capacity lock."""
-        nodes = [
-            dict(node)
-            for node in connection.execute(select(operator_nodes)).mappings()
-            if node["payload"].get("capacity_backend") == BACKEND_MARKER
-        ]
-        intents = {
-            row["id"]: dict(row)
-            for row in connection.execute(select(instance_intents)).mappings()
-        }
-        usage, observed_runs = self._observed_registration_usage(nodes)
-        return {
-            **usage,
-            **self._registration_resource_overlay(
-                connection, nodes, intents, usage, observed_runs
-            ),
-        }
+        from .native_capacity_inventory import prelaunch_usage
+
+        return prelaunch_usage(self, connection)
 
     def _registration_resource_overlay(
         self, connection, nodes, intents, usage, observed_runs
@@ -2439,7 +2498,7 @@ class DstackOperator:
         # The same fresh owned native GET may know a provider identity before
         # observe() journals it. Normalize only a non-conflicting active identity;
         # otherwise an intent key and its known allocation would count twice.
-        active_keys = {}
+        active_keys, unconfirmed_allocations = {}, []
         for observation in usage["observations"]:
             if observation["reason_code"] != "dstack_capacity_active":
                 continue
@@ -2466,7 +2525,14 @@ class DstackOperator:
                 and original["backend"] + ":" + instance in usage["resources"]
             ):
                 active_keys[intent["id"]] = (intent["provider"], instance)
-        resources = {}
+            gpus = (jpd.get("instance_type") or {}).get("resources", {}).get("gpus")
+            if (
+                node["intent_id"] not in active_keys
+                or not isinstance(gpus, list)
+                or not 1 <= len(gpus) <= 128
+            ):
+                unconfirmed_allocations.append(node["intent_id"])
+        resources, active_intents = {}, []
         for intent in intents.values():
             if (
                 intent["state"] == "destroyed"
@@ -2474,6 +2540,7 @@ class DstackOperator:
                 or manually_reviewed_inactive(connection, intent)
             ):
                 continue
+            active_intents.append(intent["id"])
             key = active_keys.get(
                 intent["id"],
                 (
@@ -2516,6 +2583,9 @@ class DstackOperator:
             "resources": resources,
             "instances": len(resources),
             "physical_gpus": sum(resources.values()),
+            "all_resource_intent_ids": tuple(active_intents),
+            "native_resources": tuple(live_keys),
+            "unconfirmed_allocation_ids": tuple(unconfirmed_allocations),
         }
 
     def registration_capacity_usage(self, connection, spec):
@@ -2597,8 +2667,10 @@ class DstackOperator:
             and usage["resources"].get(resource_key) == 1,
             "dstack_registration_allocation_unconfirmed",
         )
-        result = self._registration_resource_overlay(
-            connection, nodes, intents, usage, observed_runs
+        from .native_capacity_inventory import resource_overlay
+
+        result = resource_overlay(
+            self, connection, nodes, intents, usage, observed_runs
         )
         resources = result["resources"]
         original = matching[0]["payload"]
@@ -2675,7 +2747,7 @@ class DstackOperator:
             now, capacity_snapshot, usage = self._admit_start_capacity(
                 connection, owner, value, profile
             )
-            original = value["request"]
+            original = require_preview_ram(value["request"], profile)
             host_selection = self._validate_start_hosts(
                 connection, profile, original, now, demand_job_id
             )
@@ -2778,55 +2850,9 @@ class DstackOperator:
         return value, demand, profile
 
     def _admit_start_capacity(self, connection, owner, value, profile):
-        """Check the original test, supplier and fleet budgets before reservation."""
-        if value.get("group_id") is not None:
-            from .dstack_workspace import owned_group
+        from .capacity_lookahead_runtime import admit_capacity
 
-            owned_group(connection, self.settings, owner, value["group_id"])
-        now = self.repo.clock()
-        guard = value.get("lifecycle", {}).get("test_gpu_guard")
-        if guard is not None:
-            from .dstack_test_budget import (
-                projected_cost,
-                guard_limit,
-                limit_reason,
-                validate_guard,
-            )
-
-            try:
-                validate_guard(guard)
-            except ValueError:
-                raise OperatorError("dstack_test_guard_invalid", 422) from None
-            require(
-                guard["version"] == 2
-                and value["request"].get("test_task_id") == guard["task_id"],
-                "dstack_test_task_required",
-                422,
-            )
-            require(
-                projected_cost(connection, guard, now) + value["reservation_microusd"]
-                < guard_limit(guard),
-                limit_reason(guard),
-            )
-        from .supplier_spending import admit as admit_supplier_spending
-
-        capacity_snapshot = admit_supplier_spending(
-            connection,
-            self.settings.tenant_id,
-            now,
-            additional_microusd=value["reservation_microusd"],
-            reference_type="instance",
-            test_task=guard is not None,
-            policy=self._admin_limits(connection),
-        )
-        usage = self._limits(
-            connection,
-            profile["max_price_microusd"],
-            profile=profile,
-            request=value["request"],
-            capacity_snapshot=capacity_snapshot,
-        )
-        return now, capacity_snapshot, usage
+        return admit_capacity(self, connection, owner, value, profile)
 
     def _validate_start_hosts(self, connection, profile, original, now, demand_job_id):
         """Re-read exact Vast offer identities before reserving the original intent."""
@@ -2983,6 +3009,8 @@ class DstackOperator:
         if host_selection is not None:
             request = replace(request, host_selection=copy.deepcopy(host_selection))
         binding = request.binding(self.config["ssh_public_key"])
+        # Which dstack server owns this run (local or Sky); see live_capacity_usage.
+        binding["control_plane"] = control_plane(self.capacity.client)
         command_id = str(uuid.uuid4())
         command_payload = {
             "preview_id": preview_id,

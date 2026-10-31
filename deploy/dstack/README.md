@@ -44,6 +44,19 @@ separate B2 staging qualification. Lium and CloudRift remain outside this adapte
 allowlist until separately implemented and qualified. This upgrade does not enable
 another provider or change production credentials.
 
+#517 B2's public-image, single-pod derivative disables RunPod registry creation
+and account-wide credential cleanup. Secure-cloud creation uses REST v2;
+community-cloud creation uses GraphQL. Each sends one create with redirects
+turned off. Only typed validation performed before that request may advance to
+another offer; HTTP errors, lost/malformed replies and local failures after a
+successful create terminate that submission as unknown, preserving a validated
+original pod ID when available. No new native apply is inferred from that result.
+Private registries, network volumes, spot and cluster creation are outside this
+slice. The existing complete GraphQL inventory witness still requires staging
+parity against the exact original REST-created pod before provider acceptance.
+Version-2 provenance pins all eight sources; rollback recognizes only the exact
+retained six-source 0.22.3/0.22.5 tuples. No provider is enabled by these patches.
+
 Bind both source selections and protected execution/capacity configuration to
 `h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-29gib-total-v3`, with new configuration
 identities and an explicit default. This additive revision has a 29 GiB
@@ -272,6 +285,37 @@ Deployment behavior was checked against the pinned
 [server CLI](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/cli/commands/server.py),
 and [startup/authentication](https://github.com/dstackai/dstack/blob/0.22.5/src/dstack/_internal/server/app.py).
 
+
+### Database TCP hygiene (#588 R4)
+
+New base release bundles set PostgreSQL17 TCP keepalive idle/interval/count to
+60s/10s/3, tcp_user_timeout to90000ms and client_connection_check_interval to10000ms.
+The config validator requires the exact tuple; connection limits remain unchanged.
+These are dead-peer checks, not an idle-session deadline. Healthy pools and LISTEN
+connections may remain idle; idle_session_timeout is intentionally left at0.
+Unix sockets ignore TCP settings, so verify them over TCP when accepting a release.
+See https://www.postgresql.org/docs/17/runtime-config-connection.html#RUNTIME-CONFIG-CONNECTION-TCP.
+
+This is not proof that every old shared-netns session is gone: a peer whose kernel
+still acknowledges is live to TCP. C0's receipt-bound cleanup handles positively
+identified pre-stop idle sessions; keep that guard. PgBouncer and broader pooling
+changes are separate work.
+
+No ALTER SYSTEM/role/schema/account writes or immediate host change accompany this
+source change. Adoption changes the DB process command and may recreate the DB.
+Use a zero-job gated staging window, retain original release/config and connection
+counts, start DB then app then controller/dstack, check TCP pg_settings, healthy
+new role sessions and normal API/demand wake. Claude owns acceptance and production
+promotion. Roll back through the original approved release/config under the same
+zero-job gate; do not delete or recreate the data directory/volume. Existing retained
+releases keep their original command until explicitly adopted.
+
+The installed root validator must approve the new command tuple before adoption;
+do not bypass its existing source/CAS installation procedure. The new validator
+accepts the exact legacy tuple for retained rollback and the complete new tuple,
+not partially changed timeouts. Hold merge/adoption until Claude coordinates this
+validator prerequisite and an idle staging window; otherwise normal staging will
+correctly fail closed against the old installed validator.
 ## Capacity contract refactor (#588 R1, first slice)
 
 The existing `DstackCapacity.plan/start/observe/stop` and original ledger remain

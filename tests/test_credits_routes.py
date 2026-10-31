@@ -3,6 +3,9 @@
 from concurrent.futures import ThreadPoolExecutor
 import copy
 from decimal import Decimal
+from fractions import Fraction
+import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,10 +18,12 @@ from studio_platform.auth import Auth, Principal
 from studio_platform.credit_schema import metadata as credit_metadata, prices
 from studio_platform.credits import CreditError
 from studio_platform.credits_pricing import (
+    PROFILE_CREDIT_MULTIPLIERS,
     DEFAULT_RATES,
     PricingError,
     admin_margin_estimate,
     hide_dollar_estimate,
+    public_prices,
     public_quote,
     quote,
     user_estimate,
@@ -112,6 +117,23 @@ class CreditsRouteTests(LedgerCase):
             return quote(
                 connection, "sixnine", "supervan", compiled or self.compiled(), **extra
             )
+
+    def test_enhance_quote_uses_the_owner_price_and_no_rate_card(self):
+        from studio_platform.enhance_plans import BACKEND, compile_enhance
+        from test_enhance_plans import PROJECT, body, source
+
+        self.enable()
+        compiled, _ = compile_enhance(
+            body(tier="1080p"), PROJECT, lambda e, k: source()
+        )
+        frozen = self.get_quote(compiled, execution={"backend": BACKEND})
+        self.assertEqual(frozen["credits"], 100)
+        self.assertEqual(frozen["tier"], "enhance-1080p")
+        self.assertEqual(frozen["breakdown"][0]["rate"], 0)
+        longer, _ = compile_enhance(body(), PROJECT, lambda e, k: source(duration=10.0))
+        self.assertEqual(
+            self.get_quote(longer, execution={"backend": BACKEND})["credits"], 300
+        )
 
     def test_reads_zero_without_creating_or_granting_a_balance(self):
         self.assertEqual(
@@ -221,7 +243,7 @@ class CreditsRouteTests(LedgerCase):
 
     def test_quote_checks_server_profile_identity_not_caller_quality_provenance(self):
         self.enable()
-        from studio_platform.quality_tiers import PROFILE_TIERS
+        from studio_platform.quality_tiers import PROFILE_TIERS, billing_tier
         from studio_platform.runtime_catalog import get_profile
 
         for identity, tier in PROFILE_TIERS.items():
@@ -231,8 +253,13 @@ class CreditsRouteTests(LedgerCase):
                 quality_selection={"tier": "fast", "mapping_revision": "caller"},
             )
             frozen = self.get_quote(compiled)
-            self.assertEqual(frozen["tier"], tier)
-            self.assertEqual(frozen["credits"], 21 if tier == "standard" else 62)
+            self.assertEqual(frozen["tier"], billing_tier(tier))
+            # The multiplier applies before the single round-up: 4 credits/s x 124/24 s.
+            base = Fraction(4 if billing_tier(tier) == "standard" else 12) * Fraction(
+                124, 24
+            )
+            multiplier = PROFILE_CREDIT_MULTIPLIERS.get(identity, 1)
+            self.assertEqual(frozen["credits"], math.ceil(base * multiplier))
         for identity, model in (
             ("unregistered-private-profile", "MiniMax-H3-Pruned-Rank8-INT8"),
             (next(iter(PROFILE_TIERS)), "MiniMax-H3-Base-INT8"),
@@ -243,6 +270,24 @@ class CreditsRouteTests(LedgerCase):
                 compiled["deployment_profile_id"] = identity
             with self.assertRaisesRegex(PricingError, "credit_quote_invalid"):
                 self.get_quote(compiled)
+
+    def test_profile_multiplier_raises_usage_without_changing_tier(self):
+        self.enable()
+        from studio_platform.quality_tiers import PROFILE_TIERS
+        from studio_platform.runtime_catalog import get_profile
+
+        identity = next(i for i, tier in PROFILE_TIERS.items() if tier == "standard")
+        compiled = self.compiled(
+            deployment_profile_id=identity,
+            request={"model": get_profile(identity)["model_id"]},
+        )
+        with patch.dict(PROFILE_CREDIT_MULTIPLIERS, {identity: Fraction(13, 10)}):
+            frozen = self.get_quote(compiled)
+        # 124 frames at the standard rate is 20.67 credits (21 billed); x1.3 is
+        # 26.87, rounded up once to 27.
+        self.assertEqual((frozen["tier"], frozen["credits"]), ("standard", 27))
+        self.assertEqual(frozen["breakdown"][0]["rate"], 4)
+        self.assertNotIn("multiplier", json.dumps(frozen))
 
     def render_compiled(self):
         compiled, _, blockers, _ = compile_render(
@@ -340,6 +385,104 @@ class CreditsRouteTests(LedgerCase):
                             PricingError, "credit_quote_invalid"
                         ):
                             self.get_quote(changed, execution=execution)
+
+    def test_resolution_revision_uses_compiled_dimensions_and_preserves_old_quote(self):
+        revision = self.enable()
+        compiled = self.compiled()
+        compiled['output_spec'].update(frames=120, fps=24, width=1344, height=768)
+        compiled['request'].update(resolution='480P', quality_tier='fast', steps=5)
+        compiled['deployment_profile_id'] = (
+            'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
+        )
+        frozen = self.get_quote(compiled)
+        self.assertEqual(frozen['credits'], 20)
+        body = {
+            'expected_revision': revision,
+            'rates': dict(DEFAULT_RATES),
+            'resolution_multipliers': {'480P': 1, '768P': 2},
+            'image_credits': 5,
+            'reason': 'Disposable CR75 acceptance',
+        }
+        published = self.service.publish(self.admin, body, key='resolution-prices')
+        self.assertNotEqual(published['revision'], revision)
+        self.assertEqual(
+            self.service.publish(self.admin, body, key='resolution-prices'), published
+        )
+        sharp = self.get_quote(compiled)
+        self.assertEqual(
+            (sharp['credits'], sharp['resolution'], sharp['breakdown'][0]['rate']),
+            (40, '768P', 8),
+        )
+        compiled['output_spec'].update(width=768, height=1344)
+        self.assertEqual(self.get_quote(compiled)['credits'], 40)
+        compiled['output_spec'].update(width=480, height=832)
+        self.assertEqual(self.get_quote(compiled)['credits'], 20)
+        self.assertEqual(public_quote({'credit_quote': frozen})['credits'], 20)
+        self.assertNotIn('resolution_multiplier', frozen)
+        with self.repo.engine.connect() as connection:
+            old = connection.execute(
+                select(prices.c.configuration).where(prices.c.revision == revision)
+            ).scalar_one()
+            new = connection.execute(
+                select(prices.c.configuration).where(
+                    prices.c.revision == published['revision']
+                )
+            ).scalar_one()
+        self.assertNotIn('resolution_multipliers', old)
+        self.assertEqual(new['image_credits'], 5)
+        self.assertEqual(new['resolution_multipliers'], {'480P': 1, '768P': 2})
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(
+                public_prices(connection, "sixnine")["resolution_multipliers"],
+                {"480P": 1, "768P": 2},
+            )
+        compiled['output_spec'].update(frames=124, width=1344, height=768)
+        self.assertEqual(self.get_quote(compiled)['credits'], 42)
+        with self.assertRaisesRegex(PricingError, 'credit_prices_changed'):
+            self.service.publish(self.admin, body, key='stale-resolution-revision')
+
+    def test_resolution_pricing_rejects_invalid_adoption_and_unpriced_dimensions(self):
+        revision = self.enable()
+        for invalid in (
+            {'480P': True, '768P': 2},
+            {'480P': 1, '768P': 0},
+            {'480P': 1},
+            {'480P': 1, '768P': 2, '1080P': 3},
+            {'480P': 2, '768P': 1},
+            {'480P': 1, '768P': 1.5},
+        ):
+            with (
+                self.subTest(invalid=invalid),
+                self.assertRaisesRegex(PricingError, 'credit_prices_invalid'),
+            ):
+                self.service.publish(
+                    self.admin,
+                    {
+                        'expected_revision': revision,
+                        'rates': dict(DEFAULT_RATES),
+                        'resolution_multipliers': invalid,
+                    },
+                )
+        self.service.publish(
+            self.admin,
+            {
+                'expected_revision': revision,
+                'rates': dict(DEFAULT_RATES),
+                'resolution_multipliers': {'480P': 1, '768P': 2},
+            },
+        )
+        for width, height in ((1920, 1080), (None, 480), (True, 480), (0, 768)):
+            compiled = self.compiled()
+            compiled['output_spec'].update(width=width, height=height)
+            with (
+                self.subTest(width=width, height=height),
+                self.assertRaisesRegex(PricingError, 'credit_quote_invalid'),
+            ):
+                self.get_quote(compiled)
+        rendered = self.render_compiled()
+        quote = self.get_quote(rendered, execution={"backend": "cpu-render"})
+        self.assertEqual((quote["tier"], quote["credits"]), ("render", 0))
+        self.assertNotIn("resolution_multiplier", quote)
 
     def test_new_price_does_not_reprice_frozen_plan_and_projection_is_read_only(self):
         revision = self.enable()
@@ -491,14 +634,15 @@ class CreditsRouteTests(LedgerCase):
         margin = value["margin_estimate"]
         self.assertEqual(margin["pack_revision"], "catalog-one")
         self.assertEqual(margin["worst_case_pack_id"], "pro")
-        # $100 / 1.25 - $7 - $0.20, divided by all 11,500 credited units.
-        self.assertAlmostEqual(margin["worst_case_net_usd_per_credit"], 72.8 / 11500)
+        # Tax is added at Checkout: $100 - $7 - $0.20 over all 11,500 credits.
+        self.assertAlmostEqual(margin["worst_case_net_usd_per_credit"], 92.8 / 11500)
         self.assertEqual(margin["assumptions"]["processing_and_mor_fee_rate"], 0.07)
-        self.assertTrue(margin["assumptions"]["tax_inclusive"])
+        self.assertFalse(margin["assumptions"]["tax_inclusive"])
+        self.assertEqual(margin["assumptions"]["consumer_tax_rate"], 0)
         self.assertTrue(margin["assumptions"]["pack_credits_include_bonus"])
         refine = margin["tiers"]["refine"]
         self.assertAlmostEqual(
-            refine["estimated_net_usd_per_5s_clip"], 60 * 72.8 / 11500
+            refine["estimated_net_usd_per_5s_clip"], 60 * 92.8 / 11500
         )
         self.assertEqual(refine["status"], "gpu_cost_unmeasured")
         self.assertIsNone(refine["estimated_margin"])

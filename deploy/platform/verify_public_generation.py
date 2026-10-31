@@ -34,6 +34,8 @@ PROJECT = 'production-h3-acceptance-20261004'
 KEY_NAME = 'Temporary production GPU acceptance 20261004'
 PROMPT = 'A golden retriever walks through a sunlit garden, flowers sway gently, birds chirp, cinematic slow camera movement.'
 RECIPE = 'h3-base-fl2va-v1'
+# Mirrors studio_platform.quality_views.PUBLIC_CONTROLS: what a creator view echoes back.
+PUBLIC_CONTROLS = frozenset({'duration', 'seed', 'resolution', 'aspect_ratio', 'generate_audio', 'width', 'height'})
 SUBMISSION_KEY = 'public-gpu-job-20261004'
 
 
@@ -154,7 +156,10 @@ def check_effective(effective, requested):
     assert effective['tier'] == 'refine' and effective['mode'] == 'fl'
     assert 'model' not in effective and 'backend' not in effective
     assert effective['prompt'] == PROMPT
-    assert all(effective[key] == value for key, value in requested['controls'].items())
+    # Creators see only what they author; steps and other tuning stay internal (#898).
+    assert all(effective[key] == value for key, value in requested['controls'].items()
+               if key in PUBLIC_CONTROLS)
+    assert 'steps' not in effective
 
 
 def recover_submission(root, state, agent, headers):

@@ -10,9 +10,6 @@ from sqlalchemy import select, insert, update, inspect
 from .repository import (
     documents,
     jobs,
-    attempts,
-    registered_workers,
-    Scope,
     Conflict,
     NotFound,
     request_hash,
@@ -1339,17 +1336,9 @@ def finish_purge(service, record):
                 .values(metadata={**artifact["metadata"], "content_deleted": True})
             )
         final = []
-        from .take_reviews import redact_reviews
-        from .product_feedback import redact_feedback
+        from .review_privacy import redact
 
-        redact_reviews(
-            conn,
-            service.tenant,
-            record["owner"],
-            artifact_ids=plan["artifact_ids"],
-            now=now,
-        )
-        redact_feedback(
+        redact(
             conn,
             service.tenant,
             record["owner"],
@@ -1368,14 +1357,7 @@ def finish_purge(service, record):
             )
             target = row["payload"]["target"]
             if target["kind"] == "project":
-                redact_feedback(
-                    conn,
-                    service.tenant,
-                    record["owner"],
-                    project_ids=(target["project_id"],),
-                    now=now,
-                )
-                redact_reviews(
+                redact(
                     conn,
                     service.tenant,
                     record["owner"],

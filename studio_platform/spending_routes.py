@@ -17,7 +17,6 @@ from .repository import (
 )
 from .spending_limits import (
     ADMIN_OWNER,
-    ADMIN_DEFAULTS,
     SpendingConfirmationRequired,
     lock_owner,
     read_settings,
@@ -432,6 +431,21 @@ def register_routes(app):
                         stored, latest_capacity_changes(connection)
                     ),
                 }
+            )
+
+    @app.get("/v1/admin/settings-inventory")
+    def settings_inventory(request: Request):
+        human(request, admin=True)
+        from .settings_inventory import build
+
+        with repo._budget_read() as connection:
+            return response(
+                build(
+                    app,
+                    connection,
+                    admin_stored(connection),
+                    latest_capacity_changes(connection),
+                )
             )
 
     @app.post("/v1/operator/admin/spending-settings/preview")

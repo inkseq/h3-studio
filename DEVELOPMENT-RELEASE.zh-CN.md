@@ -8,7 +8,7 @@
 
 | 改动 | 检查与发布 | 对正在运行的服务 |
 | --- | --- | --- |
-| 文案、布局、前端交互 | Yingxu 行为测试、构建、快照及前端发布边界检查；独立静态包 | 原子切换 HTML 指针；API、数据库、GPU 控制器无需重启 |
+| 文案、布局、前端交互 | 前端行为测试、构建、快照及前端发布边界检查；独立静态包 | 原子切换 HTML 指针；API、数据库、GPU 控制器无需重启 |
 | 已确认与 worker 兼容的 API 展示/发现代码 | Python/API/数据库与镜像检查；批准平台包 | 只更新 app；控制器继续使用启动时固定镜像 |
 | 任务协议、准入、账户/数据结构、计费、调度或依赖 | 批次关键回归及完整发布门槛 | 不兼容时拒绝热更；等待任务和账单安全收尾后迁移 |
 
@@ -16,7 +16,7 @@
 
 ## 日常批次
 
-1. 编辑 canonical 前端 `../video-studio-design/studio-app`；通过 `python tools/sync_yingxu_source.py --write` 同步发布快照。不要直接维护两份前端。
+1. 编辑 canonical 前端 `../video-studio-design/studio-app`；通过 `python tools/sync_web_source.py --write` 同步发布快照。不要直接维护两份前端。
 2. 开发中按需预览、做语法及受影响关键路径检查；批次完成后再提交。
 3. PR events check only. A relevant merge to main publishes immutable tested artifacts and automatically deploys staging after the stable `test` aggregate passes. Documentation-only changes do not rebuild or deploy. Platform candidates include their matching frontend/platform/migration manifests; frontend-only changes retain the independent static path.
 4. `python tools/prepare_release.py --kind frontend|platform` verifies/pushes once and observes that main run. It no longer cancels push CI or dispatches duplicate preparation. Its retained `.release-prepares/` intent forbids uncertain replay. Reviewed repository variables select retained native sources; preparation arguments cannot trigger a second build.

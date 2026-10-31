@@ -4,13 +4,11 @@ Only an approved initial boot installs or starts. Reconnect reads the original
 marker, token and runtime incarnation. No cloud credentials cross this boundary.
 """
 
-from dataclasses import asdict
 from contextlib import contextmanager
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
 import re
 import secrets
 import stat
@@ -79,6 +77,13 @@ def safe_preparation_report(report):
         and 0 <= counters["files_complete"] <= counters["files_total"] <= 64
     ):
         value["download"] = {**counters, "basis": "completed_files"}
+        received = report.get("bytes_received")
+        # Optional live wire bytes; absent on hosts that cannot measure partials.
+        if (
+            type(received) is int
+            and counters["bytes_complete"] <= received <= counters["bytes_total"]
+        ):
+            value["download"]["bytes_received"] = received
     else:
         value["download"] = None
     diagnosis = safe_bootstrap_diagnosis(report)
@@ -645,7 +650,7 @@ def read(name):
  if p.is_symlink() or p.stat().st_size>4194304: raise ValueError('untrusted_report')
  return json.loads(p.read_text())
 s=read('setup-status.json')
-out={k:s.get(k) for k in ('state','phase','error_code','error_type','runtime_verified','engine_manifest_digest','source_revision','runtime','system_package_diagnostics','download_failure','started_unix','phase_started_unix','updated_unix','bytes_complete','bytes_total','files_complete','files_total')}
+out={k:s.get(k) for k in ('state','phase','error_code','error_type','runtime_verified','engine_manifest_digest','source_revision','runtime','system_package_diagnostics','download_failure','started_unix','phase_started_unix','updated_unix','bytes_complete','bytes_received','bytes_total','files_complete','files_total')}
 out['selected_gpus']=s.get('gpus')
 out['error_code']=s.get('error_code',s.get('code'))
 out['failure_phase']=s.get('failure_phase',s.get('failed_phase',s.get('phase')))
@@ -661,6 +666,7 @@ print(json.dumps(out))
             'phase_started_unix',
             'updated_unix',
             'bytes_complete',
+            'bytes_received',
             'bytes_total',
             'files_complete',
             'files_total',

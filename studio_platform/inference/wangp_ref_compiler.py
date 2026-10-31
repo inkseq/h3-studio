@@ -17,7 +17,12 @@ from .wangp_compiler import (
     normalize_request as normalize_fl,
     compile_settings as compile_fl,
 )
-from .wangp_contract import InputDescriptor, PreparedRequest, canonical_json
+from .wangp_contract import (
+    InputDescriptor,
+    PreparedRequest,
+    StoredInput,
+    canonical_json,
+)
 from ..storage import key_belongs_to, validate_key
 
 COMPILER_ID = "sixnine-h3-ref2va-bf16-50-smallrefs-v1"
@@ -302,7 +307,7 @@ class H3Ref2VACompiler:
             )
             for item in descriptors:
                 heartbeat()
-                with store.open(keys[item.asset_id]) as source:
+                with StoredInput(store, keys[item.asset_id]) as source:
                     if self.stage_input(item, source, heartbeat=heartbeat) != item:
                         raise ValueError("wangp_staged_input_mismatch")
             return prepared

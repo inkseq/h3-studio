@@ -1,0 +1,171 @@
+/* Signed-out landing page: what Inkseq does, then Start creating or Sign in. */
+.landing {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+}
+.landing-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px max(16px, calc((100vw - 1120px) / 2));
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+.landing-bar .logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+  font-weight: 700;
+  text-decoration: none;
+}
+.landing-bar .spacer {
+  flex: 1;
+}
+.landing-link {
+  border: 0;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink-2);
+  font-size: 14px;
+  text-decoration: none;
+  padding: 6px 8px;
+}
+.landing-link:hover {
+  color: var(--ink);
+}
+.landing main {
+  flex: 1;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.landing-lede {
+  margin: 0 0 28px;
+  max-width: 34em;
+  color: var(--ink-2);
+  font-size: 18px;
+  line-height: 1.6;
+}
+.landing-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.landing-big {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 22px;
+  font-size: 16px;
+  font-weight: 600;
+  border-radius: 12px;
+}
+
+@keyframes landing-play {
+  to {
+    left: 100%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+}
+
+.landing-final h2 {
+  margin: 0 0 24px;
+  font-size: 26px;
+}
+
+.landing-final {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 56px 0 72px;
+  border-top: 1px solid var(--line);
+  text-align: center;
+}
+@media (max-width: 860px) {
+}
+@media (max-width: 520px) {
+  .landing-bar {
+    gap: 6px;
+  }
+  .landing-bar .logo span,
+  a.landing-link {
+    display: none;
+  }
+  .landing-lede {
+    font-size: 16px;
+  }
+  /* Phones: the two actions stack at full width, so neither label is squeezed (owner 10-29). */
+  .landing-ctas {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    max-width: 360px;
+    margin-inline: auto;
+  }
+  .landing-ctas .landing-big,
+  .landing-ctas .landing-secondary {
+    justify-content: center;
+    min-height: 48px;
+    white-space: nowrap;
+  }
+}
+
+/* Top bar: every item shares one height and type size so the row reads as one line. */
+.landing-bar {
+  gap: 4px;
+}
+.landing-bar .landing-link,
+.landing-bar .language-switch,
+.landing-bar .landing-bar-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  box-shadow: none;
+}
+.landing-bar .language-switch {
+  background: transparent;
+  color: var(--ink-2);
+}
+.landing-bar .landing-link:hover,
+.landing-bar .language-switch:hover {
+  background: var(--surface-3);
+  color: var(--ink);
+}
+.landing-bar .landing-bar-start {
+  margin-left: 6px;
+  padding: 0 16px;
+  font-weight: 600;
+}
+@media (max-width: 520px) {
+  .landing-bar a.landing-link {
+    display: none;
+  }
+}
+
+.landing button:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}

@@ -1,0 +1,106 @@
+/* Floating one-line feedback: never part of the page flow (owner, 2026-10-24). */
+/* Centred with left/right insets and a content-sized width, so a narrow window gives the
+   notice the whole width instead of the half to the right of a 50% anchor (owner 2026-10-28). */
+.floating-notices {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 28px;
+  width: fit-content;
+  margin: 0 auto;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: min(640px, calc(100vw - 32px));
+  pointer-events: none;
+}
+.floating-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  padding: 8px 8px 8px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--surface, var(--surface));
+  color: var(--ink, var(--ink));
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  animation: floating-notice-in 0.16s ease-out;
+}
+.floating-notice > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.floating-notice.error {
+  border-color: color-mix(in srgb, var(--bad) 55%, transparent);
+}
+.floating-notice.warn {
+  border-color: color-mix(in srgb, var(--warn) 55%, transparent);
+}
+.floating-notice > .floating-notice-action {
+  width: auto;
+  min-height: 28px;
+  border: 0;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--surface-3, var(--surface-3));
+  color: var(--ink, var(--ink));
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+@keyframes floating-notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .floating-notice {
+    animation: none;
+  }
+}
+@media (max-width: 760px) {
+  .floating-notices {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+  .floating-notice {
+    border-radius: 16px;
+  }
+  .floating-notice > span {
+    flex: 1;
+    min-width: 0;
+    white-space: normal;
+  }
+}
+
+/* A crashed page: a calm message with a way out, never a blank screen. */
+.page-error {
+  max-width: 460px;
+  margin: 18vh auto 0;
+  padding: 24px;
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  background: var(--surface, var(--surface));
+  color: var(--ink, var(--ink));
+  text-align: center;
+}
+.page-error h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+.page-error p {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+.page-error-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+}

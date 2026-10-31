@@ -13,11 +13,9 @@ import httpx
 
 from .protocol import BackendError, SubmissionUncertain
 from .wangp_contract import (
-    ArtifactDescriptor,
     HostReadiness,
     InputDescriptor,
     OperationReceipt,
-    PreparedRequest,
     canonical_json,
 )
 
@@ -221,6 +219,10 @@ class HTTPWanGPTransport:
     def stage_input(self, descriptor, source, heartbeat=lambda: None):
         if not isinstance(descriptor, InputDescriptor):
             raise ValueError("wangp_invalid_input")
+        signed = getattr(source, "signed_url", None)
+        url = signed() if signed is not None else None
+        if url is not None and self._fetch_input(descriptor, url, heartbeat):
+            return descriptor
 
         def chunks():
             started = time.monotonic()
@@ -266,6 +268,28 @@ class HTTPWanGPTransport:
         except Exception:
             raise BackendError("wangp_input_stage_failed") from None
         return descriptor
+
+    def _fetch_input(self, descriptor, url, heartbeat):
+        """True once the host pulled and verified it; False for an older host."""
+        heartbeat()
+        try:
+            response = self._http().post(
+                "/v1/inputs/" + descriptor.handle + "/fetch",
+                content=canonical_json(
+                    {"input": asdict(descriptor), "url": url}
+                ).encode(),
+                headers={"Content-Type": "application/json"},
+                timeout=self.max_transfer_seconds,
+            )
+            if response.status_code == 404:
+                return False
+            if response.status_code != 200 or response.json() != asdict(descriptor):
+                raise BackendError("wangp_input_stage_failed")
+        except BackendError:
+            raise
+        except Exception:
+            raise BackendError("wangp_input_stage_failed") from None
+        return True
 
     def close(self):
         if self._client is not None:

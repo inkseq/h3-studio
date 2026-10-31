@@ -28,6 +28,16 @@ def _number(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
+def _boot_failed(binding):
+    """The one-shot launch ended in a failure with its processes stopped."""
+    preparation = binding.get("preparation")
+    return (
+        isinstance(preparation, dict)
+        and preparation.get("phase") in {"setup_failed", "failed"}
+        and binding.get("first_runtime_ready_at") is None
+    )
+
+
 def record_engine_progress(repo, queue, lease):
     """Only call after a positively validated running engine receipt."""
     with repo.transaction() as connection:
@@ -120,6 +130,7 @@ def fenced_node_stop(connection, node, intent, *, now=None):
         "capacity_runtime_exceeded",
         "capacity_owner_recovery",
         "capacity_startup_timeout",
+        "capacity_startup_failed",
         "capacity_provider_removed",
         "capacity_dispatch_unavailable",
     }:
@@ -216,6 +227,17 @@ def fenced_node_stop(connection, node, intent, *, now=None):
             or not 0 <= decision_at - observed <= 120
             or node["desired_state"] == "running"
             and not matching_dstack_queued_jobs(connection, intent, node)
+        ):
+            return False
+    elif marker["reason"] == "capacity_startup_failed":
+        # Decided on a failed one-shot launch; a replay sees the phase move on
+        # to stopping, so it re-checks only facts that stay true.
+        binding = node["payload"].get("dstack", {})
+        if (
+            related
+            or workers
+            or binding.get("first_runtime_ready_at") is not None
+            or binding.get("apply_started") is not True
         ):
             return False
     elif marker["reason"] == "capacity_startup_timeout":
@@ -585,6 +607,11 @@ def reclaim_node(service, node, intent):
                     continue  # A live transition won the original row lock.
                 raise
     started = binding.get("apply_started_at")
+    from .dstack_preparation import download_startup_credit
+
+    # Measured on-pace model download time does not count toward the cold
+    # window (#885); a slow or stalled host earns no credit and times out.
+    startup += int(download_startup_credit(binding, now))
     cold_due = (
         binding.get("apply_started") is True
         and _number(started)
@@ -594,12 +621,20 @@ def reclaim_node(service, node, intent):
         and not related
         and node["desired_state"] == "running"
     )
-    if receipts or cold_due or removed:
+    boot_failed = (
+        _boot_failed(binding)
+        and not workers
+        and not related
+        and node["desired_state"] == "running"
+    )
+    if receipts or cold_due or removed or boot_failed:
         reason = (
             receipts[-1]["reason"]
             if receipts
             else "capacity_provider_removed"
             if removed
+            else "capacity_startup_failed"
+            if boot_failed
             else "capacity_startup_timeout"
         )
         stopped = _stop(

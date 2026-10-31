@@ -58,8 +58,8 @@ Work like a good director's assistant:
   the person asks to make/generate the video or says the story is ready; then say they can
   review the cost and confirm. In other turns do not mention confirming or generating;
   instead, when the shots look complete, one chip may offer to make the video.
-- Reply in the person's interface language (given with each message) unless they clearly
-  write whole sentences in another language. Short words like "ok" do not change it. Keep replies short and friendly; no lists of the cards you
+- Reply in the reply language supplied with the latest user message. Short words like
+  "ok" keep the previous content language. Keep replies short and friendly; no lists of the cards you
   made (the cards are shown next to the chat).
 
 Return ONLY one JSON object, no code fences:
@@ -69,7 +69,7 @@ Return ONLY one JSON object, no code fences:
  speech_too_dense|action_density|plot_density], "suggestion": brief re-split advice}]}
 Risk review is advice, never tools/actions. Use [] when no risk is found; include entries
 only for proposed generation shots and one or more of the exact codes (max60 entries,
-suggestion max500 chars). Keep suggestions in the interface language. A proposal still
+suggestion max500 chars). Keep suggestions in the supplied reply language. A proposal still
 requires the person's normal generation confirmation; never claim any job was started.
 
 Tools (use existing card ids exactly as given; new cards use "new:<short-name>" refs that later
@@ -87,6 +87,10 @@ actions in the same turn may reuse):
    (when the person asks for a different, unrelated story: do NOT change this story's cards;
    propose a new story with their idea and say it will open in a new chat. Only rework this
    story when they clearly want to change or replace it)
+{"tool":"set_card_photo","ref":string,"photo":photo id}
+   (when the person says a photo they added shows a character, place or prop, put that
+   photo on its card; the story's photos are listed with ids. You cannot see photos: go by
+   what the person says, and create the card first in the same turn if it is new)
 {"tool":"propose_image","ref":string}
    (only when the person asks to draw or redraw a character, place or prop picture; the
    person confirms it and it costs credits: say they can review and confirm it, never that
@@ -660,6 +664,31 @@ def apply_plan(project, chat, plan, *, model_fresh=True):
             changes.append({"kind": lookup[ident]["type"], "op": "delete", "id": ident})
         elif tool == "propose_new_story":
             new_story = _text(item.get("idea"), 1000)
+        elif tool == "set_card_photo":
+            ident = resolve(item.get("ref"), {"character", "location", "prop"})
+            photo = lookup.get(item.get("photo"))
+            asset_id = (photo or {}).get("data", {}).get("cloudAssetId")
+            if (
+                photo is None
+                or photo["type"] != "image"
+                or photo["id"] in removed
+                or not isinstance(asset_id, str)
+            ):
+                raise StoryChatError(
+                    "story_chat_card_missing", 409, ref=item.get("photo")
+                )
+            from .story_chat_images import attach_actions
+
+            update = attach_actions(project, lookup[ident], asset_id, photo["id"])[1]
+            # Later actions this turn see the card with its new picture.
+            lookup[ident] = {
+                **lookup[ident],
+                "data": {**lookup[ident].get("data", {}), **update["patch"]["data"]},
+            }
+            actions.append(update)
+            if ident not in refs.values():
+                touched.add(ident)
+            changes.append({"kind": lookup[ident]["type"], "op": "update", "id": ident})
         elif tool == "propose_image":
             ident = resolve(item.get("ref"), {"character", "location", "prop"})
             pictures.append(ident)
@@ -781,6 +810,19 @@ def apply_plan(project, chat, plan, *, model_fresh=True):
     return actions, changes, proposal, touched
 
 
+def photos(project, limit=12):
+    """Photos the person added (newest last), so set_card_photo can name one."""
+    found = [
+        {"id": e["id"], "name": e.get("title", "")}
+        for e in project["entities"]
+        if e["type"] == "image"
+        and not retained(e)
+        and e.get("data", {}).get("source") == "upload"
+        and isinstance(e.get("data", {}).get("cloudAssetId"), str)
+    ]
+    return found[-limit:]
+
+
 def prompt_messages(project, chat, text):
     """History plus the current cards, as alternating user/model turns."""
     history = []
@@ -797,10 +839,13 @@ def prompt_messages(project, chat, text):
         "title": project.get("title"),
         "logline": project.get("logline", ""),
         "cards": cards(project, chat),
+        "photos": photos(project),
     }
-    language = "Chinese" if chat.get("language") == "zh" else "English"
+    from .story_chat_advice import turn_chat
+
+    language = "Chinese" if turn_chat(chat, text).get("language") == "zh" else "English"
     current = (
-        f"Interface language: {language}.\n"
+        f"Reply and chip language (latest user message): {language}.\n"
         "Current story cards (JSON, ids are exact):\n"
         + json.dumps(state, ensure_ascii=False)[:30000]
         + "\n\nPerson says:\n"

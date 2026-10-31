@@ -143,9 +143,17 @@ still disclosing expected missing objects/bytes. An older v2 missing count has
 no verified classification and remains actionable. Expected deletion does not
 make `coverage.status` complete or permit claiming full byte recovery.
 
-The existing application alert monitor does not currently ingest backup
-coverage. This format supplies the verified loss classification for the daily
-backup observer; it does not claim a new SNS/CloudWatch alarm has been installed.
-Helper/config upgrades and final candidate acceptance remain separately reviewed
+The host alert monitor reads this coverage only after validating the original
+root completion, receipt and snapshot-manifest hash. `business_backup_loss`
+fires for missing originals, including uploads and generated videos. Regenerable
+model/display/preview/thumb copies are expected missing coverage and do not page;
+roles, never filenames, determine the category. Shared original references still
+page. Older receipts remain immutable and use the current original-only alert
+policy without a historical census or media repair. Copies remain incomplete.
+Invalid/mismatched coverage remains unobservable and cannot resolve an active
+loss incident. Delivery uses the existing durable SNS outbox and deduplication;
+no media keys or customer content enter the notification. A merged source change
+does not install the host helpers or prove notification delivery. Helper/config
+upgrades and final candidate acceptance remain separately reviewed
 operations. Source merge alone does not alter the installed scheduler or replay
 any failed operation.

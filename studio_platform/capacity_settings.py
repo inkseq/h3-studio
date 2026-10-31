@@ -12,6 +12,12 @@ from .repository import request_hash
 
 POLICY_VERSION = 1
 LEGACY_DEMAND_MAX_MACHINES = 2
+OPTIONAL_DEFAULTS = {
+    "first_video_max_seconds": 300,
+    "next_video_interval_seconds": 120,
+    "modal_trigger_seconds": 180,
+    "fair_share": True,
+}
 DEFAULTS = {
     "capacity_policy_version": POLICY_VERSION,
     "tenant_daily_limit_microusd": 100_000_000,
@@ -31,6 +37,7 @@ DEFAULTS = {
     "batch_guaranteed_share_slots": {"numerator": 1, "denominator": 4},
     "per_user_machine_share_policy": "equal_active_users",
     "per_user_minimum_machine_share": 1,
+    **OPTIONAL_DEFAULTS,
 }
 FIELD_BOUNDS = {
     "tenant_daily_limit_microusd": (1_000_000, 1_000_000_000),
@@ -40,13 +47,16 @@ FIELD_BOUNDS = {
     "max_machines": (1, 10),
     "idle_shutdown_seconds": (1, 86400),
     "max_runtime_seconds": (300, 14400),
-    "test_task_limit_microusd": (1_000_000, 20_000_000),
+    "test_task_limit_microusd": (1_000_000, 50_000_000),
     "idle_active_seconds": (60, 3600),
     "idle_quiet_seconds": (60, 1800),
     "interactive_activity_window_seconds": (60, 7200),
     "interactive_wait_target_seconds": (30, 1800),
     "batch_start_target_seconds": (60, 7200),
     "per_user_minimum_machine_share": (1, 10),
+    "first_video_max_seconds": (30, 3600),
+    "next_video_interval_seconds": (30, 3600),
+    "modal_trigger_seconds": (1, 3600),
 }
 LEGACY_FIELDS = frozenset(
     {
@@ -65,8 +75,10 @@ PENDING_FIELDS = frozenset(
         "interactive_wait_target_seconds",
         "batch_start_target_seconds",
         "batch_guaranteed_share_slots",
-        "per_user_machine_share_policy",
         "per_user_minimum_machine_share",
+        "first_video_max_seconds",
+        "next_video_interval_seconds",
+        "modal_trigger_seconds",
     }
 )
 DANGEROUS_FIELDS = frozenset(
@@ -133,7 +145,9 @@ def validate_snapshot(snapshot):
         or type(snapshot["capacity_policy_version"]) is not int
         or snapshot["capacity_policy_version"] != POLICY_VERSION
         or not isinstance(snapshot["value"], dict)
-        or set(snapshot["value"]) != set(DEFAULTS)
+        or not (set(DEFAULTS) - set(OPTIONAL_DEFAULTS))
+        <= set(snapshot["value"])
+        <= set(DEFAULTS)
     ):
         raise ValueError("capacity_policy_snapshot_invalid")
     value = snapshot["value"]
@@ -153,6 +167,34 @@ def validate_snapshot(snapshot):
     except CapacitySettingsError:
         raise ValueError("capacity_policy_snapshot_invalid") from None
     return copy.deepcopy(value)
+
+
+def reservation_provenance(
+    snapshot, proof, scope, pool, provider, *, continuing, gpus, slots, usage
+):
+    """Distinct native continuing and Modal finite original capacity authority."""
+    value = validate_snapshot(snapshot)
+    if (
+        not isinstance(proof, dict)
+        or proof
+        != {
+            "capacity_backend": "dstack-v1" if continuing else "modal-v1",
+            "lifecycle_version": 2,
+            "tenant_id": scope.tenant_id,
+            "owner_id": scope.owner_id,
+            "project_id": scope.project_id,
+            "pool": pool,
+            "provider": provider,
+        }
+        or type(proof.get("lifecycle_version")) is not int
+        or provider
+        not in ({"vast", "runpod", "lium", "cloudrift"} if continuing else {"modal"})
+        or gpus != 1
+        or slots != 1
+        or usage is None
+    ):
+        raise ValueError("capacity_admission_provenance_invalid")
+    return value
 
 
 def normalize_changes(changes):
@@ -195,7 +237,11 @@ def candidate_value(stored, changes):
             key not in previous or not _same(value, previous[key])
         ):
             _invalid(key, reason="unknown_field")
-    candidate = copy.deepcopy(DEFAULTS)
+    # New controls are opt-in. Do not change old authority snapshots or adopt
+    # these recommendations as a side effect of an unrelated settings write.
+    candidate = copy.deepcopy(
+        {key: value for key, value in DEFAULTS.items() if key not in OPTIONAL_DEFAULTS}
+    )
     candidate.update(copy.deepcopy(previous))
     for key, value in changes.items():
         if key in {"mode_hourly_ceiling_microusd", "batch_guaranteed_share_slots"}:
@@ -211,7 +257,9 @@ def candidate_value(stored, changes):
     ):
         _invalid("capacity_policy_version", allowed=[POLICY_VERSION])
     changed = sorted(
-        key for key in candidate if not _same(candidate[key], previous.get(key))
+        key
+        for key in candidate
+        if key not in previous or not _same(candidate[key], previous[key])
     )
     for key in changed:
         value = candidate[key]
@@ -234,6 +282,8 @@ def candidate_value(stored, changes):
             _number(key + ".numerator", value["numerator"], 1, value["denominator"])
         elif key == "per_user_machine_share_policy" and value != "equal_active_users":
             _invalid(key, allowed=["equal_active_users"])
+        elif key == "fair_share" and type(value) is not bool:
+            _invalid(key, type="boolean")
     for fields, condition, field in (
         (
             {"mode_hourly_ceiling_microusd"},
@@ -257,6 +307,13 @@ def candidate_value(stored, changes):
     ):
         if fields.intersection(changed) and not condition:
             _invalid(field, reason="cross_field_constraint")
+    targets = {"first_video_max_seconds", "modal_trigger_seconds"}
+    if (
+        targets <= candidate.keys()
+        and targets.intersection(changed)
+        and candidate["modal_trigger_seconds"] > candidate["first_video_max_seconds"]
+    ):
+        _invalid("modal_trigger_seconds", reason="above_first_video_target")
     return candidate, changed
 
 
@@ -345,7 +402,9 @@ def confirmation_digest(
 def preview_change(stored, changes, profile_snapshots):
     value, changed = candidate_value(stored, changes)
     effects = consequences(value, changed, profile_snapshots)
-    required = not adopted(stored) or bool(DANGEROUS_FIELDS.intersection(changed))
+    required = not adopted(stored) or bool(
+        (DANGEROUS_FIELDS | OPTIONAL_DEFAULTS.keys()).intersection(changed)
+    )
     return {
         "expected_version": stored["version"],
         "value": value,
@@ -383,6 +442,7 @@ def metadata(stored, latest_changes=None):
                 "denominator_maximum": 16,
             },
             "per_user_machine_share_policy": {"allowed": ["equal_active_users"]},
+            "fair_share": {"type": "boolean"},
         }
     )
     return {

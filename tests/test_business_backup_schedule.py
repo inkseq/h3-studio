@@ -303,5 +303,269 @@ class ScheduleTests(unittest.TestCase):
                     host.check_history(root, '2026-10-16')
 
 
+class ReconciledCaptureHistoryTests(unittest.TestCase):
+    def setUp(self):
+        import hashlib
+
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name)
+        self.prior = self.root / host.FAILED_CAPTURE_DAY
+        self.prior.mkdir()
+        (self.prior / 'oom-recovery').mkdir()
+        originals = {}
+        for name in host.FAILED_CAPTURE_FILES:
+            raw = json.dumps({'synthetic_original': name}).encode()
+            (self.prior / name).write_bytes(raw)
+            originals[name] = hashlib.sha256(raw).hexdigest()
+        self.cfg = dict(
+            environment='production',
+            instance_id=host.HOSTS['production'],
+            target={'bucket': 'sixnine-business-backup-829135631045-ap-southeast-1'},
+        )
+        self.ack = dict(
+            version=1,
+            state='failed_capture_reconciled_not_completed',
+            day=host.FAILED_CAPTURE_DAY,
+            operation_id=host.FAILED_CAPTURE_NONCE,
+            evidence=originals,
+            bucket=self.cfg['target']['bucket'],
+            prefix='business-backups/' + host.FAILED_CAPTURE_NONCE + '/',
+            versions=0,
+            delete_markers=0,
+            checked_at='2026-10-27T00:55:00Z',
+            release='a' * 40,
+            image='sha256:' + 'b' * 64,
+            zero_work=True,
+            no_writer_or_transport=True,
+            partials_preserved=True,
+            automatic_retry=False,
+        )
+        self.path = self.prior / host.FAILED_CAPTURE_ACK
+        self.write_ack()
+        for item in (
+            mock.patch.object(host, 'FAILED_CAPTURE_FILES', originals),
+            mock.patch.object(host, 'protected', side_effect=lambda p, *a: Path(p)),
+            mock.patch.object(host, 'datetime', wraps=host.datetime),
+        ):
+            item.start()
+            self.addCleanup(item.stop)
+        # Fixed clock avoids depending on the developer's local date.
+        host.datetime.now.return_value = host.datetime.fromisoformat(
+            '2026-10-27T01:00:00+00:00'
+        )
+
+    def write_ack(self):
+        self.path.write_text(json.dumps(self.ack))
+
+    def check(self, day='2026-10-27', config=None):
+        return host.check_history(
+            self.root, day, self.cfg if config is None else config
+        )
+
+    def test_explicit_ack_allows_only_future_day_without_marking_old_complete(self):
+        before = {str(p): p.read_bytes() for p in self.prior.rglob('*') if p.is_file()}
+        self.assertFalse(self.check())
+        self.assertFalse(self.check('2026-10-28'))
+        self.assertEqual(
+            before,
+            {str(p): p.read_bytes() for p in self.prior.rglob('*') if p.is_file()},
+        )
+        self.assertFalse((self.prior / 'completed.json').exists())
+        self.assertFalse((self.root / '2026-10-27').exists())
+        for day in ('2026-10-26', '2026-10-25'):
+            with self.assertRaisesRegex(ValueError, 'day_refused'):
+                self.check(day)
+
+    def test_no_ack_or_unrelated_unknown_day_still_blocks(self):
+        self.path.unlink()
+        with self.assertRaisesRegex(ValueError, 'prior_outcome'):
+            self.check()
+        self.write_ack()
+        unknown = self.root / '2026-10-25'
+        unknown.mkdir()
+        with self.assertRaisesRegex(ValueError, 'prior_outcome'):
+            self.check()
+
+    def test_same_ack_cannot_be_transplanted_to_another_day_or_host(self):
+        for cfg in (
+            {},
+            {**self.cfg, 'environment': 'staging'},
+            {**self.cfg, 'instance_id': host.HOSTS['staging']},
+            {**self.cfg, 'target': {'bucket': 'different-business-backup'}},
+        ):
+            with self.assertRaises(ValueError):
+                self.check(config=cfg)
+        moved = self.root / '2026-10-25'
+        self.prior.rename(moved)
+        with self.assertRaisesRegex(ValueError, 'day_refused'):
+            self.check()
+
+    def test_changed_remote_proof_or_attestation_refuses(self):
+        original = copy.deepcopy(self.ack)
+        for field, bad in (
+            ('operation_id', 'other-nonce'),
+            ('evidence', {}),
+            ('versions', 1),
+            ('versions', False),
+            ('delete_markers', 1),
+            ('version', True),
+            ('prefix', 'other-prefix/'),
+            ('bucket', 'different-business-backup'),
+            ('zero_work', False),
+            ('no_writer_or_transport', False),
+            ('partials_preserved', False),
+            ('automatic_retry', True),
+            ('state', 'completed'),
+            ('release', 'main'),
+            ('image', 'latest'),
+            ('checked_at', '2026-10-26T20:00:00Z'),
+            ('checked_at', '2026-10-28T00:00:00Z'),
+            ('checked_at', '2026-10-27'),
+        ):
+            with self.subTest(field=field, bad=bad):
+                self.ack = {**original, field: bad}
+                self.write_ack()
+                with self.assertRaises(ValueError):
+                    self.check()
+        self.ack = {**original, 'ignore_history': True}
+        self.write_ack()
+        with self.assertRaises(ValueError):
+            self.check()
+
+    def test_changed_missing_or_additional_original_evidence_refuses(self):
+        for name in host.FAILED_CAPTURE_FILES:
+            p = self.prior / name
+            raw = p.read_bytes()
+            p.write_bytes(raw + b' ')
+            with self.assertRaisesRegex(ValueError, 'evidence_changed'):
+                self.check()
+            p.unlink()
+            with self.assertRaisesRegex(ValueError, 'evidence_changed'):
+                self.check()
+            p.write_bytes(raw)
+        for name in (
+            'target.json',
+            'receipt.json',
+            'phase-transfer-started.json',
+            'output',
+        ):
+            extra = self.prior / name
+            extra.write_text('{}')
+            with self.assertRaisesRegex(ValueError, 'evidence_changed'):
+                self.check()
+            extra.unlink()
+
+    def test_ack_uses_protected_reader_and_does_not_override_bad_completion(self):
+        def protected(path, *args):
+            if Path(path) == self.path:
+                raise ValueError('backup_path_unprotected')
+            return Path(path)
+
+        with mock.patch.object(host, 'protected', side_effect=protected):
+            with self.assertRaisesRegex(ValueError, 'path_unprotected'):
+                self.check()
+        (self.prior / 'completed.json').write_text('{}')
+        with self.assertRaisesRegex(ValueError, 'prior_receipt_invalid'):
+            self.check()
+
+
+class October27CaptureHistoryTests(unittest.TestCase):
+    setUp = ReconciledCaptureHistoryTests.setUp
+    write_ack = ReconciledCaptureHistoryTests.write_ack
+    check = ReconciledCaptureHistoryTests.check
+
+    def add_oct27(self):
+        import hashlib
+
+        prior = self.root / '2026-10-27'
+        prior.mkdir()
+        files = {}
+        for name in host.OCT27_CAPTURE_FILES:
+            raw = json.dumps({'oct27_original': name}).encode()
+            (prior / name).write_bytes(raw)
+            files[name] = hashlib.sha256(raw).hexdigest()
+        value = {
+            **self.ack,
+            'day': prior.name,
+            'operation_id': host.OCT27_CAPTURE_NONCE,
+            'prefix': 'business-backups/' + host.OCT27_CAPTURE_NONCE + '/',
+            'evidence': files,
+            'checked_at': '2026-10-27T16:40:00Z',
+        }
+        path = prior / host.FAILED_CAPTURE_ACK
+        path.write_text(json.dumps(value))
+        patch = mock.patch.object(host, 'OCT27_CAPTURE_FILES', files)
+        patch.start()
+        self.addCleanup(patch.stop)
+        host.datetime.now.return_value = host.datetime.fromisoformat(
+            '2026-10-27T17:00:00+00:00'
+        )
+        return prior, path, value
+
+    def test_both_exact_failures_allow_future_day_without_completion_or_replay(self):
+        prior, _, _ = self.add_oct27()
+        before = {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
+        self.assertFalse(self.check('2026-10-28'))
+        self.assertEqual(
+            before,
+            {str(p): p.read_bytes() for p in self.root.rglob('*') if p.is_file()},
+        )
+        self.assertFalse((prior / 'completed.json').exists())
+        self.assertFalse((self.root / '2026-10-28').exists())
+        with self.assertRaisesRegex(ValueError, 'day_refused'):
+            self.check('2026-10-27')
+
+    def test_old_ack_does_not_cover_new_failure_or_an_unknown_day(self):
+        prior, path, value = self.add_oct27()
+        path.unlink()
+        with self.assertRaisesRegex(ValueError, 'prior_outcome'):
+            self.check('2026-10-28')
+        path.write_text(json.dumps(self.ack))
+        with self.assertRaisesRegex(ValueError, 'ack_invalid'):
+            self.check('2026-10-28')
+        path.write_text(json.dumps(value))
+        prior.rename(self.root / '2026-10-25')
+        with self.assertRaisesRegex(ValueError, 'day_refused'):
+            self.check('2026-10-28')
+
+    def test_new_failure_requires_its_own_fresh_negative_proof(self):
+        _, path, value = self.add_oct27()
+        for field, bad in (
+            ('checked_at', '2026-10-27T16:34:49Z'),
+            ('checked_at', '2026-10-27T18:00:00Z'),
+            ('versions', 1),
+            ('versions', False),
+            ('delete_markers', 1),
+            ('evidence', self.ack['evidence']),
+            ('operation_id', host.FAILED_CAPTURE_NONCE),
+        ):
+            with self.subTest(field=field, bad=bad):
+                path.write_text(json.dumps({**value, field: bad}))
+                with self.assertRaises(ValueError):
+                    self.check('2026-10-28')
+
+    def test_new_handoff_transport_or_modified_metadata_refuses(self):
+        prior, _, _ = self.add_oct27()
+        for name in host.OCT27_CAPTURE_FILES:
+            path = prior / name
+            raw = path.read_bytes()
+            path.write_bytes(raw + b' ')
+            with self.assertRaisesRegex(ValueError, 'evidence_changed'):
+                self.check('2026-10-28')
+            path.write_bytes(raw)
+        for name in (
+            'phase-handoff-started.json',
+            'target.json',
+            'output',
+            'oom-recovery',
+        ):
+            path = prior / name
+            path.write_text('{}')
+            with self.assertRaisesRegex(ValueError, 'evidence_changed'):
+                self.check('2026-10-28')
+            path.unlink()
+
+
 if __name__ == '__main__':
     unittest.main()
