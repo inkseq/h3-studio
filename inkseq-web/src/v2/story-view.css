@@ -123,6 +123,26 @@
   border-radius: 4px;
   padding: 1px 4px;
 }
+/* The in-use dot and the quality badge share one 6 px inset and one 16 px row, so the dot
+   sits on the badge's midline (owner 2026-10-31); the caption rule above must not pad them. */
+.sb-workspace .storyboard-takes .ver > .take-q {
+  top: 6px;
+  right: 6px;
+  height: 16px;
+  padding: 0 5px;
+  line-height: 16px;
+  font-size: 10px;
+  overflow: visible;
+}
+.sb-workspace .storyboard-takes .ver > em.chosen-dot {
+  top: 9px;
+  left: 6px;
+  padding: 0;
+}
+.sb-workspace .storyboard-takes .ver:is(:hover, :focus-visible) > em.chosen-dot {
+  top: 6px;
+  padding: 0 6px;
+}
 /* The old-Quick-Create tag is quieter and sits at the bottom; reset the top inset, otherwise
    top + bottom stretch it over the whole thumbnail. */
 .sb-workspace .storyboard-takes .ver > em.ver-legacy {
