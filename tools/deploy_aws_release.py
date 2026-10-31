@@ -15,6 +15,15 @@ DOCUMENT = 'Sixnine-DeployApprovedRelease'
 STAGING_INSTANCE = 'i-07805df7bd6984bd9'
 COMMIT = re.compile(r'[0-9a-f]{40}\Z')
 COMMAND_ID = re.compile(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\Z')
+# The host helper's only stderr shape: one closed code and a fixed sentence.
+HOST_REFUSAL = re.compile(r'([a-z][a-z0-9_]{0,79}); preserve and inspect the original candidate/command\s')
+LOCK_BUSY = 'environment_release_lock_busy'
+LOCK_RETRY_SECONDS = 60
+
+
+def host_code(invocation):
+    found = HOST_REFUSAL.match(invocation.get('StandardErrorContent') or '')
+    return found.group(1) if found else 'unknown'
 
 
 def deploy(commit, *, resume_command=None, frontend=False, target='production', promote=False,
@@ -38,19 +47,21 @@ def deploy(commit, *, resume_command=None, frontend=False, target='production', 
         document, plugin, receipt_state = ('Inkseq-PromoteAcceptedRelease', 'promoteAcceptedCommit', 'accepted_artifacts_promoted')
     api = api or boto3.client('ssm', region_name=REGION, endpoint_url='https://ssm.ap-southeast-1.amazonaws.com',
         config=Config(connect_timeout=10, read_timeout=30, retries={'mode': 'standard', 'total_max_attempts': 1}))
-    command_id = resume_command
-    if command_id is None:
+    def submit():
         # SendCommand has no idempotency token. Do not retry a lost response
         # automatically: the same approved commit is idempotent at the host.
         try:
             response = api.send_command(InstanceIds=[instance], DocumentName=document, DocumentVersion=document_version,
                 Parameters={'Commit': [commit]}, TimeoutSeconds=120, MaxConcurrency='1', MaxErrors='0',
                 Comment='Deploy independently approved Sixnine commit '+commit)
-            command_id = response['Command']['CommandId']
+            submitted = response['Command']['CommandId']
         except Exception:
             raise RuntimeError('Submission outcome unknown; operator must reconcile the same commit before resubmission') from None
-        if not COMMAND_ID.fullmatch(command_id):
+        if not COMMAND_ID.fullmatch(submitted):
             raise RuntimeError('Deployment command response invalid; reconcile host state')
+        return submitted
+
+    command_id = resume_command or submit()
     print(json.dumps({'state': 'deployment_command_pending', 'commit': commit, 'command_id': command_id}), flush=True)
     deadline = clock()+timeout
     while clock() < deadline:
@@ -81,7 +92,17 @@ def deploy(commit, *, resume_command=None, frontend=False, target='production', 
             print(json.dumps(result))
             return result
         if status in {'Cancelled', 'TimedOut', 'Failed', 'Cancelling'}:
-            raise RuntimeError('Deployment did not complete; preserve host state and reconcile the same commit')
+            code = host_code(invocation) if status == 'Failed' else status.lower()
+            if code == LOCK_BUSY and target == 'staging' and clock()+LOCK_RETRY_SECONDS < deadline:
+                # The helper refused before any change: another release or a
+                # maintenance run holds release.lock. Queue behind it instead.
+                print(json.dumps({'state': 'release_lock_busy_waiting', 'commit': commit}), flush=True)
+                sleep(LOCK_RETRY_SECONDS)
+                command_id = submit()
+                print(json.dumps({'state': 'deployment_command_pending', 'commit': commit,
+                                  'command_id': command_id}), flush=True)
+                continue
+            raise RuntimeError(f'Deployment did not complete ({code}); preserve host state and reconcile the same commit')
         if status not in {'Pending', 'InProgress', 'Delayed'}:
             raise RuntimeError('Unknown deployment status; resume the same command ID')
         sleep(5)

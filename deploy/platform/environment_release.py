@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sys
 import tempfile
 
@@ -147,7 +148,12 @@ def main(argv=None):
             'current_application_requires_reconciliation', 'migration_root_helpers_need_reviewed_update',
             'environment_release_wrong_host', 'staging_target_invalid', 'invalid_commit',
             'independent_promotion_approval_required'}
-        code = str(error) if isinstance(error, release.ReleaseError) and str(error) in safe else (
+        # Every ReleaseError is a static code (require(condition, 'code')), so a
+        # plain identifier is safe to name; free text still collapses. A disk
+        # headroom refusal used to print only environment_release_failed.
+        named = isinstance(error, release.ReleaseError) and (
+            str(error) in safe or re.fullmatch(r'[a-z][a-z0-9_]{0,79}', str(error)))
+        code = str(error) if named else (
             'environment_release_lock_busy' if isinstance(error, BlockingIOError) else 'environment_release_failed')
         print(code+'; preserve and inspect the original candidate/command', file=sys.stderr)
         return 1

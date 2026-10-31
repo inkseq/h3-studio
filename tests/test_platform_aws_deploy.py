@@ -85,6 +85,68 @@ class RunnerTests(unittest.TestCase):
         self.assertNotIn('synthetic-private-output', out.getvalue())
         self.assertEqual(api.send_command.call_count, 1)
 
+    def test_staging_queues_behind_a_busy_release_lock(self):
+        busy = {
+            'Status': 'Failed',
+            'StandardErrorContent': 'environment_release_lock_busy; preserve and inspect '
+            'the original candidate/command\nfailed to run commands: exit status 1',
+        }
+        staged = {
+            'Status': 'Success',
+            'DocumentName': 'Inkseq-DeployStagingRelease',
+            'DocumentVersion': '1',
+            'StandardOutputContent': json.dumps(
+                {
+                    'state': 'staging_release_healthy',
+                    'commit': COMMIT,
+                    'candidate_sha256': 'c' * 64,
+                }
+            ),
+        }
+        api = self.api([busy, staged])
+        waits = []
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            result = runner.deploy(
+                COMMIT, target='staging', api=api, sleep=waits.append
+            )
+        self.assertEqual(result['state'], 'deployment_completed')
+        self.assertEqual(api.send_command.call_count, 2)
+        self.assertEqual(waits, [runner.LOCK_RETRY_SECONDS])
+        self.assertIn('release_lock_busy_waiting', out.getvalue())
+        # Production never resubmits on its own; the closed code is reported.
+        api = self.api([busy])
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(RuntimeError, 'environment_release_lock_busy'),
+        ):
+            runner.deploy(COMMIT, api=api, sleep=lambda _: None)
+        self.assertEqual(api.send_command.call_count, 1)
+
+    def test_failure_names_only_the_host_closed_code(self):
+        refusal = {
+            'Status': 'Failed',
+            'StandardErrorContent': 'staging_compact_release_disk_headroom; preserve and '
+            'inspect the original candidate/command\n',
+        }
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(
+                RuntimeError, r'\(staging_compact_release_disk_headroom\)'
+            ),
+        ):
+            runner.deploy(
+                COMMIT, target='staging', api=self.api([refusal]), sleep=lambda _: None
+            )
+        private = {
+            'Status': 'Failed',
+            'StandardErrorContent': 'secret_path; something else',
+        }
+        with (
+            contextlib.redirect_stdout(io.StringIO()),
+            self.assertRaisesRegex(RuntimeError, r'\(unknown\)'),
+        ):
+            runner.deploy(COMMIT, api=self.api([private]), sleep=lambda _: None)
+
     def test_lost_send_response_not_retried_automatically(self):
         api = mock.Mock()
         api.send_command.side_effect = TimeoutError('synthetic-freeform-error')
