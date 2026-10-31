@@ -328,6 +328,14 @@ class CandidateTests(unittest.TestCase):
                 ),
                 'another_environment_release_requires_reconciliation',
             ),
+            (
+                host.release.ReleaseError('staging_compact_release_disk_headroom'),
+                'staging_compact_release_disk_headroom',
+            ),
+            (
+                host.release.ReleaseError('private-path /srv/x'),
+                'environment_release_failed',
+            ),
             (BlockingIOError('private-path'), 'environment_release_lock_busy'),
             (RuntimeError('private-provider-payload'), 'environment_release_failed'),
         ):
