@@ -10,6 +10,7 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { StoryboardVideo, StoryboardAssetImage } from './StoryboardMedia.jsx';
 import { recipeChanges } from './storyboard-selection.js';
+import { takeName } from './enhance-take.js';
 import { segmentsAction } from './shot-segments.js';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
@@ -322,10 +323,13 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     <div className="row tight">
                       <b>
                         {index ? 'B' : 'A'} ·{' '}
-                        {row?.title ||
-                          (Number.isInteger(v?.n)
+                        {takeName(
+                          row?.title,
+                          v,
+                          Number.isInteger(v?.n)
                             ? 'v' + v.n
-                            : versionTime(row?.created_at, locale, t))}
+                            : versionTime(row?.created_at, locale, t),
+                        )}
                       </b>
                       <div className="spacer" />
                       <Button
@@ -385,8 +389,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     <StoryboardVideo asset={v.asset || v} muted />
                   )}
                   <span>
-                    {row.title ||
-                      (Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t))}
+                    {takeName(
+                      row.title,
+                      v,
+                      Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t),
+                    )}
                     {row.starred && <Star size={11} aria-label={t('workbench.star')} />}
                   </span>
                   <ReviewBadges review={reviewOf(row.id)} />
@@ -427,7 +434,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                 className="take-thumb"
                 role="button"
                 tabIndex={0}
-                aria-label={row.title || versionTime(row.created_at, locale, t)}
+                aria-label={takeName(row.title, v, versionTime(row.created_at, locale, t))}
                 onClick={preview}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -469,8 +476,11 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
               <div className="take-info">
                 <span className="take-name">
                   <b>
-                    {row.title ||
-                      (Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t))}
+                    {takeName(
+                      row.title,
+                      v,
+                      Number.isInteger(v.n) ? 'v' + v.n : versionTime(row.created_at, locale, t),
+                    )}
                   </b>
                   <IconButton
                     size="xs"
