@@ -20,6 +20,7 @@ def _selected(path):
         "/v1/guided-schema",
         "/v1/generation-plans",
         "/v1/render-plans",
+        "/v1/enhance-plans",
         "/v1/generations/preflight",
         "/v1/generations",
         "/v1/generations/queue-position",

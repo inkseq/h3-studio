@@ -805,6 +805,48 @@ class QualityViewTests(unittest.TestCase):
         self.assertNotIn(PROFILE, json.dumps(shown))
         self.assertEqual(preflight, original)
 
+    def test_flat_tuning_and_failure_controls_stay_internal(self):
+        # Found in a qa-user's /v1/jobs (#898): flat requests carried steps and
+        # sampler shifts, failure diagnostics their controls.
+        raw = {
+            "jobs": [
+                {
+                    "id": "job",
+                    "status": "failed",
+                    "effective_request": {
+                        "prompt": "Prompt",
+                        "duration": 5,
+                        "seed": 7,
+                        "steps": 5,
+                        "sampler_name": "euler",
+                        "scheduler": "auto",
+                        "shift_video": 12,
+                        "shift_audio": 3,
+                        "step_skipping": "none",
+                    },
+                    "result": {
+                        "actual_cost_microusd": 517054,
+                        "billing_status": "settled",
+                        "failure_diagnostic": {
+                            "reason_code": "upstream_generation_failed",
+                            "controls": {"steps": 5, "seed": 7, "shift_video": 12},
+                        },
+                    },
+                }
+            ]
+        }
+        shown = views.envelope(raw, USER)["jobs"][0]
+        self.assertEqual(
+            shown["effective_request"], {"prompt": "Prompt", "duration": 5, "seed": 7}
+        )
+        # The job's own cost stays visible (USD admission bills it).
+        self.assertEqual(shown["result"]["actual_cost_microusd"], 517054)
+        self.assertEqual(shown["result"]["failure_diagnostic"]["controls"], {"seed": 7})
+        self.assertEqual(views.envelope(raw, ADMIN), raw)
+        self.assertNotIn(
+            "max_steps", views._envelope({"max_steps": 100, "max_pixels": 1})
+        )
+
     def test_nested_error_and_entity_envelopes_keep_user_text_and_hide_managed_details(
         self,
     ):
