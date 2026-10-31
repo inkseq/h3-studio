@@ -103,3 +103,23 @@ class EntryTests(unittest.TestCase):
     def test_import_and_context_build_do_not_call_model_or_cloud(self):
         with patch('subprocess.run', side_effect=AssertionError('network_or_build')):
             build(self.root / 'offline')
+
+
+class GpuDetectionTests(unittest.TestCase):
+    def test_only_an_l40s_takes_the_l40s_admission(self):
+        from types import SimpleNamespace
+
+        from studio_platform.modal_entry import gpu_is_l40s
+
+        def reports(name):
+            return lambda *args, **kwargs: SimpleNamespace(stdout=name + "\n")
+
+        self.assertTrue(gpu_is_l40s(run=reports("NVIDIA L40S")))
+        self.assertFalse(
+            gpu_is_l40s(run=reports("NVIDIA RTX PRO 6000 Blackwell Server Edition"))
+        )
+
+        def broken(*args, **kwargs):
+            raise OSError("nvidia-smi missing")
+
+        self.assertTrue(gpu_is_l40s(run=broken))
