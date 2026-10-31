@@ -165,7 +165,7 @@ def install(config, slot_key, token_file, *, launch=True):
         if phase != last_phase:
             phase_started_unix = now
         last_phase = phase
-        for name in ("bytes_complete", "bytes_total", "files_complete", "files_total"):
+        for name in ("bytes_complete", "bytes_received", "bytes_total", "files_complete", "files_total"):
             if name in fields:
                 download_progress[name] = fields[name]
         value = {"phase": phase, "updated_unix": now, "phase_started_unix": phase_started_unix,

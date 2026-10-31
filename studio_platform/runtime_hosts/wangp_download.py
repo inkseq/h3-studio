@@ -598,6 +598,32 @@ def cache_size(root):
     return size
 
 
+def partial_bytes(root):
+    """Bytes of in-flight SDK HTTP transfers, or None before any is visible.
+
+    With Xet disabled the SDK appends to `.incomplete` files under the local
+    directory's `.cache/huggingface/download`; their size is received bytes.
+    """
+    folder = root / ".cache" / "huggingface" / "download"
+    if os.environ.get("HF_HUB_DISABLE_XET") != "1" or not folder.is_dir():
+        return None
+    size = count = 0
+    found = False
+    for parent, dirs, files in os.walk(folder, followlinks=False):
+        count += len(dirs) + len(files)
+        if count > 4096:
+            return None
+        for name in files:
+            path = Path(parent) / name
+            if name.endswith(".incomplete") and not path.is_symlink():
+                try:
+                    size += path.lstat().st_size
+                    found = True
+                except FileNotFoundError:
+                    pass  # The SDK renamed it to its final path meanwhile.
+    return size if found else None
+
+
 def fetch_files(
     document,
     expected_digest,
@@ -607,6 +633,7 @@ def fetch_files(
     workers=2,
     downloader=None,
     sleep=time.sleep,
+    tick_seconds=10,
 ):
     records = selected_files(document, expected_digest)
     locator_revision = _content_preserving_revision(document, expected_digest, records)
@@ -634,22 +661,40 @@ def fetch_files(
     completed = set()
     failure = None
     total = sum(row[4] for row in records)
+    measured = False  # Received bytes are reported only once partials are seen.
 
     def progress(state, code=None):
+        nonlocal measured
+        complete = sum(row[4] for row in records if row[3] in completed)
         value = {
             "state": state,
             "manifest_digest": expected_digest,
             "files_complete": len(completed),
             "files_total": len(records),
-            "bytes_complete": sum(row[4] for row in records if row[3] in completed),
+            "bytes_complete": complete,
             "bytes_total": total,
             "inference_verified": False,
         }
+        partial = partial_bytes(root) if state == "downloading" else None
+        measured = measured or partial is not None
+        if measured:
+            # A finished file may briefly appear both renamed and incomplete.
+            value["bytes_received"] = min(total, complete + (partial or 0))
         if code:
             value["code"] = code
         write_progress(progress_path, value)
 
     progress("downloading")
+    ticking = threading.Event()
+
+    def ticker():
+        # Live received bytes let the controller judge speed between files.
+        while not ticking.wait(tick_seconds):
+            with lock:
+                if failure is None:
+                    progress("downloading")
+
+    threading.Thread(target=ticker, daemon=True).start()
 
     def fetch(record):
         nonlocal failure
@@ -700,9 +745,12 @@ def fetch_files(
             list(pool.map(fetch, records))
     except Exception as error:
         with lock:
+            ticking.set()
             progress("failed", safe_error(error))
         raise ValueError(safe_error(error)) from None
-    progress("downloaded_unverified")
+    with lock:
+        ticking.set()
+        progress("downloaded_unverified")
 
 
 def stop_child(child):
@@ -814,6 +862,7 @@ def run_download(
                     "files_total",
                     "bytes_complete",
                     "bytes_total",
+                    "bytes_received",
                     "inference_verified",
                     "code",
                 }
@@ -827,6 +876,13 @@ def run_download(
                 or not 0 <= value["files_complete"] <= len(records)
                 or type(value.get("bytes_complete")) is not int
                 or not 0 <= value["bytes_complete"] <= value["bytes_total"]
+                or "bytes_received" in value
+                and (
+                    type(value["bytes_received"]) is not int
+                    or not value["bytes_complete"]
+                    <= value["bytes_received"]
+                    <= value["bytes_total"]
+                )
                 or value.get("code", "model_download_failed") not in SAFE_ERRORS
             ):
                 raise ValueError("model_download_progress_invalid")
@@ -861,6 +917,11 @@ def run_download(
                     files_total=value["files_total"],
                     bytes_complete=value["bytes_complete"],
                     bytes_total=value["bytes_total"],
+                    **(
+                        {"bytes_received": value["bytes_received"]}
+                        if "bytes_received" in value
+                        else {}
+                    ),
                 )
                 last = value
             result = child.poll()

@@ -138,6 +138,7 @@ def native_preparation(value):
                 key: download.get(key)
                 for key in (
                     "bytes_complete",
+                    "bytes_received",
                     "bytes_total",
                     "files_complete",
                     "files_total",

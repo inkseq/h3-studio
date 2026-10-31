@@ -1429,16 +1429,47 @@ class DstackOperator:
 
         return summary(self, connection, now)
 
-    def record_download_timebox(self, connection, current, intent, now):
+    def record_download_timebox(
+        self, connection, current, intent, now, *, reason_code=None
+    ):
         """Journal an owned cold stop on the original job and host history.
 
         The controller rechecks its cold/no-execution fence under this same
         capacity lock. This callback never starts/stops a provider or settles
-        money; the original stop path owns those operations.
+        money; the original stop path owns those operations. A measured slow
+        download is stopped even without a bound demand job or physical host;
+        with a bound Vast machine it is also denied until an admin restores it.
         """
+        from .dstack_demand_start import DOWNLOAD_TIMEBOX, DOWNLOAD_TOO_SLOW
+
+        reason_code = reason_code or DOWNLOAD_TIMEBOX
+        require(
+            reason_code in {DOWNLOAD_TIMEBOX, DOWNLOAD_TOO_SLOW},
+            "dstack_download_stop_reason_invalid",
+        )
+        payload = self._journal_download_stop(
+            connection, current, intent, now, reason_code
+        )
+        if reason_code != DOWNLOAD_TOO_SLOW:
+            return payload
+        from .host_policy import HostPolicyStore, bound_observation
+
+        physical = bound_observation(current, now=now)
+        if (
+            physical is not None
+            and physical['provider_instance_id'] == intent['provider_instance_id']
+        ):
+            HostPolicyStore(self.repo, self.settings.tenant_id).deny_slow_download(
+                connection,
+                physical['machine_id'],
+                node_id=current['intent_id'],
+                now=now,
+            )
+        return payload if payload is not None else copy.deepcopy(current['payload'])
+
+    def _journal_download_stop(self, connection, current, intent, now, reason_code):
         from .dstack_demand import profile_hash
         from .dstack_demand_start import (
-            DOWNLOAD_TIMEBOX,
             MAX_DOWNLOAD_REPLACEMENTS,
             _start_command,
             _start_key,
@@ -1521,7 +1552,7 @@ class DstackOperator:
             {
                 'version': 1,
                 'stage': 'model_download',
-                'reason_code': DOWNLOAD_TIMEBOX,
+                'reason_code': reason_code,
                 'at': existing['at'] if existing else now,
                 'qualified_start_failure': False,
             },
@@ -1532,7 +1563,7 @@ class DstackOperator:
             'job_id': job['id'],
             'machine_id': physical['machine_id'],
             'at': existing['at'] if existing else now,
-            'reason_code': DOWNLOAD_TIMEBOX,
+            'reason_code': reason_code,
         }
         self.repo._emit(
             connection,
@@ -1541,7 +1572,7 @@ class DstackOperator:
             {
                 'job_id': job['id'],
                 'machine_id': physical['machine_id'],
-                'reason_code': DOWNLOAD_TIMEBOX,
+                'reason_code': reason_code,
             },
         )
         return payload

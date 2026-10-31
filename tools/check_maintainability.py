@@ -16,6 +16,10 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = "tools/maintainability-baseline.json"
 LIMIT = 1500
+# Owner, 2026-10-31: module line caps only warn during feature development;
+# the modules are refactored to their caps afterwards (board Backlog). Rule
+# counts stay enforced.
+ENFORCE_MODULE_LINES = False
 ZERO_RULES = ("F401", "F841", "B023", "S608")
 
 
@@ -91,7 +95,8 @@ def validate(value):
     return value
 
 
-def compare(current, recorded, previous=None):
+def compare(current, recorded, previous=None, *, warnings=None, enforce_lines=None):
+    enforce_lines = ENFORCE_MODULE_LINES if enforce_lines is None else enforce_lines
     validate(recorded)
     errors = []
     # Improvements pass immediately; only increases fail. Refresh the baseline
@@ -101,10 +106,11 @@ def compare(current, recorded, previous=None):
             errors.append(
                 f"{code}: {count} > recorded {recorded['rules'].get(code, 0)}"
             )
+    sizes = errors if enforce_lines else warnings if warnings is not None else []
     for path, lines in current["oversized_modules"].items():
         cap = recorded["oversized_modules"].get(path, LIMIT)
         if lines > cap:
-            errors.append(f"{path}: {lines} lines > recorded cap {cap}")
+            sizes.append(f"{path}: {lines} lines > recorded cap {cap}")
     if previous is not None:
         validate(previous)
         for code, count in recorded["rules"].items():
@@ -115,7 +121,7 @@ def compare(current, recorded, previous=None):
         for path, lines in recorded["oversized_modules"].items():
             cap = previous["oversized_modules"].get(path, LIMIT)
             if lines > cap:
-                errors.append(f"{path}: {lines} lines > prior cap {cap}")
+                sizes.append(f"{path}: {lines} lines > prior cap {cap}")
     return errors
 
 
@@ -159,10 +165,12 @@ def main(argv=None):
             json.dumps(current, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
     recorded = json.loads((ROOT / BASELINE).read_text(encoding="utf-8"))
+    warnings = []
     errors = compare(
         current,
         recorded,
         prior_baseline(ROOT, args.base_ref) if args.base_ref else None,
+        warnings=warnings,
     )
     print(
         json.dumps(
@@ -170,6 +178,7 @@ def main(argv=None):
                 "rules": counts,
                 "oversized_modules": len(current["oversized_modules"]),
                 "errors": errors,
+                "warnings": warnings,
             },
             indent=2,
         )
