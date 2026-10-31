@@ -56,8 +56,16 @@ class RatchetTests(unittest.TestCase):
         self.assertEqual(
             warnings, ["studio_platform/big.py: 1801 lines > prior cap 1800"]
         )
-        rules = snapshot({"C901": 3}, {"studio_platform/big.py": 1801})
+        rules = snapshot({"C901": 2, "S608": 1}, {"studio_platform/big.py": 1801})
         self.assertTrue(compare(rules, rules, before, warnings=[]))
+
+    def test_complexity_growth_only_warns_during_development(self):
+        before = snapshot({"C901": 2}, {})
+        after = snapshot({"C901": 3}, {})
+        warnings = []
+        self.assertEqual(compare(after, after, before, warnings=warnings), [])
+        self.assertEqual(warnings, ["C901: 3 > prior 2"])
+        self.assertTrue(compare(after, after, before, enforce_lines=True))
 
     def test_new_rule_debt_is_zero_not_unlimited(self):
         before = snapshot({}, {})
