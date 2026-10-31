@@ -40,7 +40,8 @@ def mint():
 
 # A dial-out worker must exchange its boot token within this window.
 BOOT_WINDOW_SECONDS = 3600
-BOOT_URL = re.compile(r"https://[a-z0-9.-]+/v1/worker/boot")
+# A port only appears on the local end-to-end edge (tests/test_dialout_e2e.py).
+BOOT_URL = re.compile(r"https://[a-z0-9.-]+(?::[0-9]{2,5})?/v1/worker/boot")
 
 
 def boot_valid(token, url):

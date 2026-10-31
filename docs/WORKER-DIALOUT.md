@@ -43,3 +43,19 @@ Why chisel: MIT licensed; WebSocket over our existing :443; per-user allowed-rem
 4. `DstackNativeRuntime` gains the dial-out transport behind a per-profile flag; staging acceptance on Vast, Lium and CloudRift.
 5. Default to dial-out, then delete controller SSH, the #858 jump hop and host-key pinning.
 6. Serverless lane: Modal and RunPod Serverless start the same worker and dial out the same way.
+
+## Local end-to-end check
+
+`tests/test_dialout_e2e.py` runs the whole path on one machine in about 30 seconds, without renting a GPU:
+- the real app (login middleware and boot route);
+- Caddy with the staging tunnel route;
+- the controller's real chisel server and grant writer;
+- the run spec's own boot command in a plain `python:3.12-slim` container.
+
+It passes once the controller reads the worker's report through the tunnel. Only dstack, object storage and the GPU are fakes. It needs Docker and the pinned chisel 1.12.0 binary (checksum in `Dockerfile.dispatch`):
+
+```bash
+INKSEQ_DIALOUT_E2E=1 INKSEQ_E2E_CHISEL=~/bin/chisel PYTHONPATH=tests:. python -m unittest test_dialout_e2e -v
+```
+
+Run it before each dial-out change goes to staging. On WSL with Docker Desktop, the test binds the chisel server to `127.0.0.1`, because WSL does not relay Go's dual-stack listener to containers.
