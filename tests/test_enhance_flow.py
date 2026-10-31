@@ -25,7 +25,7 @@ from studio_platform.enhance_plans import (
     compile_enhance,
 )
 from studio_platform.repository import Repository, Scope
-from studio_platform.storage import LocalObjectStore, SecretURL
+from studio_platform.storage import LocalObjectStore, ObjectNotFound, SecretURL
 from studio_platform.worker import WorkerRunner
 from tests.test_enhance_plans import PROJECT, body, source
 
@@ -36,6 +36,10 @@ class PresignedStore(LocalObjectStore):
 
     def presign_worker_upload(self, key, *, content_type, expires_seconds=300):
         return SecretURL("https://r2.test/" + key, "PUT", 0, {})
+
+    def delete(self, key):
+        self.deleted.append(key)
+        super().delete(key)
 
 
 def enhanced_mp4(path, size):
@@ -62,6 +66,7 @@ class EnhanceFlowTests(unittest.TestCase):
         network.start()
         self.addCleanup(network.stop)
         self.store = PresignedStore(self.root / "objects")
+        self.store.deleted = []
         self.repo = Repository(
             "sqlite:///" + str(self.root / "db.sqlite3").replace("\\", "/")
         )
@@ -145,6 +150,11 @@ class EnhanceFlowTests(unittest.TestCase):
             (video["width"], video["height"], video["fps"]), (1920, 1080, 24)
         )
         self.assertAlmostEqual(video["duration_s"], 121 / 24, places=3)
+        # The worker's upload scratch is gone once the job settles.
+        self.assertEqual(len(self.store.deleted), 1)
+        self.assertTrue(self.store.deleted[0].startswith("enhance-tmp/"))
+        with self.assertRaises(ObjectNotFound):
+            self.store.stat(self.store.deleted[0])
 
     def test_wrong_size_output_fails_without_a_second_run(self):
         done = {"status": "COMPLETED", "output": {"uploaded": True}}

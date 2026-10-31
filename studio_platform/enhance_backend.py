@@ -36,7 +36,7 @@ from .protected_config import read_protected_json
 
 API = "https://api.runpod.ai/v2/"
 FILENAME = "runpod-enhance.json"
-TEMP_PREFIX = "enhance-tmp/"  # R2 lifecycle rule expires this prefix after 2 days.
+TEMP_PREFIX = "enhance-tmp/"  # Deleted once the job settles (discard_output).
 MAX_OUTPUT_BYTES = 512 * 1024**2
 URL_SECONDS = 3600
 # RunPod job policy: at most 15 minutes of execution and 1 hour in total.
@@ -325,6 +325,10 @@ class RunPodEnhanceBackend:
         except Exception:
             raise BackendError("enhance_output_audio_missing") from None
         return {"video": output, "audio": audio}
+
+    def discard_output(self, tag):
+        """The worker's PUT target; the settled artifact is a separate object."""
+        self.store.delete(temp_key(tag))
 
 
 def create(store, settings):
