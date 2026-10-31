@@ -94,6 +94,8 @@ PROVIDERS = {
     "runpod": "runpod",
     "lium": "lium",
     "cloudrift": "cloudrift",
+    # RunPod Serverless jobs (dial-out only) bill to the same RunPod account.
+    "runpod-serverless": "runpod",
 }
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
@@ -3561,6 +3563,16 @@ def from_environment(repo, settings, *, readiness=None):
         token = _protected_read(config.pop("token_file"), maximum=4096).strip()
         ssh = _protected_read(config.pop("ssh_public_key_file"), maximum=16384).strip()
         client = DstackClient(config["endpoint"], token, config["project"])
+        if "serverless_file" in config:
+            # RunPod Serverless dial-out jobs beside dstack (#859).
+            from .runpod_serverless import RoutedClient, RunPodServerlessClient
+
+            serverless = json.loads(
+                _protected_read(config.pop("serverless_file"), maximum=16384)
+            )
+            client = RoutedClient(
+                client, RunPodServerlessClient(serverless, config["project"])
+            )
         config["ssh_public_key"] = ssh
         store = LedgerDstackStore(
             repo,

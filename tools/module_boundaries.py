@@ -85,6 +85,7 @@ DOMAINS = (
             "worker_tunnel",
             "worker_grant",
             "dialout_",
+            "runpod_serverless",
         ),
     ),
     (
