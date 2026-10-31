@@ -12,15 +12,13 @@ export function enhanceable(take, capabilities) {
   );
 }
 
-// The service names every collected take "Generated result"; that is no name. An
-// enhanced copy says which size it is, so it is never mistaken for its original.
+// The service names every collected take "Generated result"; that is no name. The size
+// shows on the thumbnail (takeQuality), not in the name.
 const PLACEHOLDER_TITLE = 'Generated result';
 const TIER_LABELS = { '1080p': '1080P', '2k': '2K' };
 
-export function takeName(title, version, fallback) {
-  const name = title && title !== PLACEHOLDER_TITLE ? title : fallback;
-  const tier = version?.enhanced && TIER_LABELS[version.effectiveRequest?.tier];
-  return tier ? name + ' · ' + tier : name;
+export function takeName(title, fallback) {
+  return title && title !== PLACEHOLDER_TITLE ? title : fallback;
 }
 
 // The size a take plays at: an enhanced copy by its tier, others by their short side

@@ -136,12 +136,16 @@ export default function TrimBar({ duration, start, end, getVideo, onCommit, disa
           el.addEventListener('pointercancel', up);
         }}
       >
-        <span className="trim-bar-cut" style={{ left: 0, width: pct(inPoint, total) }} />
-        <span className="trim-bar-cut" style={{ left: pct(outPoint, total), right: 0 }} />
-        <span
-          className="trim-bar-keep"
-          style={{ left: pct(inPoint, total), width: pct(outPoint - inPoint, total) }}
-        />
+        {/* Cut and kept parts share one rounded, clipped fill so their ends line up with
+            the bar (owner 2026-10-31); the handles and playhead stay outside it. */}
+        <span className="trim-bar-fill">
+          <span className="trim-bar-cut" style={{ left: 0, width: pct(inPoint, total) }} />
+          <span className="trim-bar-cut" style={{ left: pct(outPoint, total), right: 0 }} />
+          <span
+            className="trim-bar-keep"
+            style={{ left: pct(inPoint, total), width: pct(outPoint - inPoint, total) }}
+          />
+        </span>
         <span className="trim-bar-head" style={{ left: pct(now, total) }} />
         {['in', 'out'].map((side) => (
           <span
