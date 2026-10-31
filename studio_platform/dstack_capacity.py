@@ -1167,8 +1167,9 @@ def assert_run_owned(run, binding, project):
         "tags",
     ):
         _require(actual.get(key) == expected[key], "dstack_run_binding_mismatch")
+    # SSH runs carry no env; a dial-out run carries exactly its boot env (#859).
     _require(
-        actual.get("env", {}) in ({}, None)
+        (actual.get("env") or {}) == (expected.get("env") or {})
         and actual.get("ports", []) in ([], None)
         and actual.get("dstack", False) is False,
         "dstack_run_binding_mismatch",
