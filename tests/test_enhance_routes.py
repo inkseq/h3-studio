@@ -97,6 +97,8 @@ class EnhanceRouteTests(unittest.TestCase):
         self.assertEqual(plan["output_spec"]["width"], 2560)
         self.assertEqual(plan["enhance"]["tier"], "2k")
         self.assertNotIn("credits", plan["enhance"])
+        # The provider behind enhance is internal (#898).
+        self.assertNotIn("backend", plan["execution"])
         job = self.client.post(
             "/v1/jobs",
             json={"plan_id": plan["plan_id"]},
