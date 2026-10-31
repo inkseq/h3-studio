@@ -83,6 +83,28 @@ PUBLIC_CONTROLS = frozenset(
     }
 )
 
+# Our sampling setup, wherever a request or diagnostic carries it flat (#898): users
+# author only PUBLIC_CONTROLS; these stay internal.
+TUNING_CONTROLS = frozenset(
+    {
+        "steps",
+        "max_steps",
+        "step_skipping",
+        "sampler_name",
+        "scheduler",
+        "denoise",
+        "shift_video",
+        "shift_audio",
+        "video_decode",
+        "video_tile_size",
+        "video_overlap",
+        "audio_decode",
+        "encoder_device",
+        "export_crf",
+        "mask_mode",
+    }
+)
+
 
 def _progress(value):
     """Stage and completed fraction; step counts reveal our sampling setup."""
@@ -238,7 +260,9 @@ def selection(value, principal=None):
 def request(value, principal=None):
     if is_admin(principal):
         return copy.deepcopy(value)
-    result = _managed(value)
+    result = {
+        key: item for key, item in _managed(value).items() if key not in TUNING_CONTROLS
+    }
     if isinstance(value, dict) and isinstance(value.get("request"), dict):
         result["request"] = request(value["request"], principal)
     if isinstance(value, dict) and "controls" in value:
@@ -292,6 +316,8 @@ def diagnostic(value, principal=None):
         "raw",
     ):
         result.pop(field, None)
+    if "controls" in result:
+        result["controls"] = controls(result["controls"])
     result.update(reason_code=code, stage=failure_stage(code))
     en, zh = POLICY_DIAGNOSTICS.get(
         code,
@@ -504,6 +530,7 @@ def _support(value):
 
 def _envelope(value):
     result = _managed(value)
+    result.pop("max_steps", None)
     if isinstance(value.get("controls"), dict):
         result["controls"] = controls(value["controls"])
     if isinstance(value.get("input_limits"), dict):

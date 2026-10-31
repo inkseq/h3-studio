@@ -840,7 +840,8 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         counts = self.counts()
         calls = []
 
-        def record(connection, current, intent, now):
+        def record(connection, current, intent, now, *, reason_code):
+            self.assertEqual(reason_code, "dstack_download_timebox_exceeded")
             calls.append((current["intent_id"], intent["provider_instance_id"], now))
             return copy.deepcopy(current["payload"])
 
@@ -860,6 +861,62 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         with self.repo.engine.connect() as connection:
             self.assertEqual(list(connection.execute(select(attempts))), [])
             self.assertEqual(list(connection.execute(select(registered_workers))), [])
+
+    def test_measured_slow_download_stops_the_cold_host_early(self):
+        self._continuing_capacity()
+        node = self.start()["node_id"]
+        self.capacity.readiness = None
+        self.running(node)
+        received, started = {"bytes": 0}, self.now
+
+        def observe(*args, **kwargs):
+            value = dict(
+                state="runtime_unconfirmed",
+                ready=False,
+                observed_at=self.now,
+                reason_code="dstack_runtime_downloading_weights",
+                preparation=dict(
+                    phase="model_download",
+                    phase_started_at=started,
+                    updated_at=self.now,
+                    download=dict(
+                        bytes_complete=0,
+                        bytes_total=52 * 1000**3,
+                        files_complete=0,
+                        files_total=11,
+                        bytes_received=received["bytes"],
+                    ),
+                ),
+            )
+            self.store.record(node, value)
+            return value
+
+        observe()
+        self.now += 200
+        received["bytes"] = 200 * 10 * 1000**2  # 10 MB/s.
+        observe()
+        controller = self.controller()
+        controller.runtime.readiness = lambda *args: None
+        controller.runtime.slot = lambda *args: self.fail("slow host launched a slot")
+        calls = []
+
+        def record(connection, current, intent, now, *, reason_code):
+            calls.append(reason_code)
+            return copy.deepcopy(current["payload"])
+
+        with (
+            patch.object(self.capacity, "observe", side_effect=observe),
+            patch.object(self.service, "record_download_timebox", side_effect=record),
+        ):
+            first = controller.tick()["nodes"][0]
+        self.assertEqual(
+            (first["code"], first["state"]), ("dstack_download_too_slow", "draining")
+        )
+        self.assertEqual(calls, ["dstack_download_too_slow"])
+        self.assertEqual(
+            controller._nodes()[0]["payload"]["stop_reason_code"],
+            "dstack_download_too_slow",
+        )
 
     def test_download_timebox_rechecks_runtime_and_execution_history_under_lock(self):
         node, controller, _ = self._timed_out_download()
@@ -950,6 +1007,36 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         )
         self.assertEqual(controller._nodes()[0]["desired_state"], "running")
         self.assertEqual(self.client.stopped, [])
+        # A measured slow host is stopped even without demand/host binding;
+        # only the journal and the deny need that binding.
+        from studio_platform.repository import instance_intents
+
+        current = controller._nodes()[0]
+        with self.repo.transaction() as connection:
+            intent = (
+                connection.execute(
+                    select(instance_intents).where(
+                        instance_intents.c.id == current["intent_id"]
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            self.assertIsNone(
+                self.service.record_download_timebox(
+                    connection, current, intent, self.now
+                )
+            )
+            self.assertEqual(
+                self.service.record_download_timebox(
+                    connection,
+                    current,
+                    intent,
+                    self.now,
+                    reason_code="dstack_download_too_slow",
+                ),
+                current["payload"],
+            )
 
     def test_stopped_terminal_rechecks_delayed_provider_absence_without_native_launch(
         self,

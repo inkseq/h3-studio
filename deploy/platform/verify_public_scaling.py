@@ -24,6 +24,8 @@ import verify_public_generation as single
 ROOT = Path('/srv/sixnine/gpu-scaler/public-verification')
 PROJECT = 'production-scaling-20261004'
 RECIPE = 'h3-base-fl2va-v1'
+# Mirrors studio_platform.quality_views.PUBLIC_CONTROLS: what a creator view echoes back.
+PUBLIC_CONTROLS = frozenset({'duration', 'seed', 'resolution', 'aspect_ratio', 'generate_audio', 'width', 'height'})
 KEY_NAME = 'Temporary scaling acceptance 20261004'
 PROMPTS = (
     'A red ceramic teapot on a wooden table, slow cinematic camera move, gentle ambient sound.',
@@ -172,7 +174,10 @@ def check_effective(effective, requested):
     assert effective['tier'] == 'refine' and effective['mode'] == 'fl'
     assert 'model' not in effective and 'backend' not in effective
     assert effective['prompt'] == requested['prompt']
-    assert all(effective[key] == value for key, value in requested['controls'].items())
+    # Creators see only what they author; steps and other tuning stay internal (#898).
+    assert all(effective[key] == value for key, value in requested['controls'].items()
+               if key in PUBLIC_CONTROLS)
+    assert 'steps' not in effective
 
 
 def check_job(job, item):

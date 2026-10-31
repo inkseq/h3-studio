@@ -10,10 +10,17 @@ import copy
 import math
 import re
 
-from sqlalchemy import select
+import uuid
 
-from .operator_capacity import operator_nodes, operator_policy, require
-from .repository import request_hash
+from sqlalchemy import insert, select, update
+
+from .operator_capacity import (
+    operator_commands,
+    operator_nodes,
+    operator_policy,
+    require,
+)
+from .repository import outbox, request_hash
 
 MAX_NODES = 4096
 MAX_OFFERS = 1000
@@ -24,6 +31,11 @@ REASONS = {
     "prefer": "operator_host_preferred",
     "deny": "operator_host_denied",
 }
+# A measured slow download denies the host until an admin restores it (owner,
+# 2026-10-31). Stored as the manual policy so the existing admin write clears it.
+AUTOMATIC_SLOW_DOWNLOAD = "automatic_slow_download"
+STORED_REASONS = {*REASONS.items(), ("deny", AUTOMATIC_SLOW_DOWNLOAD)}
+DOWNLOAD_STOPS = {"dstack_download_timebox_exceeded", "dstack_download_too_slow"}
 START_FAILURES = {
     "provider_provisioning_timeout",
     "provider_image_pull_failed",
@@ -178,7 +190,7 @@ def failure(value, *, now):
             and value["reason_code"] in START_FAILURES
             and value["qualified_start_failure"] is True
             or value["stage"] == "model_download"
-            and value["reason_code"] == "dstack_download_timebox_exceeded"
+            and value["reason_code"] in DOWNLOAD_STOPS
             and value["qualified_start_failure"] is False
         )
         and finite(value["at"], minimum=1, maximum=now),
@@ -309,7 +321,7 @@ class HostPolicyStore:
                     for key in ("version", "tenant_id", "provider", "machine_id")
                 )
                 and stored["manual"] in POLICIES
-                and stored["reason_code"] == REASONS[stored["manual"]]
+                and (stored["manual"], stored["reason_code"]) in STORED_REASONS
                 and type(row["version"]) is int
                 and row["version"] >= 1,
                 "host_policy_binding_invalid",
@@ -337,6 +349,87 @@ class HostPolicyStore:
             else None,
             "automatic_deny_until": until,
         }, value
+
+    def deny_slow_download(self, connection, machine_id, *, node_id, now):
+        """Persistently deny one host after a measured slow download.
+
+        The caller holds the capacity lock. An existing manual deny is kept;
+        any other policy is replaced and audited like an admin change.
+        """
+        old, value = self.read(connection, machine_id, now=now)
+        if old["manual"] == "deny":
+            return False
+        value.update(manual="deny", reason_code=AUTOMATIC_SLOW_DOWNLOAD)
+        row = {
+            "version": old["revision"] + 1,
+            "payload": value,
+            "actor": "system:download-speed-gate",  # Not an admin principal.
+            "updated_at": now,
+        }
+        if old["revision"]:
+            connection.execute(
+                update(operator_policy)
+                .where(operator_policy.c.id == self.key(machine_id))
+                .values(**row)
+            )
+        else:
+            connection.execute(
+                insert(operator_policy).values(id=self.key(machine_id), **row)
+            )
+        new = self.read(connection, machine_id, now=now)[0]
+        command_id, actor = str(uuid.uuid4()), "system:download-speed-gate"
+        receipt = {
+            "state": "completed",
+            "changed": True,
+            "host": {"provider": "vastai", "machine_id": machine_id},
+            "policy": new,
+            "command_id": command_id,
+            "node_id": node_id,
+        }
+        connection.execute(
+            insert(operator_commands).values(
+                id=command_id,
+                actor=actor,
+                # One receipt per policy revision: a node denied again after an
+                # admin restore must not collide with its earlier receipt.
+                idempotency_key=f"slow-download-{node_id}-{old['revision']}",
+                request_hash=request_hash(
+                    {
+                        "kind": "host_policy",
+                        "node": node_id,
+                        "revision": old["revision"],
+                    }
+                ),
+                kind="host_policy",
+                state="completed",
+                payload={"result": receipt},
+                reason_code=AUTOMATIC_SLOW_DOWNLOAD,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        fields = ("manual", "revision", "snapshot")
+        connection.execute(
+            insert(outbox).values(
+                id=str(uuid.uuid4()),
+                event_type="operator.host_policy_updated",
+                aggregate_id=machine_id,
+                payload={
+                    "tenant_id": self.tenant,
+                    "provider": "vastai",
+                    "machine_id": machine_id,
+                    "actor_id": actor,
+                    "actor_owner": None,
+                    "reason_code": AUTOMATIC_SLOW_DOWNLOAD,
+                    "old": {k: old[k] for k in fields},
+                    "new": {k: new[k] for k in fields},
+                    "command_id": command_id,
+                    "node_id": node_id,
+                },
+                created_at=now,
+            )
+        )
+        return True
 
     def known_policy_ids(self, connection):
         rows = list(
