@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState, useEffectEvent } from 'react';
 import {
   failureLabel,
   hostPolicyOptions,
+  hostReasonText,
   hostText,
   knownNumber,
   secondsLabel,
@@ -439,7 +440,7 @@ function HostEditor({ host, busy, onSave }) {
         <small>
           {t('operatorPanel.revision', {
             revision: host.policy.revision,
-            reason: hostText(host.policy.reason_code, locale),
+            reason: hostReasonText(host.policy.reason_code, locale),
           })}
         </small>
       </form>
