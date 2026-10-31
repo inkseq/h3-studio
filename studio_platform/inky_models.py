@@ -5,7 +5,7 @@ import math
 import re
 
 JEV_MODEL = "jev-1.14.0"
-EXAMPLE_MODEL = "openai/gpt-6.1-terra"
+EXAMPLE_MODEL = "gpt-6.1-terra"
 KINDS = (
     "vague_action",
     "needs_keyframe",
@@ -193,9 +193,8 @@ def example_payload(value, kind):
     source = context(value)
     return {
         "model": EXAMPLE_MODEL,
-        "reasoning": {"effort": "low"},
+        "reasoning_effort": "low",
         "response_format": {"type": "json_object"},
-        "usage": {"include": True},
         "messages": [
             {
                 "role": "system",
