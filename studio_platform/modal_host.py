@@ -23,6 +23,16 @@ from .repository import (
 )
 
 
+# GPU -> (floor, ceiling) of one host's hourly quote: the GPU plus four
+# physical cores and 41 GiB at non-preemptible Sandbox rates (~$1.552/h).
+# Owner 2026-10-31: Blackwell only for new hosts; L40S stays for the live v8
+# backstop until it is retired. RTX PRO 6000 is ~$3.031/h on Modal.
+HOURLY_BOUNDS = {
+    'L40S': (3_503_340, 4_000_000),
+    'RTX-PRO-6000': (4_583_340, 5_200_000),
+}
+
+
 @dataclass(frozen=True)
 class HostSpec:
     app_id: str
@@ -36,6 +46,8 @@ class HostSpec:
     max_containers: int = 2
     max_inputs: int = 1
     idle_timeout: int = 60
+    # The runtime profile the image was built for (INKSEQ_MODAL_PROFILE in it).
+    profile: str = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
 
     def __post_init__(self):
         for value, prefix in (
@@ -52,8 +64,10 @@ class HostSpec:
             # and 41 GiB at non-preemptible memory/CPU rates. A qualified quote
             # must cover this floor; the shared USD50 task ceiling is unchanged.
             type(self.max_hourly_microusd) is not int
-            or not 3_503_340 <= self.max_hourly_microusd <= 4_000_000
-            or self.gpu != 'L40S'
+            or self.gpu not in HOURLY_BOUNDS
+            or not HOURLY_BOUNDS[self.gpu][0]
+            <= self.max_hourly_microusd
+            <= HOURLY_BOUNDS[self.gpu][1]
             or self.memory_mib != 41 * 1024
             or self.cpu_limit != 4
             or self.max_containers != 2
@@ -72,8 +86,19 @@ class HostSpec:
             )
         ):
             raise ValueError('modal_staging_limits_invalid')
-        if self.app_name != 'inkseq-staging-worker':
+        if self.app_name not in APP_NAMES.values():
             raise ValueError('modal_staging_app_required')
+        from .modal_runtime import PROFILES
+
+        if self.profile not in PROFILES:
+            raise ValueError('modal_profile_unknown')
+
+
+# One Modal app per environment; the controller pins its own (#688).
+APP_NAMES = {
+    'staging': 'inkseq-staging-worker',
+    'production': 'inkseq-production-worker',
+}
 
 
 class ModalHosts:
@@ -86,7 +111,12 @@ class ModalHosts:
 
     def __init__(self, repo, client, spec, *, environment=None, enabled=False):
         self.repo, self.client, self.spec = repo, client, spec
-        self.enabled = enabled is True and environment == 'staging'
+        self.environment = environment
+        self.enabled = (
+            enabled is True
+            and environment in APP_NAMES
+            and spec.app_name == APP_NAMES[environment]
+        )
         self.capacity_check = None
 
     def _intent(self, c, identity):
@@ -152,11 +182,18 @@ class ModalHosts:
             )
         ):
             raise Conflict('modal_funding_unconfirmed')
+        # Admission binds a staging test guard or a production guard in the
+        # reservation transaction; re-check either before the paid create.
         from .dstack_test_budget import ACCOUNT
+        from .modal_budget import OPERATION, enforce
 
-        if any(row['account_id'] == ACCOUNT for row in rows):
-            from .modal_budget import enforce
-
+        bound = c.execute(
+            select(scaler_receipts.c.id).where(
+                scaler_receipts.c.intent_id == intent['id'],
+                scaler_receipts.c.operation == OPERATION,
+            )
+        ).first()
+        if bound is not None or any(row['account_id'] == ACCOUNT for row in rows):
             enforce(c, intent['id'], asdict(self.spec), self.repo.clock())
         for row in rows:
             account = self.repo._locked(

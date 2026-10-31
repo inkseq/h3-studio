@@ -596,9 +596,53 @@ class ExecutionPolicies:
         self.settings, self.repo = settings, repository
         self.control = WorkerControl(repository)
 
+    def _evaluate_enhance(self, compiled, fingerprint):
+        """Serverless enhance (#795): one registered CPU slot submits to RunPod."""
+        from . import enhance_plans as plan
+
+        blockers = []
+        if not getattr(self.settings, "enhance_enabled", False):
+            blockers.append("提升清晰度尚未开启")
+        else:
+            capacity = self.control.pool_status(
+                plan.POOL,
+                model_id=plan.MODEL,
+                configuration_id=plan.CONFIGURATION,
+                recipe_id=plan.RECIPE,
+                backend=plan.BACKEND,
+            )
+            if not capacity["ready"] + capacity["busy"]:
+                blockers.append("提升清晰度服务尚未就绪，请稍后重试")
+        execution = {
+            "pool": plan.POOL,
+            "backend": plan.BACKEND,
+            "configuration_id": plan.CONFIGURATION,
+            "quote_known": True,
+            "enabled": not blockers,
+            "blockers": blockers,
+            "admission_state": "blocked" if blockers else "queued",
+            "fingerprint": fingerprint,
+            "budget_account_ids": [],
+            "expected_runtime_s": 900,
+        }
+        return Admission(
+            execution,
+            0,
+            self.repo.clock() + 900,
+            {
+                "currency": "USD",
+                "cost_microusd": None,
+                "source": "credits",
+                "kind": "credits",
+            },
+        )
+
     def evaluate(self, compiled, scope, fingerprint):
         from .render_plans import RECIPE, MODEL as RENDER_MODEL, configuration_for, POOL
+        from . import enhance_plans
 
+        if compiled["recipe_id"] == enhance_plans.RECIPE:
+            return self._evaluate_enhance(compiled, fingerprint)
         if compiled["recipe_id"] == RECIPE:
             configuration = configuration_for(compiled)
             blockers = list(compiled.get("render_blockers", []))
@@ -1178,7 +1222,17 @@ class ExecutionPolicies:
         """
         execution = job.get("execution_plan", {})
         from .render_plans import RECIPE, MODEL as RENDER_MODEL, configuration_for, POOL
+        from . import enhance_plans
 
+        if job.get("request", {}).get("recipe_id") == enhance_plans.RECIPE:
+            return bool(
+                getattr(self.settings, "enhance_enabled", False)
+                and execution.get("enabled") is True
+                and execution.get("backend") == enhance_plans.BACKEND
+                and execution.get("pool") == enhance_plans.POOL
+                and execution.get("configuration_id") == enhance_plans.CONFIGURATION
+                and job["request"]["request"].get("model") == enhance_plans.MODEL
+            )
         if job.get("request", {}).get("recipe_id") == RECIPE:
             try:
                 configuration = configuration_for(job["request"])

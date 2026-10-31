@@ -1,4 +1,8 @@
-"""Optional staging fallback in the existing CPU controller, default OFF."""
+"""Optional Modal fallback in the existing CPU controller, default OFF.
+
+Staging uses the shared test GPU ledger; production uses the customer
+supplier-spending admission and a production budget account (#688).
+"""
 
 from dataclasses import asdict
 import json
@@ -15,6 +19,10 @@ from .repository import instance_intents
 
 SECRET = '/sixnine/staging/modal'
 REGION = 'ap-southeast-1'
+ENVIRONMENTS = {
+    'https://staging.inkseq.com': 'staging',
+    'https://inkseq.com': 'production',
+}
 
 
 def require(value):
@@ -73,20 +81,53 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
         require(not originals)
         return None
     value = _json(path)
+    environment = ENVIRONMENTS.get(service.settings.public_origin)
+    require(environment is not None)
     fields = {'version', 'enabled', 'host'}
-    require(set(value) in (fields, fields | {'credentials_file'}))
+    if environment == 'production':
+        # Production never reads the staging secret: an explicit file and the
+        # production budget account that funds Modal hosts are both required.
+        fields |= {
+            'credentials_file',
+            'budget_account_id',
+            'start_after_seconds',
+            'vast_min_queue',
+            'vast_after_seconds',
+        }
+        require(set(value) == fields)
+        require(
+            type(value['start_after_seconds']) is int
+            and 0 <= value['start_after_seconds'] <= 1800
+            and type(value['vast_min_queue']) is int
+            and 1 <= value['vast_min_queue'] <= 1000
+            and type(value['vast_after_seconds']) is int
+            and 60 <= value['vast_after_seconds'] <= 3600
+        )
+    else:
+        require(set(value) in (fields, fields | {'credentials_file'}))
     require(type(value['version']) is int and value['version'] == 1)
     require(type(value['enabled']) is bool)
-    require(service.settings.public_origin == 'https://staging.inkseq.com')
     require(service.settings.generation_queue == 'dbos')
-    spec = HostSpec(**value['host'])
-    require(value['host'] == asdict(spec))
+    # Configurations written before v8 omit the profile: those images are v7.
+    host = {
+        'profile': HostSpec.__dataclass_fields__['profile'].default,
+        **value['host'],
+    }
+    spec = HostSpec(**host)
+    require(host == asdict(spec))
     if 'credentials_file' in value:
         require(
             value['credentials_file'] == str(Path(work_dir) / 'modal-credentials.json')
         )
     if not value['enabled'] and not originals:
         return None
+    if value['enabled'] and 'vast_min_queue' in value:
+        # Owner 2026-10-29: Modal first; Vast once the queue is this long, or
+        # for any job Modal has not served within vast_after_seconds.
+        service.modal_first = {
+            'vast_min_queue': value['vast_min_queue'],
+            'vast_after_seconds': value['vast_after_seconds'],
+        }
     client, connect = (
         client_factory(spec, credentials_file=value['credentials_file'])
         if 'credentials_file' in value
@@ -97,7 +138,7 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
     from modal.stream_type import StreamType
 
     hosts = ModalHosts(
-        service.repo, client, spec, environment='staging', enabled=value['enabled']
+        service.repo, client, spec, environment=environment, enabled=value['enabled']
     )
     bindings = ModalWorkerBindings(
         service.repo,
@@ -105,11 +146,27 @@ def load_extension(service, work_dir, *, client_factory=client_from_staging_secr
         connect,
         stderr_sink=StreamType.DEVNULL,
     )
-    return ModalExtension(service, hosts, bindings, enabled=value['enabled'])
+    return ModalExtension(
+        service,
+        hosts,
+        bindings,
+        enabled=value['enabled'],
+        budget_account_id=value.get('budget_account_id'),
+        start_after_seconds=value.get('start_after_seconds', 0),
+    )
 
 
 class ModalExtension:
-    def __init__(self, service, hosts, bindings, *, enabled):
+    def __init__(
+        self,
+        service,
+        hosts,
+        bindings,
+        *,
+        enabled,
+        budget_account_id=None,
+        start_after_seconds=0,
+    ):
         from .modal_capacity import registration_usage
 
         self.service, self.hosts, self.bindings = service, hosts, bindings
@@ -117,7 +174,12 @@ class ModalExtension:
             service, hosts, c, spec
         )
         self.admission = ModalAdmission(
-            service, hosts, environment='staging', enabled=enabled
+            service,
+            hosts,
+            environment=hosts.environment,
+            enabled=enabled,
+            budget_account_id=budget_account_id,
+            start_after_seconds=start_after_seconds,
         )
 
     def wrap(self, original):

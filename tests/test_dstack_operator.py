@@ -78,6 +78,9 @@ class Client:
             ],
         }
 
+    def configured_backends(self):
+        return frozenset({"vastai", "runpod"})
+
     def vast_offer_mapping(self, request, *, clock):
         return {
             "observed_at": clock(),
@@ -322,6 +325,21 @@ class DstackOperatorTests(LedgerCase):
             config["profiles"][0][field] = value
             with self.assertRaises((OperatorError, DstackError)):
                 DstackOperator(self.repo, self.settings, self.capacity, config)
+
+    def test_v8_binds_5090_and_pro6000_scheduler_names_older_pruned_does_not(self):
+        names = ["RTX5090", "RTXPRO6000", "RTXPRO6000S", "RTXPRO6000WS"]
+        config = copy.deepcopy(self.config)
+        config["profiles"][0].update(
+            runtime_profile_id="h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8",
+            gpu_names=names,
+        )
+        service = DstackOperator(self.repo, self.settings, self.capacity, config)
+        self.assertEqual(service.profiles["5090-fl"]["gpu_names"], names)
+        config["profiles"][0]["runtime_profile_id"] = (
+            "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
+        )
+        with self.assertRaises((OperatorError, DstackError)):
+            DstackOperator(self.repo, self.settings, self.capacity, config)
 
     def test_catalog_prefers_authoring_default_without_changing_saved_profiles(self):
         target = 'h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6'

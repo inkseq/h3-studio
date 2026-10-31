@@ -2,15 +2,17 @@
 
 import copy
 
-from .creator_controls import TAOMATE
+from .creator_controls import PIKA_V9, TAOMATE, TAOMATE_V8, TAOMATE_V9
 from .runtime_catalog import get_profile
 
 GIB = 1024**3
 TAOMATE_HEADROOM_GIB = 12
+# v8 is the same models and LoRA on CUDA 13 + sage2, so it keeps the #716 floor.
+TAOMATE_PROFILES = (TAOMATE, TAOMATE_V8, TAOMATE_V9, PIKA_V9)
 
 
 def planning_ram_gib(profile_id, configured):
-    if profile_id != TAOMATE:
+    if profile_id not in TAOMATE_PROFILES:
         return configured
     profile = get_profile(profile_id)
     runtime = profile['runtime']
@@ -30,11 +32,12 @@ def require_preview_ram(document, profile):
     """
     from .operator_capacity import require
 
-    if profile['runtime_profile_id'] == TAOMATE:
+    if profile['runtime_profile_id'] in TAOMATE_PROFILES:
         memory = document.get('memory_gib')
         require(
             type(memory) is int
-            and memory >= planning_ram_gib(TAOMATE, profile['memory_gib']),
+            and memory
+            >= planning_ram_gib(profile['runtime_profile_id'], profile['memory_gib']),
             'dstack_preview_memory_headroom_stale',
         )
     return document
@@ -53,4 +56,6 @@ def catalog_resources(profile, fields):
 
 def vast_ram_floor(request):
     # Vast advertises cpu_ram in MiB. Keep historical non-TaoMate mapping intact.
-    return request.memory_gib * (1024 if request.profile_id == TAOMATE else 1000)
+    return request.memory_gib * (
+        1024 if request.profile_id in TAOMATE_PROFILES else 1000
+    )

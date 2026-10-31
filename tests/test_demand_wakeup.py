@@ -303,6 +303,7 @@ class DemandLedgerTests(LedgerCase):
         client = SimpleNamespace(
             project="sixnine",
             _post=Mock(return_value=[{"id": "untracked-run"}]),
+            configured_backends=Mock(return_value=frozenset({"vastai", "runpod"})),
             provider_inventory=Mock(
                 side_effect=lambda name: {
                     "complete": True,
@@ -325,6 +326,30 @@ class DemandLedgerTests(LedgerCase):
                 [dict(x) for x in c.execute(select(budget_accounts)).mappings()], before
             )
         self.assertEqual(client.provider_inventory.call_count, 2)
+
+    def test_safety_sweep_reads_configured_new_backends_before_any_node(self):
+        controller = self.controller()
+        client = SimpleNamespace(
+            project="sixnine",
+            _post=Mock(return_value=[]),
+            configured_backends=Mock(return_value=frozenset({"vastai", "lium"})),
+            provider_inventory=Mock(
+                side_effect=lambda name: {
+                    "complete": True,
+                    "instance_ids": ["orphan-pod"] if name == "lium" else [],
+                    "observed_at": self.now,
+                }
+            ),
+        )
+        controller.capacity.client = client
+        result = controller.safety_sweep()
+        self.assertEqual(
+            result["untracked_provider_allocations"], {"lium": 1, "vastai": 0}
+        )
+        self.assertEqual(
+            sorted(call.args[0] for call in client.provider_inventory.call_args_list),
+            ["lium", "vastai"],
+        )
 
     def test_real_postgres_commit_rollback_and_gap_notifications(self):
         if self.repo.engine.dialect.name != "postgresql":

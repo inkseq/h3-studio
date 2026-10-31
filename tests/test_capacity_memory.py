@@ -22,8 +22,11 @@ class PlanningMemoryTests(unittest.TestCase):
         for configured, expected in ((29, 41), (32, 41), (41, 41), (48, 48), (96, 96)):
             self.assertEqual(planning_ram_gib(TAOMATE, configured), expected)
         self.assertEqual(before, get_profile(TAOMATE))
-        for profile_id in PROFILE_IDS[:-1]:
+        for profile_id in PROFILE_IDS[:-4]:
             self.assertEqual(planning_ram_gib(profile_id, 32), 32)
+        self.assertEqual(planning_ram_gib(PROFILE_IDS[-3], 32), 41)
+        self.assertEqual(planning_ram_gib(PROFILE_IDS[-2], 32), 41)
+        self.assertEqual(planning_ram_gib(PROFILE_IDS[-1], 32), 41)
 
     def test_catalog_and_candidates_show_same_effective_floor(self):
         profile = {

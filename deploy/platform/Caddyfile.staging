@@ -21,6 +21,10 @@ staging.inkseq.com {
     request_body {
         max_size 537919488
     }
+    # Dial-out GPU worker tunnels (#859): chisel server in the app namespace.
+    handle /v1/worker-tunnel {
+        reverse_proxy app:8846
+    }
     reverse_proxy app:8845 {
         header_up X-Forwarded-For {remote_host}
         header_up X-Forwarded-Proto https

@@ -6,14 +6,32 @@ finite crash fallback; business idle shuts down the entrypoint after 60 seconds.
 """
 
 import copy
+import os
 import time
 
-PROFILE = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
+V7 = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
+V8 = 'h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8'
+# v9: v8 on WanGP 9cb2bcd (#844). On L40S it still runs sdpa (#839).
+V9 = 'h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9'
+PROFILES = (V7, V8, V9)
+# Inside a Modal container the image names the one profile it was built for;
+# images built before this variable existed are the v7 runtime.
+PROFILE = os.environ.get('INKSEQ_MODAL_PROFILE', V7)
+if PROFILE not in PROFILES:
+    raise ValueError('modal_profile_unknown')
+
+
+def selected_profile(selection):
+    """The profile an admission receipt bound; receipts before v8 carry none (v7)."""
+    profile = selection.get('profile', V7)
+    if profile not in PROFILES:
+        raise ValueError('modal_profile_unknown')
+    return profile
 
 
 def device_profile(profile):
-    """Only explicit Modal launch may qualify this unchanged v7 recipe on L40S."""
-    if profile['id'] != PROFILE or profile.get('hardware_admission') is not None:
+    """Only explicit Modal launch may qualify these unchanged recipes on L40S."""
+    if profile['id'] not in PROFILES or profile.get('hardware_admission') is not None:
         raise ValueError('modal_v7_profile_required')
     result = copy.deepcopy(profile)
     result['hardware_admission'] = {

@@ -25,7 +25,6 @@ from ..inference.wangp_contract import (
     EngineManifest,
     RuntimeObservation,
     RuntimeOutput,
-    UPSTREAM_REVISION,
 )
 
 REQUIRED_CONFIG = {
@@ -145,7 +144,7 @@ The returned evidence contains no runtime environment or configuration values.
         from .wangp_environment import verify_bound_environment
 
         environment_evidence = verify_bound_environment(root, manifest.document)
-        revision = UPSTREAM_REVISION
+        revision = manifest.document["source_revision"]
     else:
         # Historical candidate manifests retain their exact verification path;
         # new cold bootstrap requires the fully bound package above.
@@ -155,7 +154,7 @@ The returned evidence contains no runtime environment or configuration values.
             capture_output=True,
             text=True,
         ).stdout.strip()
-        if revision != UPSTREAM_REVISION:
+        if revision != manifest.document["source_revision"]:
             raise ValueError("wangp_runtime_source_mismatch")
         # Pilot image modified installation metadata only; executable source and
         # the exact requirements bytes remain pinned for the new native profiles.
@@ -283,6 +282,19 @@ def _upstream_worker_alive():
     )
 
 
+def device_attention(torch, profile):
+    """The profile's attention on cc 12.x (5090, PRO 6000); None keeps the compiled sdpa.
+
+    sage2 is measured clean on sm120 for base generation and 2K enhance; on sm89/sm90
+    (L40S, H100, H200) its int8 QK corrupts long 2K sequences, and the Modal L40S
+    acceptance ran sdpa, so every other device stays on sdpa (#794, 2026-10-30).
+    """
+    mode = profile['runtime'].get('config', {}).get('attention_mode', 'sdpa')
+    if mode == 'sdpa' or torch.cuda.get_device_capability(0)[0] != 12:
+        return None
+    return mode
+
+
 def _lock_profile_device(torch, profile):
     """One explicit visible device and one owned process per physical GPU."""
     import fcntl
@@ -302,16 +314,20 @@ def _lock_profile_device(torch, profile):
             hardware['maximum_total_vram_bytes'],
         )
     else:
-        accepted = (
-            re.fullmatch(r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name)
-            if pruned
-            else re.fullmatch(
-                r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition',
-                name,
-            )
+        pro6000 = re.fullmatch(
+            r'(?:NVIDIA\s+)?RTX\s+PRO\s+6000\s+Blackwell\s+(?:Server|Workstation)\s+Edition',
+            name,
         )
+        rtx5090 = pruned and re.fullmatch(
+            r'(?:NVIDIA\s+)?(?:GeForce\s+)?RTX\s+5090', name
+        )
+        # A pruned profile runs on PRO 6000 only when it lists one in gpu_models
+        # (v8, measured clean on 2026-10-30, #794); older pruned profiles stay 5090-only.
+        if pruned and not any('PRO 6000' in m for m in profile.get('gpu_models', ())):
+            pro6000 = None
+        accepted = rtx5090 or pro6000
         capability = (12, 0)
-        low, high = (30, 34) if pruned else (90, 100)
+        low, high = (30, 34) if rtx5090 else (90, 100)
         minimum, maximum = low * 1024**3, high * 1024**3
     if (
         not accepted
@@ -1037,6 +1053,7 @@ class PinnedWanGPSession:
         result_audit=None,
         device_lock=None,
         model_progress=None,
+        attention=None,
     ):
         if not callable(quiesce) or not callable(worker_alive):
             raise ValueError("wangp_runtime_stop_probe_required")
@@ -1051,6 +1068,7 @@ class PinnedWanGPSession:
         )
         self.device_lock = device_lock
         self._model_progress = model_progress
+        self.attention = attention
         if manifest is not None:
             from ..runtime_catalog import validate_manifest
 
@@ -1092,6 +1110,10 @@ class PinnedWanGPSession:
                 self.before_submit()
             values = self.session.get_default_settings(model)
             values.update(copy.deepcopy(dict(settings)))
+            # Compiled tasks pin override_attention=sdpa, which WanGP ranks above the
+            # server's attention_mode; this device's resolved profile attention wins.
+            if self.attention and values.get("override_attention") == "sdpa":
+                values["override_attention"] = self.attention
             job = (
                 self.session.submit_task(values, callbacks=self._model_progress)
                 if self._model_progress is not None
@@ -1208,6 +1230,7 @@ def create_session(
             result_audit=lambda: audit(loaded=True),
             device_lock=device_lock,
             model_progress=model_progress,
+            attention=device_attention(torch, profile),
         )
     return PinnedWanGPSession(
         session, output, quiesce=torch.cuda.synchronize, model_progress=model_progress

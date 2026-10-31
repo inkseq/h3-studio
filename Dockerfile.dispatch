@@ -10,6 +10,10 @@ COPY requirements.dispatch.lock.txt /app/requirements.dispatch.lock.txt
 RUN python -m pip install --no-cache-dir --require-hashes -r /app/requirements.dispatch.lock.txt \
     && python -m pip check \
     && python /opt/inkseq/tls/check_trust.py
+# Pinned chisel (MIT, github.com/jpillora/chisel v1.12.0) for dial-out GPU worker
+# tunnels (#859). The release checksum is verified before anything is installed.
+ARG CHISEL_SHA256=f3f180f1d93aa72cce4e6386f98cc06569a0146fbd65eb4423cf83e6434bcfe6
+RUN python -c "import gzip,hashlib,os,sys,urllib.request; data=urllib.request.urlopen('https://github.com/jpillora/chisel/releases/download/v1.12.0/chisel_1.12.0_linux_amd64.gz',timeout=120).read(); sys.exit('chisel_checksum_mismatch') if hashlib.sha256(data).hexdigest()!=os.environ['CHISEL_SHA256'] else None; open('/usr/local/bin/chisel','wb').write(gzip.decompress(data)); os.chmod('/usr/local/bin/chisel',0o755)"     && /usr/local/bin/chisel --version
 USER 10001:10001
 # A protected compose sets the exact controller or per-slot worker role.
 CMD ["python", "-m", "studio_platform.postgres_dispatch", "--help"]

@@ -321,6 +321,82 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.client.stop_count, 0)
 
+    def test_stock_no_capacity_settles_only_when_the_account_lacks_this_run(self):
+        # dstack Sky runs stock dstack: no typed Vast rejections exist (#868).
+        self.start()
+        self.client.run = no_capacity_run(self.client.run)
+        for submission in (
+            self.client.run["latest_job_submission"],
+            self.client.run["jobs"][0]["job_submissions"][0],
+        ):
+            submission["finished_at"] = "2026-10-30T12:00:00Z"
+        terminal = 1793361600.0  # 2026-10-30T12:00:00Z
+        marker = self.client.run["run_spec"]["run_name"][:16]
+        labels = ["dstack-inkseq-production-sixnine-ffffffff-0-0-ab", None]
+        read_at = [terminal + 300]
+
+        def inventory(backend):
+            return {
+                "backend": backend,
+                "complete": True,
+                "observed_at": read_at[0],
+                "instance_ids": [str(i) for i in range(len(labels))],
+                "labels": list(labels),
+            }
+
+        self.client.provider_inventory = inventory
+        # A live instance whose name carries this run keeps billing pending,
+        # whatever project prefix or truncation dstack applied.
+        labels[1] = "dstack-another-project-" + marker + "-0-0-x"
+        pending = self.capacity.observe(INTENT)
+        self.assertEqual(pending["billing_state"], "unsettled")
+        self.assertEqual(pending["reason_code"], "dstack_no_capacity_billing_pending")
+        labels[1] = None
+        # A create that timed out may still land: no proof inside the window.
+        read_at[0] = terminal + 299
+        self.assertEqual(self.capacity.observe(INTENT)["billing_state"], "unsettled")
+        read_at[0] = terminal + 300
+        from studio_platform.dstack_allocation_proof import from_account_absence
+
+        # A project name long enough to truncate the run marker away is refused.
+        self.assertIsNone(
+            from_account_absence(
+                self.client.run, self.store.load(INTENT), inventory("vastai"), "p" * 28
+            )
+        )
+        settled = self.capacity.observe(INTENT)
+        self.assertEqual(
+            (settled["billing_state"], settled["reason_code"]),
+            ("no_charge_confirmed", "dstack_never_allocated"),
+        )
+        from studio_platform.dstack_allocation_proof import validate_proof
+
+        proof = self.store.load(INTENT).get("no_allocation_proof") or settled.get(
+            "no_allocation_proof"
+        )
+        self.assertEqual(proof["source"], "provider_account_absent_v1")
+        self.assertEqual(proof["attempts"][0]["label_prefix"], marker)
+        self.assertIsNotNone(validate_proof(proof, self.store.load(INTENT)))
+        for change in ({"matched": 1}, {"observed_at": terminal + 10}):
+            tampered = {**proof, "attempts": [{**proof["attempts"][0], **change}]}
+            self.assertIsNone(validate_proof(tampered, self.store.load(INTENT)))
+        self.native.assert_not_called()
+        self.assertEqual(self.client.apply_count, 1)
+
+    def test_stock_no_capacity_without_instance_names_stays_pending(self):
+        self.capacity.start(request(backend="cloudrift"), PUB)
+        self.client.run = no_capacity_run(self.client.run)
+        self.client.provider_inventory = lambda backend: {
+            "backend": backend,
+            "complete": True,
+            "observed_at": 21.0,
+            "instance_ids": [],
+        }
+        value = self.capacity.observe(INTENT)
+        self.assertEqual(value["billing_state"], "unsettled")
+        self.client.provider_inventory = Mock(side_effect=DstackError("x"))
+        self.assertEqual(self.capacity.observe(INTENT)["billing_state"], "unsettled")
+
     def test_terminal_runpod_create_unknown_never_reapplies_or_settles(self):
         original = request(backend="runpod")
         self.capacity.start(original, PUB)
@@ -802,8 +878,12 @@ class DstackCapacityTests(unittest.TestCase):
     def test_supported_backend_never_falls_back(self):
         config = request(backend="runpod").run_spec(PUB)["configuration"]
         self.assertEqual(config["backends"], ["runpod"])
+        for backend in ("lium", "cloudrift"):
+            config = request(backend=backend).run_spec(PUB)["configuration"]
+            self.assertEqual(config["backends"], [backend])
+            self.assertNotIn("backend_options", config)
         with self.assertRaisesRegex(DstackError, "dstack_backend_unsupported"):
-            request(backend="lium")
+            request(backend="targon")
 
     def test_resource_floors_and_optional_regions_use_pinned_range_semantics(self):
         config = request().run_spec(PUB)["configuration"]
@@ -1116,6 +1196,38 @@ class DstackLiveUsageTests(unittest.TestCase):
             [self.node] if nodes is None else nodes,
             provider_inventory=self.inventory,
             clock=lambda: self.now,
+        )
+
+    def test_nodes_from_another_control_plane_settle_only_by_provider_absence(self):
+        # A Sky client reads history that ran on the local server (no binding field).
+        self.client.endpoint = "https://sky.dstack.ai"
+        self.client.get = Mock(
+            side_effect=AssertionError("foreign run must not be read")
+        )
+        result = self.usage()
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_foreign_provider_absent"
+        )
+        self.assertEqual(result["instances"], 0)
+        self.inventory.return_value = {
+            **self.inventory.return_value,
+            "instance_ids": [self.node["payload"]["dstack"]["provider_instance_id"]],
+        }
+        result = self.usage()
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_foreign_unconfirmed"
+        )
+        self.assertTrue(result["observations"][0]["counted"])
+        # Its own control plane reads the run as before.
+        self.node["payload"]["dstack"]["control_plane"] = "https://sky.dstack.ai"
+        self.client.get = Mock(side_effect=lambda **_: copy.deepcopy(self.run))
+        self.inventory.return_value = {
+            **self.inventory.return_value,
+            "instance_ids": [],
+        }
+        self.assertEqual(
+            self.usage()["observations"][0]["reason_code"],
+            "dstack_terminal_provider_absent",
         )
 
     def test_owned_terminal_and_fresh_provider_absence_free_capacity_not_billing(self):
@@ -1788,6 +1900,7 @@ class DstackRESTTests(unittest.TestCase):
         self.assertEqual(seen[0].content, seen[1].content)
         self.assertEqual(json.loads(seen[0].content)["verified"], {"eq": True})
         self.assertEqual(json.loads(seen[0].content)["inet_down"], {"gte": 1000})
+        self.assertEqual(json.loads(seen[0].content)["cuda_max_good"], {"gte": 13.0})
 
     def test_vast_bandwidth_floor_refuses_unknown_and_preserves_advertised_location(
         self,
@@ -1941,11 +2054,14 @@ class DstackRESTTests(unittest.TestCase):
             self.assertEqual(
                 str(req.url).split("?")[0], "https://console.vast.ai/api/v1/instances/"
             )
-            self.assertEqual(req.url.params["select_cols"], '["id"]')
+            self.assertEqual(req.url.params["select_cols"], '["id","label"]')
             self.assertEqual(req.url.params["limit"], "25")
             if len(seen) == 1:
                 self.assertNotIn("after_token", req.url.params)
-                rows, cursor = [{"id": 123}, {"id": 456}], "next-page-token"
+                rows, cursor = (
+                    [{"id": 123, "label": "dstack-a"}, {"id": 456}],
+                    "next-page-token",
+                )
             else:
                 self.assertEqual(req.url.params["after_token"], "next-page-token")
                 rows, cursor = [{"id": 789}], None
@@ -1970,6 +2086,7 @@ class DstackRESTTests(unittest.TestCase):
                 "complete": True,
                 "observed_at": 20.0,
                 "instance_ids": ["123", "456", "789"],
+                "labels": ["dstack-a", None, None],
             },
         )
         self.assertNotIn("secret", json.dumps(result))
@@ -2032,19 +2149,22 @@ class DstackRESTTests(unittest.TestCase):
             ):
                 self.provider_client("vastai", read).provider_inventory("vastai")
 
-    def test_runpod_unpaginated_account_query_projects_ids_only(self):
+    def test_runpod_unpaginated_account_query_projects_ids_and_names(self):
         def read(req):
             self.assertEqual(req.method, "POST")
             self.assertEqual(str(req.url), "https://api.runpod.io/graphql")
             self.assertEqual(
-                json.loads(req.content), {"query": "query { myself { pods { id } } }"}
+                json.loads(req.content),
+                {"query": "query { myself { pods { id name } } }"},
             )
             return httpx.Response(
-                200, json={"data": {"myself": {"pods": [{"id": "pod-123"}]}}}
+                200,
+                json={"data": {"myself": {"pods": [{"id": "pod-123", "name": "x"}]}}},
             )
 
         result = self.provider_client("runpod", read).provider_inventory("runpod")
         self.assertEqual(result["instance_ids"], ["pod-123"])
+        self.assertEqual(result["labels"], ["x"])
         for bad in (
             {
                 "data": {"myself": {"pods": []}},
@@ -2052,6 +2172,7 @@ class DstackRESTTests(unittest.TestCase):
             },
             {"data": {"myself": {"pods": [], "pageInfo": {"hasNextPage": True}}}},
             {"data": {"myself": {"pods": [{"id": "same"}, {"id": "same"}]}}},
+            {"data": {"myself": {"pods": [{"id": "pod-1", "name": 7}]}}},
         ):
             with (
                 self.subTest(bad=bad),

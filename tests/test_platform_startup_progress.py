@@ -56,6 +56,39 @@ class SafeStartupProgressTests(unittest.TestCase):
         self.assertEqual(result["phase_started_at"], 120)
         self.assertNotIn("SECRET", json.dumps(result))
 
+    def test_live_received_bytes_cross_every_seam_only_when_bounded(self):
+        source = {
+            "phase": "model_download",
+            "bytes_complete": 5,
+            "bytes_total": 100,
+            "files_complete": 1,
+            "files_total": 11,
+        }
+        self.assertEqual(
+            safe_preparation_report({**source, "bytes_received": 40})["download"][
+                "bytes_received"
+            ],
+            40,
+        )
+        native = native_preparation(
+            {
+                "phase": "model_download",
+                "download": {
+                    **{k: source[k] for k in source if k != "phase"},
+                    "bytes_received": 40,
+                },
+            }
+        )
+        self.assertEqual(native["download"]["bytes_received"], 40)
+        for bad in (4, 101, "40", None, True):
+            with self.subTest(bad=bad):
+                self.assertNotIn(
+                    "bytes_received",
+                    safe_preparation_report({**source, "bytes_received": bad})[
+                        "download"
+                    ],
+                )
+
     def test_older_source_timestamp_is_not_fabricated_or_unknown_counter_zeroed(self):
         result = safe_preparation_report(
             {"phase": "model_download", "updated_unix": 125}

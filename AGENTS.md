@@ -11,10 +11,13 @@
 - **Stuck 30 minutes? Ask Claude instead of adding guards.** If your own guard blocks a normal operation, loosen or delete it first.
 - **Deploy-helper or server-config changes are done only when live on BOTH staging and production.**
 
+## Experiments
+- Before any GPU/provider/model/quality test, search `docs/EXPERIMENTS.md`; reuse a matching row instead of re-running. Afterwards append one row (date, setup, numbers, verdict, evidence link), failures included.
+
 ## Coordination
 - Codex: backend/API/schema/infra/GPU/money/Agent docs in `inkseq/h3-studio`, except the AI layer.
 - Claude (owner 2026-10-29): the whole AI layer (model clients/prompts, story chat, Inky, pictures, attachments, Langfuse, evals) and Modal (#688), backend included; Codex reviews only when it touches money, schema or auth.
-- Claude: canonical `inkseq/inkseq-design/studio-app` AND `h3-studio/yingxu` sync. Codex edits UI only for frontend-requested API-client types.
+- Claude: canonical `inkseq/inkseq-design/studio-app` AND `h3-studio/inkseq-web` sync. Codex edits UI only for frontend-requested API-client types.
 - Share issue API routes/JSON/errors before work; post changes there. Board: github.com/orgs/inkseq/projects/1; routing: `workflow/project.json`.
 - Claim scope/integration owner/branch/worktree/base before edits; preserve parallel work. One issue in progress + one in review per lane. GitHub only; no task database.
 - Latest owner decisions win: record in `workflow/owner-changes.md`, relay one line for Codex; re-read it on origin/main before production writes/spend.
@@ -30,7 +33,7 @@
 
 Classify behavior; check slices once. If unsure between Tier1 and Tier2, it is Tier1 unless it is on the closed list. Merge small PRs; flag unfinished features. CI auto-deploys staging. Promote identical accepted bytes immediately without rebuild, any day (CR47); Tier2 needs Claude sign-off. Close on promotion, not merge. Continue independent staged milestones while waiting.
 
-Order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start <=2 (staging soak first) -> go-live checklist -> frontend repo merge into `yingxu` -> #347 editor. No new epics before M1.
+Order (CR42/43): promote staging batch -> #353 prod backfill -> GPU demand start <=2 (staging soak first) -> go-live checklist -> frontend repo merge into `inkseq-web` -> #347 editor. No new epics before M1.
 
 ## Safety
 - Reuse owners/assets/jobs/attempts/ledger/fences. Preserve immutable accepted inputs/config identity, original jobs/media and cumulative accounting. Unknown outcomes require reconciliation, never duplicate generation/rental or invented settlement.

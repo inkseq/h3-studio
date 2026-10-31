@@ -88,6 +88,20 @@ class ModalHostTests(LedgerCase):
             3_503_340,
         )
 
+    def test_blackwell_host_has_its_own_floor_and_other_gpus_are_refused(self):
+        # Owner 2026-10-31: Blackwell only; RTX PRO 6000 quotes its own floor.
+        pro = replace(self.spec, gpu='RTX-PRO-6000', max_hourly_microusd=4_583_340)
+        self.assertEqual(pro.gpu, 'RTX-PRO-6000')
+        for gpu, quote in (
+            ('RTX-PRO-6000', 4_583_339),
+            ('RTX-PRO-6000', 5_200_001),
+            ('L40S', 4_583_340),
+            ('H100', 4_583_340),
+            ('B200', 9_000_000),
+        ):
+            with self.subTest(gpu=gpu, quote=quote), self.assertRaises(ValueError):
+                replace(self.spec, gpu=gpu, max_hourly_microusd=quote)
+
     def test_create_uses_existing_funding_and_finite_single_input_host(self):
         intent = self.intent()
         before = self.balance()

@@ -321,23 +321,23 @@ jobs:
         with:
           node-version: '22.23.4'
           cache: npm
-          cache-dependency-path: yingxu/package-lock.json
+          cache-dependency-path: inkseq-web/package-lock.json
       - name: Check Node security patch and bundled trust
         run: node deploy/tls/check_node_trust.mjs
-      - name: Verify source-only Yingxu release snapshot
-        run: python tools/sync_yingxu_source.py --verify-snapshot
+      - name: Verify source-only web release snapshot
+        run: python tools/sync_web_source.py --verify-snapshot
       - run: npm ci --ignore-scripts
-        working-directory: yingxu
+        working-directory: inkseq-web
       - name: Frontend behavior tests
         run: npm test
-        working-directory: yingxu
+        working-directory: inkseq-web
       - name: Compile exact tested frontend at the site root
-        run: npm run build -- --base / --outDir ../yingxu-dist
-        working-directory: yingxu
+        run: npm run build -- --base / --outDir ../inkseq-web-dist
+        working-directory: inkseq-web
       - name: Package frontend candidate (publication waits for every required gate)
         if: needs.changes.outputs.action == 'prepare-frontend' || needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
-          python tools/build_frontend_release.py "$GITHUB_SHA" yingxu-dist frontend-release
+          python tools/build_frontend_release.py "$GITHUB_SHA" inkseq-web-dist frontend-release
           python tools/check_frontend_bundle.py "$GITHUB_SHA" frontend-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-frontend' || needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
@@ -366,7 +366,7 @@ jobs:
             requirements.dispatch.lock.txt
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
       - name: Frontend packaging, compatibility and host boundary tests only
-        run: python -m unittest test_yingxu_snapshot test_frontend_release test_frontend_deploy test_release_contract test_platform_frontend -v
+        run: python -m unittest test_web_snapshot test_frontend_release test_frontend_deploy test_release_contract test_platform_frontend -v
 
   restore-native:
     needs: changes
@@ -443,8 +443,8 @@ jobs:
             requirements.lock.txt
             requirements.dispatch.lock.txt
       - run: python -m pip install --require-hashes -r requirements.dispatch.lock.txt
-      - name: Verify source-only Yingxu release snapshot
-        run: python tools/sync_yingxu_source.py --verify-snapshot
+      - name: Verify source-only web release snapshot
+        run: python tools/sync_web_source.py --verify-snapshot
       - uses: docker/setup-buildx-action@v3
       - name: Build cached unified platform runtime
         uses: docker/build-push-action@v6
@@ -553,7 +553,13 @@ jobs:
             --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:fl \
             --migration-selection h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4:ref \
             --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:fl \
-            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:ref "${retained_args[@]}"
+            --migration-selection h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7:ref \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8:fl \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8:ref \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9:fl \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9:ref \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9:fl \
+            --migration-selection h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9:ref "${retained_args[@]}"
           python tools/check_platform_bundle.py "$GITHUB_SHA" platform-release
       - uses: actions/upload-artifact@v4
         if: needs.changes.outputs.action == 'prepare-platform' || (github.event_name == 'push' && github.ref == 'refs/heads/main')

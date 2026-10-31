@@ -29,6 +29,9 @@ PROFILE_IDS = (
     "h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4",
     "h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4",
     "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7",
+    "h3-pruned-rank8-int8-sage2-cu130-p4-29gib-taomate5-v8",
+    "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9",
+    "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9",
 )
 PROFILE_DIRECTORY = (
     Path(__file__).resolve().parents[1] / "deploy" / "wangp" / "profiles"
@@ -156,12 +159,14 @@ def weights_manifest(profile_id, mode):
     """Exact component selection for one mode, consumable by the downloader."""
     model_for(profile_id, mode)
     components = get_profile(profile_id)["components"]
+    # Per-mode adapters (turbo_lora_fl / turbo_lora_ref) ship only with their mode.
+    other = {"fl": "ref", "ref": "fl"}[mode]
     return {
         "transformer": components["transformer_" + mode],
         **{
             key: value
             for key, value in components.items()
-            if not key.startswith("transformer_")
+            if not key.startswith("transformer_") and key != "turbo_lora_" + other
         },
     }
 

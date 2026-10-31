@@ -9,8 +9,12 @@ from studio_platform.dstack_preparation import (
     record_preparation,
     safe_preparation,
     download_progress_timing,
+    download_startup_credit,
     download_timebox_due,
+    download_too_slow,
 )
+
+GB = 1000**3
 
 
 class PreparationTests(unittest.TestCase):
@@ -424,6 +428,119 @@ class PreparationTests(unittest.TestCase):
         self.assertIsNone(view["reason_code"])
         self.assertIn("尚不能判定失败", view["reason_text"])
         self.assertTrue(self.view(binding, now=240)["stale"])
+
+
+class DownloadSpeedTests(unittest.TestCase):
+    """Live wire bytes judge host speed; completed files alone never do."""
+
+    def sample(self, binding, now, received, *, complete=0, files=0, phase=None):
+        binding["observed_at"] = now
+        download = dict(
+            bytes_complete=complete,
+            bytes_total=52 * GB,
+            files_complete=files,
+            files_total=11,
+        )
+        if received is not None:
+            download["bytes_received"] = received
+        record_preparation(
+            binding,
+            dict(
+                phase=phase or "model_download",
+                phase_started_at=90,
+                updated_at=now,
+                download=download,
+            ),
+            now,
+        )
+        return binding
+
+    def binding(self):
+        return dict(
+            intent_id="intent-one",
+            run_id="run-one",
+            provider_instance_id="123",
+            backend="vastai",
+            profile_id="native-one",
+            mode="fl",
+            configuration_id="config-one",
+            manifest_digest="a" * 64,
+            spec_digest="b" * 64,
+        )
+
+    def test_slow_host_is_due_only_after_the_measurement_window(self):
+        binding = self.sample(self.binding(), 100, 0)
+        # 38 MB/s, the 2026-10-31 Lium rate.
+        self.sample(binding, 200, 38 * 10**8 // 10)
+        self.assertFalse(download_too_slow(binding, 200))  # Still measuring.
+        self.sample(binding, 280, 38 * 10**6 * 180)
+        self.assertTrue(download_too_slow(binding, 280))
+        self.assertEqual(download_startup_credit(binding, 280), 0)
+        # A stale provider read is never stop evidence.
+        self.assertFalse(download_too_slow(binding, 400))
+
+    def test_fast_host_earns_startup_credit_until_progress_stops(self):
+        binding = self.sample(self.binding(), 100, 0)
+        self.sample(binding, 400, 120 * 10**6 * 300, complete=GB, files=7)
+        self.assertFalse(download_too_slow(binding, 400))
+        self.assertEqual(download_startup_credit(binding, 400), 300)
+        # The same bytes again: no new progress, so the credit stops growing.
+        self.sample(binding, 600, 120 * 10**6 * 300, complete=GB, files=7)
+        self.assertEqual(download_startup_credit(binding, 600), 300)
+        self.assertEqual(binding["download_progress"]["last_progress_at"], 400)
+
+    def test_completed_download_keeps_its_credit_in_later_phases(self):
+        binding = self.sample(self.binding(), 100, 0)
+        self.sample(binding, 600, 26 * GB, complete=20 * GB, files=9)
+        self.sample(binding, 1100, None, complete=52 * GB, files=11)
+        self.assertEqual(binding["download_progress"]["bytes_received"], 52 * GB)
+        self.sample(binding, 1200, None, phase="runtime_start")
+        self.assertEqual(download_startup_credit(binding, 3000), 1000)
+        self.assertFalse(download_too_slow(binding, 3000))
+
+    def test_hosts_without_live_bytes_keep_the_original_rules(self):
+        binding = self.sample(self.binding(), 100, None)
+        self.sample(binding, 1000, None, complete=GB, files=1)
+        self.assertNotIn("bytes_received", binding["download_progress"])
+        self.assertFalse(download_too_slow(binding, 1000))
+        self.assertEqual(download_startup_credit(binding, 1000), 0)
+
+    def test_received_bytes_never_go_back_or_exceed_the_manifest(self):
+        binding = self.sample(self.binding(), 100, 10 * GB)
+        self.sample(binding, 150, 4 * GB)  # An SDK retry restarted one file.
+        self.assertEqual(binding["download_progress"]["bytes_received"], 10 * GB)
+        self.assertEqual(binding["download_progress"]["last_progress_at"], 100)
+        for bad in (53 * GB, -1, "1", 2.5):
+            with self.subTest(bad=bad):
+                value = safe_preparation(
+                    dict(
+                        phase="model_download",
+                        download=dict(
+                            bytes_complete=GB,
+                            bytes_total=52 * GB,
+                            files_complete=1,
+                            files_total=11,
+                            bytes_received=bad,
+                        ),
+                    ),
+                    200,
+                )
+                self.assertNotIn("bytes_received", value["download"])
+        # Received below completed bytes is malformed, not a slow sample.
+        value = safe_preparation(
+            dict(
+                phase="model_download",
+                download=dict(
+                    bytes_complete=2 * GB,
+                    bytes_total=52 * GB,
+                    files_complete=1,
+                    files_total=11,
+                    bytes_received=GB,
+                ),
+            ),
+            200,
+        )
+        self.assertNotIn("bytes_received", value["download"])
 
 
 if __name__ == "__main__":

@@ -574,6 +574,9 @@ def create_app(
             public_paths.add("/v1/legal/policy")
         if request.method == "POST":
             public_paths.add("/v1/billing/stripe/webhook")
+            # A dial-out GPU worker has no session; its one-time boot token
+            # is checked by the route itself (#859).
+            public_paths.add("/v1/worker/boot")
         public_frontend = is_public_frontend(settings, request.method, request.url.path)
         public_discovery = (
             request.method in {"GET", "HEAD"} and request.url.path in AGENT_PUBLIC_PATHS
@@ -1399,6 +1402,10 @@ def create_app(
 
     app.state.quick_chat_recovery = QuickChatRecovery(app.state.quick_chat)
     register_agent_connect_routes(app)
+    from . import enhance_routes, worker_boot
+
+    worker_boot.register_routes(app)
+    enhance_routes.register_routes(app)
     from .batches import register_routes
 
     register_routes(app)

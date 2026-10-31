@@ -15,7 +15,12 @@ import re
 
 from .protocol import BackendError
 from .wangp_compiler import MAX_SEED, control_schema as legacy_schema
-from .wangp_contract import InputDescriptor, PreparedRequest, canonical_json
+from .wangp_contract import (
+    InputDescriptor,
+    PreparedRequest,
+    StoredInput,
+    canonical_json,
+)
 from ..runtime_catalog import get_profile, model_for, validate_manifest
 from ..storage import key_belongs_to, validate_key
 
@@ -66,12 +71,21 @@ def turbo_prompt(prompt):
     return framed[:end] + CLEAN_FRAME + framed[end:]
 
 
-def acceleration(profile_id):
-    """A profile's pinned turbo LoRA binding, or None for the plain sampler."""
+def acceleration(profile_id, mode=None):
+    """A profile's pinned turbo LoRA binding, or None for the plain sampler.
+
+    A per-mode component map (Pika H3 Flex: one adapter for FL2VA, one for Ref2VA)
+    resolves its LoRA path only for a given mode.
+    """
     value = get_profile(profile_id).get('acceleration')
     if value is None:
         return None
-    component = get_profile(profile_id)['components'][value['component']]
+    name = value['component']
+    if isinstance(name, dict):
+        if mode is None:
+            return dict(value)
+        name = name[mode]
+    component = get_profile(profile_id)['components'][name]
     return {**value, 'path': component['files'][0]['path']}
 
 
@@ -930,13 +944,16 @@ def _settings(value, output_spec, handles, profile_id):
             'return_side_files': False,
         },
     }
-    turbo = acceleration(profile_id)
+    turbo = acceleration(profile_id, mode)
     if turbo is not None:
         # Model-root relative and manifest-pinned; only the GPU host maps it to
         # its verified local file (upstream accepts an absolute LoRA path).
         settings['activated_loras'] = [turbo['path']]
         settings['loras_multipliers'] = turbo['lora_multiplier']
         settings['guidance_scale'] = turbo['guidance_scale']
+        if 'sample_solver' in turbo:
+            # The adapter's own sampler (Pika: pika_renoise); the creator sampler control stays euler.
+            settings['sample_solver'] = turbo['sample_solver']
     if value['step_skipping'] == 'first_block':
         # The handler accepts only its listed thresholds; 0.08 is the upstream balanced one.
         settings['skip_steps_multiplier'] = 0.08
@@ -1043,7 +1060,7 @@ class H3ProfileCompiler:
             )
             for item in descriptors:
                 heartbeat()
-                with store.open(keys[item.asset_id]) as stream:
+                with StoredInput(store, keys[item.asset_id]) as stream:
                     if self.stage_input(item, stream, heartbeat=heartbeat) != item:
                         raise ValueError('wangp_staged_input_mismatch')
             return prepared
@@ -1066,6 +1083,14 @@ def _parse_positions(text):
             {'time_seconds': float(match[1]), 'duration_seconds': float(match[2])}
         )
     return result
+
+
+def _authored_sampler(solver, profile_id):
+    """An adapter-fixed sampler reads back as the euler control it compiles from."""
+    turbo = acceleration(profile_id)
+    if turbo is not None and solver == turbo.get('sample_solver'):
+        return 'euler'
+    return solver
 
 
 def _authored_prompt(prompt, profile_id):
@@ -1213,7 +1238,7 @@ def prepared_request(prepared, manifest):
         **canvas,
         'seed': settings.get('seed'),
         'steps': settings.get('num_inference_steps'),
-        'sampler_name': settings.get('sample_solver'),
+        'sampler_name': _authored_sampler(settings.get('sample_solver'), profile['id']),
         'denoise': settings.get('denoising_strength'),
         'shift_video': settings.get('flow_shift'),
         'inputs': inputs,

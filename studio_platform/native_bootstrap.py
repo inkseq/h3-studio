@@ -253,7 +253,7 @@ class SSHHost:
         self.tunnel = None
         self._connection_lock = threading.Lock()
         self._ever_connected = False
-        self.client = None
+        self.client = self.jump_client = None
         self.ensure_connected()
 
     def ensure_connected(self):
@@ -278,38 +278,65 @@ class SSHHost:
         username = coordinates.get('username', 'root')
         if username != expected_user:
             raise BootError('bootstrap_ssh_user_mismatch')
-        if self.client is not None:
-            self.client.close()
-        self.client = paramiko.SSHClient()
+        for client in (self.client, self.jump_client):
+            if client is not None:
+                client.close()
+        self.client = self.jump_client = None
         config.known_hosts_file.parent.mkdir(parents=True, exist_ok=True)
-        if config.known_hosts_file.exists():
-            self.client.load_host_keys(str(config.known_hosts_file))
-        else:
+        if not config.known_hosts_file.exists():
             config.known_hosts_file.touch(mode=0o600)
-            self.client.load_host_keys(str(config.known_hosts_file))
-        # Initial explicit TOFU is allowed once. Transport recovery cannot trust
-        # a different host key if the endpoint was replaced or the pin was lost.
-        self.client.set_missing_host_key_policy(
-            paramiko.AutoAddPolicy()
-            if config.trust_first_host_key and not self._ever_connected
-            else paramiko.RejectPolicy()
-        )
+        jump = coordinates.get("jump")
         try:
-            self.client.connect(
-                coordinates["host"],
-                port=coordinates["port"],
-                username=username,
-                key_filename=str(config.ssh_key_file),
-                look_for_keys=False,
-                allow_agent=False,
-                timeout=15,
-                banner_timeout=15,
-                auth_timeout=15,
+            sock = None
+            if jump is not None:
+                # Both hops pin their host keys in the same per-intent file.
+                self.jump_client = self._pinned_client(paramiko)
+                self._login(
+                    self.jump_client, jump["host"], jump["port"], jump["username"]
+                )
+                sock = self.jump_client.get_transport().open_channel(
+                    "direct-tcpip",
+                    (coordinates["host"], coordinates["port"]),
+                    ("127.0.0.1", 0),
+                    timeout=15,
+                )
+            # Load pins only after the jump hop saved its own.
+            self.client = self._pinned_client(paramiko)
+            self._login(
+                self.client, coordinates["host"], coordinates["port"], username, sock
             )
             self._ever_connected = True
         except Exception:
-            self.client.close()
+            for client in (self.client, self.jump_client):
+                if client is not None:
+                    client.close()
             raise BootError("bootstrap_ssh_unavailable_or_host_key_untrusted") from None
+
+    def _pinned_client(self, paramiko):
+        client = paramiko.SSHClient()
+        client.load_host_keys(str(self.config.known_hosts_file))
+        # Initial explicit TOFU is allowed once. Transport recovery cannot trust
+        # a different host key if the endpoint was replaced or the pin was lost.
+        client.set_missing_host_key_policy(
+            paramiko.AutoAddPolicy()
+            if self.config.trust_first_host_key and not self._ever_connected
+            else paramiko.RejectPolicy()
+        )
+        return client
+
+    def _login(self, client, host, port, username, sock=None):
+        client.connect(
+            host,
+            port=port,
+            username=username,
+            key_filename=str(self.config.ssh_key_file),
+            look_for_keys=False,
+            allow_agent=False,
+            timeout=15,
+            banner_timeout=15,
+            auth_timeout=15,
+            sock=sock,
+        )
 
     def run(self, script, *, limit=4 * 1024 * 1024, timeout=25):
         channel = None
@@ -451,6 +478,8 @@ class SSHHost:
             self.tunnel.shutdown()
             self.tunnel.server_close()
         self.client.close()
+        if self.jump_client is not None:
+            self.jump_client.close()
 
 
 def provider_instance_id(provider, value):

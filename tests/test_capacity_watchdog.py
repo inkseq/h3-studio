@@ -341,6 +341,52 @@ class NodeWatchdogTests(LedgerCase):
         self.assertIsNone(node["payload"]["dstack"].get("first_runtime_ready_at"))
         self.assertIsNone(node["payload"]["dstack"].get("provider_removal_proof"))
 
+    def test_on_pace_download_credit_extends_only_the_cold_window(self):
+        # Short windows keep this inside the fixture's other start windows.
+        self.settings.capacity_startup_timeout_seconds = 300
+        node_id = self.start()["node_id"]
+        controller = self.controller()
+        # The measured credit itself is covered in test_dstack_preparation.
+        with patch(
+            "studio_platform.dstack_preparation.download_startup_credit",
+            return_value=200,
+        ):
+            self.now += 301
+            self.assertNotIn("code", controller.tick()["nodes"][0])
+            self.assertEqual(self.client.stopped, [])
+            self.now += 200
+            result = controller.tick()["nodes"][0]
+        self.assertEqual(result["code"], "capacity_startup_timeout")
+        node, intent = self.node(node_id)
+        self.assertEqual(node["payload"]["capacity_watchdog"]["timeout_seconds"], 500)
+        with self.repo.engine.connect() as connection:
+            self.assertTrue(fenced_node_stop(connection, node, intent))
+
+    def test_failed_one_shot_launch_stops_without_waiting_for_the_timeout(self):
+        node_id = self.start()["node_id"]
+        node, _ = self.node(node_id)
+        payload = node["payload"]
+        payload["dstack"]["preparation"] = {
+            "phase": "setup_failed",
+            "failure_phase": "runtime_start",
+            "started_at": self.now,
+            "phase_started_at": self.now,
+            "updated_at": self.now,
+        }
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(payload=payload)
+            )
+        self.now += 30
+        result = self.controller().tick()["nodes"][0]
+        self.assertEqual(result["code"], "capacity_startup_failed")
+        self.assertEqual(len(self.client.stopped), 1)
+        node, intent = self.node(node_id)
+        with self.repo.engine.connect() as connection:
+            self.assertTrue(fenced_node_stop(connection, node, intent))
+
     def test_marker_alone_cannot_authorize_stop_of_unfenced_attempt(self):
         node_id, controller, original, claim = self.lost()
         node, intent = self.node(node_id)

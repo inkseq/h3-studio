@@ -1,0 +1,1064 @@
+import React, { useEffect, useMemo, useReducer, useRef, useState, useEffectEvent } from 'react';
+import { FloatingMessage } from './floating-notice.js';
+import {
+  ArrowUp,
+  Check,
+  Film,
+  ImagePlus,
+  MessageSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Paperclip,
+  Plus,
+  Sparkles,
+  Undo2,
+  Upload,
+  X,
+} from 'lucide-react';
+import StudioHeader from './StudioHeader.jsx';
+import ItemMenu from './ItemMenu.jsx';
+import { MenuItem } from './ui/Menu.jsx';
+import { Button, IconButton } from './ui/Button.jsx';
+import { Chip } from './ui/Chip.jsx';
+import { Tabs } from './ui/Tabs.jsx';
+import { ListButton } from './ui/ListButton.jsx';
+import { EmptyState } from './ui/Note.jsx';
+import { StoryboardSplitter, useStoryboardPanelSize } from './StoryboardPanels.jsx';
+import { RenameDialog } from './UniversalTrash.jsx';
+import { useI18n } from './i18n/I18nProvider.jsx';
+import { navigateApp } from './app-navigation.js';
+import {
+  CARD_GROUPS,
+  applyEvent,
+  cardsByKind,
+  editCard,
+  emptyChat,
+  progress,
+  quoteAffordable,
+} from './story-chat-model.js';
+import { createPreviewChat } from './story-chat-preview.js';
+import { createLiveChat } from './story-chat-client.js';
+import { ACCEPT } from './story-chat-attach.js';
+import { AttachedFiles, PendingFiles, useAttachments } from './StoryChatAttachments.jsx';
+import { createCloudClient } from './cloud-client.js';
+import { agentLinkSearch } from './agent-navigation.js';
+import './story-chat.css';
+
+// A card is busy while its picture is being drawn or a chosen photo is uploading.
+const busyCard = (card) => card.status === 'generating' || card.status === 'uploading';
+import { track } from './analytics.js';
+
+// Dragged narrow, the stories list snaps to an icon rail (owner, 2026-10-25).
+const RAIL = 56,
+  SIDE_DEFAULT = 220,
+  RAIL_BELOW = 150;
+
+function reducer(state, action) {
+  if (action.type === 'edit') return editCard(state, action.id, action.patch);
+  if (action.type === 'reset') return emptyChat();
+  return applyEvent(state, action.event);
+}
+
+const cardName = (card, t) =>
+  card.kind === 'shot' ? t('storyChat.shotN', { n: card.order }) : card.name || '—';
+
+function Thumb({ card, wide = false }) {
+  return (
+    <span className={'sc-thumb' + (wide ? ' wide' : '') + (busyCard(card) ? ' busy' : '')}>
+      {card.image ? <img src={card.image} alt="" /> : <span>{(card.name || '').slice(0, 1)}</span>}
+    </span>
+  );
+}
+
+function QuoteCard({ quote, balance, onSettle }) {
+  const { t } = useI18n();
+  const affordable = quoteAffordable(quote, balance);
+  if (quote.action?.kind === 'new_story')
+    return (
+      <div className={'sc-quote ' + quote.status}>
+        <div className="sc-quote-head">
+          <Plus size={15} aria-hidden="true" />
+          <strong>{quote.label}</strong>
+        </div>
+        {quote.status === 'open' ? (
+          <div className="sc-quote-actions">
+            <small>{t('storyChat.newStoryHelp')}</small>
+            <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
+              {t('storyChat.newStoryStart')}
+            </Button>
+            <Button className="keep-label" onClick={() => onSettle(quote, false)}>
+              {t('storyChat.newStoryStay')}
+            </Button>
+          </div>
+        ) : (
+          <small className="sc-quote-done">
+            {quote.status === 'confirmed' ? t('storyChat.newStoryOpened') : t('storyChat.declined')}
+          </small>
+        )}
+      </div>
+    );
+  if (quote.live)
+    return (
+      <div className={'sc-quote ' + quote.status}>
+        <div className="sc-quote-head">
+          <Film size={15} aria-hidden="true" />
+          <strong>{quote.label}</strong>
+        </div>
+        {quote.status === 'open' ? (
+          <div className="sc-quote-actions">
+            <small>{t('storyChat.liveQuoteHelp')}</small>
+            <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
+              {t('storyChat.makeInWorks')}
+            </Button>
+            <Button className="keep-label" onClick={() => onSettle(quote, false)}>
+              {t('storyChat.notNow')}
+            </Button>
+          </div>
+        ) : (
+          <small className="sc-quote-done">
+            {quote.status === 'confirmed' ? t('storyChat.openedWorks') : t('storyChat.declined')}
+          </small>
+        )}
+      </div>
+    );
+  return (
+    <div className={'sc-quote ' + quote.status}>
+      <div className="sc-quote-head">
+        <Sparkles size={15} aria-hidden="true" />
+        <strong>{quote.label}</strong>
+        {Number.isFinite(quote.credits) && (
+          <span className="sc-credits">
+            {t('storyChat.quoteCredits', { credits: quote.credits })}
+          </span>
+        )}
+      </div>
+      {quote.status === 'open' ? (
+        <div className="sc-quote-actions">
+          {Number.isFinite(balance) && (
+            <small>{t('storyChat.quoteBalance', { balance: balance.toLocaleString() })}</small>
+          )}
+          {affordable ? (
+            <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
+              {t('storyChat.confirm')}
+            </Button>
+          ) : (
+            <>
+              <small className="sc-short">{t('storyChat.short')}</small>
+              <Button
+                variant="primary"
+                className="keep-label"
+                onClick={() => navigateApp('/pricing')}
+              >
+                {t('storyChat.buy')}
+              </Button>
+            </>
+          )}
+          <Button className="keep-label" onClick={() => onSettle(quote, false)}>
+            {t('storyChat.notNow')}
+          </Button>
+        </div>
+      ) : (
+        <small className="sc-quote-done">
+          {quote.status === 'confirmed' ? (
+            <>
+              <Check size={13} aria-hidden="true" /> {t('storyChat.confirmed')}
+            </>
+          ) : (
+            t('storyChat.declined')
+          )}
+        </small>
+      )}
+    </div>
+  );
+}
+
+function CardDetail({
+  card,
+  profiles,
+  busy,
+  canDraw = true,
+  onEdit,
+  onPicture,
+  onShot,
+  onAsk,
+  onUpload,
+  onClose,
+}) {
+  const { t } = useI18n();
+  const photo = useRef(null);
+  const [name, setName] = useState(card.name || '');
+  const [text, setText] = useState(card.text || '');
+  useEffect(() => {
+    setName(card.name || '');
+    setText(card.text || '');
+  }, [card.id, card.name, card.text]);
+  const commit = () => {
+    const patch = {};
+    if (card.kind !== 'shot' && name.trim() && name !== card.name) patch.name = name.trim();
+    if (text !== card.text) patch.text = text;
+    if (Object.keys(patch).length) onEdit(card.id, patch);
+  };
+  const shot = card.kind === 'shot';
+  const refs = card.refs || [];
+  return (
+    <aside className="sc-detail" aria-label={cardName(card, t)}>
+      <header>
+        <strong>{cardName(card, t)}</strong>
+        {shot && <small>{t('storyChat.time', { start: card.start, end: card.end })}</small>}
+        <IconButton
+          label={t('storyChat.close')}
+          onClick={() => {
+            commit();
+            onClose();
+          }}
+        >
+          <X size={16} />
+        </IconButton>
+      </header>
+      <div className={'sc-detail-picture' + (shot ? ' wide' : '')}>
+        {card.image ? (
+          <img src={card.image} alt="" />
+        ) : (
+          <span>
+            {card.status === 'uploading'
+              ? t('storyChat.status.uploading')
+              : card.status === 'generating'
+                ? t('storyChat.status.generating')
+                : t('storyChat.detailNoPicture')}
+          </span>
+        )}
+      </div>
+      {!shot && (
+        <label>
+          {t('storyChat.detailName')}
+          <input value={name} onChange={(event) => setName(event.target.value)} onBlur={commit} />
+        </label>
+      )}
+      <label>
+        {shot ? t('storyChat.detailShot') : t('storyChat.detailText')}
+        <textarea
+          rows={4}
+          value={text}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={commit}
+        />
+      </label>
+      {shot && (
+        <fieldset>
+          <legend>{t('storyChat.detailRefs')}</legend>
+          <div className="sc-refs">
+            {profiles.map((profile) => {
+              const on = refs.includes(profile.id);
+              return (
+                <Chip
+                  key={profile.id}
+                  pressed={on}
+                  media={<Thumb card={profile} />}
+                  onClick={() =>
+                    onEdit(card.id, {
+                      refs: on ? refs.filter((id) => id !== profile.id) : [...refs, profile.id],
+                    })
+                  }
+                >
+                  {profile.name}
+                </Chip>
+              );
+            })}
+          </div>
+        </fieldset>
+      )}
+      <div className="sc-detail-actions">
+        {shot ? (
+          <Button
+            variant="primary"
+            className="keep-label"
+            disabled={busy || busyCard(card)}
+            onClick={() => {
+              commit();
+              onShot(card);
+            }}
+          >
+            <Film size={15} aria-hidden="true" />
+            {card.status === 'ready' ? t('storyChat.remakeShot') : t('storyChat.makeShot')}
+          </Button>
+        ) : canDraw ? (
+          <Button
+            variant="primary"
+            className="keep-label"
+            disabled={busy}
+            onClick={() => {
+              commit();
+              onPicture(card);
+            }}
+          >
+            <ImagePlus size={15} aria-hidden="true" />
+            {card.image ? t('storyChat.redrawPicture') : t('storyChat.makePicture')}
+          </Button>
+        ) : null}
+        {!shot && onUpload && (
+          <>
+            <Button
+              className="keep-label"
+              disabled={busy || busyCard(card)}
+              onClick={() => photo.current?.click()}
+            >
+              <Upload size={15} aria-hidden="true" />
+              {t('storyChat.uploadPhoto')}
+            </Button>
+            <input
+              ref={photo}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (file) onUpload(card, file);
+              }}
+            />
+          </>
+        )}
+        <Button
+          className="keep-label"
+          onClick={() => {
+            commit();
+            onAsk(card);
+          }}
+        >
+          <MessageSquare size={15} aria-hidden="true" />
+          {t('storyChat.askAbout')}
+        </Button>
+      </div>
+    </aside>
+  );
+}
+
+function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
+  const { t } = useI18n();
+  const groups = cardsByKind(state);
+  const done = progress(state);
+  const profiles = Object.fromEntries(state.cards.map((card) => [card.id, card]));
+  if (!state.cards.length)
+    return (
+      <EmptyState
+        compact
+        className="sc-board-empty"
+        icon={<Sparkles size={22} aria-hidden="true" />}
+      >
+        {t('storyChat.boardEmpty')}
+      </EmptyState>
+    );
+  return (
+    <>
+      <div className="sc-progress">
+        <span>{t('storyChat.progressCast', { ...done, sets: done.places + done.props })}</span>
+        {done.shots > 0 && <span>{t('storyChat.progressShots', done)}</span>}
+        {done.shots > 0 && (
+          <span className="sc-meter" style={{ '--made': done.generated / done.shots }}>
+            {t('storyChat.progressMade', done)}
+          </span>
+        )}
+        <Button
+          variant={done.done ? 'primary' : 'secondary'}
+          className="keep-label"
+          disabled={!done.shots}
+          onClick={onWorks}
+        >
+          <Film size={15} aria-hidden="true" />
+          {t('storyChat.openWorks')}
+        </Button>
+      </div>
+      <FloatingMessage tone="info" text={notice ? notice : null} />
+      {CARD_GROUPS.filter((group) => group.kind !== 'shot').map((group) =>
+        groups[group.kind].length ? (
+          <section key={group.kind} className="sc-group">
+            <h3>{t('storyChat.' + group.key)}</h3>
+            <div className="sc-tiles">
+              {groups[group.kind].map((card) => (
+                <Button
+                  key={card.id}
+                  className={
+                    'sc-tile' +
+                    (fresh.includes(card.id) ? ' fresh' : '') +
+                    (openId === card.id ? ' open' : '')
+                  }
+                  onClick={() => onOpen(card.id)}
+                >
+                  <Thumb card={card} />
+                  <strong>{card.name}</strong>
+                  <small>
+                    {card.status === 'uploading'
+                      ? t('storyChat.status.uploading')
+                      : card.status === 'generating'
+                        ? t('storyChat.drawing')
+                        : card.text}
+                  </small>
+                </Button>
+              ))}
+            </div>
+          </section>
+        ) : null,
+      )}
+      {groups.shot.length > 0 && (
+        <section className="sc-group">
+          <h3>{t('storyChat.shots')}</h3>
+          <ol className="sc-shots">
+            {groups.shot.map((card) => (
+              <li key={card.id}>
+                <Button
+                  className={
+                    'sc-shot' +
+                    (fresh.includes(card.id) ? ' fresh' : '') +
+                    (openId === card.id ? ' open' : '')
+                  }
+                  onClick={() => onOpen(card.id)}
+                >
+                  <Thumb card={card} wide />
+                  <span className="sc-shot-body">
+                    <span className="sc-shot-meta">
+                      <strong>{t('storyChat.shotN', { n: card.order })}</strong>
+                      <small>{t('storyChat.time', { start: card.start, end: card.end })}</small>
+                      <small className={'sc-status ' + (card.status || 'draft')}>
+                        {t('storyChat.status.' + (card.status || 'draft'))}
+                      </small>
+                    </span>
+                    <span className="sc-shot-text">{card.text}</span>
+                    <span className="sc-shot-refs">
+                      {(card.refs || [])
+                        .map((id) => profiles[id])
+                        .filter(Boolean)
+                        .map((profile) => (
+                          <span key={profile.id}>{profile.name}</span>
+                        ))}
+                    </span>
+                  </span>
+                </Button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+    </>
+  );
+}
+
+// "14:05" today, otherwise a short date, in the viewer's language.
+function whenText(seconds, locale) {
+  const value = Number(seconds) * (Number(seconds) < 1e12 ? 1000 : 1);
+  if (!Number.isFinite(value)) return '';
+  const date = new Date(value);
+  const today = date.toDateString() === new Date().toDateString();
+  return new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en', {
+    ...(today ? { hour: 'numeric', minute: '2-digit' } : { month: 'short', day: 'numeric' }),
+  }).format(date);
+}
+
+const openInWorks = (projectId, entityId, { generate = false } = {}) => {
+  const search = agentLinkSearch({ projectId, entityId: entityId || null, generate });
+  if (search) navigateApp('/' + search);
+};
+
+// mode 'preview' uses sample replies; 'live' talks to /v1/story-chats (#422).
+// A remembered on/off switch for a panel; private browsing or full storage just forgets.
+function useRemembered(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? initial : raw === '1';
+    } catch {
+      return initial;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, value ? '1' : '0');
+    } catch {
+      // Browser storage is optional (private mode, blocked site data).
+    }
+  }, [key, value]);
+  return [value, setValue];
+}
+
+export default function StoryChat({ account, mode = 'preview', projectId = null }) {
+  const { t, locale } = useI18n();
+  const live = mode === 'live';
+  const api = useMemo(() => {
+    const client = createCloudClient();
+    client.setAccount(account);
+    return client;
+  }, [account]);
+  const [unavailable, setUnavailable] = useState('');
+  // Admin switch (#466): card pictures only when the server says they are on.
+  const [picturesOn, setPicturesOn] = useState(!live);
+  // The story this chat edits: the address's id at first, then whatever the client created.
+  const story = useRef(projectId);
+  const [session, setSession] = useState(0);
+  const pending = useRef(null);
+  // The list panel is part of the page layout: it shows at once and the list fills in, so the
+  // chat never jumps sideways when the read returns (or fails).
+  const [stories, setStories] = useState(live ? [] : null);
+  const [storiesRead, setStoriesRead] = useState(false);
+  const refreshStories = () =>
+    live &&
+    api
+      .request('/v1/story-chats')
+      .then((value) => {
+        setStories(value.story_chats || []);
+        setStoriesRead(true);
+      })
+      .catch(() => {});
+  // Open another story (or a new one, optionally starting with an idea) without a reload.
+  const openStory = (ident, firstMessage = null) => {
+    story.current = ident;
+    pending.current = firstMessage;
+    setOpenId(null);
+    setTab('chat');
+    try {
+      window.history.pushState(window.history.state, '', '/quick-chat?story=' + (ident || 'new'));
+    } catch {
+      // A blocked history update only loses the back/reload shortcut.
+    }
+    setSession((value) => value + 1);
+  };
+  useEffect(() => {
+    if (!live) return undefined;
+    const back = () => {
+      const ident = new URLSearchParams(window.location.search).get('story');
+      if (window.location.pathname !== '/quick-chat' || !ident || ident === story.current) return;
+      story.current = ident === 'new' ? null : ident;
+      setSession((value) => value + 1);
+    };
+    window.addEventListener('popstate', back);
+    return () => window.removeEventListener('popstate', back);
+  }, [live]);
+  const [state, dispatch] = useReducer(reducer, null, () => emptyChat());
+  const [balance, setBalance] = useState(live ? Number.NaN : 0);
+  const [text, setText] = useState('');
+  const [tab, setTab] = useState('chat');
+  const [openId, setOpenId] = useState(null);
+  // Desktop layout (owner, 2026-10-24): drag the story list and the card panel wider or
+  // narrower, or fold either away; phones keep the tabs.
+  const sideSize = useStoryboardPanelSize('story-chat-stories', SIDE_DEFAULT, RAIL, 380),
+    boardSize = useStoryboardPanelSize('story-chat-board', 620, 320, 1200);
+  const railed = sideSize.size < RAIL_BELOW;
+  const [sideOpen, setSideOpen] = useRemembered('inkseq.storyChat.sideOpen', true),
+    [boardOpen, setBoardOpen] = useRemembered('inkseq.storyChat.boardOpen', true);
+  const [renaming, setRenaming] = useState(null);
+  // A chat is one Works story; renaming renames the story, removing only takes the chat
+  // out of this list (the story stays in Works and comes back when continued there).
+  const updateChat = async (ident, body) => {
+    await api.request(`/v1/story-chats/${encodeURIComponent(ident)}`, { method: 'PATCH', body });
+    refreshStories();
+    if (body.hidden && ident === story.current) openStory(null);
+  };
+  const [fresh, setFresh] = useState([]);
+  const [notice, setNotice] = useState('');
+  const attachments = useAttachments({ live, maxChars: 4000, setText, onNotice: setNotice });
+  const files = attachments.files;
+  const chat = useRef(null);
+  const thread = useRef(null);
+  const input = useRef(null);
+  const fileInput = useRef(null);
+
+  // Preview: sample replies. Live: the story-chat server, once it says it is ready.
+  const refreshStoriesEvent = useEffectEvent((...args) => refreshStories(...args));
+  const emitEvent = useEffectEvent((...args) => emit(...args));
+  useEffect(() => {
+    dispatch({ type: 'reset' });
+    setUnavailable('');
+    if (!live) {
+      const preview = createPreviewChat({ locale });
+      chat.current = preview;
+      setBalance(preview.balance);
+      return () => preview.close();
+    }
+    let alive = true;
+    const client = createLiveChat({
+      api,
+      language: locale === 'zh' ? 'zh' : 'en',
+      projectId: story.current,
+      labels: {
+        t,
+        generate: (count) =>
+          t(count === 1 ? 'storyChat.liveQuote.one' : 'storyChat.liveQuote', { count }),
+        failed: (failure) => {
+          const code = failure.detail?.detail?.code;
+          if (code === 'image_billing_unavailable') return t('storyChat.pictureUnavailable');
+          if (code === 'image_not_returned') return t('storyChat.pictureRefused');
+          return t('storyChat.failed', { reason: failure.message });
+        },
+        openWorks: openInWorks,
+        picture: (name) => t('storyChat.livePicture', { name }),
+        newStory: (idea) => t('storyChat.newStoryLabel', { idea }),
+        startStory: (idea) => openStory(null, idea),
+      },
+      // Keep the address on this story, so a reload reopens it.
+      onProject: (ident) => {
+        story.current = ident;
+        void refreshStoriesEvent();
+        try {
+          window.history.replaceState(window.history.state, '', '/quick-chat?story=' + ident);
+        } catch {
+          // A blocked history update only loses the reload shortcut.
+        }
+      },
+    });
+    chat.current = client;
+    api
+      .request('/v1/story-chats/config')
+      .then((config) => {
+        if (!alive) return;
+        if (Number.isSafeInteger(config.image_credits)) client.imageCredits = config.image_credits;
+        setPicturesOn(config.pictures_enabled === true);
+        // The confirm card shows the real balance, or none if it cannot be read.
+        api
+          .request('/v1/credits')
+          .then((value) => alive && setBalance(Number(value.available)))
+          .catch(() => alive && setBalance(Number.NaN));
+        client.picturesEnabled = config.pictures_enabled === true;
+        if (!config.enabled || !config.assistant_ready) setUnavailable(t('storyChat.notReady'));
+        else {
+          void refreshStoriesEvent();
+          if (story.current) return client.open(emitEvent);
+          if (pending.current) {
+            const idea = pending.current;
+            pending.current = null;
+            return client.send({ text: idea }, emitEvent);
+          }
+        }
+      })
+      .catch((failure) => alive && setUnavailable(failure.message));
+    return () => {
+      alive = false;
+    };
+  }, [live, locale, api, session, t]);
+
+  const emit = useMemo(() => {
+    let clear = null;
+    return (event) => {
+      dispatch({ type: 'event', event });
+      if (event.type === 'chat.loaded' && event.fresh?.length) {
+        setFresh(event.fresh);
+        clearTimeout(clear);
+        clear = setTimeout(() => setFresh([]), 1600);
+      }
+      if (event.type === 'project.changed') {
+        setFresh((event.changes || []).map((change) => change.card?.id).filter(Boolean));
+        clearTimeout(clear);
+        clear = setTimeout(() => setFresh([]), 1600);
+      }
+    };
+  }, []);
+
+  // An in-app link to another story (?story=<id>) switches to it; the chat's own address
+  // update after creating a story names the same story and changes nothing.
+  useEffect(() => {
+    if (live && projectId && projectId !== story.current) {
+      story.current = projectId;
+      setSession((value) => value + 1);
+    }
+  }, [live, projectId]);
+
+  // A new title (the chat names the story) updates the list.
+  useEffect(() => {
+    if (live && state.title) void refreshStoriesEvent();
+  }, [live, state.title]);
+
+  useEffect(() => {
+    const node = thread.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [state.messages.length, state.busy]);
+
+  const send = (value = text) => {
+    const message = value.trim();
+    if ((!message && !files.length) || state.busy || unavailable) return;
+    chat.current.send({ text: message, attachments: files }, emit);
+    track('story_chat_message', { live, attachments: files.length });
+    setText('');
+    attachments.clear();
+    setTab('chat');
+  };
+  const settle = (quote, accepted) => {
+    if (accepted) setBalance((value) => value - quote.credits);
+    chat.current.settle(quote, accepted, state.cards, emit);
+  };
+  const edit = (id, patch) => {
+    if (live) {
+      void chat.current.edit(id, patch, emit);
+      return;
+    }
+    chat.current.edited();
+    dispatch({ type: 'edit', id, patch });
+  };
+  const ask = (card) => {
+    setOpenId(null);
+    setTab('chat');
+    setText(t('storyChat.askPrefix', { name: cardName(card, t) }));
+    setTimeout(() => input.current?.focus(), 0);
+  };
+  const addFiles = attachments.add;
+
+  const works = () =>
+    live && chat.current?.projectId
+      ? openInWorks(chat.current.projectId)
+      : setNotice(t('storyChat.previewWorks'));
+  // A confirm card already offers the next step; the model's chips would only repeat it.
+  const proposalShown = state.messages.at(-1)?.role === 'quote';
+  const lastAssistant = [...state.messages].reverse().find((item) => item.role === 'assistant');
+  const open = state.cards.find((card) => card.id === openId);
+  const profiles = state.cards.filter((card) => card.kind !== 'shot');
+  const done = progress(state);
+  const starters = ['storyChat.starter1', 'storyChat.starter2', 'storyChat.starter3'];
+
+  return (
+    <div className="home sc-shell">
+      <StudioHeader account={account} active="quick" />
+      {!live && (
+        <p className="sc-preview-bar" role="status">
+          {t('storyChat.preview')}
+        </p>
+      )}
+      {unavailable && (
+        <p className="sc-preview-bar" role="alert">
+          {unavailable}
+        </p>
+      )}
+      <Tabs
+        className="sc-tabs"
+        fill
+        value={tab}
+        onChange={setTab}
+        options={[
+          ...(stories ? [{ value: 'stories', label: t('storyChat.tabStories') }] : []),
+          { value: 'chat', label: t('storyChat.tabChat') },
+          { value: 'cards', label: t('storyChat.tabCards', { count: state.cards.length }) },
+        ]}
+      />
+      <main
+        className={
+          'sc tab-' +
+          tab +
+          (stories ? ' with-stories' : '') +
+          (sideOpen ? '' : ' side-closed') +
+          (railed ? ' side-rail' : '') +
+          (boardOpen ? '' : ' board-closed')
+        }
+        style={{
+          '--sc-side': (railed ? RAIL : sideSize.size) + 'px',
+          '--sc-board': boardSize.size + 'px',
+        }}
+      >
+        {stories && (
+          <nav className="sc-stories" aria-label={t('storyChat.myStories')}>
+            {railed && (
+              <IconButton
+                label={t('storyChat.showStories')}
+                onClick={() => sideSize.set(SIDE_DEFAULT)}
+              >
+                <PanelLeftOpen size={16} />
+              </IconButton>
+            )}
+            <Button
+              variant="primary"
+              className={'sc-new-story' + (railed ? '' : ' keep-label')}
+              title={railed ? t('storyChat.newStory') : undefined}
+              aria-label={railed ? t('storyChat.newStory') : undefined}
+              onClick={() => openStory(null)}
+            >
+              <Plus size={15} aria-hidden="true" />
+              {!railed && t('storyChat.newStory')}
+            </Button>
+            <h3>{t('storyChat.myStories')}</h3>
+            {storiesRead && stories.length === 0 && (
+              <p className="sc-stories-empty">{t('storyChat.noStories')}</p>
+            )}
+            <ul>
+              {(stories || []).map((item) => (
+                <li key={item.project_id}>
+                  <ListButton
+                    label={item.title}
+                    title={item.title}
+                    meta={whenText(item.updated_at, locale)}
+                    current={item.project_id === story.current}
+                    onClick={() => item.project_id !== story.current && openStory(item.project_id)}
+                  />
+                  <ItemMenu label={t('storyChat.chatMenu')}>
+                    <MenuItem onSelect={() => setRenaming(item)}>
+                      {t('storyChat.renameChat')}
+                    </MenuItem>
+                    <MenuItem
+                      title={t('storyChat.removeChatHelp')}
+                      onSelect={() =>
+                        void updateChat(item.project_id, { hidden: true }).catch(() => {})
+                      }
+                    >
+                      {t('storyChat.removeChat')}
+                    </MenuItem>
+                  </ItemMenu>
+                </li>
+              ))}
+            </ul>
+            {renaming && (
+              <RenameDialog
+                title={renaming.title}
+                onSave={(title) => updateChat(renaming.project_id, { title: title.trim() })}
+                onClose={() => setRenaming(null)}
+              />
+            )}
+          </nav>
+        )}
+        {stories && sideOpen && (
+          <StoryboardSplitter
+            panel={sideSize}
+            className="sc-split"
+            label={t('storyChat.resizeStories')}
+            title={t('storyChat.resizeHelp')}
+          />
+        )}
+        <section className="sc-chat" aria-label={t('storyChat.tabChat')}>
+          <div className="sc-panel-toggles">
+            {stories && (
+              <IconButton
+                label={t(sideOpen ? 'storyChat.hideStories' : 'storyChat.showStories')}
+                onClick={() => setSideOpen((v) => !v)}
+              >
+                {sideOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
+              </IconButton>
+            )}
+            <IconButton
+              label={t(boardOpen ? 'storyChat.hideCards' : 'storyChat.showCards')}
+              onClick={() => setBoardOpen((v) => !v)}
+            >
+              {boardOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+            </IconButton>
+          </div>
+          <div className="sc-thread" ref={thread}>
+            {!state.messages.length && (
+              <div className="sc-welcome">
+                <h1>{t('storyChat.welcome')}</h1>
+                <p>{t('storyChat.welcomeHelp')}</p>
+                <div className="sc-starters">
+                  {starters.map((key) => (
+                    <Button key={key} variant="option" onClick={() => send(t(key))}>
+                      {t(key)}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {state.messages.map((message) => {
+              if (message.role === 'user')
+                return (
+                  <div key={message.id} className="sc-msg user">
+                    <AttachedFiles files={message.attachments} />
+                    {message.text && <p>{message.text}</p>}
+                  </div>
+                );
+              if (message.role === 'change')
+                return (
+                  <Button
+                    key={message.id}
+                    className="sc-change keep-label"
+                    onClick={() => setTab('cards')}
+                  >
+                    <Check size={13} aria-hidden="true" />
+                    {t(
+                      'storyChat.change.' +
+                        message.summary.kind +
+                        (message.summary.count === 1 ? '.one' : ''),
+                      message.summary,
+                    )}
+                  </Button>
+                );
+              if (message.role === 'quote')
+                return (
+                  <QuoteCard
+                    key={message.id}
+                    quote={state.quotes[message.quoteId]}
+                    balance={balance}
+                    onSettle={settle}
+                  />
+                );
+              return (
+                <div key={message.id} className="sc-msg assistant">
+                  <p>{message.text}</p>
+                  {live &&
+                    message === lastAssistant &&
+                    !state.busy &&
+                    state.undoTurnId &&
+                    message.turnId === state.undoTurnId && (
+                      <Button
+                        variant="link"
+                        className="sc-undo"
+                        onClick={() =>
+                          void chat.current.undo(state.undoTurnId, emit).then((ok) => {
+                            setNotice(t(ok ? 'storyChat.undone' : 'storyChat.undoStale'));
+                            refreshStories();
+                          })
+                        }
+                      >
+                        <Undo2 size={13} aria-hidden="true" />
+                        {t('storyChat.undo')}
+                      </Button>
+                    )}
+                  {message === lastAssistant &&
+                    !state.busy &&
+                    !proposalShown &&
+                    message.chips.length > 0 && (
+                      <div className="sc-chips">
+                        {message.chips.map((chip) => (
+                          <Chip key={chip} tone="accent" onClick={() => send(chip)}>
+                            {chip}
+                          </Chip>
+                        ))}
+                      </div>
+                    )}
+                </div>
+              );
+            })}
+            {state.busy && (
+              <div className="sc-typing" aria-live="polite">
+                <span />
+                <span />
+                <span />
+                <small>{t(state.cards.length ? 'storyChat.working' : 'storyChat.thinking')}</small>
+              </div>
+            )}
+            {done.done && (
+              <div className="sc-handoff">
+                <Film size={18} aria-hidden="true" />
+                <span>
+                  <strong>{t('storyChat.handoffTitle')}</strong>
+                  <small>{t('storyChat.handoffHelp')}</small>
+                </span>
+                <Button variant="primary" className="keep-label" onClick={works}>
+                  {t('storyChat.openWorks')}
+                </Button>
+              </div>
+            )}
+          </div>
+          <form
+            className="sc-composer"
+            onSubmit={(event) => {
+              event.preventDefault();
+              send();
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              addFiles(event.dataTransfer.files);
+            }}
+          >
+            <PendingFiles attachments={attachments} cards={state.cards} />
+            <div className="sc-compose-row">
+              <IconButton label={t('storyChat.attach')} onClick={() => fileInput.current?.click()}>
+                <Paperclip size={17} />
+              </IconButton>
+              <input
+                ref={fileInput}
+                type="file"
+                accept={live ? ACCEPT : 'image/*'}
+                multiple
+                hidden
+                onChange={(event) => {
+                  addFiles(event.target.files);
+                  event.target.value = '';
+                }}
+              />
+              <textarea
+                ref={input}
+                className="field-bare"
+                rows={1}
+                value={text}
+                placeholder={t('storyChat.placeholder')}
+                onChange={(event) => setText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    send();
+                  }
+                }}
+              />
+              <Button
+                type="submit"
+                className="sc-send"
+                aria-label={t('storyChat.send')}
+                disabled={state.busy || (!text.trim() && !files.length)}
+              >
+                <ArrowUp size={17} />
+              </Button>
+            </div>
+          </form>
+        </section>
+        {boardOpen && (
+          <StoryboardSplitter
+            panel={boardSize}
+            sign={-1}
+            className="sc-split"
+            label={t('storyChat.resizeCards')}
+            title={t('storyChat.resizeHelp')}
+          />
+        )}
+        <section
+          className="sc-board"
+          aria-label={t('storyChat.tabCards', { count: state.cards.length })}
+        >
+          <header className="sc-board-head">
+            {live && chat.current?.projectId ? (
+              <input
+                key={state.title}
+                className="sc-title-input"
+                aria-label={t('storyChat.renameStory')}
+                title={t('storyChat.renameStory')}
+                defaultValue={state.title || t('storyChat.untitled')}
+                maxLength={160}
+                onKeyDown={(event) => event.key === 'Enter' && event.currentTarget.blur()}
+                onBlur={(event) => {
+                  void chat.current.rename(event.currentTarget.value, emit).then(refreshStories);
+                }}
+              />
+            ) : (
+              <h2>{state.title || t('storyChat.untitled')}</h2>
+            )}
+          </header>
+          <div className="sc-board-body">
+            <Board
+              state={state}
+              fresh={fresh}
+              openId={openId}
+              onOpen={setOpenId}
+              onWorks={works}
+              notice={notice}
+            />
+          </div>
+          {open && (
+            <CardDetail
+              card={open}
+              profiles={profiles}
+              busy={state.busy}
+              canDraw={picturesOn}
+              onEdit={edit}
+              onPicture={(card) => {
+                setOpenId(null);
+                setTab('chat');
+                chat.current.propose({ kind: 'image', cards: [card.id] }, card, emit);
+              }}
+              onShot={(card) => {
+                setOpenId(null);
+                setTab('chat');
+                chat.current.propose({ kind: 'generate', cards: [card.id] }, card, emit);
+              }}
+              onAsk={ask}
+              onUpload={
+                live ? (card, file) => void chat.current.attachPhoto(card.id, file, emit) : null
+              }
+              onClose={() => setOpenId(null)}
+            />
+          )}
+        </section>
+      </main>
+    </div>
+  );
+}

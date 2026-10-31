@@ -23,7 +23,7 @@ from .modal_admission import OPERATION
 from .modal_budget import binding, enforce, require
 from .modal_entry import _write, launch_document
 from .modal_launch import initialize, observe
-from .modal_runtime import PROFILE
+from .modal_runtime import selected_profile
 from .modal_transport import ModalHTTPTransport
 from .repository import request_hash, scaler_receipts
 from .runtime_catalog import engine_manifest, profile_output_delivery
@@ -86,7 +86,7 @@ class ModalWorkerBindings:
         receipts = self._receipts(c, identity, OPERATION)
         require(len(receipts) == 1)
         selection = receipts[0]
-        manifest = engine_manifest(PROFILE, selection['mode'])
+        manifest = engine_manifest(selected_profile(selection), selection['mode'])
         require(selection['manifest_digest'] == manifest.digest)
         return intent, selection, manifest
 
@@ -228,7 +228,7 @@ class ModalWorkerBindings:
             selection['configuration_id'],
             'wangp-worker',
             manifest.digest,
-            profile_output_delivery(PROFILE),
+            profile_output_delivery(selected_profile(selection)),
             'hatchet-v1',
         )
         return SlotConfig(

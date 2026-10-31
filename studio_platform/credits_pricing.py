@@ -12,6 +12,12 @@ from .credit_schema import CreditSchemaError, prices, ready
 from .identity_schema import users
 
 DEFAULT_RATES = {"fast": 2, "standard": 4, "refine": 12}
+# Runtime profiles that cost more GPU time than their tier's rate covers. Users
+# see only the larger usage, never a per-clip price (owner 2026-10-30): Pika's
+# accelerator measured about +30% GPU time against TaoMate on the same runtime.
+PROFILE_CREDIT_MULTIPLIERS = {
+    "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9": Fraction(13, 10),
+}
 RECOMMENDED_IMAGE_CREDITS = 5
 DEFAULT_CONFIGURATION = {
     "cost_multiplier": 3,
@@ -348,7 +354,7 @@ def aggregate_quotes(plans, *, complete=True):
 
 def get_tier(compiled, *, execution=None):
     """Classify a fresh server compilation, never caller labels or step counts."""
-    from .quality_tiers import model_tier, profile_tier
+    from .quality_tiers import billing_tier, model_tier, profile_tier
     from .render_plans import RECIPE as RENDER_RECIPE
 
     if (
@@ -363,7 +369,7 @@ def get_tier(compiled, *, execution=None):
     if identity is not None:
         from .runtime_catalog import get_profile
 
-        if profile_tier(identity) != tier:
+        if billing_tier(profile_tier(identity)) != tier:
             raise PricingError(
                 "credit_quote_invalid", "Compiled quality is unavailable."
             )
@@ -401,11 +407,18 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         and isinstance(execution, dict)
         and execution.get("backend") == "cpu-render"
     )
+    from . import enhance_plans
+
+    enhance = (
+        compiled.get("recipe_id") == enhance_plans.RECIPE
+        and isinstance(execution, dict)
+        and execution.get("backend") == enhance_plans.BACKEND
+    )
     output = compiled.get("output_spec", {})
     # CPU chapter/Film compilers use frame_count; generation still requires
     # its original frames contract, even when a caller supplies a render tier.
     frame_key, other_key = (
-        ("frame_count", "frames") if render else ("frames", "frame_count")
+        ("frame_count", "frames") if render or enhance else ("frames", "frame_count")
     )
     frames, fps = output.get(frame_key), output.get("fps", FPS)
     if (
@@ -421,20 +434,31 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         raise PricingError(
             "credit_quote_invalid", "Compiled output duration is unavailable."
         )
-    tier = get_tier(compiled, execution=execution)
+    if enhance:
+        # Owner 2026-10-30 (#795): fixed credits per clip, then per extra second.
+        tier = "enhance-" + compiled.get("request", {}).get("tier", "")
+        if tier[len("enhance-") :] not in enhance_plans.PRICES:
+            raise PricingError("credit_quote_invalid", "Enhance tier is unavailable.")
+    else:
+        tier = get_tier(compiled, execution=execution)
     multiplier, resolution = (
-        (1, {}) if render else resolution_price(price["configuration"], output)
+        (1, {})
+        if render or enhance
+        else resolution_price(price["configuration"], output)
     )
-    rate = 0 if render else price["rates"][tier] * multiplier
+    rate = 0 if render or enhance else price["rates"][tier] * multiplier
     from .reference_video_pricing import price as reference_price
 
     amount, reference = (
         (0, {})
         if render
+        else (enhance_plans.credits(tier[len("enhance-") :], frames / fps), {})
+        if enhance
         else reference_price(
             price["configuration"],
             compiled,
-            Fraction(rate * frames, fps),
+            Fraction(rate * frames, fps)
+            * PROFILE_CREDIT_MULTIPLIERS.get(compiled.get("deployment_profile_id"), 1),
             resolution.get("resolution"),
         )
     )

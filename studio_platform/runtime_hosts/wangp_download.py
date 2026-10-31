@@ -212,6 +212,47 @@ _TAOMATE_LORA = (
     "sha256",
     "de9663d974a884b477556748239c6f28239f7ca1825be270f98f023ff5dab6a7",
 )
+_VAE_ORIGINAL = next(
+    row
+    for row in _LOCATOR_FILES
+    if row[0] == "minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors"
+)
+# Newer immutable files fetched from their own revision (per-file locator). Each
+# row is approved only at exactly this path, size, hash and revision (#844).
+_DIRECT_FILES = {
+    # v9 (WanGP 9cb2bcd): the same VAE with ConvRot file-level format metadata,
+    # the file 9cb2bcd was measured with (2026-10-11, +72 bytes).
+    (
+        "minimax_h3/minimax_h3_video_vae_int8_convrot.safetensors",
+        2811065256,
+        "sha256",
+        "0cb8161a12166fb049a2c1295e6a4833fdc571effdab9ac0ed074b10f2d6646d",
+    ): "98b5288b174fe08f6d54f9af0dc46ee8bb58b225",
+    # Pika H3 Flex adapters for the v9 Pika profile (#844 stage 2), one per mode.
+    (
+        "loras/pika_h3_flex_fl2va_6step_v1_bf16.safetensors",
+        1383678576,
+        "sha256",
+        "d2e7b5ded8671fd480dc92b86beca078708e90f4712e73670111ea8adb98988f",
+    ): "2375fd1c3475ea21cc1bfa9761c5ab79f0cde3ea",
+    (
+        "loras/pika_h3_flex_ref2va_6step_v1_bf16.safetensors",
+        1383678576,
+        "sha256",
+        "202e31cd53963fc9ad7692542b911024c6d2025c37e8f2c143bca5179cb10e98",
+    ): "2375fd1c3475ea21cc1bfa9761c5ab79f0cde3ea",
+}
+_V9_VAE = next(row for row in _DIRECT_FILES if row[0] == _VAE_ORIGINAL[0])
+_PIKA_LORAS = {
+    mode: next(row for row in _DIRECT_FILES if "_" + name + "_6step" in row[0])
+    for mode, name in (("fl", "fl2va"), ("ref", "ref2va"))
+}
+
+
+def _with_v9_vae(rows):
+    return tuple(_V9_VAE if row == _VAE_ORIGINAL else row for row in rows)
+
+
 _FULL_CONTROL_LOCATOR_FILES = {
     "fl": (
         tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
@@ -221,6 +262,26 @@ _FULL_CONTROL_LOCATOR_FILES = {
             *(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["ref"]),
             _TAOMATE_LORA,
         ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["ref"]
+                ),
+                _TAOMATE_LORA,
+            )
+        ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["ref"]
+                ),
+                _PIKA_LORAS["fl"],
+            )
+        ),
     ),
     "ref": (
         tuple(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
@@ -229,6 +290,26 @@ _FULL_CONTROL_LOCATOR_FILES = {
         (
             *(row for row in _LOCATOR_FILES if row[0] != _LOCATOR_TRANSFORMERS["fl"]),
             _TAOMATE_LORA,
+        ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["fl"]
+                ),
+                _TAOMATE_LORA,
+            )
+        ),
+        _with_v9_vae(
+            (
+                *(
+                    row
+                    for row in _LOCATOR_FILES
+                    if row[0] != _LOCATOR_TRANSFORMERS["fl"]
+                ),
+                _PIKA_LORAS["ref"],
+            )
         ),
     ),
 }
@@ -386,15 +467,24 @@ def _content_preserving_revision(document, expected_digest, records):
             raise ValueError("model_download_locator_invalid") from None
         full_controls = True
     if manifests.get(mode) != expected_digest or any(
-        repo != _LOCATOR_REPOSITORY or revision != _LOCATOR_ORIGINAL
+        repo != _LOCATOR_REPOSITORY
+        or revision not in {_LOCATOR_ORIGINAL, *_DIRECT_FILES.values()}
         for _, repo, revision, _, _ in records
     ):
         raise ValueError("model_download_locator_invalid")
-    files = []
+    files, direct = [], {}
     for component in document["components"].values():
         for item in component["files"]:
             kind = "sha256" if "sha256" in item else "git_blob_sha1"
-            files.append((item["path"], item["size_bytes"], kind, item[kind]))
+            row = (item["path"], item["size_bytes"], kind, item[kind])
+            files.append(row)
+            # A direct row and only a direct row names its own newer revision.
+            if (component["revision"] != _LOCATOR_ORIGINAL) != (row in _DIRECT_FILES):
+                raise ValueError("model_download_locator_invalid")
+            if row in _DIRECT_FILES:
+                if component["revision"] != _DIRECT_FILES[row]:
+                    raise ValueError("model_download_locator_invalid")
+                direct[row[0]] = _DIRECT_FILES[row]
     if full_controls:
         expected_sets = _FULL_CONTROL_LOCATOR_FILES[mode]
     elif document.get("deployment_profile_id") in {
@@ -409,6 +499,11 @@ def _content_preserving_revision(document, expected_digest, records):
         sorted(files) == sorted(expected_files) for expected_files in expected_sets
     ):
         raise ValueError("model_download_locator_invalid")
+    if direct:
+        return {
+            filename: direct.get(filename, _LOCATOR_REVISION)
+            for _, _, _, filename, _ in records
+        }
     return _LOCATOR_REVISION
 
 
@@ -468,6 +563,10 @@ def download_environment(environment, state_root):
         HF_DEBUG="0",
         HF_HUB_DOWNLOAD_TIMEOUT="60",
         HF_HUB_ETAG_TIMEOUT="30",
+        # Plain HTTPS through the Hub CDN. On staging Lium hosts (2026-10-31) native
+        # Xet averaged ~8.5 MB/s and missed the startup window; HTTPS reached
+        # ~38 MB/s on the same provider. HTTP also keeps SDK resume.
+        HF_HUB_DISABLE_XET="1",
         HF_XET_HIGH_PERFORMANCE="0",
         HF_XET_CHUNK_CACHE_SIZE_BYTES="0",
         HF_XET_SHARD_CACHE_SIZE_LIMIT="0",
@@ -499,6 +598,32 @@ def cache_size(root):
     return size
 
 
+def partial_bytes(root):
+    """Bytes of in-flight SDK HTTP transfers, or None before any is visible.
+
+    With Xet disabled the SDK appends to `.incomplete` files under the local
+    directory's `.cache/huggingface/download`; their size is received bytes.
+    """
+    folder = root / ".cache" / "huggingface" / "download"
+    if os.environ.get("HF_HUB_DISABLE_XET") != "1" or not folder.is_dir():
+        return None
+    size = count = 0
+    found = False
+    for parent, dirs, files in os.walk(folder, followlinks=False):
+        count += len(dirs) + len(files)
+        if count > 4096:
+            return None
+        for name in files:
+            path = Path(parent) / name
+            if name.endswith(".incomplete") and not path.is_symlink():
+                try:
+                    size += path.lstat().st_size
+                    found = True
+                except FileNotFoundError:
+                    pass  # The SDK renamed it to its final path meanwhile.
+    return size if found else None
+
+
 def fetch_files(
     document,
     expected_digest,
@@ -508,6 +633,7 @@ def fetch_files(
     workers=2,
     downloader=None,
     sleep=time.sleep,
+    tick_seconds=10,
 ):
     records = selected_files(document, expected_digest)
     locator_revision = _content_preserving_revision(document, expected_digest, records)
@@ -535,22 +661,40 @@ def fetch_files(
     completed = set()
     failure = None
     total = sum(row[4] for row in records)
+    measured = False  # Received bytes are reported only once partials are seen.
 
     def progress(state, code=None):
+        nonlocal measured
+        complete = sum(row[4] for row in records if row[3] in completed)
         value = {
             "state": state,
             "manifest_digest": expected_digest,
             "files_complete": len(completed),
             "files_total": len(records),
-            "bytes_complete": sum(row[4] for row in records if row[3] in completed),
+            "bytes_complete": complete,
             "bytes_total": total,
             "inference_verified": False,
         }
+        partial = partial_bytes(root) if state == "downloading" else None
+        measured = measured or partial is not None
+        if measured:
+            # A finished file may briefly appear both renamed and incomplete.
+            value["bytes_received"] = min(total, complete + (partial or 0))
         if code:
             value["code"] = code
         write_progress(progress_path, value)
 
     progress("downloading")
+    ticking = threading.Event()
+
+    def ticker():
+        # Live received bytes let the controller judge speed between files.
+        while not ticking.wait(tick_seconds):
+            with lock:
+                if failure is None:
+                    progress("downloading")
+
+    threading.Thread(target=ticker, daemon=True).start()
 
     def fetch(record):
         nonlocal failure
@@ -564,7 +708,9 @@ def fetch_files(
                 returned = downloader(
                     repo_id=repo,
                     filename=filename,
-                    revision=locator_revision or revision,
+                    revision=locator_revision.get(filename)
+                    if isinstance(locator_revision, dict)
+                    else locator_revision or revision,
                     local_dir=str(root),
                     token=False,
                     endpoint=ENDPOINT,
@@ -599,9 +745,12 @@ def fetch_files(
             list(pool.map(fetch, records))
     except Exception as error:
         with lock:
+            ticking.set()
             progress("failed", safe_error(error))
         raise ValueError(safe_error(error)) from None
-    progress("downloaded_unverified")
+    with lock:
+        ticking.set()
+        progress("downloaded_unverified")
 
 
 def stop_child(child):
@@ -713,6 +862,7 @@ def run_download(
                     "files_total",
                     "bytes_complete",
                     "bytes_total",
+                    "bytes_received",
                     "inference_verified",
                     "code",
                 }
@@ -726,6 +876,13 @@ def run_download(
                 or not 0 <= value["files_complete"] <= len(records)
                 or type(value.get("bytes_complete")) is not int
                 or not 0 <= value["bytes_complete"] <= value["bytes_total"]
+                or "bytes_received" in value
+                and (
+                    type(value["bytes_received"]) is not int
+                    or not value["bytes_complete"]
+                    <= value["bytes_received"]
+                    <= value["bytes_total"]
+                )
                 or value.get("code", "model_download_failed") not in SAFE_ERRORS
             ):
                 raise ValueError("model_download_progress_invalid")
@@ -760,6 +917,11 @@ def run_download(
                     files_total=value["files_total"],
                     bytes_complete=value["bytes_complete"],
                     bytes_total=value["bytes_total"],
+                    **(
+                        {"bytes_received": value["bytes_received"]}
+                        if "bytes_received" in value
+                        else {}
+                    ),
                 )
                 last = value
             result = child.poll()

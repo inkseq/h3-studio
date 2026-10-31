@@ -21,6 +21,9 @@ CONFIRMED = {
     'dstack_terminal_no_allocation',
     'dstack_terminal_provider_absent',
     'dstack_terminal_provider_accounted',
+    # A node from another dstack control plane (#848) that the provider account
+    # shows absent holds no capacity; 'dstack_foreign_unconfirmed' still refuses.
+    'dstack_foreign_provider_absent',
 }
 
 
@@ -80,16 +83,29 @@ def usage(service, c):
     return {**value, 'active_instance_ids': active, 'hourly_cost_microusd': hourly}
 
 
-def admission(service, c, profile, spec, *, identity=None, expected_snapshot=None):
+def admission(
+    service,
+    c,
+    profile,
+    spec,
+    *,
+    production=False,
+    additional_microusd=0,
+    identity=None,
+    expected_snapshot=None,
+):
     from .supplier_spending import admit
 
     stored = service._admin_limits(c)
+    # Staging hosts are test-ledger work; production hosts count against the
+    # customer supplier-spending day like any Vast rental (#688).
     snapshot = admit(
         c,
         service.settings.tenant_id,
         service.repo.clock(),
+        additional_microusd=additional_microusd,
         reference_type='instance',
-        test_task=True,
+        test_task=not production,
         policy=stored,
     )
     if identity is not None and snapshot != expected_snapshot:
@@ -105,8 +121,12 @@ def admission(service, c, profile, spec, *, identity=None, expected_snapshot=Non
     current = stored['value']
     price = spec.max_hourly_microusd
     mode = profile['mode'] if profile['mode'] in {'fl', 'ref'} else 'other'
-    require(price <= current['max_hourly_price_microusd'])
-    require(price <= current['mode_hourly_ceiling_microusd'][mode])
+    if not production:
+        require(price <= current['max_hourly_price_microusd'])
+        require(price <= current['mode_hourly_ceiling_microusd'][mode])
+    # Production: the per-machine Vast ceilings do not price a Modal backstop
+    # (an all-resource L40S quote is bounded by HostSpec); the fleet hourly
+    # limit, supplier day and budget accounts still bound total spend.
     require(
         value['hourly_cost_microusd'] + (price if identity is None else 0)
         <= current['fleet_hourly_limit_microusd']
@@ -125,6 +145,7 @@ def precreate(service, hosts, c, intent):
         c,
         profile,
         hosts.spec,
+        production=hosts.environment == 'production',
         identity=intent['id'],
         expected_snapshot=original['capacity_policy_snapshot'],
     )
@@ -151,13 +172,15 @@ def registration_usage(service, hosts, c, spec):
     require(spec.backend == 'wangp-worker' and spec.dispatch_backend == 'hatchet-v1')
     require(original['configuration_id'] == spec.configuration_id)
     require(original['manifest_digest'] == spec.engine_manifest_digest)
-    from .modal_runtime import PROFILE
+    from .modal_runtime import selected_profile
     from .runtime_catalog import engine_manifest, profile_output_delivery
 
-    manifest = engine_manifest(PROFILE, original['mode'])
+    runtime = selected_profile(original)
+    require(runtime == hosts.spec.profile)
+    manifest = engine_manifest(runtime, original['mode'])
     require(spec.model_id == manifest.document['model_id'])
     require(spec.recipe_ids == (manifest.document['generation_recipe_id'],))
-    require(spec.output_delivery == profile_output_delivery(PROFILE))
+    require(spec.output_delivery == profile_output_delivery(runtime))
     ready = list(
         c.execute(
             select(scaler_receipts.c.facts).where(

@@ -21,6 +21,7 @@ import threading
 from sqlalchemy import or_, select
 
 from .control import WorkerControl, worker_spec_payload
+from .dstack_inventory import known_allocations, read_inventories
 from .dstack_capacity import (
     idle_action,
     assert_run_owned,
@@ -29,7 +30,7 @@ from .dstack_capacity import (
 )
 from .capacity_policy import cold_unadmitted_runtime, window_open
 from .demand_wakeup import IDLE_SAFETY_SECONDS
-from .dstack_preparation import download_timebox_due
+from .dstack_preparation import download_timebox_due, download_too_slow
 from .dstack_operator import (
     BACKEND_MARKER,
 )
@@ -51,6 +52,11 @@ from .slot_lock import slot_lock
 from .telemetry import NullTelemetry, configured_telemetry
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
+# Cold download stops, checked in order: a stall, then a measured slow host.
+DOWNLOAD_STOP_CHECKS = {
+    "dstack_download_timebox_exceeded": download_timebox_due,
+    "dstack_download_too_slow": download_too_slow,
+}
 
 
 def _terminal_review_candidate(run, binding, project):
@@ -439,22 +445,14 @@ class DstackController:
             )
             if not isinstance(rows, list) or len(rows) >= 100:
                 raise ValueError("incomplete_active_runs")
-            providers = {
-                name: client.provider_inventory(name) for name in ("vastai", "runpod")
-            }
+            nodes = self._nodes()
+            providers = read_inventories(client, nodes)
             if not all(value["complete"] is True for value in providers.values()):
                 raise ValueError("incomplete_provider_inventory")
-            known = {name: set() for name in providers}
-            known_runs = set()
-            nodes = self._nodes()
-            for node in nodes:
-                binding = node["payload"].get("dstack", {})
-                if binding.get("backend") in known and binding.get(
-                    "provider_instance_id"
-                ):
-                    known[binding["backend"]].add(binding["provider_instance_id"])
-                if binding.get("run_id"):
-                    known_runs.add(binding["run_id"])
+            known = known_allocations(providers, nodes)
+            known_runs = {
+                node["payload"].get("dstack", {}).get("run_id") for node in nodes
+            }
             with self.repo.engine.connect() as connection:
                 busy = self._business_demand(connection)
             if (
@@ -628,7 +626,7 @@ class DstackController:
                     )
                     if matching_dstack_queued_jobs(connection, intent, current):
                         return False
-                elif reason_code == "dstack_download_timebox_exceeded":
+                elif reason_code in DOWNLOAD_STOP_CHECKS:
                     intent = self.repo._locked(
                         connection,
                         select(instance_intents).where(
@@ -658,7 +656,7 @@ class DstackController:
                     ids = [worker_id, *[worker["id"] for worker in workers]]
                     record = getattr(self.service, "record_download_timebox", None)
                     if (
-                        not download_timebox_due(
+                        not DOWNLOAD_STOP_CHECKS[reason_code](
                             binding,
                             now,
                             fresh_seconds=self.service.policy[
@@ -685,7 +683,9 @@ class DstackController:
                         or not callable(record)
                     ):
                         return False
-                    payload = record(connection, current, intent, now)
+                    payload = record(
+                        connection, current, intent, now, reason_code=reason_code
+                    )
                     if not isinstance(payload, dict):
                         return False
                 payload["stop_reason_code"] = reason_code
@@ -971,24 +971,20 @@ class DstackController:
             }
         payload = current["payload"]
         now = self.repo.clock()
-        if (
-            current["desired_state"] == "running"
-            and download_timebox_due(
-                binding,
-                now,
-                fresh_seconds=self.service.policy["observation_fresh_seconds"],
-            )
-            and self._request_stop(
-                current, reason_code="dstack_download_timebox_exceeded"
-            )
-        ):
-            # Fence this exact cold host first. The next tick uses the original
-            # begin_stop checks; no worker is launched and the queued job stays.
-            return {
-                "node_id": intent_id,
-                "state": "draining",
-                "code": "dstack_download_timebox_exceeded",
-            }
+        for code, due in DOWNLOAD_STOP_CHECKS.items():
+            if (
+                current["desired_state"] == "running"
+                and due(
+                    binding,
+                    now,
+                    fresh_seconds=self.service.policy["observation_fresh_seconds"],
+                )
+                and self._request_stop(current, reason_code=code)
+            ):
+                # Fence this exact cold host first. The next tick uses the
+                # original begin_stop checks; no worker is launched and the
+                # queued job stays.
+                return {"node_id": intent_id, "state": "draining", "code": code}
         observed = binding.get("observed_at")
         fresh = (
             type(observed) in (int, float)
@@ -1398,7 +1394,9 @@ def main(argv=None):
         service = from_environment(repo, settings)
         if service.capacity is None:
             raise ValueError("dstack_capacity_disabled")
-        runtime, work_dir = create_runtime(repo, service.capacity.store)
+        runtime, work_dir = create_runtime(
+            repo, service.capacity.store, settings=settings
+        )
         modal_extension = load_extension(service, work_dir)
         if settings.generation_queue == "dbos":
             from .dbos_transport import DurableExecutor
@@ -1460,6 +1458,14 @@ def main(argv=None):
 
         wakeup = DemandWakeup(repo, stop)
         cadence = IdleCadence()
+        from .host_loss import Manifest
+
+        stop_list = Manifest(repo, work_dir)
+
+        def heartbeat(active):
+            progress.beat(active)
+            stop_list.beat()
+
         try:
             if threading.current_thread() is threading.main_thread():
                 for signum in (signal.SIGINT, signal.SIGTERM):
@@ -1471,7 +1477,7 @@ def main(argv=None):
                 controller.tick,
                 active_seconds=lambda: cadence.interval(controller),
                 safety=controller.safety_sweep,
-                heartbeat=progress.beat,
+                heartbeat=heartbeat,
                 report=lambda value: print(
                     json.dumps(value, sort_keys=True), flush=True
                 ),

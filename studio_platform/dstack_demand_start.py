@@ -22,6 +22,18 @@ STATES = {'planning', 'starting', 'observing', 'backoff', 'blocked'}
 MAX_DOWNLOAD_REPLACEMENTS = 2
 DOWNLOAD_RETRY_LIMIT = 'download_retry_limit'
 DOWNLOAD_TIMEBOX = 'dstack_download_timebox_exceeded'
+DOWNLOAD_TOO_SLOW = 'dstack_download_too_slow'
+# Stops that count toward the per-job replacement cap: a stalled or measured
+# slow download, and a start that failed or timed out, which is usually
+# deterministic (#874).
+COUNTED_STOPS = frozenset(
+    {
+        DOWNLOAD_TIMEBOX,
+        DOWNLOAD_TOO_SLOW,
+        'capacity_startup_failed',
+        'capacity_startup_timeout',
+    }
+)
 
 
 def download_journal(connection, tenant, job_id):
@@ -185,6 +197,119 @@ def _write(connection, row, payload, now):
     )
 
 
+# A Modal host that is not ready this long after its reservation no longer
+# holds its job back from Vast (owner: either provider covers a failed start).
+MODAL_START_GRACE_SECONDS = 600
+
+
+def modal_covered_jobs(connection, now):
+    """Queued jobs a live Modal host was started for (#784): one provider per job.
+
+    Modal admission runs first in the controller tick. Vast only starts for a job
+    Modal refused, once its Modal host is going away or gone, or when the host
+    has not become ready within MODAL_START_GRACE_SECONDS.
+    """
+    from .modal_capacity import OPERATION
+    from .repository import instance_intents, scaler_receipts
+
+    rows = connection.execute(
+        select(
+            scaler_receipts.c.facts,
+            instance_intents.c.state,
+            instance_intents.c.created_at,
+        )
+        .join(
+            instance_intents,
+            instance_intents.c.id == scaler_receipts.c.intent_id,
+        )
+        .where(
+            scaler_receipts.c.operation == OPERATION,
+            instance_intents.c.provider == 'modal',
+            instance_intents.c.state.not_in(
+                ('destroyed', 'not_created', 'draining', 'destroying')
+            ),
+        )
+    ).all()
+    return {
+        facts.get('job_id')
+        for facts, state, created in rows
+        if isinstance(facts, dict)
+        and (
+            state in ('ready', 'busy')
+            or isinstance(created, (int, float))
+            and now - created < MODAL_START_GRACE_SECONDS
+        )
+    }
+
+
+MODAL_BOOT_SECONDS = 120  # Measured ≈2 min cold to ready on staging (#688).
+
+
+def modal_machines(connection, now):
+    """Live Modal hosts as lookahead capacity; a start past its grace counts no more."""
+    from .capacity_lookahead import Machine
+    from .repository import instance_intents
+
+    machines = []
+    for identity, state, created in connection.execute(
+        select(
+            instance_intents.c.id,
+            instance_intents.c.state,
+            instance_intents.c.created_at,
+        ).where(
+            instance_intents.c.provider == 'modal',
+            instance_intents.c.state.in_(
+                (
+                    'reserved',
+                    'creating',
+                    'creation_unknown',
+                    'starting',
+                    'ready',
+                    'busy',
+                )
+            ),
+        )
+    ):
+        if state in ('ready', 'busy'):
+            machines.append(Machine(identity, 'ready'))
+        elif isinstance(created, (int, float)) and 0 <= now - created < (
+            MODAL_START_GRACE_SECONDS
+        ):
+            machines.append(
+                Machine(
+                    identity,
+                    'starting',
+                    ready_in_seconds=max(0, MODAL_BOOT_SECONDS - (now - created)),
+                )
+            )
+    return tuple(machines)
+
+
+def vast_share(policy, queued, work, now, machines):
+    """Owner 2026-10-29 / #688: Modal first; Vast by the boot-time lookahead.
+
+    Modal hosts are the floor. Vast rents only when the lookahead still sees at
+    least vast_min_queue jobs left when a Vast machine would be ready, or for a
+    job that has waited past vast_after_seconds (Modal refused or failed).
+    """
+    from .capacity_lookahead import Policy, plan
+
+    decision = plan(
+        Policy(minimum_jobs=policy['vast_min_queue']),
+        machines,
+        queued=len(queued),
+        available_slots=1,
+        admission_blocked=False,
+    )
+    if decision.start_count:
+        return work
+    return [
+        item
+        for item in work
+        if now - item[0]['created_at'] >= policy['vast_after_seconds']
+    ]
+
+
 def _claim(service):
     from .dstack_demand import (
         _nodes,
@@ -203,7 +328,14 @@ def _claim(service):
             return _result('disabled'), None
         if demand_configuration(service.config, now=now) is None:
             return _result('blocked', 'authority_unavailable'), None
-        work = eligible_jobs(service, connection, now)
+        covered = modal_covered_jobs(connection, now)
+        queued = eligible_jobs(service, connection, now)
+        work = [item for item in queued if item[0]['id'] not in covered]
+        policy = getattr(service, 'modal_first', None)
+        if policy:
+            work = vast_share(
+                policy, queued, work, now, modal_machines(connection, now)
+            )
         if not work:
             return _result('idle'), None
         journals = list(
@@ -289,9 +421,7 @@ def _claim(service):
                     .first()
                 )
                 if _ended_for_replacement(connection, node):
-                    timed_out = (
-                        node['payload'].get('stop_reason_code') == DOWNLOAD_TIMEBOX
-                    )
+                    timed_out = node['payload'].get('stop_reason_code') in COUNTED_STOPS
                     replacements = payload.get('download_replacements', 0)
                     if timed_out and replacements >= MAX_DOWNLOAD_REPLACEMENTS:
                         payload.update(
@@ -458,6 +588,43 @@ def _reason(error):
     )
 
 
+LADDER_STEP_SECONDS = 180
+LADDER_STEP_FRACTION = 0.15
+
+
+def ladder_price(service, profile, job_id):
+    """Requested hourly price for a waiting job, or None to keep the profile price.
+
+    A fixed cap starved the first paid production job while 5090 offers sat at
+    0.77-1.0 USD/h (h3-studio#798 B13). Each 3 minutes a job waits adds 15% of
+    the profile price, never above the lowest of the profile price ceiling, the
+    admin mode ceiling and the admin hourly maximum. Read-only; it only shapes
+    the preview body that the original guarded start path validates again.
+    """
+    from .operator_prices import OperatorPrices, mode_price_ceiling
+    from .repository import jobs
+
+    with service.repo.engine.connect() as connection:
+        created = connection.execute(
+            select(jobs.c.created_at).where(jobs.c.id == job_id)
+        ).scalar()
+        price, _, _ = OperatorPrices(service.repo, service.settings).read(
+            connection, profile
+        )
+        limits = service._admin_limits(connection)
+    base, ceiling = price["max_price_microusd"], price["price_ceiling_microusd"]
+    caps = [ceiling, limits["value"]["max_hourly_price_microusd"]]
+    if limits["adopted"] or service.policy.get("demand_start"):
+        caps.append(mode_price_ceiling(profile, limits))
+    if not all(type(v) is int and v > 0 for v in [base, *caps]) or type(
+        created
+    ) not in (int, float):
+        return None
+    steps = max(0, int((service.repo.clock() - created) // LADDER_STEP_SECONDS))
+    target = min(int(base * (1 + LADDER_STEP_FRACTION * steps)), *caps)
+    return target if target > base else None
+
+
 def start_once(service):
     """At most one original allocation; unknown calls keep their frozen input."""
     result, claim = _claim(service)
@@ -478,6 +645,9 @@ def start_once(service):
             task = service.policy['demand_start'].get('test_task_id')
             if task is not None:
                 body['test_task_id'] = task
+            raised = ladder_price(service, profile, job_id)
+            if raised is not None:
+                body['max_price_microusd'] = raised
             preview = service._preview_for_owner(
                 profile['owner_id'], body, demand_job_id=job_id
             )

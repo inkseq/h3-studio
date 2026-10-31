@@ -142,7 +142,12 @@ class WorkerSpec:
             self.configuration_id,
         ):
             identifier(value)
-        if self.backend not in {"mock", "cpu-render", *REAL_GPU_BACKENDS}:
+        if self.backend not in {
+            "mock",
+            "cpu-render",
+            "runpod-enhance",
+            *REAL_GPU_BACKENDS,
+        }:
             raise ValueError("invalid_worker_backend")
         if self.backend == "wangp-worker":
             if not isinstance(self.engine_manifest_digest, str) or not re.fullmatch(
@@ -153,7 +158,10 @@ class WorkerSpec:
             raise ValueError("unexpected_engine_manifest")
         if (
             not isinstance(self.physical_gpu_ids, tuple)
-            or (not self.physical_gpu_ids and self.backend != "cpu-render")
+            or (
+                not self.physical_gpu_ids
+                and self.backend not in {"cpu-render", "runpod-enhance"}
+            )
             or len(set(self.physical_gpu_ids)) != len(self.physical_gpu_ids)
             or len(self.physical_gpu_ids) > 8
         ):
@@ -184,6 +192,16 @@ class WorkerSpec:
                 or self.recipe_ids != ("chapter-roughcut-v1",)
             ):
                 raise ValueError("cpu_render_identity_required")
+        elif self.backend == "runpod-enhance":
+            # Serverless: RunPod owns the GPUs, so no physical device ids (#795).
+            if (
+                self.provider != "runpod"
+                or self.physical_gpu_ids
+                or self.model_id != "open-h3-regenerate-2k"
+                or self.configuration_id != "runpod-enhance-v1"
+                or self.recipe_ids != ("enhance-v1",)
+            ):
+                raise ValueError("enhance_identity_required")
         elif self.provider in {"mock", "local-cpu"} or not self.recipe_ids:
             raise ValueError("real_worker_requires_recipe_bindings")
         for recipe in self.recipe_ids:
@@ -391,7 +409,7 @@ class WorkerControl:
         validate_delivery_policy(backend, output_delivery)
         if recipe_id is not None:
             identifier(recipe_id)
-        if backend not in {"mock", "cpu-render", *REAL_GPU_BACKENDS}:
+        if backend not in {"mock", "cpu-render", "runpod-enhance", *REAL_GPU_BACKENDS}:
             raise ValueError("invalid_worker_backend")
         if backend == "wangp-worker" and (
             not isinstance(engine_manifest_digest, str)
@@ -587,6 +605,8 @@ class WorkerControl:
                         not in {
                             ("dstack-v1", "vast"),
                             ("dstack-v1", "runpod"),
+                            ("dstack-v1", "lium"),
+                            ("dstack-v1", "cloudrift"),
                             ("modal-v1", "modal"),
                         }
                         or type(admission["lifecycle_version"]) is not int

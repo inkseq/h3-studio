@@ -15,6 +15,7 @@ from studio_platform.quality_tiers import (
     MODE_RECIPES,
     PROFILE_TIERS,
     QualitySelectionError,
+    billing_tier,
     model_tier,
     normalize_request,
     profile_alias,
@@ -37,6 +38,7 @@ from test_platform_execution_policy import policy
 STANDARD = "h3-pruned-rank8-int8-sdpa-p4-29gib-controls-v6"
 OTHER_STANDARD = "h3-pruned-rank8-int8-pro6000-sdpa-p4-controls-v2"
 REFINE = "h3-unpruned33b-int8-sdpa-p3-144gib-single-controls-v4"
+NATURAL = "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-pika6-v9"
 
 
 class QualityTierTests(unittest.TestCase):
@@ -90,7 +92,9 @@ class QualityTierTests(unittest.TestCase):
         self.assertEqual(set(PROFILE_TIERS), set(PROFILE_IDS))
         for identity in PROFILE_IDS:
             original = get_profile(identity)
-            self.assertEqual(profile_tier(identity), model_tier(original["model_id"]))
+            self.assertEqual(
+                billing_tier(profile_tier(identity)), model_tier(original["model_id"])
+            )
             self.assertNotIn("tier", original)
             self.assertEqual(get_profile(identity), original)
         for unknown in (None, [], {}, "unregistered", "quality:standard"):
@@ -195,6 +199,25 @@ class QualityTierTests(unittest.TestCase):
         self.path.write_text("{}", encoding="utf-8")
         with self.assertRaisesRegex(QualitySelectionError, "quality_tier_unavailable"):
             self.resolve()
+
+    def test_natural_option_routes_beside_the_standard_default(self):
+        # Natural is a public option that bills as Standard; its binding never
+        # makes the Standard default ambiguous or replaces it.
+        self.add(STANDARD, "ref")
+        with self.assertRaisesRegex(QualitySelectionError, "quality_tier_unavailable"):
+            self.resolve(tier="natural")
+        self.add(NATURAL, "ref")
+        self.assertEqual(self.resolve()["deployment_profile_id"], STANDARD)
+        selection = self.resolve(tier="natural")
+        self.assertEqual(selection["deployment_profile_id"], NATURAL)
+        self.assertEqual(selection["tier"], "natural")
+        self.assertEqual(billing_tier("natural"), "standard")
+        self.assertEqual(billing_tier("refine"), "refine")
+        resolved, _ = self.normalize(
+            {"deployment_profile_id": "quality:natural", "recipe_id": "video-ref-v1"},
+            allow_internal=False,
+        )
+        self.assertEqual(resolved["deployment_profile_id"], NATURAL)
 
     def test_raw_id_authority_and_conflicts_are_safe_before_config_reads(self):
         raw = generation_request(deployment_profile_id=STANDARD)

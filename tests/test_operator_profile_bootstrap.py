@@ -253,7 +253,7 @@ for identity in PROFILE_IDS:
     profile=get_profile(identity)
     for mode in (model['mode'] for model in profile['models']):
         inputs={'first_frame':'a','last_frame':'b'} if mode=='fl' else {'images':['a','b']}
-        request={'model':profile['model_id'],'mode':mode,'prompt':'Synthetic offline fixture','steps':5 if 'acceleration' in profile else MAX_STEPS,
+        request={'model':profile['model_id'],'mode':mode,'prompt':'Synthetic offline fixture','steps':profile['acceleration']['steps'] if 'acceleration' in profile else MAX_STEPS,
             'duration':5,'resolution':'480P','seed':'42','inputs':inputs}
         manifest=engine_manifest(identity,mode)
         assets={key:{'metadata':{'kind':'image','model_ready':True,'width':832,'height':480},

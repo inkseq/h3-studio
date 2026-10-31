@@ -57,6 +57,8 @@ PRIVATE_SELECTION = frozenset(
     }
 )
 RENDER_RECIPE = "chapter-roughcut-v1"
+# Recipes with no video quality selection; their IDs name no model.
+PLAIN_RECIPES = {RENDER_RECIPE, "enhance-v1"}
 
 
 def is_admin(principal):
@@ -66,6 +68,51 @@ def is_admin(principal):
         and getattr(principal, "role", None) == "admin"
         and getattr(principal, "status", None) == "active"
     )
+
+
+# Creator-authored controls plus the custom canvas; tuning stays internal.
+PUBLIC_CONTROLS = frozenset(
+    {
+        "duration",
+        "seed",
+        "resolution",
+        "aspect_ratio",
+        "generate_audio",
+        "width",
+        "height",
+    }
+)
+
+# Our sampling setup, wherever a request or diagnostic carries it flat (#898): users
+# author only PUBLIC_CONTROLS; these stay internal.
+TUNING_CONTROLS = frozenset(
+    {
+        "steps",
+        "max_steps",
+        "step_skipping",
+        "sampler_name",
+        "scheduler",
+        "denoise",
+        "shift_video",
+        "shift_audio",
+        "video_decode",
+        "video_tile_size",
+        "video_overlap",
+        "audio_decode",
+        "encoder_device",
+        "export_crf",
+        "mask_mode",
+    }
+)
+
+
+def _progress(value):
+    """Stage and completed fraction; step counts reveal our sampling setup."""
+    result = {k: v for k, v in value.items() if k not in {"steps_done", "steps_total"}}
+    done, total = value.get("steps_done"), value.get("steps_total")
+    if type(done) is int and type(total) is int and total > 0:
+        result["fraction"] = round(min(max(done / total, 0), 1), 2)
+    return result
 
 
 def _pick(value, fields):
@@ -147,7 +194,7 @@ def _identities(result, original):
     }.intersection(original)
     if not identity_fields or (
         identity_fields <= {"recipe_id", "recipeId"}
-        and all(original[field] == RENDER_RECIPE for field in identity_fields)
+        and all(original[field] in PLAIN_RECIPES for field in identity_fields)
     ):
         # Revision summaries, controls-only drafts and CPU renders have no
         # video quality selection. Preserve their existing response shape.
@@ -172,9 +219,9 @@ def _identities(result, original):
 
 
 def controls(value):
-    # DTO controls already passed the authoritative supported-control validator.
-    # Do not create a second key list that can lag behind newly supported fields.
-    return _managed(value)
+    # Creators only author these; steps, sampler, shift and other tuning are
+    # our configuration and stay internal (#798 B8b). New fields default hidden.
+    return _pick(_managed(value), PUBLIC_CONTROLS)
 
 
 def _reference(value):
@@ -213,7 +260,9 @@ def selection(value, principal=None):
 def request(value, principal=None):
     if is_admin(principal):
         return copy.deepcopy(value)
-    result = _managed(value)
+    result = {
+        key: item for key, item in _managed(value).items() if key not in TUNING_CONTROLS
+    }
     if isinstance(value, dict) and isinstance(value.get("request"), dict):
         result["request"] = request(value["request"], principal)
     if isinstance(value, dict) and "controls" in value:
@@ -227,7 +276,15 @@ def request(value, principal=None):
         result["authoring_context"] = authoring_context(
             value["authoring_context"], principal
         )
-    return _identities(result, value)
+    result = _identities(result, value)
+    if isinstance(value.get("enhance"), dict):
+        # Enhance (#795): users see the tier and the source take, never the
+        # regenerate steps, sigma, weights or audio mode.
+        source = value["enhance"].get("source_artifact_id")
+        result["enhance"] = {"source_artifact_id": source} if source else {}
+        if value.get("tier") in {"1080p", "2k"}:
+            result["tier"] = value["tier"]
+    return result
 
 
 def diagnostic(value, principal=None):
@@ -259,6 +316,8 @@ def diagnostic(value, principal=None):
         "raw",
     ):
         result.pop(field, None)
+    if "controls" in result:
+        result["controls"] = controls(result["controls"])
     result.update(reason_code=code, stage=failure_stage(code))
     en, zh = POLICY_DIAGNOSTICS.get(
         code,
@@ -410,6 +469,8 @@ def job(value, principal=None):
         )
     if isinstance(value.get("wait_diagnostic"), dict):
         result["wait_diagnostic"] = _managed(value["wait_diagnostic"])
+    if isinstance(value.get("progress"), dict):
+        result["progress"] = _progress(value["progress"])
     return result
 
 
@@ -459,7 +520,7 @@ def _support(value):
     result["controls"] = {
         key: _schema(item)
         for key, item in value.get("controls", {}).items()
-        if key != "script_window_prompts"
+        if key in PUBLIC_CONTROLS
     }
     result["reason_code"] = (
         "preflight_required" if value.get("enabled") else "quality_tier_unavailable"
@@ -469,6 +530,7 @@ def _support(value):
 
 def _envelope(value):
     result = _managed(value)
+    result.pop("max_steps", None)
     if isinstance(value.get("controls"), dict):
         result["controls"] = controls(value["controls"])
     if isinstance(value.get("input_limits"), dict):
@@ -594,6 +656,7 @@ def capabilities(value, principal=None, *, settings=None):
         value,
         {
             "story_film",
+            "enhance",
             "library",
             "content_lifecycle",
             "upload_constraints",

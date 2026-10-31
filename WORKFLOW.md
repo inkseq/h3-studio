@@ -3,7 +3,7 @@
 [#328](https://github.com/inkseq/h3-studio/issues/328) and [AGENTS.md](AGENTS.md) define the current lanes, tiers, cadence and safety. Latest owner decisions: [workflow/owner-changes.md](workflow/owner-changes.md). Older process text is archived under `docs/archive/workflow-20261019/` and is not a current gate.
 
 ## One bounded issue
-Read latest owner comments and concurrent claims/PRs; claim integration owner, worktree/branch, base and contracts before editing. Never reset shared/preserved checkouts. Put a shared API contract in the issue before backend/frontend implementation. Claude owns studio-app and yingxu; Codex owns backend and operations. Keep one issue in progress plus one in review per lane.
+Read latest owner comments and concurrent claims/PRs; claim integration owner, worktree/branch, base and contracts before editing. Never reset shared/preserved checkouts. Put a shared API contract in the issue before backend/frontend implementation. Claude owns studio-app and inkseq-web; Codex owns backend and operations. Keep one issue in progress plus one in review per lane.
 
 ## Checks and staging
 Use the smallest checks appropriate to the changed behavior, once per related slice. Keep required CI's single `test` aggregate; no bypass or self-hosted runners. Tier0 has CI + staging self-check, PR description only. Tier1 adds affected tests and one short issue comment. Tier2 (closed list in CR-20261027-70: money, schema/user-data deletion, auth/credentials, production host machinery) retains safety/isolation/unknown-outcome tests, one non-author safety review and the relevant staging acceptance checklist; everything else merges on the author's green CI. Record review scope/revision and findings in the PR; the author's own review is not independent.

@@ -3,6 +3,9 @@
 from concurrent.futures import ThreadPoolExecutor
 import copy
 from decimal import Decimal
+from fractions import Fraction
+import json
+import math
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -15,6 +18,7 @@ from studio_platform.auth import Auth, Principal
 from studio_platform.credit_schema import metadata as credit_metadata, prices
 from studio_platform.credits import CreditError
 from studio_platform.credits_pricing import (
+    PROFILE_CREDIT_MULTIPLIERS,
     DEFAULT_RATES,
     PricingError,
     admin_margin_estimate,
@@ -113,6 +117,23 @@ class CreditsRouteTests(LedgerCase):
             return quote(
                 connection, "sixnine", "supervan", compiled or self.compiled(), **extra
             )
+
+    def test_enhance_quote_uses_the_owner_price_and_no_rate_card(self):
+        from studio_platform.enhance_plans import BACKEND, compile_enhance
+        from test_enhance_plans import PROJECT, body, source
+
+        self.enable()
+        compiled, _ = compile_enhance(
+            body(tier="1080p"), PROJECT, lambda e, k: source()
+        )
+        frozen = self.get_quote(compiled, execution={"backend": BACKEND})
+        self.assertEqual(frozen["credits"], 100)
+        self.assertEqual(frozen["tier"], "enhance-1080p")
+        self.assertEqual(frozen["breakdown"][0]["rate"], 0)
+        longer, _ = compile_enhance(body(), PROJECT, lambda e, k: source(duration=10.0))
+        self.assertEqual(
+            self.get_quote(longer, execution={"backend": BACKEND})["credits"], 300
+        )
 
     def test_reads_zero_without_creating_or_granting_a_balance(self):
         self.assertEqual(
@@ -222,7 +243,7 @@ class CreditsRouteTests(LedgerCase):
 
     def test_quote_checks_server_profile_identity_not_caller_quality_provenance(self):
         self.enable()
-        from studio_platform.quality_tiers import PROFILE_TIERS
+        from studio_platform.quality_tiers import PROFILE_TIERS, billing_tier
         from studio_platform.runtime_catalog import get_profile
 
         for identity, tier in PROFILE_TIERS.items():
@@ -232,8 +253,13 @@ class CreditsRouteTests(LedgerCase):
                 quality_selection={"tier": "fast", "mapping_revision": "caller"},
             )
             frozen = self.get_quote(compiled)
-            self.assertEqual(frozen["tier"], tier)
-            self.assertEqual(frozen["credits"], 21 if tier == "standard" else 62)
+            self.assertEqual(frozen["tier"], billing_tier(tier))
+            # The multiplier applies before the single round-up: 4 credits/s x 124/24 s.
+            base = Fraction(4 if billing_tier(tier) == "standard" else 12) * Fraction(
+                124, 24
+            )
+            multiplier = PROFILE_CREDIT_MULTIPLIERS.get(identity, 1)
+            self.assertEqual(frozen["credits"], math.ceil(base * multiplier))
         for identity, model in (
             ("unregistered-private-profile", "MiniMax-H3-Pruned-Rank8-INT8"),
             (next(iter(PROFILE_TIERS)), "MiniMax-H3-Base-INT8"),
@@ -244,6 +270,24 @@ class CreditsRouteTests(LedgerCase):
                 compiled["deployment_profile_id"] = identity
             with self.assertRaisesRegex(PricingError, "credit_quote_invalid"):
                 self.get_quote(compiled)
+
+    def test_profile_multiplier_raises_usage_without_changing_tier(self):
+        self.enable()
+        from studio_platform.quality_tiers import PROFILE_TIERS
+        from studio_platform.runtime_catalog import get_profile
+
+        identity = next(i for i, tier in PROFILE_TIERS.items() if tier == "standard")
+        compiled = self.compiled(
+            deployment_profile_id=identity,
+            request={"model": get_profile(identity)["model_id"]},
+        )
+        with patch.dict(PROFILE_CREDIT_MULTIPLIERS, {identity: Fraction(13, 10)}):
+            frozen = self.get_quote(compiled)
+        # 124 frames at the standard rate is 20.67 credits (21 billed); x1.3 is
+        # 26.87, rounded up once to 27.
+        self.assertEqual((frozen["tier"], frozen["credits"]), ("standard", 27))
+        self.assertEqual(frozen["breakdown"][0]["rate"], 4)
+        self.assertNotIn("multiplier", json.dumps(frozen))
 
     def render_compiled(self):
         compiled, _, blockers, _ = compile_render(

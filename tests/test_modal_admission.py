@@ -13,10 +13,12 @@ from studio_platform.modal_admission import ModalAdmission
 from studio_platform.modal_host import HostSpec, ModalHosts
 from studio_platform.repository import (
     Scope,
+    budget_reservations,
     capacity_gate,
     instance_intents,
     pool_limits,
     registered_workers,
+    scaler_receipts,
     spending_settings,
 )
 from studio_platform.runtime_catalog import engine_manifest
@@ -206,6 +208,30 @@ class ModalAdmissionTests(ModalAdmissionFixture):
         self.assertEqual(self.admission.tick()['state'], 'destroyed')
         self.assertEqual(len(self.client.created), 1)
 
+    def test_vast_skips_a_job_while_its_modal_host_lives(self):
+        # #784: one provider per job; Vast takes over once the Modal host is gone.
+        from studio_platform.dstack_demand_start import modal_covered_jobs
+
+        job = self.accepted('one')
+        with self.repo.transaction() as c:
+            self.assertEqual(modal_covered_jobs(c, self.now), set())
+        intent = self.admission.tick()['intent_id']
+        with self.repo.transaction() as c:
+            self.assertEqual(modal_covered_jobs(c, self.now), {job['id']})
+            # A start that never becomes ready stops holding the job back.
+            self.assertEqual(modal_covered_jobs(c, self.now + 601), set())
+        from studio_platform.dstack_demand_start import modal_machines
+
+        with self.repo.transaction() as c:
+            (machine,) = modal_machines(c, self.now)
+            self.assertEqual((machine.identity, machine.state), (intent, 'starting'))
+            self.assertEqual(modal_machines(c, self.now + 601), ())
+        self.hosts.stop(intent)
+        self.hosts.observe(intent)
+        with self.repo.transaction() as c:
+            self.assertEqual(modal_covered_jobs(c, self.now), set())
+            self.assertEqual(modal_machines(c, self.now), ())
+
     def test_two_unresolved_hosts_block_third_and_release_no_funding(self):
         for key in ('one', 'two', 'three'):
             self.accepted(key)
@@ -305,3 +331,161 @@ class ModalAdmissionTests(ModalAdmissionFixture):
         job['request']['deployment_profile_id'] = 'legacy'
         self.assertEqual(self.admission.tick()['state'], 'blocked')
         self.assertFalse(self.client.created)
+
+
+class ProductionModalAdmissionTests(ModalAdmissionFixture):
+    """#688: production Modal backstop funded by a production account."""
+
+    def setUp(self):
+        super().setUp()
+        self.scope = Scope('sixnine', 'superdan', 'production-h3-acceptance')
+        self.pool = 'inkseq-production-v7-fl'
+        self.repo.configure_pool(self.pool, max_instances=10, max_physical_gpus=10)
+        self.repo.configure_budget(
+            'production-gpu', tenant_id='sixnine', limit_microusd=50_000_000
+        )
+        # The id stays: the patched original demand gate returns it.
+        self.profile.update(
+            pool=self.pool,
+            project_id=self.scope.project_id,
+            budget_account_ids=['production-gpu'],
+        )
+        self.service.profiles = {self.profile['id']: self.profile}
+        self.hosts = ModalHosts(
+            self.repo,
+            self.client,
+            HostSpec(
+                'ap-test',
+                'im-test',
+                'vo-test',
+                4_000_000,
+                app_name='inkseq-production-worker',
+            ),
+            environment='production',
+            enabled=True,
+        )
+        # Vast per-machine ceilings stay below a Modal all-resource quote.
+        self.set_limits(
+            max_hourly_price_microusd=3_000_000,
+            mode_hourly_ceiling_microusd={
+                'fl': 1_200_000,
+                'ref': 3_000_000,
+                'other': 850_000,
+            },
+            max_runtime_seconds=7200,
+        )
+        self.admission = ModalAdmission(
+            self.service,
+            self.hosts,
+            environment='production',
+            enabled=True,
+            budget_account_id='production-gpu',
+        )
+
+    def test_production_needs_its_account_and_matching_hosts(self):
+        for options in (
+            {'environment': 'production', 'enabled': True},
+            {
+                'environment': 'staging',
+                'enabled': True,
+                'budget_account_id': 'production-gpu',
+            },
+        ):
+            self.assertEqual(
+                ModalAdmission(self.service, self.hosts, **options).tick()['state'],
+                'disabled',
+            )
+
+    def test_customer_job_binds_a_production_guard_on_its_account(self):
+        from studio_platform.modal_budget import binding
+
+        self.accepted('one')
+        first = self.admission.tick()
+        self.assertEqual(first['state'], 'starting')
+        with self.repo.transaction() as c:
+            _, value = binding(c, first['intent_id'])
+            reservations = list(
+                c.execute(
+                    select(budget_reservations).where(
+                        budget_reservations.c.reference_id == first['intent_id']
+                    )
+                ).mappings()
+            )
+        self.assertEqual(value['guard']['version'], 3)
+        self.assertEqual(value['guard']['budget_account_id'], 'production-gpu')
+        self.assertEqual(
+            {row['account_id'] for row in reservations}, {'production-gpu'}
+        )
+        self.assertEqual(len(self.client.created), 1)
+
+    def test_staging_test_projects_never_take_the_production_path(self):
+        self.profile['project_id'] = 'project-inkseq-staging-superdan'
+        self.accepted('one')
+        self.assertEqual(
+            self.admission.tick()['reason_code'], 'modal_admission_refused'
+        )
+        self.assertFalse(self.client.created)
+
+    def test_backstop_waits_for_vast_before_starting_modal(self):
+        self.admission.start_after_seconds = 300
+        job = self.accepted('one')
+        self.now = job['created_at'] + 299
+        self.assertEqual(self.admission.tick()['state'], 'idle')
+        self.now = job['created_at'] + 300
+        self.assertEqual(self.admission.tick()['state'], 'starting')
+
+    def test_production_guard_never_names_the_staging_test_account(self):
+        from studio_platform.dstack_test_budget import ACCOUNT
+        from studio_platform.modal_budget import production_guard
+
+        with self.assertRaises(ValueError):
+            production_guard(ACCOUNT, max_runtime=7200)
+        with self.assertRaises(ValueError):
+            production_guard('production-gpu', max_runtime=7201)
+
+
+class ModalProfileTests(ModalAdmissionFixture):
+    """v7 -> v8 switch: one Modal image serves one runtime profile."""
+
+    def test_receipts_before_v8_mean_v7_and_unknown_profiles_fail(self):
+        from studio_platform.modal_runtime import V7, V8, V9, selected_profile
+
+        self.assertEqual(selected_profile({}), V7)
+        self.assertEqual(selected_profile({'profile': V8}), V8)
+        self.assertEqual(selected_profile({'profile': V9}), V9)
+        HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000, profile=V9)
+        with self.assertRaises(ValueError):
+            selected_profile({'profile': 'something-else'})
+        with self.assertRaises(ValueError):
+            HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000, profile='unknown')
+
+    def test_a_v8_host_never_takes_a_v7_job(self):
+        from studio_platform.modal_runtime import V8
+
+        hosts = ModalHosts(
+            self.repo,
+            self.client,
+            HostSpec('ap-test', 'im-test', 'vo-test', 4_000_000, profile=V8),
+            environment='staging',
+            enabled=True,
+        )
+        admission = ModalAdmission(
+            self.service, hosts, environment='staging', enabled=True
+        )
+        self.accepted('one')
+        self.assertEqual(admission.tick()['reason_code'], 'modal_admission_refused')
+        self.assertFalse(self.client.created)
+
+    def test_v7_admission_records_its_profile(self):
+        from studio_platform.modal_runtime import V7
+
+        self.accepted('one')
+        intent = self.admission.tick()['intent_id']
+        with self.repo.transaction() as c:
+            facts = c.execute(
+                select(scaler_receipts.c.facts).where(
+                    scaler_receipts.c.intent_id == intent,
+                    scaler_receipts.c.operation == 'modal_demand_bound',
+                )
+            ).scalar_one()
+        self.assertEqual(facts['profile'], V7)

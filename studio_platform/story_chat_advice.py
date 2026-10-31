@@ -5,7 +5,6 @@ import re
 
 from .capabilities import capabilities
 from .generation_draft import read_draft
-from .inky_models import language
 
 PICTURE = re.compile(
     r"画|绘|立绘|生.*图|draw|redraw|portrait|generate.*(?:image|picture)", re.I
@@ -17,11 +16,20 @@ GENERATE = re.compile(
 
 
 def turn_chat(chat, text):
+    """The conversation keeps its language until the person clearly writes in another.
+
+    Chinese characters switch to Chinese; at least two English words switch to
+    English. A typo, one word, a number or an emoji ('asdf', 'ok', '👍') keeps the
+    current language (owner 2026-10-29: 'asdf' flipped a Chinese chat to English).
+    """
     value = copy.deepcopy(chat)
-    # Neutral acknowledgements retain the last content language, not the UI.
-    neutral = text.strip().lower().strip(".!！。?？") in {"ok", "okay", "yes", "no"}
-    if not neutral:
-        value["language"] = language(text, fallback=chat.get("language", "zh"))
+    current = chat.get("language", "zh")
+    if re.search(r"[㐀-鿿]", text):
+        value["language"] = "zh"
+    elif len(re.findall(r"[A-Za-z]{2,}", text)) >= 2:
+        value["language"] = "en"
+    else:
+        value["language"] = current
     return value
 
 

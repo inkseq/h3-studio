@@ -2,6 +2,7 @@
 
 import copy
 import json
+import unittest
 from unittest.mock import Mock, patch
 
 from sqlalchemy import insert, select, update
@@ -235,6 +236,51 @@ class DemandStartTests(LedgerCase):
         self.assertNotEqual(second['node_id'], first['node_id'])
         self.assertEqual(self.repo.get_job(self.scope, job['id'])['status'], 'queued')
         self.assertEqual(len(self.client.applied), 2)
+
+    def test_repeated_failed_starts_stop_renting_at_the_replacement_cap(self):
+        from studio_platform.capacity_watchdog import reclaim_node
+        from studio_platform.repository import instance_intents
+
+        self.enabled()
+        self.accepted()
+        for attempt in range(3):
+            started = start_once(self.service)
+            self.assertEqual(started['state'], 'accepted', (attempt, started))
+            node_id = started['node_id']
+            self.now += 1201
+            with self.repo.engine.connect() as connection:
+                node = dict(
+                    connection.execute(
+                        select(operator_nodes).where(
+                            operator_nodes.c.intent_id == node_id
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                intent = dict(
+                    connection.execute(
+                        select(instance_intents).where(instance_intents.c.id == node_id)
+                    )
+                    .mappings()
+                    .one()
+                )
+            self.assertTrue(reclaim_node(self.service, node, intent)['stop_requested'])
+            with self.repo.transaction() as connection:  # The provider removed it.
+                connection.execute(
+                    update(instance_intents)
+                    .where(instance_intents.c.id == node_id)
+                    .values(state='destroyed')
+                )
+            outcome = start_once(self.service)
+            if attempt < 2:
+                self.assertEqual(outcome['reason_code'], 'backoff')
+                self.now += 80
+            else:
+                self.assertEqual(
+                    outcome, dict(state='blocked', reason_code='download_retry_limit')
+                )
+        self.assertEqual(len(self.client.applied), 3)
 
     def test_demand_does_not_spend_when_actual_registration_cap_is_disabled(self):
         self.enabled()
@@ -999,7 +1045,9 @@ class DemandStartTests(LedgerCase):
             )
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
 
-    def close_slow_allocation(self, node_id, machine, *, proof=True):
+    def close_slow_allocation(
+        self, node_id, machine, *, proof=True, reason='dstack_download_timebox_exceeded'
+    ):
         from test_host_policy import physical
         from studio_platform.repository import instance_intents
 
@@ -1035,9 +1083,11 @@ class DemandStartTests(LedgerCase):
                 .mappings()
                 .one()
             )
-            payload = self.service.record_download_timebox(c, node, intent, self.now)
+            payload = self.service.record_download_timebox(
+                c, node, intent, self.now, reason_code=reason
+            )
             self.assertIsNotNone(payload)
-            payload['stop_reason_code'] = 'dstack_download_timebox_exceeded'
+            payload['stop_reason_code'] = reason
             payload['dstack'].update(state='stopped', dstack_status='terminated')
             if proof:
                 payload['dstack']['provider_removal_proof'] = dict(
@@ -1121,6 +1171,45 @@ class DemandStartTests(LedgerCase):
         self.assertEqual(self.journal()['payload']['download_replacements'], 2)
         self.assertEqual(len(self.journal()['payload']['download_stops']), 3)
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_measured_slow_download_denies_the_host_beyond_this_job(self):
+        from studio_platform.host_policy import HostPolicyStore
+
+        self.accepted()
+        self.enabled()
+        self.client.vast_offer_mapping = lambda *args, **kw: dict(
+            observed_at=self.now,
+            offers=[
+                dict(
+                    offer_id='12345',
+                    machine_id='19493',
+                    country='US',
+                    region='test-region',
+                    advertised_download_mbps=2000,
+                )
+            ],
+        )
+        result = start_once(self.service)
+        self.assertEqual(result['state'], 'accepted')
+        stopped = self.close_slow_allocation(
+            result['node_id'], '19493', reason='dstack_download_too_slow'
+        )
+        self.assertEqual(
+            stopped['host_failure']['reason_code'], 'dstack_download_too_slow'
+        )
+        self.assertFalse(stopped['host_failure']['qualified_start_failure'])
+        with self.repo.engine.connect() as c:
+            policy = HostPolicyStore(self.repo, self.settings.tenant_id).read(
+                c, '19493'
+            )[0]
+        self.assertEqual(
+            (policy['effective'], policy['reason_code']),
+            ('deny', 'automatic_slow_download'),
+        )
+        self.assertEqual(start_once(self.service)['state'], 'blocked')
+        self.now = self.journal()['payload']['next_decision_at'] + 1
+        start_once(self.service)
+        self.assertEqual(len(self.client.applied), 1)  # The denied host only.
 
     def test_slow_stop_without_removal_proof_never_reoffers_and_creator_sees_starting(
         self,
@@ -1238,3 +1327,49 @@ class DemandStartTests(LedgerCase):
                     self.owner, {'preview_id': preview['preview_id']}, 'no-paid-drift'
                 )
             self.assertEqual(self.client.applied, [])
+
+
+class VastShareTests(unittest.TestCase):
+    """Owner 2026-10-29 / #688: Modal first; Vast by the boot-time lookahead."""
+
+    def setUp(self):
+        from studio_platform.capacity_lookahead import Machine
+
+        self.policy = {'vast_min_queue': 20, 'vast_after_seconds': 600}
+        self.ready = Machine('modal-a', 'ready')
+        self.starting = Machine('modal-b', 'starting', ready_in_seconds=60)
+
+    def jobs(self, count, created=1000):
+        return [({'id': str(i), 'created_at': created}, {}) for i in range(count)]
+
+    def test_no_machine_at_all_takes_the_floor(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        queued = self.jobs(1)
+        self.assertEqual(vast_share(self.policy, queued, queued, 1000, ()), queued)
+
+    def test_modal_covers_a_queue_it_clears_before_vast_is_ready(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        queued = self.jobs(25)
+        machines = (self.ready, self.starting)
+        self.assertEqual(vast_share(self.policy, queued, queued, 1000, machines), [])
+
+    def test_vast_starts_when_twenty_would_be_left_at_ready(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        queued = self.jobs(60)  # two Modal hosts clear ~38 of them in 10 min
+        machines = (self.ready, self.starting)
+        self.assertEqual(
+            vast_share(self.policy, queued, queued, 1000, machines), queued
+        )
+
+    def test_a_job_waiting_past_the_fallback_reaches_vast(self):
+        from studio_platform.dstack_demand_start import vast_share
+
+        old = self.jobs(1, created=300)
+        fresh = self.jobs(1, created=1000)
+        queued = old + fresh
+        self.assertEqual(
+            vast_share(self.policy, queued, queued, 1000, (self.ready,)), old
+        )

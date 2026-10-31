@@ -96,7 +96,8 @@ class DiagnosticTests(unittest.TestCase):
             {
                 'machine_id': '19492',
                 'provider': 'vast',
-                'node_id': str(uuid.uuid4()),
+                # Fixed: a random UUID can contain the '999' sentinel below.
+                'node_id': '00000000-0000-4000-8000-000000000001',
                 'offer_id': '123',
                 'provider_instance_id': '456',
                 'url': 'PRIVATE',

@@ -53,6 +53,19 @@ class PaymentApplicationTests(LedgerCase):
         self.assertEqual(before, after)
         self.assertFalse(TABLE_NAMES & after)
 
+    def test_worker_boot_reaches_its_own_token_check_without_a_session(self):
+        app = create_app(self.settings(), repository=self.repo)
+        with TestClient(app, base_url="https://staging.inkseq.com") as client:
+            result = client.post(
+                "/v1/worker/boot", json={"intent_id": "x", "token": "y"}
+            )
+            # The route's own refusal, not the login wall's 401.
+            self.assertEqual(
+                (result.status_code, result.json()),
+                (403, {"error": "worker_boot_denied"}),
+            )
+            self.assertEqual(client.get("/v1/worker/boot").status_code, 401)
+
     def test_production_refuses_payment_processing_without_creating_schema(self):
         settings = replace(
             self.settings(),

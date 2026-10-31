@@ -10,6 +10,7 @@ Provider endpoint extraction and worker lifecycle stay with the controller.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field, replace
 import hashlib
 import json
@@ -43,7 +44,12 @@ from .wangp_bootstrap import (
 from .slot_lock import slot_lock
 
 GPU_UUID = re.compile(r"GPU-[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
-PROVIDERS = {"vastai": "vast", "runpod": "runpod"}
+PROVIDERS = {
+    "vastai": "vast",
+    "runpod": "runpod",
+    "lium": "lium",
+    "cloudrift": "cloudrift",
+}
 IDENTITY_FIELDS = (
     "intent_id",
     "run_id",
@@ -108,6 +114,8 @@ class DstackRuntimeConfig:
     min_gpu_bytes: int = 30 * 1024**3
     trust_first_host_key: bool = False
     runtime_python: str = "/venv/main/bin/python"
+    # Dial-out workers (#859): CPU port of the worker's boot exec endpoint.
+    status_port: int | None = None
     profile_slot_index: int = field(default=0, init=False)
     expected_host_gpus: int = field(default=1, init=False)
     execution_backend: str = field(default="wangp-worker", init=False)
@@ -118,7 +126,11 @@ class DstackRuntimeConfig:
         for name in ("work_dir", "source_dir", "ssh_key_file", "known_hosts_file"):
             object.__setattr__(self, name, _absolute(getattr(self, name)))
         _require(
-            type(self.local_port) is int and 1024 <= self.local_port <= 65535,
+            all(
+                type(port) is int and 1024 <= port <= 65535
+                for port in (self.local_port, self.status_port or self.local_port)
+            )
+            and self.status_port != self.local_port,
             "dstack_runtime_port_invalid",
         )
         _require(
@@ -227,6 +239,8 @@ class DstackNativeRuntime:
         transport_factory=HTTPWanGPTransport,
         backend_factory=create_backend,
         max_hosts=128,
+        grant_writer=None,
+        dialout_factory=None,
     ):
         _require(
             type(max_hosts) is int and 1 <= max_hosts <= 128,
@@ -243,6 +257,52 @@ class DstackNativeRuntime:
             backend_factory,
         )
         self.max_hosts, self._hosts, self._slots = max_hosts, {}, {}
+        # Dial-out (#859): prepares a worker's one-time grant; None disables it.
+        self.grant_writer, self.dialout_factory = grant_writer, dialout_factory
+
+    def _dialout_host(self, binding, config, identity, files, directory):
+        """Write the grant once, then reach the worker through its tunnel."""
+        intent_id = binding["intent_id"]
+        _require(
+            self.grant_writer is not None and config.status_port is not None,
+            "dstack_runtime_dialout_unconfigured",
+        )
+        self.grant_writer(binding, config, identity, directory)
+        coordinates = {
+            "host": "127.0.0.1",
+            "port": config.status_port,
+            "username": "root",
+            "instance_id": binding["provider_instance_id"],
+            "slot_key": intent_id,
+        }
+        if intent_id not in self._hosts:
+            _require(
+                len(self._hosts) < self.max_hosts, "dstack_runtime_host_limit_reached"
+            )
+            try:
+                host = self.dialout_factory(config, coordinates)
+            except Exception:
+                # The worker has not exchanged its grant or dialed out yet.
+                raise DstackError(
+                    "dstack_runtime_ssh_unavailable_or_host_key_untrusted"
+                ) from None
+            self._hosts[intent_id] = (identity, coordinates, host)
+        cached_identity, cached_coordinates, host = self._hosts[intent_id]
+        _require(
+            cached_identity == identity and cached_coordinates == coordinates,
+            "dstack_runtime_host_identity_changed",
+        )
+        try:
+            host.ensure_connected()
+            host.upload(files)
+            host.start(identity)
+        except BootError as error:
+            raise DstackError(
+                "dstack_runtime_upload_reconciliation_required"
+                if error.args == ("bootstrap_existing_source_mismatch",)
+                else "dstack_runtime_ssh_unavailable_or_host_key_untrusted"
+            ) from None
+        return host
 
     def _binding(self, binding, run, config):
         _require(
@@ -324,7 +384,21 @@ class DstackNativeRuntime:
         coordinates = self.coordinates_for_run(dict(binding), run)
         _require(
             type(coordinates) is dict
-            and set(coordinates) == {"host", "port", "username", "instance_id"},
+            and set(coordinates) - {"jump"}
+            == {"host", "port", "username", "instance_id"},
+            "dstack_runtime_ssh_coordinates_invalid",
+        )
+        jump = coordinates.get("jump")
+        _require(
+            jump is None
+            or type(jump) is dict
+            and set(jump) == {"host", "port", "username"}
+            and isinstance(jump["host"], str)
+            and re.fullmatch(r"[A-Za-z0-9.:_-]{1,253}", jump["host"])
+            and type(jump["port"]) is int
+            and 1 <= jump["port"] <= 65535
+            and isinstance(jump["username"], str)
+            and re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", jump["username"]),
             "dstack_runtime_ssh_coordinates_invalid",
         )
         _require(
@@ -340,7 +414,7 @@ class DstackNativeRuntime:
             and coordinates["instance_id"] == binding["provider_instance_id"],
             "dstack_runtime_ssh_coordinates_invalid",
         )
-        return dict(coordinates)
+        return copy.deepcopy(coordinates)
 
     @staticmethod
     def _save(path, state):
@@ -468,30 +542,34 @@ class DstackNativeRuntime:
                 # read-only connection work belongs before the nonreplayable
                 # journal; do not consume the initial bootstrap while waiting
                 # for an endpoint or its verified host key.
-                coordinates = self._coordinates(binding, run)
-                if intent_id not in self._hosts:
+                # Dial-out workers (#859) connect only after their grant exists.
+                dialout = bool(binding.get("boot"))
+                if not dialout:
+                    coordinates = self._coordinates(binding, run)
+                    if intent_id not in self._hosts:
+                        _require(
+                            len(self._hosts) < self.max_hosts,
+                            "dstack_runtime_host_limit_reached",
+                        )
+                        try:
+                            host = self.ssh_factory(config, coordinates)
+                        except Exception:
+                            raise DstackError(
+                                "dstack_runtime_ssh_unavailable_or_host_key_untrusted"
+                            ) from None
+                        self._hosts[intent_id] = (identity, coordinates, host)
+                    cached_identity, cached_coordinates, host = self._hosts[intent_id]
                     _require(
-                        len(self._hosts) < self.max_hosts,
-                        "dstack_runtime_host_limit_reached",
+                        cached_identity == identity
+                        and cached_coordinates == coordinates,
+                        "dstack_runtime_host_identity_changed",
                     )
                     try:
-                        host = self.ssh_factory(config, coordinates)
+                        host.ensure_connected()
                     except Exception:
                         raise DstackError(
                             "dstack_runtime_ssh_unavailable_or_host_key_untrusted"
                         ) from None
-                    self._hosts[intent_id] = (identity, coordinates, host)
-                cached_identity, cached_coordinates, host = self._hosts[intent_id]
-                _require(
-                    cached_identity == identity and cached_coordinates == coordinates,
-                    "dstack_runtime_host_identity_changed",
-                )
-                try:
-                    host.ensure_connected()
-                except Exception:
-                    raise DstackError(
-                        "dstack_runtime_ssh_unavailable_or_host_key_untrusted"
-                    ) from None
                 if state is None and not current.get("bootstrap_started"):
                     # Stage the original private runtime credential once on
                     # CPU. WanGPSSHHost.start uploads these same bytes; it must
@@ -545,7 +623,23 @@ class DstackNativeRuntime:
                     )  # Verify, never recreate.
                 else:
                     raise DstackError("dstack_runtime_recovery_material_missing")
-                if state["phase"] == "journaled":
+                if state["phase"] == "journaled" and dialout:
+                    self.store.authorize_bootstrap_launch(
+                        intent_id, binding["run_id"], binding["provider_instance_id"]
+                    )
+                    state["phase"] = "start_unknown"
+                    self._save(receipt, state)  # Before the grant enables launch.
+                    _require(
+                        self.store.begin_runtime_launch(
+                            intent_id,
+                            binding["run_id"],
+                            binding["provider_instance_id"],
+                        ),
+                        "dstack_runtime_launch_requires_reconciliation",
+                    )
+                    state["phase"] = "booting"
+                    self._save(receipt, state)
+                elif state["phase"] == "journaled":
                     self.store.authorize_bootstrap_launch(
                         intent_id, binding["run_id"], binding["provider_instance_id"]
                     )
@@ -584,6 +678,10 @@ class DstackNativeRuntime:
                         ) from None
                     state["phase"] = "booting"
                     self._save(receipt, state)
+                if dialout:
+                    host = self._dialout_host(
+                        binding, config, identity, files, directory
+                    )
                 report = host.report()
                 _require(
                     type(report) is dict and report.get("identity") == identity,
@@ -776,3 +874,6 @@ class DstackNativeRuntime:
             self._slots.pop(identity, None)
             if pair is not None:
                 pair[2].close()
+            if intent_id is not None and self.grant_writer is not None:
+                # An ended intent's tunnel user can never reconnect (#859).
+                self.grant_writer.revoke(identity)

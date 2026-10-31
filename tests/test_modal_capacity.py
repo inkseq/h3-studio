@@ -87,6 +87,34 @@ class ModalCapacityTests(fixture.ModalAdmissionFixture):
         self.service.prelaunch_capacity_usage = unconfirmed
         self.no_create()
 
+    def test_foreign_absent_node_admits_but_foreign_unconfirmed_refuses(self):
+        # #848 nodes from another dstack control plane: absent in the provider
+        # account holds no capacity (it blocked every Modal start on staging).
+        self.accepted('one')
+        original = self.capacity_usage
+
+        def foreign(reason, counted):
+            def usage(c):
+                value = original(c)
+                return {
+                    **value,
+                    'observations': [
+                        *value.get('observations', []),
+                        {'reason_code': reason, 'counted': counted},
+                    ],
+                }
+
+            return usage
+
+        self.service.prelaunch_capacity_usage = foreign(
+            'dstack_foreign_unconfirmed', True
+        )
+        self.no_create()
+        self.service.prelaunch_capacity_usage = foreign(
+            'dstack_foreign_provider_absent', False
+        )
+        self.assertEqual(self.admission.tick()['state'], 'starting')
+
     def test_precreate_rechecks_current_snapshot_and_retains_original_binding(self):
         self.accepted('one')
         with self.repo.transaction() as c:

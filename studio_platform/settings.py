@@ -92,6 +92,15 @@ def database_url_from_environment():
         raise ValueError("Database credential file is unavailable or invalid") from None
 
 
+def enhance_switch(value, data_dir):
+    """Enhance (#795) is on when explicitly set, or, unset, once the host has
+    installed its RunPod credential into the data volume (root-only, per target)
+    without a release-helper change. "0" always keeps it off."""
+    if value is not None:
+        return value == "1"
+    return (Path(data_dir) / "runtime-secrets" / "runpod-enhance.json").is_file()
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -122,6 +131,8 @@ class Settings:
     storyboard_owners: tuple[str, ...] = ()
     stage_query_config_file: Path | None = None
     render_enabled: bool = False
+    # Enhance a finished take to 1080P/2K on RunPod Serverless (#795).
+    enhance_enabled: bool = False
     recovery_backends: tuple[str, ...] = ()
     generation_queue: str = "postgres"
     capacity_no_progress_seconds: int = 600
@@ -498,6 +509,10 @@ class Settings:
             if os.environ.get("SIXNINE_STAGE_QUERY_CONFIG_FILE")
             else None,
             render_enabled=os.environ.get("SIXNINE_RENDER_ENABLED", "0") == "1",
+            enhance_enabled=enhance_switch(
+                os.environ.get("INKSEQ_ENHANCE_ENABLED"),
+                Path(os.environ.get("SIXNINE_DATA", str(default))),
+            ),
             recovery_backends=tuple(
                 x.strip()
                 for x in os.environ.get("SIXNINE_RECOVERY_BACKENDS", "").split(",")

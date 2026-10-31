@@ -17,6 +17,11 @@ from typing import Any, Iterable, Mapping, Protocol
 from .protocol import TAG
 
 UPSTREAM_REVISION = "0e58385fbde7ff102d276e4a9e490845de76b4ea"
+# Every manifest binds one of these; its own source_revision is what the host verifies,
+# so profiles on different WanGP revisions run side by side (v9 on 9cb2bcd, #844).
+SUPPORTED_REVISIONS = frozenset(
+    {UPSTREAM_REVISION, "9cb2bcdafa7b41d2a1c30d2571cea4bc104657fb"}
+)
 PROTOCOL_VERSION = "wangp-private-v1"
 _SHA = re.compile(r"^[0-9a-f]{64}$")
 _ID = re.compile(r"^[A-Za-z0-9_.-]{1,200}$")
@@ -71,7 +76,7 @@ class EngineManifest:
         data = _object(self.document_json)
         if (
             data.get("engine") != "wangp"
-            or data.get("source_revision") != UPSTREAM_REVISION
+            or data.get("source_revision") not in SUPPORTED_REVISIONS
             or data.get("protocol_version") != PROTOCOL_VERSION
         ):
             raise ValueError("wangp_manifest_revision_mismatch")
@@ -322,3 +327,40 @@ class WanGPTransport(Protocol):
     def cancel(self, operation_id: str) -> bool: ...
     def read_artifact(self, operation_id: str, kind: str) -> Iterable[bytes]: ...
     def readiness(self) -> HostReadiness: ...
+
+
+# Signed input GETs outlive one bounded host fetch, never a whole job.
+INPUT_URL_SECONDS = 900
+
+
+class StoredInput:
+    """One stored job input. Hosts pull it by signed URL when the store can
+    presign; otherwise the CPU streams the same bytes as before (#859)."""
+
+    def __init__(self, store, key):
+        self.store, self.key, self._stream = store, key, None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        if self._stream is not None:
+            self._stream.close()
+
+    def read(self, size=-1):
+        if self._stream is None:
+            self._stream = self.store.open(self.key)
+        return self._stream.read(size)
+
+    def signed_url(self):
+        from ..storage import UnsupportedStorageOperation
+
+        presign = getattr(self.store, "presign_download", None)
+        if presign is None:
+            return None
+        try:
+            signed = presign(self.key, expires_seconds=INPUT_URL_SECONDS)
+        except UnsupportedStorageOperation:
+            return None
+        # A host GET cannot carry signing headers; stream those inputs instead.
+        return None if signed.required_headers else signed.reveal()

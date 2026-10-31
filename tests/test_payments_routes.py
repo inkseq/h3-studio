@@ -212,7 +212,49 @@ class PaymentRouteTests(LedgerCase):
         self.gateway.checkout.assert_called_once_with(
             self.core.begin_checkout.return_value["payment"],
             idempotency_key="inkseq-original",
+            customer_email=None,
         )
+
+    def test_checkout_prefills_only_the_buyers_canonical_verified_email(self):
+        self.save()
+        self.core.begin_checkout.return_value = {
+            "payment": {"id": str(uuid.uuid4()), "request_fingerprint": "f" * 64},
+            "dispatch": True,
+            "stripe_idempotency_key": "inkseq-original",
+        }
+        self.core.bind_checkout.return_value = {
+            "checkout_url": "https://checkout.stripe.com/c/pay/original"
+        }
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(users)
+                .where(users.c.id == self.ids["other"])
+                .values(email="other@example.test", email_verified=1)
+            )
+        for verified, email, expected in (
+            (1, "buyer@example.test", "buyer@example.test"),
+            (0, "unverified@example.test", None),
+            (1, None, None),
+        ):
+            with self.subTest(verified=verified, email=email):
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        update(users)
+                        .where(users.c.id == self.ids["supervan"])
+                        .values(email=email, email_verified=verified)
+                    )
+                self.api.checkout(self.user, {"pack_id": "starter"}, key="prefill")
+                self.assertEqual(
+                    self.gateway.checkout.call_args.kwargs["customer_email"], expected
+                )
+        self.gateway.checkout.reset_mock()
+        with self.assertRaises(BillingError):
+            self.api.checkout(
+                self.user,
+                {"pack_id": "starter", "customer_email": "injected@example.test"},
+                key="injected-email",
+            )
+        self.gateway.checkout.assert_not_called()
 
     def test_original_bound_checkout_replay_has_no_second_provider_request(self):
         self.save()

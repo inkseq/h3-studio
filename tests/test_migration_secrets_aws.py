@@ -536,6 +536,17 @@ class ManagedSecretTests(unittest.TestCase):
             {row["type"] for row in server["projects"][0]["backends"]},
             {"vastai", "runpod"},
         )
+        for name in ("lium", "cloudrift"):
+            value["providers"][name] = {
+                "profile_id": name + "--synthetic-test",
+                "base_url": target.ENDPOINTS[name],
+                "api_key": "SYNTHETIC_" + name.upper() + "_" + "k" * 40,
+            }
+        server = json.loads(target.outputs(value)["dstack-server-config.yml"][0])
+        self.assertEqual(
+            {row["type"] for row in server["projects"][0]["backends"]},
+            {"vastai", "runpod", "lium", "cloudrift"},
+        )
         self.assertEqual(result["dstack-server-config.yml"][1:], (0, 0, 0o600))
         self.assertNotIn("gpu_ssh_key", result)
         self.assertNotIn("app_database_url", result)
