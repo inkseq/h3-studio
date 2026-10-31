@@ -767,6 +767,30 @@ small {
 .ver.chosen {
   border-color: var(--good);
 }
+/* Quality and length over a take thumbnail (#890), styled like .card-dur. */
+.take-q {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 15px;
+  color: var(--white);
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
+  border-radius: 5px;
+  padding: 0 5px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.take-thumb {
+  position: relative;
+}
+.take-thumb .take-q {
+  top: auto;
+  bottom: 6px;
+  right: 6px;
+}
 .ver.viewing {
   box-shadow: 0 0 0 2px var(--accent);
 }

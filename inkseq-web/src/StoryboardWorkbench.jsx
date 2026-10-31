@@ -10,7 +10,7 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { StoryboardVideo, StoryboardAssetImage } from './StoryboardMedia.jsx';
 import { recipeChanges } from './storyboard-selection.js';
-import { takeName } from './enhance-take.js';
+import { takeName, takeQuality } from './enhance-take.js';
 import { segmentsAction } from './shot-segments.js';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
@@ -23,6 +23,19 @@ function versionTime(value, locale, t) {
         timeStyle: 'medium',
       })
     : t('workbench.unknownStatus');
+}
+// Quality and length over the thumbnail, e.g. "1080P · 5s" (owner 2026-10-31, #890).
+function TakeQualityBadge({ version }) {
+  const { t } = useI18n();
+  const quality = takeQuality(version),
+    seconds = Number(version?.duration);
+  if (!quality) return null;
+  return (
+    <span className="take-q">
+      {quality}
+      {seconds > 0 && ' · ' + Math.round(seconds) + t('storyboard.secondsUnit')}
+    </span>
+  );
 }
 export function WorkbenchCopies({ value, onChange, max }) {
   const { t } = useI18n();
@@ -388,6 +401,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                   ) : (
                     <StoryboardVideo asset={v.asset || v} muted />
                   )}
+                  <TakeQualityBadge version={v} />
                   <span>
                     {takeName(
                       row.title,
@@ -453,6 +467,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
                     onMouseLeave={(e) => e.currentTarget.pause()}
                   />
                 )}
+                <TakeQualityBadge version={v} />
               </div>
               <div className="take-top">
                 {row.selected && <em>{t('takes.selected')}</em>}
