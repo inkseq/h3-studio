@@ -82,6 +82,30 @@ class CapacityContractTests(unittest.TestCase):
         altered["run_spec"]["configuration"]["max_price"] = 99
         with self.assertRaises(DstackError):
             assert_run_owned(altered, binding, "sixnine")
+        altered = copy.deepcopy(run)
+        altered["run_spec"]["configuration"]["env"] = {"EXTRA": "1"}
+        with self.assertRaises(DstackError):
+            assert_run_owned(altered, binding, "sixnine")
+
+    def test_ownership_accepts_exact_dialout_boot_env_only(self):
+        binding = request(
+            boot_token="t" * 43, boot_url="https://staging.inkseq.com/v1/worker/boot"
+        ).binding(PUB)
+        env = binding["run_spec"]["configuration"]["env"]
+        self.assertEqual(
+            sorted(env), ["INKSEQ_BOOT_TOKEN", "INKSEQ_BOOT_URL", "INKSEQ_INTENT"]
+        )
+        run = {
+            "id": RUN,
+            "project_name": "sixnine",
+            "run_spec": copy.deepcopy(binding["run_spec"]),
+        }
+        assert_run_owned(run, binding, "sixnine")
+        for changed in ({}, None, {**env, "INKSEQ_BOOT_TOKEN": "u" * 43}):
+            altered = copy.deepcopy(run)
+            altered["run_spec"]["configuration"]["env"] = changed
+            with self.assertRaises(DstackError):
+                assert_run_owned(altered, binding, "sixnine")
 
     def test_shared_lock_excludes_and_recovers_and_import_has_no_worker_dependency(
         self,
