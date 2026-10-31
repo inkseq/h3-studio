@@ -56,10 +56,12 @@ DIAGNOSTICS = (
         "worker_window_expired",
         "dstack_broker_unavailable",
         "dstack_download_timebox_exceeded",
+        "dstack_download_too_slow",
     }
 )
 REASONS = {
     "dstack_download_timebox_exceeded": "下载长时间没有完成新的文件，正在更换机器",
+    "dstack_download_too_slow": "这台机器下载太慢，已停用并加入黑名单，正在更换机器",
     "dstack_no_capacity_billing_pending": "没有满足当前条件的可用机器；未分配实例，账单待核对",
     "dstack_never_allocated": "启动失败，已核实未分配机器",
     "dstack_allocation_requires_reconciliation": "启动分配结果尚未确认，保留原记录等待核对",
@@ -135,6 +137,20 @@ def _known(value, choices):
 
 
 DOWNLOAD_COUNTERS = ("bytes_complete", "bytes_total", "files_complete", "files_total")
+# Live wire bytes from hosts that measure partial files. All four or none.
+RECEIVED_KEYS = (
+    "bytes_received",
+    "received_started_at",
+    "received_started_bytes",
+    "last_received_at",
+)
+# A host must sustain this after the measurement window or it is stopped and
+# denied (owner, 2026-10-31): the 52 GB v9 manifest then fits in ~17 minutes.
+MIN_DOWNLOAD_BYTES_PER_SECOND = 50 * 1000**2
+DOWNLOAD_MEASURE_SECONDS = 180
+# Measured progressing download time that does not count against the fixed
+# cold-start window; a stalled or slow download earns no further credit.
+DOWNLOAD_STARTUP_CREDIT_SECONDS = 1800
 DOWNLOAD_IDENTITY = (
     "intent_id",
     "run_id",
@@ -172,24 +188,41 @@ def _download_counts(value):
     return result
 
 
+def _cover_completed(watch, now):
+    # Completed files were received even when a sample lacked live bytes.
+    if "bytes_received" in watch and watch["bytes_complete"] > watch["bytes_received"]:
+        watch.update(bytes_received=watch["bytes_complete"], last_received_at=now)
+
+
+def _received(value, counts):
+    received = _count(value.get("bytes_received")) if isinstance(value, dict) else None
+    if (
+        received is None
+        or counts is None
+        or not counts["bytes_complete"] <= received <= counts["bytes_total"]
+    ):
+        return None
+    return received
+
+
 def _download_watch(binding, now):
     if not isinstance(binding, dict) or not _number(now):
         return None
     value = binding.get("download_progress")
+    base = {
+        "version",
+        "valid",
+        "identity",
+        "started_at",
+        "last_progress_at",
+        "last_observed_at",
+        "source_phase_started_at",
+        "completed_at",
+        *DOWNLOAD_COUNTERS,
+    }
     if (
         not isinstance(value, dict)
-        or set(value)
-        != {
-            "version",
-            "valid",
-            "identity",
-            "started_at",
-            "last_progress_at",
-            "last_observed_at",
-            "source_phase_started_at",
-            "completed_at",
-            *DOWNLOAD_COUNTERS,
-        }
+        or set(value) not in (base, base | set(RECEIVED_KEYS))
         or type(value["version"]) is not int
         or value["version"] != 1
         or value["valid"] is not True
@@ -213,6 +246,18 @@ def _download_watch(binding, now):
             _stamp(value["completed_at"], now) is None
             or not value["started_at"]
             <= value["completed_at"]
+            <= value["last_observed_at"]
+        )
+        or "bytes_received" in value
+        and (
+            _received(value, _download_counts(value)) is None
+            or _count(value["received_started_bytes"]) is None
+            or not value["received_started_bytes"] <= value["bytes_received"]
+            or _stamp(value["received_started_at"], now) is None
+            or _stamp(value["last_received_at"], now) is None
+            or not value["started_at"]
+            <= value["received_started_at"]
+            <= value["last_received_at"]
             <= value["last_observed_at"]
         )
     ):
@@ -264,6 +309,7 @@ def _record_download_progress(binding, incoming, now):
                     complete["last_progress_at"] = now
                 complete.update(counts)
             complete["last_observed_at"] = now
+            _cover_completed(complete, now)
             if complete["completed_at"] is None:
                 complete["completed_at"] = stopped_at if stopped_at is not None else now
             binding["download_progress"] = complete
@@ -288,6 +334,7 @@ def _record_download_progress(binding, incoming, now):
         return
     if not valid:
         return
+    received = _received(incoming.get("download"), counts)
     if watch is None:
         watch = {
             "version": 1,
@@ -304,9 +351,26 @@ def _record_download_progress(binding, incoming, now):
         watch = copy.deepcopy(watch)
         if any(
             counts[key] > watch[key] for key in ("bytes_complete", "files_complete")
+        ) or (
+            received is not None
+            and "bytes_received" in watch
+            and received > watch["bytes_received"]
         ):
             watch["last_progress_at"] = now
         watch.update(counts, last_observed_at=now)
+    if received is not None:
+        if "bytes_received" not in watch:
+            # The rate window starts at the first server-clock sample.
+            watch.update(
+                bytes_received=received,
+                received_started_at=now,
+                received_started_bytes=received,
+                last_received_at=now,
+            )
+        elif received > watch["bytes_received"]:
+            # An SDK retry may restart a partial file; the latch never goes back.
+            watch.update(bytes_received=received, last_received_at=now)
+    _cover_completed(watch, now)
     if (
         counts["bytes_complete"] == counts["bytes_total"]
         and counts["files_complete"] == counts["files_total"]
@@ -333,10 +397,11 @@ def download_progress_timing(binding, now):
     }
 
 
-def download_timebox_due(binding, now, *, fresh_seconds=30):
+def _live_download(binding, now, fresh_seconds):
+    """The current, freshly observed, unfinished download watch or None."""
     value = _download_watch(binding, now)
     preparation = binding.get("preparation") if isinstance(binding, dict) else None
-    return bool(
+    if (
         value is not None
         and isinstance(preparation, dict)
         and _number(fresh_seconds)
@@ -344,12 +409,61 @@ def download_timebox_due(binding, now, *, fresh_seconds=30):
         and _download_counts(preparation.get("download"))
         == {key: value[key] for key in DOWNLOAD_COUNTERS}
         and value["completed_at"] is None
-        and now - value["started_at"] > 1500
-        and now - value["last_progress_at"] >= 300
         and 0 <= now - value["last_observed_at"] <= fresh_seconds
         and _stamp(binding.get("observed_at"), now) is not None
         and 0 <= now - binding["observed_at"] <= fresh_seconds
+    ):
+        return value
+    return None
+
+
+def download_timebox_due(binding, now, *, fresh_seconds=30):
+    value = _live_download(binding, now, fresh_seconds)
+    return bool(
+        value is not None
+        and now - value["started_at"] > 1500
+        and now - value["last_progress_at"] >= 300
     )
+
+
+def download_rate(value):
+    """Measured wire bytes/s once the window has elapsed, else None."""
+    if not isinstance(value, dict) or "bytes_received" not in value:
+        return None
+    end = (
+        value["last_observed_at"]
+        if value["completed_at"] is None
+        else value["completed_at"]
+    )
+    span = end - value["received_started_at"]
+    if span < DOWNLOAD_MEASURE_SECONDS:
+        return None
+    return (value["bytes_received"] - value["received_started_bytes"]) / span
+
+
+def download_too_slow(binding, now, *, fresh_seconds=30):
+    rate = download_rate(_live_download(binding, now, fresh_seconds))
+    return rate is not None and rate < MIN_DOWNLOAD_BYTES_PER_SECOND
+
+
+def download_startup_credit(binding, now):
+    """Seconds of measured on-pace download excluded from the cold-start window.
+
+    Only hosts that report live wire bytes earn credit. It ends at completion
+    or the last observed byte progress, so a stall resumes the original timer.
+    """
+    value = _download_watch(binding, now)
+    if value is None or "bytes_received" not in value:
+        return 0
+    rate = download_rate(value)
+    if rate is not None and rate < MIN_DOWNLOAD_BYTES_PER_SECOND:
+        return 0
+    end = (
+        value["last_progress_at"]
+        if value["completed_at"] is None
+        else value["completed_at"]
+    )
+    return max(0, min(DOWNLOAD_STARTUP_CREDIT_SECONDS, end - value["started_at"]))
 
 
 def safe_preparation(value, now):
@@ -377,6 +491,9 @@ def safe_preparation(value, now):
             )
         }
         result["download"]["basis"] = "completed_files"
+        received = _received(download, _download_counts(result["download"]))
+        if received is not None:
+            result["download"]["bytes_received"] = received
     image = value.get("image")
     if isinstance(image, dict):
         result["image"] = {

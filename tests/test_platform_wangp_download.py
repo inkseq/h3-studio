@@ -107,6 +107,42 @@ class DownloadTests(unittest.TestCase):
             sorted(self.payloads),
         )
 
+    def test_live_received_bytes_are_reported_between_file_completions(self):
+        seen = []
+
+        def partial_sdk(**kwargs):
+            if kwargs["filename"] == "tiny.bin":
+                folder = self.models / ".cache" / "huggingface" / "download"
+                folder.mkdir(parents=True, exist_ok=True)
+                partial = folder / "abc.etag.incomplete"
+                partial.write_bytes(b"saf")
+                deadline = time.monotonic() + 5
+                while not seen and time.monotonic() < deadline:
+                    value = json.loads(self.progress.read_text())
+                    if value.get("bytes_received") == 3:
+                        seen.append(value)
+                    time.sleep(0.005)
+                partial.unlink()
+            return self.sdk(**kwargs)
+
+        with patch.dict(os.environ, {"HF_HUB_DISABLE_XET": "1"}):
+            self.run_fetch(downloader=partial_sdk, workers=1, tick_seconds=0.01)
+        self.assertEqual(seen[0]["bytes_complete"], 0)
+        self.assertEqual(seen[0]["state"], "downloading")
+        self.assertEqual(
+            json.loads(self.progress.read_text()),
+            {**self.receipt(), "bytes_received": 6},
+        )
+
+    def test_received_bytes_are_omitted_when_partials_are_not_http_files(self):
+        folder = self.models / ".cache" / "huggingface" / "download"
+        folder.mkdir(parents=True)
+        (folder / "abc.etag.incomplete").write_bytes(b"x" * 4)
+        # Xet may preallocate a whole object, so its stat size is not progress.
+        with patch.dict(os.environ, {"HF_HUB_DISABLE_XET": "0"}):
+            self.run_fetch(tick_seconds=0.01)
+        self.assertEqual(json.loads(self.progress.read_text()), self.receipt())
+
     def test_v3_fl_ref_locator_keeps_original_manifest_and_complete_content(self):
         from studio_platform.runtime_catalog import engine_manifest
 

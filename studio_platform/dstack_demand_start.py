@@ -22,10 +22,17 @@ STATES = {'planning', 'starting', 'observing', 'backoff', 'blocked'}
 MAX_DOWNLOAD_REPLACEMENTS = 2
 DOWNLOAD_RETRY_LIMIT = 'download_retry_limit'
 DOWNLOAD_TIMEBOX = 'dstack_download_timebox_exceeded'
-# Stops that count toward the per-job replacement cap: a stalled download, and a
-# start that failed or timed out, which is usually deterministic (#874).
+DOWNLOAD_TOO_SLOW = 'dstack_download_too_slow'
+# Stops that count toward the per-job replacement cap: a stalled or measured
+# slow download, and a start that failed or timed out, which is usually
+# deterministic (#874).
 COUNTED_STOPS = frozenset(
-    {DOWNLOAD_TIMEBOX, 'capacity_startup_failed', 'capacity_startup_timeout'}
+    {
+        DOWNLOAD_TIMEBOX,
+        DOWNLOAD_TOO_SLOW,
+        'capacity_startup_failed',
+        'capacity_startup_timeout',
+    }
 )
 
 

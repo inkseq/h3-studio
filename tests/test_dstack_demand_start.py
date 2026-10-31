@@ -1045,7 +1045,9 @@ class DemandStartTests(LedgerCase):
             )
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
 
-    def close_slow_allocation(self, node_id, machine, *, proof=True):
+    def close_slow_allocation(
+        self, node_id, machine, *, proof=True, reason='dstack_download_timebox_exceeded'
+    ):
         from test_host_policy import physical
         from studio_platform.repository import instance_intents
 
@@ -1081,9 +1083,11 @@ class DemandStartTests(LedgerCase):
                 .mappings()
                 .one()
             )
-            payload = self.service.record_download_timebox(c, node, intent, self.now)
+            payload = self.service.record_download_timebox(
+                c, node, intent, self.now, reason_code=reason
+            )
             self.assertIsNotNone(payload)
-            payload['stop_reason_code'] = 'dstack_download_timebox_exceeded'
+            payload['stop_reason_code'] = reason
             payload['dstack'].update(state='stopped', dstack_status='terminated')
             if proof:
                 payload['dstack']['provider_removal_proof'] = dict(
@@ -1167,6 +1171,45 @@ class DemandStartTests(LedgerCase):
         self.assertEqual(self.journal()['payload']['download_replacements'], 2)
         self.assertEqual(len(self.journal()['payload']['download_stops']), 3)
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
+
+    def test_measured_slow_download_denies_the_host_beyond_this_job(self):
+        from studio_platform.host_policy import HostPolicyStore
+
+        self.accepted()
+        self.enabled()
+        self.client.vast_offer_mapping = lambda *args, **kw: dict(
+            observed_at=self.now,
+            offers=[
+                dict(
+                    offer_id='12345',
+                    machine_id='19493',
+                    country='US',
+                    region='test-region',
+                    advertised_download_mbps=2000,
+                )
+            ],
+        )
+        result = start_once(self.service)
+        self.assertEqual(result['state'], 'accepted')
+        stopped = self.close_slow_allocation(
+            result['node_id'], '19493', reason='dstack_download_too_slow'
+        )
+        self.assertEqual(
+            stopped['host_failure']['reason_code'], 'dstack_download_too_slow'
+        )
+        self.assertFalse(stopped['host_failure']['qualified_start_failure'])
+        with self.repo.engine.connect() as c:
+            policy = HostPolicyStore(self.repo, self.settings.tenant_id).read(
+                c, '19493'
+            )[0]
+        self.assertEqual(
+            (policy['effective'], policy['reason_code']),
+            ('deny', 'automatic_slow_download'),
+        )
+        self.assertEqual(start_once(self.service)['state'], 'blocked')
+        self.now = self.journal()['payload']['next_decision_at'] + 1
+        start_once(self.service)
+        self.assertEqual(len(self.client.applied), 1)  # The denied host only.
 
     def test_slow_stop_without_removal_proof_never_reoffers_and_creator_sees_starting(
         self,
