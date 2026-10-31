@@ -767,6 +767,43 @@ small {
 .ver.chosen {
   border-color: var(--good);
 }
+/* The take in use: a green dot that opens to its words on hover (owner 2026-10-31). */
+.ver em.chosen-dot,
+.take-top em.chosen-dot {
+  display: inline-flex;
+  align-items: center;
+  width: 10px;
+  height: 10px;
+  min-width: 0;
+  padding: 0;
+  border-radius: 999px;
+  background: var(--good);
+  color: var(--good-ink);
+  box-shadow: 0 0 0 2px var(--white);
+  overflow: hidden;
+  white-space: nowrap;
+}
+.chosen-dot > span {
+  opacity: 0;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+}
+.ver:hover em.chosen-dot,
+.ver:focus-visible em.chosen-dot,
+.take:hover .take-top em.chosen-dot,
+.take:focus-within .take-top em.chosen-dot {
+  width: auto;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.ver:hover .chosen-dot > span,
+.ver:focus-visible .chosen-dot > span,
+.take:hover .chosen-dot > span,
+.take:focus-within .chosen-dot > span {
+  opacity: 1;
+}
 /* Quality and length over a take thumbnail (#890), styled like .card-dur. */
 .take-q {
   position: absolute;

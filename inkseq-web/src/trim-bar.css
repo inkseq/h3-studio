@@ -17,6 +17,13 @@
   cursor: default;
   opacity: 0.6;
 }
+.trim-bar-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
 .trim-bar-cut,
 .trim-bar-keep {
   position: absolute;

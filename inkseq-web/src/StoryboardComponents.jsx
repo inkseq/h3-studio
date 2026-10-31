@@ -2818,7 +2818,8 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
             onPick={pick}
           />
         ))}
-        {/* The playhead is a handle too (owner, 2026-10-26): grab the line or its grip. */}
+        {/* One playhead element (owner 2026-10-31): its grip sits in the lane above the
+            pictures and its line runs down the track; nothing is drawn on the ruler. */}
         <div
           className="playhead"
           style={{ left: at }}
@@ -2850,7 +2851,6 @@ export function Timeline({ player, selectedId, onPick, chapterStarts }) {
             {fmt(value)}
           </span>
         ))}
-        <i className="ruler-knob" style={{ left: at }} />
       </div>
     </div>
   );
