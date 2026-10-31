@@ -33,7 +33,13 @@ from .telemetry import ERROR_CODES as TELEMETRY_ERROR_CODES, NullStage, NullTele
 
 # Compatibility exports retain the same objects for existing worker callers.
 from .inference.comfy import ComfyBackend
-from .inference.outputs import _request, _shape, delivery_spec
+from .inference.outputs import (
+    _request,
+    _shape,
+    _validate_native_timing,
+    delivery_spec,
+    output_rejected,
+)
 from .inference.protocol import (
     BackendError,
     InferenceBackend,
@@ -779,7 +785,7 @@ class WorkerRunner:
         except LeaseLost:
             self._generation_note("lease_lost_reconcile_required")
             return self._summary(job, "lease_lost_reconcile_required")
-        except Exception:
+        except Exception as error:
             self._generation_note("worker_reconciliation_needed")
             # No raw exception response, URL, request or prompt escapes this worker.
             fresh = self.repo.get_job(self._scope(job), job["id"])
@@ -794,6 +800,14 @@ class WorkerRunner:
                     fresh["status"] == "collecting"
                     or fresh.get("cancel_from_status") == "collecting"
                 ):
+                    if output_rejected(error):  # Never re-collect a probed mismatch.
+                        return self._fail(
+                            fresh,
+                            lease,
+                            "artifact_validation_failed",
+                            actual_cost_microusd=self._cost(job, task_id),
+                            upstream_stopped=True,
+                        )
                     fresh = self.queue.collection_failed(lease)
                 else:
                     fresh = self.queue.release(
@@ -1281,20 +1295,6 @@ def _lease_keepalive(heartbeat, *, interval_s=30):
         thread.join(timeout=5)
     if lost:
         raise LeaseLost("lease_lost_during_media_stage")
-
-
-def _validate_native_timing(stream, delivery):
-    """Reject an unexpected native timeline instead of coercing its frame rate."""
-    try:
-        if (
-            Fraction(stream["avg_frame_rate"]) != delivery["fps"]
-            or int(stream["nb_frames"]) != delivery["frame_count"]
-            or abs(float(stream["duration"]) - delivery["duration_s"]) > 0.001
-            or abs(float(stream.get("start_time", 0))) > 0.001
-        ):
-            raise ValueError
-    except (KeyError, TypeError, ValueError, ZeroDivisionError):
-        raise BackendError("native_output_timing_mismatch") from None
 
 
 def _validate_video(path, width, height, duration, audio, *, timeout=180):

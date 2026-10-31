@@ -149,7 +149,10 @@ class EnhanceFlowTests(unittest.TestCase):
     def test_wrong_size_output_fails_without_a_second_run(self):
         done = {"status": "COMPLETED", "output": {"uploaded": True}}
         job, _, calls, _ = self.run_job("2k", "1920x1080", [done] * 4)
-        self.assertNotEqual(job["status"], "succeeded")
+        # A probed size mismatch settles once; it never re-collects forever.
+        self.assertEqual(
+            (job["status"], job["error_code"]), ("failed", "artifact_validation_failed")
+        )
         self.assertEqual(calls.count("/v2/endpoint1/run"), 1)
 
 
