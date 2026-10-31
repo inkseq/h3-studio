@@ -174,9 +174,11 @@ class HostPolicyTests(ledger.LedgerCase):
         self.assertEqual(result["policy"]["effective"], "default")
         self.assertEqual(len(self.service.audit(self.owner)["events"]), 2)
         with self.repo.transaction() as conn:
+            # The same node again after the restore is a new, distinct receipt.
             self.assertTrue(
-                store.deny_slow_download(conn, "19492", node_id="node-three", now=1002)
+                store.deny_slow_download(conn, "19492", node_id="node-one", now=1002)
             )
+        self.assertEqual(len(self.service.audit(self.owner)["events"]), 3)
 
     def test_unknown_lookup_is_not_fabricated_and_policy_audit_replay(self):
         host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]

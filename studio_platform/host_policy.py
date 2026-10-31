@@ -390,8 +390,16 @@ class HostPolicyStore:
             insert(operator_commands).values(
                 id=command_id,
                 actor=actor,
-                idempotency_key="slow-download-" + node_id,
-                request_hash=request_hash({"kind": "host_policy", "node": node_id}),
+                # One receipt per policy revision: a node denied again after an
+                # admin restore must not collide with its earlier receipt.
+                idempotency_key=f"slow-download-{node_id}-{old['revision']}",
+                request_hash=request_hash(
+                    {
+                        "kind": "host_policy",
+                        "node": node_id,
+                        "revision": old["revision"],
+                    }
+                ),
                 kind="host_policy",
                 state="completed",
                 payload={"result": receipt},
