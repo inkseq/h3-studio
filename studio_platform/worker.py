@@ -431,6 +431,11 @@ class WorkerRunner:
             # obligation, never a reason to resubmit or fail the original job.
             logging.getLogger(__name__).warning("r2_artifact_scratch_cleanup_pending")
             return  # The original manifest must complete before display scratch is introduced.
+        try:
+            # A backend's own transfer scratch (enhance-tmp/) is dropped once settled.
+            getattr(self.backend, "discard_output", lambda tag: None)(tag)
+        except Exception:
+            logging.getLogger(__name__).warning("backend_output_cleanup_pending")
         if not publish_renditions:
             return
         try:
