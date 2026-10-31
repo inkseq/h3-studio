@@ -886,3 +886,11 @@ early-stage mode the immutable-binding rule is a cautious-era guard, and a v9
 profile, rebinding, default switch and Modal change are not worth one measured
 sm120 GPU. Attention resolves per device: sage2 on cc 12.x, sdpa elsewhere;
 Modal stays L40S/sdpa.
+
+### 2026-11-01 — Hosted cold-start backstop for H3 takes (#918)
+Owner: use an external per-render API (EveryFrame, SN117) to remove cold-start
+waits, not as a new tier. Route every representable cold FL/REF take, including
+uploaded faces; the look difference from v9 is accepted; terms are legal's later.
+Users keep the same tiers and credits and see no new controls. Owner rejected the
+vendor's lip-sync and dub tools (quality). Blackwell-only applies to our own
+GPUs; the hosted API is not a GPU binding.

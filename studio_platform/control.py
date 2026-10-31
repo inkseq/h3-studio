@@ -146,6 +146,7 @@ class WorkerSpec:
             "mock",
             "cpu-render",
             "runpod-enhance",
+            "everyframe-render",
             *REAL_GPU_BACKENDS,
         }:
             raise ValueError("invalid_worker_backend")
@@ -160,7 +161,8 @@ class WorkerSpec:
             not isinstance(self.physical_gpu_ids, tuple)
             or (
                 not self.physical_gpu_ids
-                and self.backend not in {"cpu-render", "runpod-enhance"}
+                and self.backend
+                not in {"cpu-render", "runpod-enhance", "everyframe-render"}
             )
             or len(set(self.physical_gpu_ids)) != len(self.physical_gpu_ids)
             or len(self.physical_gpu_ids) > 8
@@ -202,6 +204,18 @@ class WorkerSpec:
                 or self.recipe_ids != ("enhance-v1",)
             ):
                 raise ValueError("enhance_identity_required")
+        elif self.backend == "everyframe-render":
+            # Hosted per-render API (#918): no devices, one fixed identity.
+            from .everyframe_plans import CONFIGURATION, MODEL, PROVIDER, RECIPES
+
+            if (
+                self.provider != PROVIDER
+                or self.physical_gpu_ids
+                or self.model_id != MODEL
+                or self.configuration_id != CONFIGURATION
+                or self.recipe_ids != RECIPES
+            ):
+                raise ValueError("everyframe_identity_required")
         elif self.provider in {"mock", "local-cpu"} or not self.recipe_ids:
             raise ValueError("real_worker_requires_recipe_bindings")
         for recipe in self.recipe_ids:
@@ -409,7 +423,13 @@ class WorkerControl:
         validate_delivery_policy(backend, output_delivery)
         if recipe_id is not None:
             identifier(recipe_id)
-        if backend not in {"mock", "cpu-render", "runpod-enhance", *REAL_GPU_BACKENDS}:
+        if backend not in {
+            "mock",
+            "cpu-render",
+            "runpod-enhance",
+            "everyframe-render",
+            *REAL_GPU_BACKENDS,
+        }:
             raise ValueError("invalid_worker_backend")
         if backend == "wangp-worker" and (
             not isinstance(engine_manifest_digest, str)
@@ -796,9 +816,9 @@ class WorkerControl:
         ) != spec.get("engine_manifest_digest"):
             return False
         return (
-            effective.get("model") == spec["model_id"]
-            and execution.get("configuration_id") == spec["configuration_id"]
-        )
+            spec["backend"] == "everyframe-render"
+            or effective.get("model") == spec["model_id"]
+        ) and execution.get("configuration_id") == spec["configuration_id"]
 
     def _claim_filter(self, connection, worker, pool, purpose, job_filter=None):
         spec = worker["spec"]
@@ -821,7 +841,13 @@ class WorkerControl:
             bindings.append(
                 jobs.c.request["recipe_id"].as_string().in_(spec["recipe_ids"])
             )
-        if spec["backend"] != "mock":
+        if spec["backend"] == "everyframe-render":
+            # The hosted backend serves the job's tier, not its model id (#918).
+            bindings.append(
+                jobs.c.execution_plan["configuration_id"].as_string()
+                == spec["configuration_id"]
+            )
+        elif spec["backend"] != "mock":
             # Preserve nested request precedence rather than coalescing a
             # missing nested model with an unrelated outer display field.
             model = case(

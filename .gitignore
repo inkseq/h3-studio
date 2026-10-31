@@ -74,6 +74,8 @@ inventory.json
 !studio_platform/enhance_plans.py
 !studio_platform/enhance_routes.py
 !studio_platform/enhance_backend.py
+!studio_platform/everyframe_backend.py
+!studio_platform/everyframe_plans.py
 !studio_platform/worker_tunnel.py
 !deploy/platform/modal_credentials.py
 !deploy/modal/STAGING-CREDENTIALS.md
@@ -1044,6 +1046,10 @@ inventory.json
 !tests/test_runpod_enhance_deployment.py
 !deploy/platform/runpod-enhance-staging-read-policy.json
 !deploy/platform/runpod-enhance-production-read-policy.json
+!deploy/platform/everyframe_credentials.py
+!tools/import_everyframe_credentials.py
+!deploy/platform/everyframe-staging-read-policy.json
+!deploy/platform/everyframe-production-read-policy.json
 !tests/test_modal_gvisor_ram.py
 !studio_platform/backup_loss_policy.py
 !docs/EXPERIMENTS.md

@@ -637,12 +637,111 @@ class ExecutionPolicies:
             },
         )
 
-    def evaluate(self, compiled, scope, fingerprint):
+    def _evaluate_everyframe(self, compiled, scope, fingerprint):
+        """Cold-start backstop (#918): the hosted API serves this take now.
+
+        None when the take cannot be represented exactly, the backstop is off,
+        no hosted slot is registered, or the vendor window is nearly used up
+        (then our own machines start as before)."""
+        from . import everyframe_plans as plan
+        from .credits_pricing import quote as credit_quote
+        from .repository import jobs as job_rows
+        from sqlalchemy import func, select
+
+        if not getattr(self.settings, "everyframe_enabled", False):
+            return None
+        if plan.vendor_request(compiled) is None:
+            return None
+        capacity = self.control.pool_status(
+            plan.POOL,
+            model_id=plan.MODEL,
+            configuration_id=plan.CONFIGURATION,
+            recipe_id=compiled["recipe_id"],
+            backend=plan.BACKEND,
+        )
+        if not capacity["ready"] + capacity["busy"]:
+            return None
+        now = self.repo.clock()
+        with self.repo.engine.connect() as connection:
+            recent = connection.execute(
+                select(func.count())
+                .select_from(job_rows)
+                .where(
+                    job_rows.c.pool == plan.POOL,
+                    job_rows.c.created_at >= now - plan.WINDOW_SECONDS,
+                )
+            ).scalar_one()
+            if recent >= plan.MAX_PER_WINDOW:
+                return None
+            execution = {
+                "pool": plan.POOL,
+                "backend": plan.BACKEND,
+                "configuration_id": plan.CONFIGURATION,
+                "quote_known": True,
+                "enabled": True,
+                "blockers": [],
+                "admission_state": "queued",
+                "fingerprint": fingerprint,
+                "budget_account_ids": [],
+                "expected_runtime_s": plan.EXPECTED_RUNTIME_S,
+                "registered_healthy_slots": capacity["ready"] + capacity["busy"],
+            }
+            if compiled.get("deployment_profile_id") is not None:
+                execution["deployment_profile_id"] = compiled["deployment_profile_id"]
+            frozen_credit = credit_quote(
+                connection,
+                scope.tenant_id,
+                scope.owner_id,
+                compiled,
+                execution=execution,
+            )
+        if frozen_credit is not None:
+            execution["credit_quote"] = frozen_credit
+        return Admission(
+            execution,
+            0,
+            now + 900,
+            {
+                "currency": "USD",
+                "cost_microusd": None,
+                "source": "credits",
+                "kind": "credits",
+            },
+        )
+
+    def evaluate(self, compiled, scope, fingerprint, *, route=None):
+        """`route`: None picks the hosted backstop for a cold take; "primary"
+        and "everyframe" re-check one already chosen plan (ensure_current)."""
         from .render_plans import RECIPE, MODEL as RENDER_MODEL, configuration_for, POOL
         from . import enhance_plans
 
         if compiled["recipe_id"] == enhance_plans.RECIPE:
             return self._evaluate_enhance(compiled, fingerprint)
+        if route == "everyframe":
+            hosted = self._evaluate_everyframe(compiled, scope, fingerprint)
+            if hosted is not None:
+                return hosted
+            from . import everyframe_plans
+
+            return Admission(
+                {
+                    "pool": everyframe_plans.POOL,
+                    "backend": everyframe_plans.BACKEND,
+                    "enabled": False,
+                    "blockers": ["备用生成线路暂时不可用，请重新预检"],
+                    "fingerprint": fingerprint,
+                    "budget_account_ids": [],
+                    "admission_state": "blocked",
+                },
+                0,
+                self.repo.clock() + 900,
+                {
+                    "currency": "USD",
+                    "cost_microusd": None,
+                    "source": "unknown",
+                    "kind": "unknown",
+                },
+            )
         if compiled["recipe_id"] == RECIPE:
             configuration = configuration_for(compiled)
             blockers = list(compiled.get("render_blockers", []))
@@ -959,6 +1058,19 @@ class ExecutionPolicies:
                         blockers.append(
                             "此双节点执行池尚未接入完整的持续服务，请保留任务并等待启用"
                         )
+        if (
+            route is None
+            and not blockers
+            and not private_pool
+            and capacity["ready"] + capacity["busy"] == 0
+        ):
+            hosted = self._evaluate_everyframe(compiled, scope, fingerprint)
+            if hosted is not None:
+                hosted.execution["routed_from"] = {
+                    "pool": policy["pool"],
+                    "configuration_id": policy["configuration_id"],
+                }
+                return hosted
         if not blockers and not private_pool:
             from .dstack_demand import demand_admission
 
@@ -1096,7 +1208,14 @@ class ExecutionPolicies:
 
     def ensure_current(self, plan, scope):
         previous = plan["execution_plan"]
-        current = self.evaluate(plan["request"], scope, previous["fingerprint"])
+        from .everyframe_plans import BACKEND as HOSTED
+
+        current = self.evaluate(
+            plan["request"],
+            scope,
+            previous["fingerprint"],
+            route="everyframe" if previous.get("backend") == HOSTED else "primary",
+        )
         if current.execution.get("budget_error_code") == "budget_exceeded":
             raise BudgetExceeded("budget_exceeded")
         if (
@@ -1232,6 +1351,17 @@ class ExecutionPolicies:
                 and execution.get("pool") == enhance_plans.POOL
                 and execution.get("configuration_id") == enhance_plans.CONFIGURATION
                 and job["request"]["request"].get("model") == enhance_plans.MODEL
+            )
+        from . import everyframe_plans
+
+        if execution.get("backend") == everyframe_plans.BACKEND:
+            return bool(
+                getattr(self.settings, "everyframe_enabled", False)
+                and execution.get("enabled") is True
+                and execution.get("pool") == everyframe_plans.POOL
+                and execution.get("configuration_id") == everyframe_plans.CONFIGURATION
+                and job.get("request", {}).get("recipe_id") in everyframe_plans.RECIPES
+                and everyframe_plans.vendor_request(job["request"]) is not None
             )
         if job.get("request", {}).get("recipe_id") == RECIPE:
             try:
