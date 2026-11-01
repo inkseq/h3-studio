@@ -433,6 +433,13 @@ def register_routes(app):
                 }
             )
 
+    @app.get("/v1/admin/provider-balances")
+    def provider_balances(request: Request):
+        human(request, admin=True)
+        from .providers.balances import read_stored
+
+        return response(read_stored(settings))
+
     @app.get("/v1/admin/settings-inventory")
     def settings_inventory(request: Request):
         human(request, admin=True)
