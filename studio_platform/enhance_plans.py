@@ -13,6 +13,9 @@ POOL = "enhance"
 BACKEND = "runpod-enhance"
 MODEL = "open-h3-regenerate-2k"
 CONFIGURATION = "runpod-enhance-v1"
+# In flight at once. Matches workersMax on the RunPod endpoints, which bill only
+# while a worker runs, so a batch of clips does not wait in line.
+SLOTS = 3
 FPS = 24
 MAX_SOURCE_BYTES = 512 * 1024**2
 # Generated takes only: at most 15 s and the generation size cap. A render or an
