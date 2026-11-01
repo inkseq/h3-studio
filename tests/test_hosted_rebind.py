@@ -189,7 +189,7 @@ class BalanceTests(unittest.TestCase):
         self.addCleanup(rebind_module._balance.update, usd=None, read_at=None)
         self.settings = SimpleNamespace(everyframe_enabled=True)
 
-    def test_read_at_most_every_five_minutes_and_low_balance_closes_hosted(self):
+    def test_read_every_four_hours_and_low_balance_closes_hosted(self):
         reads = []
 
         def reader(_):
@@ -198,9 +198,9 @@ class BalanceTests(unittest.TestCase):
 
         self.assertEqual(refresh_balance(self.settings, 1000, reader=reader), 0.5)
         self.assertFalse(rebind_module.balance_allows_hosted())
-        refresh_balance(self.settings, 1200, reader=reader)
+        refresh_balance(self.settings, 1000 + 14399, reader=reader)
         self.assertEqual(len(reads), 1)
-        refresh_balance(self.settings, 1301, reader=reader)
+        refresh_balance(self.settings, 1000 + 14400, reader=reader)
         self.assertEqual(len(reads), 2)
 
     def test_an_unreadable_balance_leaves_hosted_open(self):
