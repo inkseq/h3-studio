@@ -42,6 +42,7 @@ PRIVATE_FILES = (
     "studio_platform/runtime_hosts/wangp_startup.py",
     "studio_platform/runtime_hosts/wangp_system_restore.py",
     "studio_platform/runtime_hosts/wangp_download.py",
+    "studio_platform/runtime_hosts/model_cache.py",
     "studio_platform/runtime_catalog.py", "studio_platform/inference/wangp_profile_compiler.py",
     "studio_platform/inference/wangp_profile_dispatch.py", "studio_platform/inference/wangp_full_compiler.py",
     "studio_platform/runtime_hosts/wangp_media_tools.py",
