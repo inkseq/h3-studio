@@ -119,7 +119,10 @@ class ModalDialoutClient(RunPodServerlessClient):
                 job["command"],
                 app=app,
                 name=run_name,
-                image=sdk.Image.from_registry(c["image"]),
+                # The image's own ENTRYPOINT is the Vast base start script,
+                # which exits on Modal before the boot command runs; the run
+                # spec's command is the whole container, as under dstack.
+                image=sdk.Image.from_registry(c["image"]).entrypoint([]),
                 secrets=[
                     sdk.Secret.from_dict({**job["env"], "INKSEQ_MODEL_CACHE": CACHE})
                 ],
