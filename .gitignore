@@ -1088,3 +1088,4 @@ inventory.json
 !tests/cassettes/
 !tests/cassettes/everyframe_render.yaml
 !tests/cassettes/everyframe_refused.yaml
+!docs/SCHEDULING-SCENARIOS.md

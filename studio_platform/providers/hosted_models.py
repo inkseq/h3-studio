@@ -122,8 +122,9 @@ MODELS = {
             "everyframe-vivix-w1-v1",
             PLAIN | {"omni"},
             frozenset({"480P", "768P"}),
-            # 4:5 comes back as 3:4 and 21:9 as 16:9, so those go to turbo.
-            frozenset({"16:9", "9:16", "1:1"}),
+            # 4:5 comes back as 3:4, which crops cleanly; 21:9 comes back as 16:9
+            # and would lose a quarter of its height, so it goes to turbo.
+            frozenset({"16:9", "9:16", "1:1", "4:5"}),
             5,
             0,
             3,
