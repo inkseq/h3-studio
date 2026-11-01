@@ -20,7 +20,7 @@ Six signals:
 | 1 | No machine, an occasional click | Hosted chain once the job passes its wait limit | Not started | Built; passed on staging |
 | 2 | Sustained clicks: 5+ hosted renders in 15 min | Hosted until a machine is warm, then the machine | Starts one | Built; not yet seen live |
 | 3 | A machine is free | The machine, before the wait limit | Already running | Built |
-| 4 | Auto-queue, fewer than 40 shots waiting | Vivix, one at a time | Not started | Built; not yet seen live |
+| 4 | Auto-queue, fewer than 40 shots waiting | Vivix, one at a time | Not started | Built; one job passed on staging |
 | 5 | Auto-queue, 40+ shots waiting | The machine, until the backlog is done | Starts one, stays while work remains | Built; not yet seen live |
 | 6 | The machine is running economy work and someone clicks | The click takes the next free slot; past its wait limit it goes hosted. A running render is never interrupted | Keeps running | Built; not yet seen live |
 | 7 | No machine can start | Clicks go hosted; economy goes to Vivix, otherwise waits | Lanes back off and retry | Built; not yet seen live |
