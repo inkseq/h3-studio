@@ -456,6 +456,7 @@ inventory.json
 !studio_platform/runtime_hosts/wangp_environment.py
 !studio_platform/runtime_hosts/wangp_system_restore.py
 !studio_platform/runtime_hosts/wangp_download.py
+!studio_platform/runtime_hosts/model_cache.py
 !deploy/wangp/bootstrap.py
 !deploy/wangp/package_tool.py
 !deploy/wangp/probe_gpu.py
