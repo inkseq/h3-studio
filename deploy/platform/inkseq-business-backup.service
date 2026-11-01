@@ -14,7 +14,7 @@ Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin LANG=C.UTF-8
 UnsetEnvironment=PYTHONPATH PYTHONHOME AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE AWS_DEFAULT_PROFILE AWS_ENDPOINT_URL
 UMask=0077
 # 40m snapshot + 15m handoff + 30m transfer + 10m bounded validation headroom.
-TimeoutStartSec=5700
+TimeoutStartSec=7200
 Nice=10
 IOSchedulingClass=idle
 NoNewPrivileges=true
