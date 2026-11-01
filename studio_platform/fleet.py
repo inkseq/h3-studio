@@ -595,7 +595,9 @@ def slot_runner(
         elif slot.spec.backend == "runpod-enhance":
             from . import enhance_backend
 
-            backend = enhance_backend.create(store_factory(settings), settings)
+            backend = enhance_backend.create(
+                store_factory(settings), settings, slot_key=slot.spec.worker_id
+            )
         elif slot.spec.backend == "everyframe-render":
             from .providers import everyframe
 

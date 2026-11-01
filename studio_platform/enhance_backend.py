@@ -117,9 +117,11 @@ class Prepared:
 class RunPodEnhanceBackend:
     kind = BACKEND
 
-    def __init__(self, store, config_file, *, enabled=True, transport=None):
+    def __init__(
+        self, store, config_file, *, enabled=True, transport=None, slot_key=None
+    ):
         self.store, self.config_file, self.enabled = store, Path(config_file), enabled
-        self.slot_key = "runpod-" + CONFIGURATION
+        self.slot_key = slot_key or "runpod-" + CONFIGURATION
         self._transport, self._config = transport, None
         self.cost_resolver = self._cost
 
@@ -331,7 +333,7 @@ class RunPodEnhanceBackend:
         self.store.delete(temp_key(tag))
 
 
-def create(store, settings):
+def create(store, settings, *, slot_key=None):
     """The fleet's backend: credentials from the host-installed runtime secret."""
     path = Path(settings.data_dir) / "runtime-secrets" / FILENAME
-    return RunPodEnhanceBackend(store, path)
+    return RunPodEnhanceBackend(store, path, slot_key=slot_key)
