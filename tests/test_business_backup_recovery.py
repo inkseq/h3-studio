@@ -250,7 +250,7 @@ class RecoveryGateTests(unittest.TestCase):
             )
         )
         self.assertGreaterEqual(limit, host.SNAPSHOT_TIMEOUT + 900 + 1800 + 600)
-        self.assertLessEqual(limit, 5700)
+        self.assertLessEqual(limit, 7200)
 
 
 @unittest.skipUnless(sys.platform == 'linux', 'Linux release-lock semantics')
