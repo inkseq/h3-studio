@@ -126,7 +126,8 @@ class VendorRequestTests(unittest.TestCase):
             plan.chain(compiled()), ["h3-max-turbo", "pika-h3-flex", "h3-max-fast"]
         )
         self.assertEqual(
-            plan.chain(compiled(), "economy"), ["vivix-w1", "h3-max-turbo"]
+            plan.chain(compiled(resolution="768P"), "economy"),
+            ["vivix-w1", "h3-max-turbo"],
         )
         self.assertEqual(plan.chain(compiled(resolution="2K")), ["pika-h3-flex"])
         self.assertAlmostEqual(plan.price("h3-max-turbo", compiled(duration=10)), 0.076)
@@ -134,7 +135,8 @@ class VendorRequestTests(unittest.TestCase):
         body, _ = plan.vendor_request(compiled(), "pika-h3-flex")
         self.assertNotIn(plan.NO_CUT, body["prompt"])
         # Vivix always renders 720p; Pika takes 2K under the vendor's own name.
-        body, _ = plan.vendor_request(compiled(), "vivix-w1")
+        body, _ = plan.vendor_request(compiled(resolution="768P"), "vivix-w1")
+        self.assertIsNone(plan.vendor_request(compiled(), "vivix-w1"))  # 480P.
         self.assertEqual(body["resolution"], "720p")
         body, _ = plan.vendor_request(compiled(resolution="2K"), "pika-h3-flex")
         self.assertEqual(body["resolution"], "2K")
@@ -217,15 +219,13 @@ class BackendTests(unittest.TestCase):
             backend._call("GET", "/key")
 
     def test_every_vivix_canvas_normalises_to_the_take_size(self):
-        """Measured canvases (docs/SCHEDULING-SCENARIOS.md) to our 480P and 768P."""
+        """Measured canvases (docs/SCHEDULING-SCENARIOS.md) to our 768P sizes."""
         backend = self.backend([])
         for source, size in (
-            ((1264, 720), (832, 480)),
             ((1264, 720), (1344, 768)),
-            ((720, 1264), (480, 832)),
             ((720, 1264), (768, 1344)),
-            ((960, 960), (640, 640)),
-            ((832, 1104), (640, 800)),
+            ((960, 960), (1024, 1024)),
+            ((832, 1104), (896, 1120)),
         ):
             with self.subTest(source=source, size=size):
                 with tempfile.TemporaryDirectory() as directory:
@@ -282,10 +282,13 @@ class BackendTests(unittest.TestCase):
 
     def test_vivix_takes_4_5_but_sends_21_9_to_turbo(self):
         self.assertIsNotNone(
-            plan.vendor_request(compiled(aspect_ratio="4:5"), "vivix-w1")
+            plan.vendor_request(
+                compiled(resolution="768P", aspect_ratio="4:5"), "vivix-w1"
+            )
         )
         self.assertEqual(
-            plan.chain(compiled(aspect_ratio="21:9"), "economy"), ["h3-max-turbo"]
+            plan.chain(compiled(resolution="768P", aspect_ratio="21:9"), "economy"),
+            ["h3-max-turbo"],
         )
 
     def test_config_holds_only_the_key_and_never_shows_it(self):

@@ -53,11 +53,11 @@ All figures are for a 5090 at about USD 0.65/h, 480P, 5 s, about 20 s per clip (
 
 ## Vivix sizes
 
-Vivix ignores the requested resolution, so its output is scaled to fill the take's size and centre-cropped.
+Vivix ignores the requested resolution, so its output is scaled to fill the take's size and centre-cropped. The economy tier is always 768P at 2 credits per second (owner 2026-11-02), and Vivix serves only that tier: it renders one at a time across all vendor customers, so a person waiting never uses it.
 
 | Aspect | Vivix renders | Effect |
 |---|---|---|
-| 16:9 | 1264x720 | 480P downscale; 768P about 6% upscale; about 1% cropped |
+| 16:9 | 1264x720 | About 6.7% upscale to 1344x768; about 0.3% cropped |
 | 9:16 | 720x1264 | Same as 16:9, turned |
 | 1:1 | 960x960 | No crop |
 | 4:5 | 832x1104 (3:4) | About 6% cropped top and bottom; allowed |

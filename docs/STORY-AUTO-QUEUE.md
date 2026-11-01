@@ -8,7 +8,7 @@ Status: proposal for owner review, 2026-11-01. It builds on the provider archite
 2. **One-click fix-all.** Inky gets one click that fixes every flagged clip card. The AI decides how to fill each card and which existing story elements to use.
 3. **Hosted coordination.** How these background jobs and EveryFrame work together.
 4. **Seeds.** Users don't need them. Remove the seed option from the creator UI. The API keeps it for our own use.
-5. **Economy tier** (owner, via the taomate H3 session). The auto-queue toggle is a cheap tier: about 50% below today's lowest tier, served by Vivix W1 on EveryFrame.
+5. **Economy tier** (owner, via the taomate H3 session). The auto-queue toggle is a cheap tier: always 768P at half the fast 768P price, served by Vivix W1 on EveryFrame.
 
 There is no auto-queue switch today. Generation always starts from an explicit click or chat confirmation, and "Generate all shots" is a one-time batch.
 
@@ -62,22 +62,23 @@ The verdict is stored per card version. The existing Inky source identity covers
 - **Debounce.** A card is queued 60 s after its last edit and only while its verdict is still `ready`. Typing does not create jobs.
 - **Not-ready cards** stay put, and Inky says what is missing (section 3 can fix them in one click).
 
-**Price (owner approved, 2026-11-01).**
+**Price (owner chose, 2026-11-02).** The economy tier is always 768P, at 2 credits per output second. There is no economy 480P: Vivix renders 720p and costs the same at any size.
 
-| | Live today | Economy |
+| 5 s | Credits | Speed |
 |---|---|---|
-| Rate per output second | fast 2, standard 4, refine 12 credits | **1 credit** |
-| 768P | ×2 | ×2 (2 credits/s) |
-| 5 s at 480P | fast: 10 credits | 5 credits |
+| Economy 768P | 10 | Queued |
+| Fast 480P | 10 | Now |
+| Fast 768P | 20 | Now |
 
-1 credit = USD 0.01.
+1 credit = USD 0.01. Fast 480P and economy 768P cost the same on purpose: speed versus sharpness.
 
-| Cost | 480P 5 s | 768P 5 s | Gross margin |
-|---|---|---|---|
-| On Vivix | $0.01 | $0.01 | about 73% / 83% after a 7% fee |
-| Fallback to turbo | $0.038 | $0.06 | still positive |
+| Route for 5 s at 768P | Cost |
+|---|---|
+| Vivix | $0.01 |
+| Our machine (backlog) | about $0.009 |
+| Fallback to turbo | $0.06 |
 
-Fallback never loses money at list credit price. Recheck if packs sell below $0.01 per credit.
+Every route earns money at list credit price. Recheck if packs sell below $0.01 per credit.
 
 **Edited cards.** A card edited after it already has a take becomes `stale`, and it is **not** re-run by default. Each stale card offers "Generate again", plus a story-level "Generate all changed". A sub-option, "Also re-generate edited shots", defaults to off, because re-runs cost credits the user may not expect.
 
@@ -186,7 +187,7 @@ The scheduler (`decide()` in PROVIDER-ARCHITECTURE.md) gets a **priority class**
 - Vivix accepts text, first-frame, first-last, up to 5 reference images plus 3 audio, and voice-only.
 - Aspects: 16:9, 9:16, 1:1 and 3:4. A 4:5 request comes back as 3:4, and 21:9 as 16:9. Shots in an aspect Vivix can't serve skip straight to turbo.
 - No seed and no negative prompt. It passed the face and Demon Slayer moderation round.
-- Output is always 1264×720, 24 fps, with sound. It is normalised to the take's size, as #919's fetch already does: a downscale for 480P, and about a 6% upscale for 768P.
+- Output is always 1264×720, 24 fps, with sound. It is scaled about 6.7% up to 768P with a crop of about 0.3%.
 
 **Swappable backend.** The Vivix price is SN117-subsidised: below Vivix's own expired $0.003/s promo. The economy tier names a chain in the rules table (`"economy": ["vivix-w1", "h3-max-turbo"]`), not a model. Another cheap model, or our own fleet, can replace it without touching the queue.
 
@@ -206,7 +207,7 @@ These feed the margin report.
 Each item is one PR, on staging first.
 
 1. **Readiness verdict.** Layer 1 checks plus a verdict API on cards, with a per-card state chip. Remove the seed control from the creator UI.
-2. **Economy tier and price.** A rate-table row (1 credit/s, 768P ×2) behind an owner switch, after the owner confirms the price.
+2. **Economy tier and price.** A rate-table row (2 credits/s, 768P only) behind an owner switch.
 3. **Economy queue.** It lands with #931 step 5 (hosted adapter). It covers:
    - one Vivix render in flight per account, with ETA;
    - the 30 min deadline, then turbo fallback with a daily cap, then our fleet;
