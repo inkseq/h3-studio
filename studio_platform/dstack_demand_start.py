@@ -286,28 +286,10 @@ def modal_machines(connection, now):
 
 
 def vast_share(policy, queued, work, now, machines):
-    """Owner 2026-10-29 / #688: Modal first; Vast by the boot-time lookahead.
+    """Kept for callers of the original helper; see scheduling.decide."""
+    from .scheduling.decide import Rules, vast_share
 
-    Modal hosts are the floor. Vast rents only when the lookahead still sees at
-    least vast_min_queue jobs left when a Vast machine would be ready, or for a
-    job that has waited past vast_after_seconds (Modal refused or failed).
-    """
-    from .capacity_lookahead import Policy, plan
-
-    decision = plan(
-        Policy(minimum_jobs=policy['vast_min_queue']),
-        machines,
-        queued=len(queued),
-        available_slots=1,
-        admission_blocked=False,
-    )
-    if decision.start_count:
-        return work
-    return [
-        item
-        for item in work
-        if now - item[0]['created_at'] >= policy['vast_after_seconds']
-    ]
+    return vast_share(Rules.from_modal_first(policy), queued, work, now, machines)
 
 
 def _claim(service):
@@ -328,14 +310,17 @@ def _claim(service):
             return _result('disabled'), None
         if demand_configuration(service.config, now=now) is None:
             return _result('blocked', 'authority_unavailable'), None
-        covered = modal_covered_jobs(connection, now)
+        from .scheduling.decide import Rules, dstack_work
+
+        rules = Rules.from_modal_first(getattr(service, 'modal_first', None))
         queued = eligible_jobs(service, connection, now)
-        work = [item for item in queued if item[0]['id'] not in covered]
-        policy = getattr(service, 'modal_first', None)
-        if policy:
-            work = vast_share(
-                policy, queued, work, now, modal_machines(connection, now)
-            )
+        work = dstack_work(
+            queued,
+            modal_covered_jobs(connection, now),
+            rules,
+            modal_machines(connection, now) if rules.vast_min_queue else (),
+            now,
+        )
         if not work:
             return _result('idle'), None
         journals = list(
