@@ -12,6 +12,15 @@ export function enhanceable(take, capabilities) {
   );
 }
 
+// The take a batch would enhance for each selected shot: the one the shot uses now.
+export function batchEnhanceTakes(shots, ids, capabilities, chosen) {
+  const wanted = new Set(ids);
+  return shots
+    .filter((shot) => wanted.has(shot.id))
+    .map((shot) => chosen(shot))
+    .filter((take) => enhanceable(take, capabilities));
+}
+
 // The service names every collected take "Generated result"; that is no name. The size
 // shows on the thumbnail (takeQuality), not in the name.
 const PLACEHOLDER_TITLE = 'Generated result';

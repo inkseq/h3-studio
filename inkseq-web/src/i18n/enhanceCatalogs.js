@@ -1,6 +1,16 @@
 // Enhance a finished take to 1080P/2K (h3-studio#795). Credits show as a usage bar only.
 export const enhanceCatalogs = {
   en: {
+    'enhance.batchButton': 'Enhance {count}',
+    'enhance.batchHelp':
+      'Make a sharper copy of the take each selected shot uses now. The originals stay.',
+    'enhance.batchTitle': 'Enhance selected takes',
+    'enhance.batchIntro':
+      'Each of these {count} takes gets a sharper copy as a new take of its shot. The originals stay.',
+    'enhance.batchTiming': 'They run a few at a time, so a larger batch takes longer.',
+    'enhance.batchSkipped': '{count} can’t be enhanced right now and will be left out.',
+    'enhance.batchPartial':
+      'Started {count}, then something went wrong. Please select the rest and try again.',
     'enhance.button': 'Enhance',
     'enhance.help': 'Make a sharper 1080P or 2K copy of this take. The original stays.',
     'enhance.title': 'Enhance this take',
@@ -18,6 +28,13 @@ export const enhanceCatalogs = {
     'enhance.failed': 'Couldn’t start enhancing. Please try again.',
   },
   zh: {
+    'enhance.batchButton': '提升清晰度（{count}）',
+    'enhance.batchHelp': '为每个所选镜头当前使用的镜次生成清晰版，原片保留。',
+    'enhance.batchTitle': '提升所选镜次的清晰度',
+    'enhance.batchIntro': '这 {count} 条镜次的清晰版会作为各自镜头的新镜次出现，原片保留。',
+    'enhance.batchTiming': '会分批同时处理，数量越多耗时越长。',
+    'enhance.batchSkipped': '有 {count} 条暂时无法提升，会被跳过。',
+    'enhance.batchPartial': '已开始 {count} 条，之后出了问题。请选择其余镜头重试。',
     'enhance.button': '提升清晰度',
     'enhance.help': '为这条镜次生成 1080P 或 2K 的清晰版，原片保留。',
     'enhance.title': '提升这条镜次的清晰度',
