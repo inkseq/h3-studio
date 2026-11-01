@@ -246,6 +246,43 @@ class WorkerTests(LedgerCase):
                     self.repo.get_budget("owner-budget")["reserved_microusd"], 0
                 )
 
+    def test_closed_worker_window_defers_without_failing_or_submitting(self):
+        job = self.worker_job()
+        control, inner, posts = self.controlled_mock(), self.mock(), []
+
+        class Guarded:  # Not a MockBackend, so both pre-submit checks apply.
+            def __getattr__(self, name):
+                return getattr(inner, name)
+
+        backend = Guarded()
+        original = inner.submit
+        inner.submit = lambda prepared, tag: (
+            posts.append(tag) or original(prepared, tag)
+        )
+        answers = iter([False, True, True])
+        control.submission_allowed = lambda _: next(answers)
+        runner = WorkerRunner(
+            self.repo,
+            self.store,
+            self.work,
+            backend=backend,
+            control=control,
+            submission_guard=lambda _: True,
+        )
+        result = runner.run_once("controlled-worker", "worker-test")
+        deferred = self.repo.get_job(self.scope, job["id"])
+        self.assertEqual(result["state"], "queued")
+        self.assertEqual(
+            (deferred["status"], deferred["error_code"]),
+            ("queued", "worker_window_closed"),
+        )
+        self.assertEqual(posts, [])
+        self.now += 31
+        self.assertEqual(
+            runner.run_once("controlled-worker", "worker-test")["state"], "succeeded"
+        )
+        self.assertEqual(len(posts), 1)
+
     def test_running_reconciliation_does_not_require_new_submission_guard(self):
         job = self.worker_job(backend="comfy-worker")
         from studio_platform.queue import TaskQueue
