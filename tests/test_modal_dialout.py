@@ -51,7 +51,19 @@ class FakeModal:
         self.App = SimpleNamespace(
             lookup=lambda name, **k: SimpleNamespace(app_id="ap-1", name=name)
         )
-        self.Image = SimpleNamespace(from_registry=lambda ref: ("image", ref))
+
+        class Image:
+            def __init__(self, ref, entrypoint=None):
+                self.ref, self.entry = ref, entrypoint
+
+            @staticmethod
+            def from_registry(ref):
+                return Image(ref)
+
+            def entrypoint(self, commands):
+                return Image(self.ref, commands)
+
+        self.Image = Image
         self.Secret = SimpleNamespace(from_dict=lambda d: ("secret", dict(d)))
         self.Volume = SimpleNamespace(from_id=lambda i, client=None: ("volume", i))
 
@@ -97,6 +109,9 @@ class ModalDialoutTests(unittest.TestCase):
             [("secret", {**boot_env(INTENT, TOKEN, URL), "INKSEQ_MODEL_CACHE": CACHE})],
         )
         self.assertEqual(kwargs["volumes"], {"/ckpts": ("volume", "vo-abc123")})
+        self.assertEqual(
+            (kwargs["image"].ref, kwargs["image"].entry), (self.config["image"], [])
+        )
         self.assertEqual(
             (kwargs["name"], kwargs["gpu"], kwargs["timeout"]),
             (RUN, "RTX-PRO-6000", 7200),
