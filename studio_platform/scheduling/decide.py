@@ -60,13 +60,13 @@ def dstack_work(queued, covered, rules, machines, now):
 
 # Seconds a job may wait for a machine of ours before going hosted (#918).
 WAIT_LIMITS = {"fast": 30, "standard": 60, "refine": 120}
-# The vendor allows 40 renders per 15 min per account; economy keeps the rest.
+# The vendor allows 40 renders per 15 min per account, shared by every
+# environment; each environment's share comes from its routing file.
 HOSTED_WINDOW_SECONDS = 900
-HOSTED_PER_WINDOW = 25
 HOSTED_PER_OWNER = 10
 
 
-def hosted_offload(queued, tier_of, enabled_tiers, used, now):
+def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
     """Jobs to hand to the hosted API now, oldest first.
 
     A job goes hosted once it has waited past its tier's limit: a free machine
@@ -83,7 +83,7 @@ def hosted_offload(queued, tier_of, enabled_tiers, used, now):
             tier not in enabled_tiers
             or limit is None
             or now - job["created_at"] < limit
-            or total >= HOSTED_PER_WINDOW
+            or total >= per_window
             or owners.get(job["owner_id"], 0) >= HOSTED_PER_OWNER
         ):
             continue
