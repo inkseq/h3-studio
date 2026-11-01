@@ -20,6 +20,7 @@ PROVIDER = "everyframe"
 BACKEND = "everyframe-render"
 POOL = "everyframe"
 RECIPES = ("h3-base-fl2va-v1", "h3-base-ref2va-v1")
+SLOTS_PER_MODEL = 4
 # Turbo and fast insert their own camera cuts and follow lighting words
 # literally (#918, 2026-11-01); our shots are already split by the storyboard.
 NO_CUT = "Single continuous shot with no cuts, no scene changes and steady lighting."

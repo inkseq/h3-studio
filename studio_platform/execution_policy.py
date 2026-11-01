@@ -1233,6 +1233,16 @@ class ExecutionPolicies:
                 and execution.get("configuration_id") == enhance_plans.CONFIGURATION
                 and job["request"]["request"].get("model") == enhance_plans.MODEL
             )
+        from .providers import hosted_models
+
+        if execution.get("backend") == hosted_models.BACKEND:
+            return bool(
+                getattr(self.settings, "everyframe_enabled", False)
+                and execution.get("enabled") is True
+                and execution.get("pool") == hosted_models.POOL
+                and execution.get("configuration_id") in hosted_models.CONFIGURATIONS
+                and job.get("request", {}).get("recipe_id") in hosted_models.RECIPES
+            )
         if job.get("request", {}).get("recipe_id") == RECIPE:
             try:
                 configuration = configuration_for(job["request"])
