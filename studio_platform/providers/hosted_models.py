@@ -117,11 +117,11 @@ MODELS = {
         ),
         HostedModel(
             # Economy only: one render at a time across all vendor customers,
-            # always 1264x720 with sound; normalised to the take's size.
+            # always 1264x720 with sound; scaled about 6.7% up to 768P.
             "vivix-w1",
             "everyframe-vivix-w1-v1",
             PLAIN | {"omni"},
-            frozenset({"480P", "768P"}),
+            frozenset({"768P"}),  # The economy tier is always 768P (owner 11-02).
             # 4:5 comes back as 3:4, which crops cleanly; 21:9 comes back as 16:9
             # and would lose a quarter of its height, so it goes to turbo.
             frozenset({"16:9", "9:16", "1:1", "4:5"}),
@@ -129,11 +129,7 @@ MODELS = {
             0,
             3,
             False,
-            {
-                (resolution, kind): 0.01
-                for resolution in ("480P", "768P")
-                for kind in ("plain", "references")
-            },
+            {("768P", "plain"): 0.01, ("768P", "references"): 0.01},
             1800,
             vendor_resolution="720p",
             concurrency=1,
