@@ -1847,6 +1847,13 @@ export function createCloudController({
     if (!Array.isArray(value?.items)) throw Error('inky.unavailable');
     return value;
   }
+  async function readShotReadiness() {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request('/v1/inky/readiness' + inkyQuery(ctx));
+    guard(ctx);
+    return value;
+  }
   async function ignoreInkySuggestion(id) {
     requireCloud();
     const ctx = context();
@@ -2068,6 +2075,7 @@ export function createCloudController({
     readTakeReview: (shotId, artifactId) => readTakeReview(shotId, artifactId),
     readTakeReviewSummaries: (shotId) => readTakeReviewSummaries(shotId),
     readInkySuggestions: () => readInkySuggestions(),
+    readShotReadiness: () => readShotReadiness(),
     ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
     saveTakeReview: (shotId, artifactId, body, key) =>
       saveTakeReview(shotId, artifactId, body, key),

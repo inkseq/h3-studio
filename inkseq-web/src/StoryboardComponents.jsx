@@ -79,6 +79,7 @@ import {
   queuePositions,
 } from './storyboard-ui-model.js';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
+import { useShotReadiness } from './shot-readiness.js';
 import { StoryboardNameDialog } from './StoryboardDialog.jsx';
 import { createStoryboardPlayback } from './storyboard-playback.js';
 
@@ -1578,6 +1579,8 @@ export function ShotCard({
   const [picker, setPicker] = useState(null);
   const { setNodeRef, attributes, listeners, style, isOver, active } = useShotSortable(shot.id);
   const info = expand(shot, db, locale);
+  const missing = useShotReadiness(shot, tr);
+  const warnings = [...info.warnings, ...missing];
   const status = shotStatus(shot, queuePositions(state.shots)[shot.id], locale);
   const latest = shot.versions[shot.versions.length - 1];
   const usual = usualSettings(state.shots, db, locale);
@@ -1648,8 +1651,8 @@ export function ShotCard({
             {shot.quality !== usual.quality && (
               <span className="q">{QUALITY_LABEL[shot.quality]}</span>
             )}
-            {info.warnings.length > 0 && (
-              <span className="warnbadge" title={info.warnings.join('\n')}>
+            {warnings.length > 0 && (
+              <span className="warnbadge" title={warnings.join('\n')}>
                 !
               </span>
             )}
@@ -1818,6 +1821,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
   const { state, dispatch, db } = useStore();
   const shot = state.shots.find((s) => s.id === shotId);
+  const missing = useShotReadiness(shot, tr);
   const [copies, setCopies] = useState('1');
   // Hooks stay above the early return below (rules of hooks).
   const [regenerating, setRegenerating] = useState(false);
@@ -2469,7 +2473,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
           </div>
           {/* Advice right above Generate, always visible (h3-studio#739). */}
-          {info.hints?.map((hint) => (
+          {[...(info.hints || []), ...missing].map((hint) => (
             <p key={hint} className="ed-hint">
               {hint}
             </p>
