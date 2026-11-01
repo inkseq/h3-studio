@@ -8,6 +8,9 @@ The route is chosen from the catalog at dispatch; nothing happens unless the
 credential is installed and everyframe-routing.json switches the tier on.
 """
 
+import json
+from pathlib import Path
+
 from sqlalchemy import select, update
 
 from ..providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS, POOL, chain
@@ -23,6 +26,30 @@ KEPT = (
     "deployment_profile_id",
     "fingerprint",
 )
+
+
+def routing(data_dir):
+    """(tiers, per_window) from the host's routing file; off if absent or malformed.
+
+    {"tiers": ["fast"], "per_window": 5}. Environments share one vendor key and
+    limit, so staging keeps a small window (#918, owner 2026-11-01). Read at each
+    decision, so a change needs no restart.
+    """
+    path = Path(data_dir) / "runtime-secrets" / "everyframe-routing.json"
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        tiers = frozenset(value["tiers"])
+        window = value["per_window"]
+        if (
+            not isinstance(value["tiers"], list)
+            or type(window) is not int
+            or not 0 <= window <= 40
+            or not all(isinstance(tier, str) for tier in tiers)
+        ):
+            raise ValueError
+    except (OSError, ValueError, KeyError, TypeError):
+        return frozenset(), 0
+    return tiers, window
 
 
 def hosted_plan(execution, model_id, now):
@@ -130,8 +157,10 @@ def rebind(repo, connection, job, model_id, now):
 def offload(service, connection, queued, now):
     """Rebind what has waited too long; the rest stays for our own machines."""
     settings = service.settings
-    tiers = getattr(settings, "everyframe_tiers", frozenset())
-    if not tiers or not getattr(settings, "everyframe_enabled", False):
+    if not getattr(settings, "everyframe_enabled", False):
+        return queued
+    tiers, window = routing(settings.data_dir)
+    if not tiers:
         return queued
     from ..credits_pricing import get_tier
 
@@ -144,7 +173,6 @@ def offload(service, connection, queued, now):
     # A job that already went through the hosted chain stays on our machines.
     fresh = [item for item in queued if "hosted_tried" not in item[0]["execution_plan"]]
     moved = set()
-    window = getattr(settings, "everyframe_per_window", 0)
     for job, _ in hosted_offload(fresh, tier_of, tiers, used, now, per_window=window):
         for model_id in chain(job["request"]):
             if MODELS[model_id].configuration_id in live:

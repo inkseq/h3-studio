@@ -1,6 +1,7 @@
 """Hosted offload decision and rebind (#931 step 3b); no vendor or GPU calls."""
 
 import copy
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from sqlalchemy import select
 
 from studio_platform.capabilities import compile_request
 from studio_platform.control import WorkerControl, WorkerSpec
+from studio_platform.credits_pricing import get_tier
 from studio_platform.inference.protocol import Outcome, SubmissionRejected
 from studio_platform.providers.hosted_models import (
     BACKEND,
@@ -25,8 +27,8 @@ from studio_platform.scheduling.rebind import (
     next_plan,
     offload,
     rebind,
+    routing,
 )
-from studio_platform.settings import everyframe_routing
 from studio_platform.worker import WorkerRunner
 from test_platform_api import generation_request
 from test_platform_repository import LedgerCase
@@ -81,7 +83,7 @@ class RoutingFileTests(unittest.TestCase):
             folder.mkdir()
             if text is not None:
                 (folder / "everyframe-routing.json").write_text(text, encoding="utf-8")
-            return everyframe_routing(root)
+            return routing(root)
 
     def test_absent_or_malformed_means_off(self):
         off = (frozenset(), 0)
@@ -205,14 +207,20 @@ class RebindLedgerTests(LedgerCase):
         control.mark_ready(worker, upstream_idle_confirmed=True)
         return control, worker
 
-    def service(self, *, tiers=frozenset({"standard"}), enabled=True):
+    def service(self, *, tiers=("standard",), enabled=True):
+        root = tempfile.TemporaryDirectory()
+        self.addCleanup(root.cleanup)
+        folder = Path(root.name) / "runtime-secrets"
+        folder.mkdir()
+        (folder / "everyframe-routing.json").write_text(
+            json.dumps({"tiers": list(tiers), "per_window": 25}), encoding="utf-8"
+        )
         return SimpleNamespace(
             repo=self.repo,
             settings=SimpleNamespace(
                 tenant_id=self.scope.tenant_id,
                 everyframe_enabled=enabled,
-                everyframe_tiers=tiers,
-                everyframe_per_window=25,
+                data_dir=root.name,
             ),
         )
 
@@ -335,11 +343,23 @@ class RebindLedgerTests(LedgerCase):
         self.hosted_control()
         with self.repo.transaction() as connection:
             for service in (
-                self.service(tiers=frozenset()),
+                self.service(tiers=()),
                 self.service(enabled=False),
             ):
                 self.assertEqual(offload(service, connection, queued, now), queued)
         self.assertEqual(self.row(created["id"])["pool"], "own")
+
+    def test_an_overdue_job_moves_when_everything_is_switched_on(self):
+        created = self.queued_job()
+        old = self.row(created["id"])
+        self.now = old["created_at"] + 121  # Past every tier's limit.
+        now = self.now
+        self.hosted_control()  # A slot that is live at that moment.
+        tier = get_tier(old["request"], execution=old["execution_plan"])
+        with self.repo.transaction() as connection:
+            left = offload(self.service(tiers=(tier,)), connection, [(old, {})], now)
+        self.assertEqual(left, [])
+        self.assertEqual(self.row(created["id"])["pool"], POOL)
 
     def test_no_live_hosted_slot_leaves_the_job_for_our_machines(self):
         created = self.queued_job()

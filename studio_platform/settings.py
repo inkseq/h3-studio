@@ -109,30 +109,6 @@ def everyframe_switch(value, data_dir):
     return (Path(data_dir) / "runtime-secrets" / "everyframe.json").is_file()
 
 
-def everyframe_routing(data_dir):
-    """Hosted routing switches from a host file; off when absent or malformed.
-
-    {"tiers": ["fast"], "per_window": 5}. Environments share one vendor key and
-    limit, so staging keeps a small window (#918, owner 2026-11-01).
-    """
-    import json
-
-    path = Path(data_dir) / "runtime-secrets" / "everyframe-routing.json"
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-        tiers = frozenset(value["tiers"])
-        window = value["per_window"]
-        if (
-            type(window) is not int
-            or not 0 <= window <= 40
-            or not all(isinstance(tier, str) for tier in tiers)
-        ):
-            raise ValueError
-    except (OSError, ValueError, KeyError, TypeError):
-        return frozenset(), 0
-    return tiers, window
-
-
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -166,10 +142,6 @@ class Settings:
     # Enhance a finished take to 1080P/2K on RunPod Serverless (#795).
     enhance_enabled: bool = False
     everyframe_enabled: bool = False
-    # Tiers the hosted API may serve; none until the owner switches one on.
-    everyframe_tiers: frozenset = frozenset()
-    # This environment's share of the vendor window (shared key and limit).
-    everyframe_per_window: int = 0
     recovery_backends: tuple[str, ...] = ()
     generation_queue: str = "postgres"
     capacity_no_progress_seconds: int = 600
@@ -554,12 +526,6 @@ class Settings:
                 os.environ.get("INKSEQ_EVERYFRAME_ENABLED"),
                 Path(os.environ.get("SIXNINE_DATA", str(default))),
             ),
-            everyframe_tiers=everyframe_routing(
-                Path(os.environ.get("SIXNINE_DATA", str(default)))
-            )[0],
-            everyframe_per_window=everyframe_routing(
-                Path(os.environ.get("SIXNINE_DATA", str(default)))
-            )[1],
             recovery_backends=tuple(
                 x.strip()
                 for x in os.environ.get("SIXNINE_RECOVERY_BACKENDS", "").split(",")
