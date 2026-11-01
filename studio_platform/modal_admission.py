@@ -25,6 +25,7 @@ from .repository import (
 )
 from .runtime_catalog import engine_manifest
 from .worker_admission import worker_window_reason
+from .providers.registry import DSTACK_V1_PROVIDERS
 
 OPERATION = 'modal_demand_bound'
 
@@ -33,9 +34,7 @@ def dedicated_ready(connection, job, now):
     """Only a live, compatible, idle original worker can suppress fallback."""
     workers = connection.execute(
         select(registered_workers).where(
-            registered_workers.c.provider.in_(
-                ('vast', 'runpod', 'lium', 'cloudrift', 'modal-dialout')
-            ),
+            registered_workers.c.provider.in_(sorted(DSTACK_V1_PROVIDERS)),
             registered_workers.c.pool == job['pool'],
             registered_workers.c.state == 'ready',
             registered_workers.c.current_job_id.is_(None),

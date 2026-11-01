@@ -64,6 +64,7 @@ from .repository import (
 from .dstack_inventory import OPTIONAL_PROFILE_FIELDS as OPTIONAL, fallbacks_valid
 from .dstack_inventory import profile_backends, request_options
 from .runtime_catalog import engine_manifest, get_profile
+from .providers.registry import BACKEND_PROVIDERS
 
 BACKEND_MARKER = "dstack-v1"
 MAX_HOST_CANDIDATES = 10
@@ -89,17 +90,7 @@ def preferred_download_offer(offer):
     )
 
 
-PROVIDERS = {
-    "vastai": "vast",
-    "runpod": "runpod",
-    "lium": "lium",
-    "cloudrift": "cloudrift",
-    # RunPod Serverless jobs (dial-out only) bill to the same RunPod account.
-    "runpod-serverless": "runpod",
-    # Modal sandboxes running the same dial-out worker (#859); not the
-    # older Modal lane, which keeps provider "modal".
-    "modal-dialout": "modal-dialout",
-}
+PROVIDERS = BACKEND_PROVIDERS
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
 SCHEDULER_GPU_ALIASES = {
@@ -2091,11 +2082,23 @@ class DstackOperator:
         # One intent always rents from exactly one backend. Each backend in
         # order (primary, then configured fallbacks) is planned and fully
         # filtered; the first with eligible offers binds the preview and start.
-        backends = [request.backend, *profile.get("fallback_backends", [])]
+        from .scheduling.health import cooling_backends
+
+        with self.repo.engine.connect() as connection:
+            cooling = cooling_backends(connection, self.settings.tenant_id, now)
+        # A lane whose recent starts failed cools down alone (#931 step 2).
+        backends = [
+            backend
+            for backend in (request.backend, *profile.get("fallback_backends", []))
+            if backend not in cooling
+        ]
+        require(bool(backends), "dstack_lane_backoff")
         store, offers = None, []
         for index, backend in enumerate(backends):
             candidate = (
-                request if index == 0 else replace(request, backend=backend, regions=())
+                request
+                if backend == request.backend
+                else replace(request, backend=backend, regions=())
             )
             offers = plan_offers(
                 self.capacity.plan(candidate, self.config["ssh_public_key"]),
@@ -2115,7 +2118,7 @@ class DstackOperator:
                     offers = []
             if offers:
                 request = candidate
-                if index:
+                if backend != profile["backend"]:
                     profile["backend"] = backend
                     profile.pop("regions", None)
                 break
