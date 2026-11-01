@@ -42,17 +42,10 @@ from .wangp_bootstrap import (
     safe_preparation_report,
 )
 from .slot_lock import slot_lock
+from .providers.registry import BACKEND_PROVIDERS
 
 GPU_UUID = re.compile(r"GPU-[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}\Z")
-PROVIDERS = {
-    "vastai": "vast",
-    "runpod": "runpod",
-    "lium": "lium",
-    "cloudrift": "cloudrift",
-    # RunPod Serverless jobs (dial-out only) bill to the same RunPod account.
-    "runpod-serverless": "runpod",
-    "modal-dialout": "modal-dialout",
-}
+PROVIDERS = BACKEND_PROVIDERS
 IDENTITY_FIELDS = (
     "intent_id",
     "run_id",

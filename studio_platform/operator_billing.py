@@ -31,6 +31,7 @@ from .repository import (
     spending_origins,
 )
 from .settlement_recovery import closed_attempt
+from .providers.registry import DSTACK_V1_PROVIDERS
 
 PROJECT = "__billing_control"
 PREVIEW_SECONDS = 900
@@ -353,8 +354,7 @@ def _allocations(repo, conn, tenant, owner, body, values):
         row = instance["reference"]
         need(
             row["state"] == "destroyed"
-            and row["provider"]
-            in {"vast", "runpod", "lium", "cloudrift", "modal-dialout"}
+            and row["provider"] in DSTACK_V1_PROVIDERS
             and row["provider_instance_id"],
             "billing_allocation_unconfirmed",
             409,
