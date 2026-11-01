@@ -11,6 +11,8 @@ import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { StoryboardVideo, StoryboardAssetImage } from './StoryboardMedia.jsx';
 import { recipeChanges } from './storyboard-selection.js';
 import { takeName, takeQuality } from './enhance-take.js';
+import { EnhanceSelectedButton } from './EnhanceTake.jsx';
+import { chosenVersion } from './storyboard-ui-model.js';
 import { segmentsAction } from './shot-segments.js';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
@@ -681,6 +683,12 @@ export function WorkbenchBulk({ ids, onClear, onSelectAll, onSelectPending, pend
           <Sparkles size={14} />
           {t('workbench.generateSelected', { count: ids.length })}
         </Button>
+        <EnhanceSelectedButton
+          shots={state.shots}
+          ids={ids}
+          chosen={chosenVersion}
+          onStarted={onClear}
+        />
         {trash?.account && (
           <Button
             disabled={locked || trash.busy || !!trash.pending}
