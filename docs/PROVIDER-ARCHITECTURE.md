@@ -75,7 +75,7 @@ The gateway names them as one layer with one contract. The frontend and Inky tal
    - Route fields (`dispatch_backend`, `output_delivery`, the manifest digest) go.
    - The frozen `credit_quote`, the budget accounts and the spending snapshot stay.
    - The USD reservation is only an admission gate: `_settle` records the actual vendor cost whatever was reserved, so a rebind doesn't touch it.
-4. **Switches.** Nothing moves unless the credential is installed (`everyframe_enabled`) and the tier is listed in `INKSEQ_EVERYFRAME_TIERS`, which is empty by default.
+4. **Switches.** Nothing moves unless the credential is installed (`everyframe_enabled`) and `runtime-secrets/everyframe-routing.json` lists the tier and this environment's share of the vendor window, e.g. `{"tiers": ["fast"], "per_window": 5}`. Staging and production share one vendor key, balance and limit (owner 2026-11-01), so staging keeps a small window, and spend is attributed from each take's recorded cost.
 5. **Unchanged.** Claims, fences, settlement and jobs that never wait past the limit behave exactly as today. DBOS `turn` re-reads `job["pool"]` each turn, so a rebound job reaches the hosted slot with no new wake.
 
 **Not yet:** a job with an explicit seed should stay on our fleet, but the compiler fills a seed for every job, so explicit seeds can't be told apart yet. Creators no longer set seeds; this only matters for API jobs.

@@ -26,6 +26,7 @@ from studio_platform.scheduling.rebind import (
     offload,
     rebind,
 )
+from studio_platform.settings import everyframe_routing
 from studio_platform.worker import WorkerRunner
 from test_platform_api import generation_request
 from test_platform_repository import LedgerCase
@@ -46,7 +47,9 @@ def tier_of(row):
 
 class OffloadDecisionTests(unittest.TestCase):
     def ids(self, queued, tiers=("standard", "fast", "refine"), used=None, now=1100):
-        chosen = hosted_offload(queued, tier_of, set(tiers), used or {}, now)
+        chosen = hosted_offload(
+            queued, tier_of, set(tiers), used or {}, now, per_window=25
+        )
         return [row["id"] for row, _ in chosen]
 
     def test_only_jobs_past_their_tier_wait_limit_go_hosted(self):
@@ -69,6 +72,28 @@ class OffloadDecisionTests(unittest.TestCase):
         self.assertEqual(self.ids(queued, used={"b": 25}), [])
         mixed = [job("a1", created=1), job("b1", created=2, owner="b")]
         self.assertEqual(self.ids(mixed, used={"a": 10}), ["b1"])
+
+
+class RoutingFileTests(unittest.TestCase):
+    def read(self, text):
+        with tempfile.TemporaryDirectory() as root:
+            folder = Path(root) / "runtime-secrets"
+            folder.mkdir()
+            if text is not None:
+                (folder / "everyframe-routing.json").write_text(text, encoding="utf-8")
+            return everyframe_routing(root)
+
+    def test_absent_or_malformed_means_off(self):
+        off = (frozenset(), 0)
+        for text in (None, "not json", "{}", '{"tiers": "fast", "per_window": 99}'):
+            with self.subTest(text=text):
+                self.assertEqual(self.read(text), off)
+        self.assertEqual(self.read('{"tiers": ["fast"], "per_window": 41}'), off)
+
+    def test_a_valid_file_sets_tiers_and_this_environment_window(self):
+        self.assertEqual(
+            self.read('{"tiers": ["fast"], "per_window": 5}'), (frozenset({"fast"}), 5)
+        )
 
 
 class HostedPlanTests(unittest.TestCase):
@@ -187,6 +212,7 @@ class RebindLedgerTests(LedgerCase):
                 tenant_id=self.scope.tenant_id,
                 everyframe_enabled=enabled,
                 everyframe_tiers=tiers,
+                everyframe_per_window=25,
             ),
         )
 

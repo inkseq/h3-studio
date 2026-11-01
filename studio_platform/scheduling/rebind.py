@@ -5,7 +5,7 @@ binding a job to another route means rewriting those fields, inside the
 caller's capacity-locked transaction. Credits stay frozen with the tier, and
 settlement records the vendor's actual cost on the job's original accounts.
 The route is chosen from the catalog at dispatch; nothing happens unless the
-credential is installed and the tier is switched on.
+credential is installed and everyframe-routing.json switches the tier on.
 """
 
 from sqlalchemy import select, update
@@ -144,7 +144,8 @@ def offload(service, connection, queued, now):
     # A job that already went through the hosted chain stays on our machines.
     fresh = [item for item in queued if "hosted_tried" not in item[0]["execution_plan"]]
     moved = set()
-    for job, _ in hosted_offload(fresh, tier_of, tiers, used, now):
+    window = getattr(settings, "everyframe_per_window", 0)
+    for job, _ in hosted_offload(fresh, tier_of, tiers, used, now, per_window=window):
         for model_id in chain(job["request"]):
             if MODELS[model_id].configuration_id in live:
                 if rebind(service.repo, connection, job, model_id, now):
