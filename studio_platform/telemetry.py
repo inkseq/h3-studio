@@ -23,6 +23,7 @@ import uuid
 from .runtime_catalog import PROFILE_IDS
 from .generation_diagnostics import WANGP_VALIDATION_CODES, COMMON_CODES
 from .inference.protocol import INFERENCE_FAILURE_CODES
+from .providers.registry import DSTACK_V1_PROVIDERS, LEGACY_MODAL_PROVIDER
 
 STAGES = frozenset(
     {
@@ -47,19 +48,7 @@ OUTCOMES = frozenset({"success", "failure", "unknown", "cancelled"})
 # Background export only. A 1 s cap failed every production metrics batch
 # (Grafana Cloud au-southeast-1 answers in ~1.2 s from the CPU host, #193).
 EXPORT_SECONDS = 5
-PROVIDERS = frozenset(
-    {
-        "vast",
-        "runpod",
-        "lium",
-        "cloudrift",
-        "targon",
-        "modal",
-        "modal-dialout",
-        "local",
-        "unknown",
-    }
-)
+PROVIDERS = DSTACK_V1_PROVIDERS | {"targon", LEGACY_MODAL_PROVIDER, "local", "unknown"}
 GPU_TYPES = frozenset(
     {"rtx5090", "rtx-pro6000", "h100", "h200", "b200", "b300", "unknown"}
 )

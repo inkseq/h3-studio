@@ -64,6 +64,7 @@ from .repository import (
 from .dstack_inventory import OPTIONAL_PROFILE_FIELDS as OPTIONAL, fallbacks_valid
 from .dstack_inventory import profile_backends, request_options
 from .runtime_catalog import engine_manifest, get_profile
+from .providers.registry import BACKEND_PROVIDERS
 
 BACKEND_MARKER = "dstack-v1"
 MAX_HOST_CANDIDATES = 10
@@ -89,17 +90,7 @@ def preferred_download_offer(offer):
     )
 
 
-PROVIDERS = {
-    "vastai": "vast",
-    "runpod": "runpod",
-    "lium": "lium",
-    "cloudrift": "cloudrift",
-    # RunPod Serverless jobs (dial-out only) bill to the same RunPod account.
-    "runpod-serverless": "runpod",
-    # Modal sandboxes running the same dial-out worker (#859); not the
-    # older Modal lane, which keeps provider "modal".
-    "modal-dialout": "modal-dialout",
-}
+PROVIDERS = BACKEND_PROVIDERS
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
 SCHEDULER_GPU_ALIASES = {

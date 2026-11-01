@@ -7,6 +7,7 @@ A malformed reply raises InventoryUnconfirmed; it is never read as empty.
 """
 
 import re
+from .providers.registry import DSTACK_BACKENDS
 
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
 LIUM_PODS_URL = "https://lium.io/api/pods"
@@ -15,9 +16,7 @@ CLOUDRIFT_INSTANCES_URL = "https://api.cloudrift.ai/api/v1/instances/list"
 CLOUDRIFT_API_VERSION = "2026-10-12"
 # Lium and CloudRift authenticate with an API-key header; Vast and RunPod use Bearer.
 KEY_HEADER_URLS = frozenset({LIUM_PODS_URL, CLOUDRIFT_INSTANCES_URL})
-SUPPORTED = frozenset(
-    {"vastai", "runpod", "lium", "cloudrift", "runpod-serverless", "modal-dialout"}
-)
+SUPPORTED = DSTACK_BACKENDS
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,200}")
 LIVE_CLOUDRIFT = ["Initializing", "Active", "Deactivating"]
 

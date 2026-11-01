@@ -9,6 +9,7 @@ import json
 import math
 
 from .repository import request_hash
+from .providers.registry import DSTACK_V1_PROVIDERS, LEGACY_MODAL_PROVIDER
 
 POLICY_VERSION = 1
 LEGACY_DEMAND_MAX_MACHINES = 2
@@ -188,11 +189,7 @@ def reservation_provenance(
         }
         or type(proof.get("lifecycle_version")) is not int
         or provider
-        not in (
-            {"vast", "runpod", "lium", "cloudrift", "modal-dialout"}
-            if continuing
-            else {"modal"}
-        )
+        not in (DSTACK_V1_PROVIDERS if continuing else {LEGACY_MODAL_PROVIDER})
         or gpus != 1
         or slots != 1
         or usage is None
