@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 import uuid
+from .providers.registry import DSTACK_V1_PROVIDERS
 
 # Closed source-level vocabulary, not a regex that could disclose a credential
 # disguised as a well-formed exception code. Unknown exceptions remain opaque.
@@ -575,7 +576,7 @@ def safe_failure_summary(job, context=None):
         node_id=_uuid(source.get('node_id')),
         provider=_choice(
             source.get('provider'),
-            {'vast', 'runpod', 'lium', 'cloudrift', 'modal-dialout', 'targon', 'local'},
+            DSTACK_V1_PROVIDERS | {'targon', 'local'},
             'unknown',
         ),
         gpu_type=_choice(

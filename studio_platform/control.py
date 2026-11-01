@@ -14,6 +14,7 @@ from sqlalchemy import and_, case, func, insert, inspect, select, update
 
 from .queue import TaskQueue
 from .inference.outputs import validate_delivery_policy
+from .providers.registry import ADMISSION_PAIRS
 from .repository import (
     BudgetExceeded,
     Conflict,
@@ -602,14 +603,7 @@ class WorkerControl:
                             "capacity_policy_snapshot",
                         }
                         or (admission["capacity_backend"], spec.provider)
-                        not in {
-                            ("dstack-v1", "vast"),
-                            ("dstack-v1", "runpod"),
-                            ("dstack-v1", "lium"),
-                            ("dstack-v1", "cloudrift"),
-                            ("dstack-v1", "modal-dialout"),
-                            ("modal-v1", "modal"),
-                        }
+                        not in ADMISSION_PAIRS
                         or type(admission["lifecycle_version"]) is not int
                         or admission["lifecycle_version"] != 2
                         or admission["worker_id"] != spec.worker_id
