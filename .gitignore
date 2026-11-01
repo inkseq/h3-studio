@@ -439,6 +439,8 @@ inventory.json
 !studio_platform/providers/
 !studio_platform/providers/__init__.py
 !studio_platform/providers/registry.py
+!studio_platform/providers/everyframe.py
+!studio_platform/providers/hosted_models.py
 !tests/test_provider_registry.py
 !studio_platform/runtime_hosts/wangp.py
 !studio_platform/runtime_hosts/wangp_receipts.py
@@ -1073,3 +1075,7 @@ inventory.json
 !tools/runpod_serverless_endpoint.py
 !deploy/runpod-serverless/
 !deploy/runpod-serverless/handler.py
+!deploy/platform/everyframe_credentials.py
+!tools/import_everyframe_credentials.py
+!deploy/platform/everyframe-staging-read-policy.json
+!deploy/platform/everyframe-production-read-policy.json
