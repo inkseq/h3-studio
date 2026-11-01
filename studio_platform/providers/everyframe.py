@@ -38,6 +38,7 @@ API = "https://api.everyframe.studio/v1"
 FILENAME = "everyframe.json"
 MAX_INPUT_BYTES = 512 * 1024**2
 MAX_OUTPUT_BYTES = 512 * 1024**2
+MAX_ANSWER_BYTES = 1024**2
 STATES = {
     "queued": "running",
     "running": "running",
@@ -99,7 +100,7 @@ class EveryFrameBackend:
         self.store, self.config_file, self.enabled = store, Path(config_file), enabled
         # One local render lock per slot; the vendor's limits are per account.
         self.slot_key = slot_key
-        self._transport, self._config = transport, None
+        self._transport, self._client, self._config = transport, None, None
         self.cost_resolver = self._cost
 
     def __repr__(self):
@@ -119,25 +120,26 @@ class EveryFrameBackend:
         return self._config
 
     def close(self):
-        if self._transport is not None:
-            self._transport.close()
-        self._transport, self._config = None, None
+        if self._client is not None:
+            self._client.close()
+        self._transport, self._client, self._config = None, None, None
 
     def _request(self, method, path, *, content=None, content_type=None):
         config = self.config()
-        if self._transport is None:
-            self._transport = httpx.HTTPTransport(retries=0, trust_env=False)
+        if self._client is None:
+            # No retry (a lost submit is never resent), no environment proxy or
+            # netrc, and no redirect (the key only ever goes to the API origin).
+            self._client = httpx.Client(
+                transport=self._transport,
+                trust_env=False,
+                follow_redirects=False,
+                timeout=60,
+            )
         headers = {"Authorization": "Bearer " + config.api_key}
         if content_type:
             headers["Content-Type"] = content_type
-        return httpx.Request(
-            method,
-            API + path,
-            headers=headers,
-            content=content,
-            extensions={
-                "timeout": dict.fromkeys(("connect", "read", "write", "pool"), 60)
-            },
+        return self._client.build_request(
+            method, API + path, headers=headers, content=content
         )
 
     def _call(self, method, path, body=None, *, raw=None, content_type=None):
@@ -154,10 +156,12 @@ class EveryFrameBackend:
             or ("application/json" if body is not None else None),
         )
         try:
-            with closing(self._transport.handle_request(request)) as response:
-                content = response.read()
-                if len(content) > 1024**2:
-                    raise ValueError
+            with closing(self._client.send(request, stream=True)) as response:
+                content = b""
+                for chunk in response.iter_bytes():
+                    content += chunk
+                    if len(content) > MAX_ANSWER_BYTES:
+                        raise ValueError
                 data = json.loads(content) if content else None
                 if data is not None and type(data) is not dict:
                     raise ValueError
@@ -270,7 +274,7 @@ class EveryFrameBackend:
         request = self._request("GET", url)
         count = 0
         try:
-            with closing(self._transport.handle_request(request)) as response:
+            with closing(self._client.send(request, stream=True)) as response:
                 if response.status_code != 200:
                     raise BackendError("everyframe_output_unavailable")
                 with target.open("xb") as handle:
