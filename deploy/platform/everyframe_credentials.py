@@ -1,9 +1,10 @@
 """Cold-start backstop credential transport over SSM (#918), like runpod_enhance.
 
 One SecureString per deployment target holds the `everyframe.json` contract of
-studio_platform.providers.everyframe. The vendor is not yet a central registry
-service, so the import reads the owner's local drop file in memory; the host
-installs the parameter into the app's data volume. Values are never printed.
+studio_platform.providers.everyframe. The import reads the exact central profile
+and refuses any other endpoint; the host installs the parameter into the app's
+data volume. Staging and production share this key (owner 2026-11-01). Values
+are never printed.
 """
 
 import json
@@ -13,6 +14,8 @@ from studio_platform.providers.everyframe import FILENAME, validate_config
 
 TARGETS = ("staging", "production")
 VARIABLE = "EVERYFRAME_API_KEY"
+PROFILE = "everyframe--inkseq-20261101"
+ENDPOINT = "https://api.everyframe.studio/v1"
 
 
 def name(target):
@@ -48,22 +51,12 @@ def read(api, target):
     return row
 
 
-def key_from_env_file(path):
-    from pathlib import Path
-
-    for line in Path(path).read_text(encoding="utf-8").splitlines():
-        if line.startswith(VARIABLE + "="):
-            value = line.split("=", 1)[1].strip().strip('"')
-            if value:
-                return value
-    raise ValueError("everyframe_drop_file_missing_key")
-
-
-def import_existing(api, target, *, env_file):
-    """Create or update the parameter from the drop file; never print it."""
-    value = json.dumps(
-        {"api_key": key_from_env_file(env_file)}, separators=(",", ":")
-    )
+def import_existing(api, loader, target):
+    """Create or update the parameter from the central profile; never print it."""
+    config = loader("everyframe", profile=PROFILE)
+    if config.base_url != ENDPOINT:
+        raise ValueError("everyframe_endpoint_mismatch")
+    value = json.dumps({"api_key": config.env[VARIABLE]}, separators=(",", ":"))
     _validate(value)
     row = read(api, target)
     if row is None or row["Value"] != value:
