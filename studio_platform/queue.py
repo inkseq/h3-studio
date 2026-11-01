@@ -930,14 +930,16 @@ class TaskQueue:
             )
             return repo._job(connection, lease.job_id)
 
-    def reroute(self, lease, execution_plan, error_code):
-        """Requeue on another route after a vendor refused or refunded this attempt.
+    def reroute(self, lease, execution_plan, error_code, *, actual_cost_microusd=0):
+        """Requeue on another route; this attempt is over.
 
-        The attempt is over and cost nothing, so nothing is settled and the
-        credit hold stays. None if the job is no longer in flight here (for
+        A refusal or refunded failure cost nothing. A render abandoned at its
+        deadline keeps what the vendor charged, counted when the job settles.
+        The credit hold stays. None if the job is no longer in flight here (for
         example a cancel arrived); the caller then fails it as usual.
         """
         identifier(error_code)
+        cost = money(actual_cost_microusd)
         repo = self.repository
         with repo.transaction() as connection:
             job = self._leased(connection, lease)
@@ -967,7 +969,7 @@ class TaskQueue:
                     status="failed",
                     error_code=error_code,
                     upstream_stopped=1,
-                    actual_cost_microusd=0,
+                    actual_cost_microusd=cost,
                     updated_at=repo.clock(),
                 )
             )

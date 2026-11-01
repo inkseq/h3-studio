@@ -6,8 +6,9 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from studio_platform.capabilities import compile_request
 from studio_platform.control import WorkerControl, WorkerSpec
@@ -20,17 +21,21 @@ from studio_platform.providers.hosted_models import (
     PROVIDER,
     RECIPES,
 )
-from studio_platform.repository import jobs
+from studio_platform.repository import attempts, jobs
 from studio_platform.scheduling.decide import (
     hosted_has_first_claim,
     hosted_offload,
 )
+from studio_platform.scheduling import rebind as rebind_module
 from studio_platform.scheduling.rebind import (
+    hold_for_hosted,
     hosted_plan,
     next_plan,
     offload,
     rebind,
+    refresh_balance,
     routing,
+    used_in_window,
 )
 from studio_platform.worker import WorkerRunner
 from test_platform_api import generation_request
@@ -178,7 +183,40 @@ class NextPlanTests(unittest.TestCase):
         self.assertIsNone(next_plan(job, 1))
 
 
+class BalanceTests(unittest.TestCase):
+    def setUp(self):
+        rebind_module._balance.update(usd=None, read_at=None)
+        self.addCleanup(rebind_module._balance.update, usd=None, read_at=None)
+        self.settings = SimpleNamespace(everyframe_enabled=True)
+
+    def test_read_at_most_every_five_minutes_and_low_balance_closes_hosted(self):
+        reads = []
+
+        def reader(_):
+            reads.append(1)
+            return 0.5
+
+        self.assertEqual(refresh_balance(self.settings, 1000, reader=reader), 0.5)
+        self.assertFalse(rebind_module.balance_allows_hosted())
+        refresh_balance(self.settings, 1200, reader=reader)
+        self.assertEqual(len(reads), 1)
+        refresh_balance(self.settings, 1301, reader=reader)
+        self.assertEqual(len(reads), 2)
+
+    def test_an_unreadable_balance_leaves_hosted_open(self):
+        def broken(_):
+            raise OSError("no network")
+
+        self.assertIsNone(refresh_balance(self.settings, 1000, reader=broken))
+        self.assertTrue(rebind_module.balance_allows_hosted())
+
+
 class RebindLedgerTests(LedgerCase):
+    def setUp(self):
+        super().setUp()
+        rebind_module._balance.update(usd=None, read_at=None)
+        self.addCleanup(rebind_module._balance.update, usd=None, read_at=None)
+
     def queued_job(self):
         value, _ = compile_request(generation_request(), lambda _: None)
         plan = self.repo.create_plan(
@@ -208,7 +246,7 @@ class RebindLedgerTests(LedgerCase):
 
     def hosted_control(self):
         control = WorkerControl(self.repo)
-        worker = "hosted-turbo"
+        worker = "dbos-everyframe-test-0"
         control.register(
             WorkerSpec(
                 worker,
@@ -328,6 +366,122 @@ class RebindLedgerTests(LedgerCase):
         self.assertEqual(
             self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000
         )
+
+    def submitted_ago(self, job_id, seconds):
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(attempts)
+                .where(attempts.c.job_id == job_id)
+                .values(submission_started_at=self.now - seconds)
+            )
+
+    def test_a_render_past_its_deadline_moves_on_and_keeps_its_charge(self):
+        running = lambda tag, task: Outcome(
+            "running", task, actual_cost_microusd=38_000
+        )
+
+        created = self.queued_job()
+        with self.repo.transaction() as connection:
+            rebind(
+                self.repo, connection, self.row(created["id"]), "h3-max-turbo", self.now
+            )
+        control, worker = self.hosted_control()
+        posts = []
+        backend = SimpleNamespace(
+            kind=BACKEND,
+            enabled=True,
+            slot_key="test-slot",
+            prepare=lambda *args: object(),
+            submit=lambda prepared, tag: posts.append(tag) or "rnd_1",
+            poll=running,
+            reconcile=running,
+            close=lambda: None,
+        )
+        with tempfile.TemporaryDirectory() as work:
+            runner = WorkerRunner(
+                self.repo,
+                None,
+                Path(work),
+                backend=backend,
+                control=control,
+                retry_after_s=0,
+                submission_guard=lambda _: True,
+            )
+            runner.run_once(worker, POOL)
+            early = self.row(created["id"])
+            self.assertEqual(early["pool"], POOL)
+            self.assertNotIn("hosted_tried", early["execution_plan"])
+            # Still running just before the deadline.
+            self.submitted_ago(created["id"], TURBO.deadline_s - 1)
+            runner.run_once(worker, POOL)
+            self.assertNotIn("hosted_tried", self.row(created["id"])["execution_plan"])
+            self.submitted_ago(created["id"], TURBO.deadline_s + 1)
+            runner.run_once(worker, POOL)
+        moved = self.row(created["id"])
+        self.assertEqual(moved["status"], "queued")
+        self.assertEqual(moved["error_code"], "hosted_render_deadline")
+        self.assertEqual(moved["execution_plan"]["hosted_tried"], ["h3-max-turbo"])
+        self.assertEqual(len(posts), 1)
+        with self.repo.engine.connect() as connection:
+            charged = connection.execute(
+                select(attempts.c.actual_cost_microusd).where(
+                    attempts.c.job_id == created["id"]
+                )
+            ).scalar_one()
+        self.assertEqual(charged, 38_000)
+        self.assertEqual(
+            self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000
+        )
+
+    def test_the_window_counts_every_render_a_later_model_replaced(self):
+        row = self.run_hosted(lambda prepared, tag: "rnd_1")
+        self.assertEqual(row["status"], "queued")  # Failed once; now on the next model.
+        with self.repo.engine.connect() as connection:
+            used = used_in_window(connection, self.scope.tenant_id, self.now)
+        # The refunded render still used the vendor's limit, plus the queued retry.
+        self.assertEqual(used, {self.scope.owner_id: 2})
+
+    def test_sustained_hosted_use_stops_holding_machines_back(self):
+        created = self.queued_job()
+        job = self.row(created["id"])
+        service = self.service(tiers=("standard", "fast", "refine"))
+        with self.repo.engine.connect() as connection:
+            self.assertTrue(
+                hold_for_hosted(
+                    service.settings, connection, job, job["created_at"] + 1
+                )
+            )
+        with (
+            mock.patch.object(
+                rebind_module,
+                "used_in_window",
+                return_value={"someone": rebind_module.HOSTED_WARMS_MACHINE_AT},
+            ),
+            self.repo.engine.connect() as connection,
+        ):
+            self.assertFalse(
+                hold_for_hosted(
+                    service.settings, connection, job, job["created_at"] + 1
+                )
+            )
+
+    def test_low_balance_sends_jobs_to_our_machines(self):
+        created = self.queued_job()
+        job = self.row(created["id"])
+        service = self.service(tiers=("standard", "fast", "refine"))
+        rebind_module._balance.update(usd=0.5, read_at=self.now)
+        self.hosted_control()
+        with self.repo.transaction() as connection:
+            self.assertFalse(
+                hold_for_hosted(
+                    service.settings, connection, job, job["created_at"] + 1
+                )
+            )
+            self.assertEqual(
+                offload(service, connection, [(job, {})], job["created_at"] + 121),
+                [(job, {})],
+            )
+        self.assertEqual(self.row(created["id"])["pool"], "own")
 
     def test_a_job_back_from_the_chain_is_not_offloaded_again(self):
         created = self.queued_job()

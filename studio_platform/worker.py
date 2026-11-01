@@ -286,6 +286,38 @@ class WorkerRunner:
         moved = None if plan is None else self.queue.reroute(lease, plan, error_code)
         return None if moved is None else self._summary(moved)
 
+    def _past_deadline(self, job, lease, outcome):
+        """A running hosted render over its deadline moves on; None keeps polling.
+
+        The vendor has no cancel, so the render still runs and stays charged.
+        Its quoted cost is counted here and its late output is not collected.
+        """
+        from .providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS
+        from .scheduling.rebind import next_plan
+
+        if self.backend.kind != BACKEND or outcome.actual_cost_microusd is None:
+            return None
+        model = MODELS.get(
+            CONFIGURATIONS.get(job["execution_plan"]["configuration_id"])
+        )
+        attempt = self.queue.get_attempt(self._scope(job), job["id"])
+        started = attempt["submission_started_at"]
+        now = self.repo.clock()
+        if model is None or started is None or now - started < model.deadline_s:
+            return None
+        plan = next_plan(job, now)
+        moved = (
+            None
+            if plan is None
+            else self.queue.reroute(
+                lease,
+                plan,
+                "hosted_render_deadline",
+                actual_cost_microusd=outcome.actual_cost_microusd,
+            )
+        )
+        return None if moved is None else self._summary(moved)
+
     def _fail(
         self, job, lease, error_code, *, actual_cost_microusd, upstream_stopped=False
     ):
@@ -816,6 +848,13 @@ class WorkerRunner:
                 )
             if outcome.state == "unknown":
                 self._generation_note("upstream_status_unknown")
+            if outcome.state == "running":
+                moved = self._past_deadline(job, lease, outcome)
+                if moved:
+                    self._generation_finish(
+                        lease, "failure", error_code="hosted_render_deadline"
+                    )
+                    return moved
             return self._summary(
                 self.queue.release(
                     lease,

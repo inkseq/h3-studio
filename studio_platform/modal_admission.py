@@ -291,7 +291,7 @@ class ModalAdmission:
                 continue
             from .scheduling.rebind import hold_for_hosted
 
-            if hold_for_hosted(self.service.settings, job, now):
+            if hold_for_hosted(self.service.settings, c, job, now):
                 continue
             if len(active) >= self.hosts.spec.max_containers:
                 return {

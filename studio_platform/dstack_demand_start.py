@@ -320,7 +320,7 @@ def _claim(service):
             for item in offload(
                 service, connection, eligible_jobs(service, connection, now), now
             )
-            if not hold_for_hosted(service.settings, item[0], now)
+            if not hold_for_hosted(service.settings, connection, item[0], now)
         ]
         work = dstack_work(
             queued,
@@ -621,6 +621,10 @@ def ladder_price(service, profile, job_id):
 
 
 def start_once(service):
+    from .scheduling.rebind import refresh_balance
+
+    # A vendor call, so before the capacity-locked transaction in _claim.
+    refresh_balance(service.settings, service.repo.clock())
     """At most one original allocation; unknown calls keep their frozen input."""
     result, claim = _claim(service)
     if claim is None:
