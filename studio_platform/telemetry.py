@@ -99,6 +99,7 @@ ERROR_CODES = (
             "worker_preparation_failed",
             "worker_reconciliation_needed",
             "worker_draining",
+            "worker_window_closed",
             "worker_backend_not_authorized",
             "execution_policy_unavailable_before_submission",
             "artifact_validation_failed",
