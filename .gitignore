@@ -1085,3 +1085,4 @@ inventory.json
 !deploy/platform/everyframe-production-read-policy.json
 !studio_platform/shot_readiness.py
 !tests/test_shot_readiness.py
+!tests/test_everyframe_credentials.py
