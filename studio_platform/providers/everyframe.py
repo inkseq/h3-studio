@@ -23,7 +23,7 @@ from pathlib import Path
 
 import httpx
 
-from .hosted_models import BACKEND, CONFIGURATIONS, vendor_request
+from .hosted_models import BACKEND, CONFIGURATIONS, PROVIDER, vendor_request
 from ..inference.protocol import (
     BackendError,
     NotReady,
@@ -93,8 +93,12 @@ class Prepared:
 class EveryFrameBackend:
     kind = BACKEND
 
-    def __init__(self, store, config_file, *, enabled=True, transport=None):
+    def __init__(
+        self, store, config_file, *, enabled=True, transport=None, slot_key=PROVIDER
+    ):
         self.store, self.config_file, self.enabled = store, Path(config_file), enabled
+        # One local render lock per slot; the vendor's limits are per account.
+        self.slot_key = slot_key
         self._transport, self._config = transport, None
         self.cost_resolver = self._cost
 
@@ -356,7 +360,7 @@ class EveryFrameBackend:
         """Nothing is staged on our side before fetch."""
 
 
-def create(store, settings):
+def create(store, settings, slot_key=PROVIDER):
     """The fleet's backend: credentials from the host-installed runtime secret."""
     path = Path(settings.data_dir) / "runtime-secrets" / FILENAME
-    return EveryFrameBackend(store, path)
+    return EveryFrameBackend(store, path, slot_key=slot_key)

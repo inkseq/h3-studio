@@ -1,6 +1,8 @@
 """Hosted offload decision and rebind (#931 step 3b); no vendor or GPU calls."""
 
 import copy
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 
@@ -8,6 +10,7 @@ from sqlalchemy import select
 
 from studio_platform.capabilities import compile_request
 from studio_platform.control import WorkerControl, WorkerSpec
+from studio_platform.inference.protocol import Outcome, SubmissionRejected
 from studio_platform.providers.hosted_models import (
     BACKEND,
     MODELS,
@@ -17,7 +20,13 @@ from studio_platform.providers.hosted_models import (
 )
 from studio_platform.repository import jobs
 from studio_platform.scheduling.decide import hosted_offload
-from studio_platform.scheduling.rebind import hosted_plan, offload, rebind
+from studio_platform.scheduling.rebind import (
+    hosted_plan,
+    next_plan,
+    offload,
+    rebind,
+)
+from studio_platform.worker import WorkerRunner
 from test_platform_api import generation_request
 from test_platform_repository import LedgerCase
 
@@ -86,6 +95,42 @@ class HostedPlanTests(unittest.TestCase):
             (POOL, BACKEND, TURBO.configuration_id),
         )
         self.assertEqual(plan["primary_plan"], execution)
+
+
+class NextPlanTests(unittest.TestCase):
+    def compiled(self):
+        value, _ = compile_request(generation_request(), lambda _: None)
+        return value
+
+    def test_chain_moves_on_never_repeats_and_ends_on_our_machines(self):
+        primary = {"pool": "own", "backend": "wangp-worker", "expected_runtime_s": 60}
+        job = {
+            "request": self.compiled(),
+            "execution_plan": hosted_plan(primary, "h3-max-turbo", 1),
+        }
+        seen = []
+        for _ in range(3):
+            job["execution_plan"] = next_plan(job, 2)
+            seen.append(job["execution_plan"]["backend"])
+            if job["execution_plan"]["backend"] == BACKEND:
+                seen[-1] = job["execution_plan"]["configuration_id"]
+        self.assertEqual(
+            seen,
+            [
+                MODELS["pika-h3-flex"].configuration_id,
+                MODELS["h3-max-fast"].configuration_id,
+                "wangp-worker",
+            ],
+        )
+        self.assertEqual(job["execution_plan"]["pool"], "own")
+        self.assertEqual(
+            job["execution_plan"]["hosted_tried"],
+            ["h3-max-turbo", "pika-h3-flex", "h3-max-fast"],
+        )
+
+    def test_a_plan_without_an_original_route_just_fails(self):
+        job = {"request": self.compiled(), "execution_plan": {"pool": POOL}}
+        self.assertIsNone(next_plan(job, 1))
 
 
 class RebindLedgerTests(LedgerCase):
@@ -162,6 +207,89 @@ class RebindLedgerTests(LedgerCase):
         control, worker = self.hosted_control()
         claim = control.claim(worker, POOL, lease_seconds=30)
         self.assertEqual(claim.job["id"], created["id"])
+
+    def test_refused_attempt_requeues_on_the_next_model_keeping_the_hold(self):
+        created = self.queued_job()
+        with self.repo.transaction() as connection:
+            rebind(
+                self.repo, connection, self.row(created["id"]), "h3-max-turbo", self.now
+            )
+        control, worker = self.hosted_control()
+        claim = control.claim(worker, POOL, lease_seconds=30)
+        control.queue.begin_submission(claim.lease)
+        plan = next_plan(self.row(created["id"]), self.now)
+        moved = control.queue.reroute(claim.lease, plan, "submission_rejected")
+        self.assertEqual(moved["status"], "queued")
+        self.assertIsNone(moved["current_attempt_id"])
+        self.assertEqual(
+            moved["execution_plan"]["configuration_id"],
+            MODELS["pika-h3-flex"].configuration_id,
+        )
+        self.assertEqual(
+            self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000
+        )
+
+    def run_hosted(self, submit, poll=None):
+        """One real WorkerRunner turn on a hosted slot with a fake vendor."""
+        created = self.queued_job()
+        with self.repo.transaction() as connection:
+            rebind(
+                self.repo, connection, self.row(created["id"]), "h3-max-turbo", self.now
+            )
+        control, worker = self.hosted_control()
+        backend = SimpleNamespace(
+            kind=BACKEND,
+            enabled=True,
+            slot_key="test-slot",
+            prepare=lambda *args: object(),
+            submit=submit,
+            poll=poll or (lambda tag, task: Outcome("failed", task, 0)),
+            reconcile=lambda tag, task=None: Outcome("unknown"),
+            close=lambda: None,
+        )
+        with tempfile.TemporaryDirectory() as work:
+            WorkerRunner(
+                self.repo,
+                None,
+                Path(work),
+                backend=backend,
+                control=control,
+                submission_guard=lambda _: True,
+            ).run_once(worker, POOL)
+        return self.row(created["id"])
+
+    def test_vendor_refusal_moves_a_real_worker_turn_to_the_next_model(self):
+        def refuse(prepared, tag):
+            raise SubmissionRejected("everyframe_render_refused")
+
+        row = self.run_hosted(refuse)
+        self.assertEqual(row["status"], "queued")
+        self.assertEqual(
+            row["execution_plan"]["configuration_id"],
+            MODELS["pika-h3-flex"].configuration_id,
+        )
+
+    def test_refunded_vendor_failure_moves_on_instead_of_failing_the_job(self):
+        row = self.run_hosted(lambda prepared, tag: "rnd_1")
+        self.assertEqual(row["status"], "queued")
+        self.assertEqual(row["execution_plan"]["hosted_tried"], ["h3-max-turbo"])
+        self.assertEqual(
+            self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000
+        )
+
+    def test_a_job_back_from_the_chain_is_not_offloaded_again(self):
+        created = self.queued_job()
+        old = self.row(created["id"])
+        old["execution_plan"] = {**old["execution_plan"], "hosted_tried": ["x"]}
+        self.hosted_control()
+        with self.repo.transaction() as connection:
+            self.assertEqual(
+                offload(
+                    self.service(), connection, [(old, {})], old["created_at"] + 3600
+                ),
+                [(old, {})],
+            )
+        self.assertEqual(self.row(created["id"])["pool"], "own")
 
     def test_a_stale_or_leased_job_is_not_moved(self):
         created = self.queued_job()

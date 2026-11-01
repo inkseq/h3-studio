@@ -185,6 +185,14 @@ class BackendTests(unittest.TestCase):
         backend._config = Config("key-1")
         return backend
 
+    def test_backend_has_everything_a_worker_turn_reads(self):
+        backend = self.backend([])
+        for name in ("kind", "enabled", "slot_key", "prepare", "submit", "poll"):
+            self.assertTrue(hasattr(backend, name), name)
+        self.assertEqual(
+            EveryFrameBackend(Store(), "/unused", slot_key="dbos-1").slot_key, "dbos-1"
+        )
+
     def test_config_holds_only_the_key_and_never_shows_it(self):
         for value, valid in (
             ({"api_key": "k"}, True),

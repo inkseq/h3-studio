@@ -599,7 +599,9 @@ def slot_runner(
         elif slot.spec.backend == "everyframe-render":
             from .providers import everyframe
 
-            backend = everyframe.create(store_factory(settings), settings)
+            backend = everyframe.create(
+                store_factory(settings), settings, slot_key=slot.spec.worker_id
+            )
         elif slot.spec.backend == "comfy-worker":
             backend = ComfyBackend(
                 endpoint=slot.endpoint,

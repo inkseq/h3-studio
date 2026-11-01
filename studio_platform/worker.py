@@ -275,6 +275,17 @@ class WorkerRunner:
         context.update(failure_log_context(job))
         return context
 
+    def _reroute(self, job, lease, error_code):
+        """A hosted refusal or failure moves on; None keeps the normal failure."""
+        from .providers.hosted_models import BACKEND
+        from .scheduling.rebind import next_plan
+
+        if self.backend.kind != BACKEND:
+            return None
+        plan = next_plan(job, self.repo.clock())
+        moved = None if plan is None else self.queue.reroute(lease, plan, error_code)
+        return None if moved is None else self._summary(moved)
+
     def _fail(
         self, job, lease, error_code, *, actual_cost_microusd, upstream_stopped=False
     ):
@@ -684,6 +695,9 @@ class WorkerRunner:
                     self._generation_finish(
                         lease, "failure", error_code="submission_rejected"
                     )
+                    rerouted = self._reroute(job, lease, "submission_rejected")
+                    if rerouted:
+                        return rerouted
                     return self._fail(
                         job,
                         lease,
@@ -789,6 +803,10 @@ class WorkerRunner:
                     if self.backend.kind == "wangp-worker" and outcome.state == "failed"
                     else None
                 )
+                if outcome.state == "failed":
+                    rerouted = self._reroute(job, lease, "upstream_generation_failed")
+                    if rerouted:
+                        return rerouted
                 return self._fail(
                     job,
                     lease,
