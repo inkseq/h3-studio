@@ -11,6 +11,11 @@ from unittest import mock
 import httpx
 
 from studio_platform.providers import balances
+from studio_platform.providers.hosted_models import (
+    MODELS,
+    RESOLUTIONS,
+    catalog_changes,
+)
 
 REPLIES = {
     "console.vast.ai": {"credit": 42.5},
@@ -19,6 +24,20 @@ REPLIES = {
     "api.cloudrift.ai": {"data": {"balance": 965}},
     "api.everyframe.studio": {"balanceUsd": 2.93},
 }
+
+
+def vendor_list():
+    rows = []
+    for model in MODELS.values():
+        prices = {
+            (model.vendor_resolution or RESOLUTIONS[resolution]) + ":5": usd
+            for (resolution, kind), usd in model.price_5s.items()
+            if kind == "plain"
+        }
+        rows.append(
+            {"id": model.id, "referenceModes": sorted(model.modes), "pricesUsd": prices}
+        )
+    return rows
 
 
 class Client:
@@ -44,12 +63,15 @@ class BalanceTests(unittest.TestCase):
         patch.start()
         self.addCleanup(patch.stop)
         self.seen = []
+        self.vendor_models = vendor_list()
 
     def transport(self, refuse=()):
         def handler(request):
             self.seen.append(request)
             if request.url.host in refuse:
                 return httpx.Response(500, json={"error": "nope"})
+            if request.url.path.endswith("/render/models"):
+                return httpx.Response(200, json=self.vendor_models)
             return httpx.Response(200, json=REPLIES[request.url.host])
 
         return httpx.MockTransport(handler)
@@ -123,6 +145,22 @@ class BalanceTests(unittest.TestCase):
         self.assertIn("lium", sent["lium.io"])
         self.assertIn("cloudrift", sent["api.cloudrift.ai"])
         self.assertIn("ef-test-key", sent["api.everyframe.studio"])
+
+    def test_catalog_changes_are_named_and_a_matching_list_is_quiet(self):
+        self.assertEqual(catalog_changes(vendor_list()), [])
+        out = self.read()
+        self.assertNotIn("hosted_catalog_changed", out)
+        self.assertEqual(balances.read_stored(self.settings)["catalog_changes"], [])
+        rows = vendor_list()
+        rows[0]["pricesUsd"] = {key: 9.0 for key in rows[0]["pricesUsd"]}
+        rows[1]["referenceModes"] = ["text"]
+        del rows[2]
+        self.vendor_models = rows
+        out = self.read()
+        changed = balances.read_stored(self.settings)["catalog_changes"]
+        self.assertEqual(len(changed), 3)
+        self.assertIn("hosted_catalog_changed " + changed[0], out)
+        self.assertNotIn("9.0", out)
 
     def test_reads_only_when_due(self):
         started = []

@@ -204,6 +204,28 @@ def vendor_request(compiled, model_id):
     return body, attachments
 
 
+def catalog_changes(vendor_models):
+    """Our model ids whose list price or modes no longer match the vendor's list.
+
+    Prices only order chains, so a change never breaks a render, but the economy
+    margins and the machine break-even points rest on them. A person decides.
+    """
+    listed = {row.get("id"): row for row in vendor_models if isinstance(row, dict)}
+    changed = []
+    for model in MODELS.values():
+        row = listed.get(model.id)
+        if row is None or not model.modes <= set(row.get("referenceModes") or ()):
+            changed.append(model.id)
+            continue
+        prices = row.get("pricesUsd") or {}
+        for (resolution, kind), usd in model.price_5s.items():
+            name = model.vendor_resolution or RESOLUTIONS[resolution]
+            if kind == "plain" and prices.get(name + ":5") != usd:
+                changed.append(model.id)
+                break
+    return changed
+
+
 def need(compiled):
     """The chain a take needs: economy, plain, references or 2k."""
     if (compiled or {}).get("priority_class") == "economy":

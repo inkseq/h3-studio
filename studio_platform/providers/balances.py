@@ -18,6 +18,7 @@ import httpx
 from .everyframe import API as EVERYFRAME_API
 from .everyframe import FILENAME as EVERYFRAME_FILE
 from .everyframe import load_config
+from .hosted_models import catalog_changes
 
 READ_SECONDS = 4 * 3600
 FILENAME = "provider-balances.json"
@@ -61,6 +62,13 @@ def _everyframe(client, key):
         EVERYFRAME_API + "/key", headers={"Authorization": "Bearer " + key}
     )
     return answer.raise_for_status().json()["balanceUsd"]
+
+
+def _catalog(client, key):
+    answer = client.get(
+        EVERYFRAME_API + "/render/models", headers={"Authorization": "Bearer " + key}
+    )
+    return catalog_changes(answer.raise_for_status().json())
 
 
 @dataclass(frozen=True)
@@ -134,6 +142,7 @@ def read_stored(settings):
     return {
         "read_every_seconds": READ_SECONDS,
         "attempted_at": stored.get("attempted_at"),
+        "catalog_changes": stored.get("catalog_changes") or [],
         "rows": result,
     }
 
@@ -172,16 +181,30 @@ def read_all(settings, client, *, now=None, transport=None):
                     "read_at": old["read_at"],
                     "last_read_failed": True,
                 }
+        try:
+            changes = _catalog(
+                session,
+                _key(
+                    next(s for s in SOURCES if s.provider == "everyframe"),
+                    settings,
+                    client,
+                ),
+            )
+        except Exception:
+            changes = []
     path = _path(settings)
     scratch = path.with_suffix(".tmp")
     scratch.write_text(
-        json.dumps({"attempted_at": now, "rows": rows}), encoding="utf-8"
+        json.dumps({"attempted_at": now, "rows": rows, "catalog_changes": changes}),
+        encoding="utf-8",
     )
     os.replace(scratch, path)
     # Names only: on-call reads these lines; amounts stay on the admin page.
     for row in read_stored(settings)["rows"]:
         if row["low"]:
             print("provider_balance_low " + row["provider"], flush=True)
+    for model in changes:
+        print("hosted_catalog_changed " + model, flush=True)
 
 
 _running = threading.Lock()
