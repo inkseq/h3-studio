@@ -420,7 +420,13 @@ class DemandLoopLedgerTests(LedgerCase):
                     .one()
                 )
                 payload = copy.deepcopy(row["payload"])
-                payload["dstack"].update(first_stopped_at=self.now, state="stopped")
+                # Ready but never served: the loop the global pause still owns.
+                # A start that never became ready only cools its lane (#931).
+                payload["dstack"].update(
+                    first_runtime_ready_at=self.now - 5,
+                    first_stopped_at=self.now,
+                    state="stopped",
+                )
                 connection.execute(
                     update(operator_nodes)
                     .where(operator_nodes.c.intent_id == node)

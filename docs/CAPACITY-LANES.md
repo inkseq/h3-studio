@@ -2,6 +2,8 @@
 
 Owner approved, 2026-10-30. This doc records the target and the migration order; each step is its own PR.
 
+> 2026-11-01: [PROVIDER-ARCHITECTURE.md](PROVIDER-ARCHITECTURE.md) proposes the next shape. Serverless lanes now run the same dial-out worker rather than per-call handlers, and scheduling moves into one `decide()` with per-lane backoff.
+
 ## Today
 
 - **Queue.** The Postgres job queue (DBOS) is the only source of truth. Keep it.

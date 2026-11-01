@@ -22,6 +22,7 @@ import stat
 import threading
 import time
 from urllib.parse import urlencode, urlsplit
+from .providers.registry import DSTACK_V1_PROVIDERS
 
 MAX_ATTEMPTS = 32
 MAX_ROWS = 256
@@ -166,7 +167,7 @@ class CloudStageReader:
         if (
             not isinstance(node_id, str)
             or not _UUID.fullmatch(node_id)
-            or provider not in {"vast", "runpod", "lium", "cloudrift", "modal-dialout"}
+            or provider not in DSTACK_V1_PROVIDERS
             or mode not in {"fl", "ref"}
             or not isinstance(profile_id, str)
             or not _PROFILE.fullmatch(profile_id)

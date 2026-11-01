@@ -25,6 +25,10 @@
 !studio_platform/inference/*.py
 !studio_platform/runtime_hosts/
 !studio_platform/runtime_hosts/*.py
+!studio_platform/scheduling/
+!studio_platform/scheduling/*.py
+!studio_platform/providers/
+!studio_platform/providers/*.py
 !deploy/
 deploy/*
 !deploy/tls/
