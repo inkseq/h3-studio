@@ -1086,3 +1086,4 @@ inventory.json
 !studio_platform/shot_readiness.py
 !tests/test_shot_readiness.py
 !tests/test_hosted_e2e.py
+!tests/test_everyframe_credentials.py
