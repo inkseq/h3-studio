@@ -6,13 +6,8 @@ import { recipeFor, effectiveControlSchema } from './quick-chat-model.js';
 import GenerationControl from './GenerationControl.jsx';
 // Trade secret (owner 2026-10-29): only these settings are the person's own choice;
 // engine settings (steps, sampler, shift, precision, decoding) stay internal.
-const PUBLIC_CONTROLS = new Set([
-  'duration',
-  'resolution',
-  'aspect_ratio',
-  'generate_audio',
-  'seed',
-]);
+// Seeds are for the API and admin only (owner 2026-11-01).
+const PUBLIC_CONTROLS = new Set(['duration', 'resolution', 'aspect_ratio', 'generate_audio']);
 export default function TakeRecipe({ take, state }) {
   const { t, locale } = useI18n();
   if (!take?.recipe)
@@ -65,7 +60,7 @@ export default function TakeRecipe({ take, state }) {
             ),
           )}
       </fieldset>
-      <p>{t('takes.lockedSeed', { seed: take.seed })}</p>
+      {modelsVisible() && <p>{t('takes.lockedSeed', { seed: take.seed })}</p>}
       <ul>
         {Object.entries(value.inputs || {}).flatMap(([role, items]) =>
           (Array.isArray(items) ? items : items ? [items] : []).map((item, index) => {

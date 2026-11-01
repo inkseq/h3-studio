@@ -223,7 +223,6 @@ export const storyboardCatalogs = {
     'storyboard.copy81': 'Save frame',
     'storyboard.moreActions': 'Download and more',
     'storyboard.moreSettings': 'More settings',
-    'storyboard.seedLock': 'Fixed seed',
     'storyboard.aspect': 'Aspect ratio',
     'storyboard.aspectWide': 'Landscape',
     'storyboard.aspectTall': 'Portrait',
@@ -248,8 +247,6 @@ export const storyboardCatalogs = {
     'storyboard.help.download': 'Full quality, for editing and publishing.',
     'storyboard.help.downloadSmall':
       'About a quarter of the size, slightly softer when paused; good for sending in messages.',
-    'storyboard.seedLockHelp':
-      'Change only the prompt or references; keep everything else like this take.',
     'storyboard.copy82': 'In use',
     'storyboard.copy83': 'Cancel',
     'storyboard.copy84': 'Script',
@@ -773,7 +770,6 @@ export const storyboardCatalogs = {
     'storyboard.copy81': '截取参考图',
     'storyboard.moreActions': '下载及更多',
     'storyboard.moreSettings': '更多设置',
-    'storyboard.seedLock': '固定种子',
     'storyboard.aspect': '画幅',
     'storyboard.aspectWide': '横屏',
     'storyboard.aspectTall': '竖屏',
@@ -795,7 +791,6 @@ export const storyboardCatalogs = {
     'storyboard.help.remakeSharp': '用同样的设置以清晰画质重新生成，人物和构图可能会和这一版不同。',
     'storyboard.help.download': '原画质，适合剪辑和发布。',
     'storyboard.help.downloadSmall': '文件约小四分之三，暂停细看会稍糊，适合直接发消息。',
-    'storyboard.seedLockHelp': '只改提示词或素材，其他尽量和这一条保持一致。',
     'storyboard.copy82': '使用中',
     'storyboard.copy83': '取消',
     'storyboard.copy84': '剧本',
