@@ -479,16 +479,46 @@ class WorkerRunner:
             self.drain()
 
     def _submission_allowed(self, job):
+        """Policy recheck; a revoked policy fails the job before any POST."""
         if isinstance(self.backend, MockBackend):
             return True
         try:
             return (
-                callable(self.submission_guard)
-                and self.submission_guard(job) is True
-                and (self.control is None or self.control.submission_allowed(job))
+                callable(self.submission_guard) and self.submission_guard(job) is True
             )
         except Exception:
             return False
+
+    def _window_open(self, job):
+        """Slot, TTL and funded runway; a closed window only defers the job.
+
+        A machine that has just turned ready can be claimed before the
+        controller has funded its next runway chunk or refreshed its consumer
+        observation. Nothing is submitted yet, so the job goes back to the queue.
+        """
+        if isinstance(self.backend, MockBackend) or self.control is None:
+            return True
+        try:
+            return self.control.submission_allowed(job) is True
+        except Exception:
+            return False
+
+    def _submission_blocked(self, job, lease):
+        if not self._submission_allowed(job):
+            return self._fail(
+                job,
+                lease,
+                "execution_policy_unavailable_before_submission",
+                actual_cost_microusd=0,
+                upstream_stopped=True,
+            )
+        if not self._window_open(job):
+            return self._summary(
+                self.queue.defer_unsubmitted(
+                    lease, retry_after_s=30, error_code="worker_window_closed"
+                )
+            )
+        return None
 
     @staticmethod
     def _scope(job):
@@ -601,14 +631,9 @@ class WorkerRunner:
                     )
                 )
             if purpose == "generate":
-                if not self._submission_allowed(job):
-                    return self._fail(
-                        job,
-                        lease,
-                        "execution_policy_unavailable_before_submission",
-                        actual_cost_microusd=0,
-                        upstream_stopped=True,
-                    )
+                blocked = self._submission_blocked(job, lease)
+                if blocked:
+                    return blocked
                 try:
                     delivery_spec(
                         job
@@ -648,14 +673,9 @@ class WorkerRunner:
                             lease, error_code="worker_draining"
                         )
                     )
-                if not self._submission_allowed(job):
-                    return self._fail(
-                        job,
-                        lease,
-                        "execution_policy_unavailable_before_submission",
-                        actual_cost_microusd=0,
-                        upstream_stopped=True,
-                    )
+                blocked = self._submission_blocked(job, lease)
+                if blocked:
+                    return blocked
                 submitting = self.queue.begin_submission(lease)
                 self._generation_start(job, lease, submitting["updated_at"])
                 try:
