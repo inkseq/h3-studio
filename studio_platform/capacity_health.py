@@ -75,6 +75,65 @@ def active_attempt(job, attempt, now):
     return submitted or leased
 
 
+def node_attempts(node, attempt_rows, workers):
+    """Workers and attempts that belong to one original node."""
+    binding = node["payload"].get("dstack", {})
+    instance = node.get("provider_instance_id", binding.get("provider_instance_id"))
+    associated = [
+        worker
+        for worker in workers
+        if (
+            worker["id"] == "dstack-" + node["intent_id"].replace("-", "")
+            or isinstance(instance, str)
+            and bool(instance)
+            and worker.get("instance_id") == instance
+            and worker.get("provider") == node.get("provider")
+        )
+    ]
+    worker_ids = {
+        "dstack-" + node["intent_id"].replace("-", ""),
+        *[worker["id"] for worker in associated],
+    }
+    related = [
+        attempt for attempt in attempt_rows if attempt["worker_id"] in worker_ids
+    ]
+    return associated, related
+
+
+def unserved_stop(node, related, now):
+    """(started, stopped) of a start that ended without serving, else None."""
+    binding = node["payload"].get("dstack", {})
+    started = binding.get("apply_started_at")
+    stopped = binding.get("first_stopped_at")
+    served = any(
+        finite(attempt.get("submission_started_at"), now) for attempt in related
+    )
+    if (
+        node["runtime_state"] == "stopped"
+        and finite(started, now)
+        and finite(stopped, now)
+        and started <= stopped
+        and not served
+    ):
+        return started, stopped
+    return None
+
+
+def start_loop(cycles):
+    """Cross-lane start loops pause demand; one failing lane only backs off.
+
+    `cycles` are (stopped, intent_id, lane) in the loop window; lane is None
+    unless an allocated machine never became ready. A lane that fails on its own is cooled
+    by scheduling.health (#931 step 2), so the global switch is for loops that
+    are not one lane's: two lanes, a machine that was ready but never served,
+    or four failed starts in the window.
+    """
+    if len(cycles) < 2:
+        return False
+    backends = {backend for _, _, backend in cycles}
+    return len(cycles) >= 4 or None in backends or len(backends) >= 2
+
+
 def evaluate(
     nodes,
     job_rows,
@@ -109,44 +168,27 @@ def evaluate(
     for node in nodes:
         payload = node["payload"]
         binding = payload.get("dstack", {})
-        instance = node.get("provider_instance_id", binding.get("provider_instance_id"))
-        associated = [
-            worker
-            for worker in workers
-            if (
-                worker["id"] == "dstack-" + node["intent_id"].replace("-", "")
-                or isinstance(instance, str)
-                and bool(instance)
-                and worker.get("instance_id") == instance
-                and worker.get("provider") == node.get("provider")
-            )
-        ]
-        worker_ids = {
-            "dstack-" + node["intent_id"].replace("-", ""),
-            *[worker["id"] for worker in associated],
-        }
-        related = [
-            attempt for attempt in attempt_rows if attempt["worker_id"] in worker_ids
-        ]
+        associated, related = node_attempts(node, attempt_rows, workers)
         served = [
             attempt
             for attempt in related
             if finite(attempt.get("submission_started_at"), now)
         ]
-        started = binding.get("apply_started_at")
-        stopped = binding.get("first_stopped_at")
+        cycle = unserved_stop(node, related, now)
         if (
             demand_enabled
-            and node["runtime_state"] == "stopped"
-            and finite(started, now)
-            and finite(stopped, now)
-            and now - loop_window_seconds <= started <= stopped
+            and cycle is not None
+            and now - loop_window_seconds <= cycle[0]
             and (
-                not finite(demand_enabled_since, now) or stopped >= demand_enabled_since
+                not finite(demand_enabled_since, now)
+                or cycle[1] >= demand_enabled_since
             )
-            and not served
         ):
-            empty_cycles.append((stopped, node["intent_id"]))
+            # Attributed to a lane only for an allocated machine that never
+            # became ready; that lane then cools down alone (scheduling.health).
+            from .scheduling.health import lane
+
+            empty_cycles.append((cycle[1], node["intent_id"], lane(node, now)))
         if (
             node["desired_state"] != "running"
             or binding.get("apply_started") is not True
@@ -208,13 +250,8 @@ def evaluate(
                 stop_replace=host_fault and diagnosis == "host_runtime",
             )
         )
-    empty_cycles = sorted(
-        (at, identity)
-        for identity, at in {
-            identity: at for at, identity in sorted(set(empty_cycles))
-        }.items()
-    )
-    if len(empty_cycles) >= 2:
+    empty_cycles = sorted(set(empty_cycles))
+    if start_loop(empty_cycles):
         last = empty_cycles[-2:]
         result.append(
             finding(
@@ -222,7 +259,7 @@ def evaluate(
                 last[-1][1],
                 last[0][0],
                 "unserved_start_stop_loop",
-                node_ids=[node for _, node in last],
+                node_ids=[node for _, node, _ in last],
             )
         )
     return result
@@ -265,11 +302,10 @@ def queue_episode_ages(connection, tenant):
     return {row.id: row.since for row in connection.execute(rows)}
 
 
-def snapshot(service, connection, now):
+def capacity_rows(connection, tenant):
+    """Original nodes (with provider), attempts and workers, bounded."""
     from .dstack_demand import _nodes
-    from .dstack_demand_policy import policy_key, read_runtime
 
-    tenant = service.settings.tenant_id
     nodes = _nodes(connection, tenant)
     providers = {
         row.id: row.provider
@@ -279,12 +315,6 @@ def snapshot(service, connection, now):
     }
     for node in nodes:
         node["provider"] = providers[node["intent_id"]]
-    job_rows = [
-        dict(row)
-        for row in connection.execute(
-            select(jobs).where(jobs.c.tenant_id == tenant).limit(10001)
-        ).mappings()
-    ]
     attempt_rows = [
         dict(row)
         for row in connection.execute(
@@ -298,6 +328,20 @@ def snapshot(service, connection, now):
         dict(row)
         for row in connection.execute(
             select(registered_workers).limit(10001)
+        ).mappings()
+    ]
+    return nodes, attempt_rows, workers
+
+
+def snapshot(service, connection, now):
+    from .dstack_demand_policy import policy_key, read_runtime
+
+    tenant = service.settings.tenant_id
+    nodes, attempt_rows, workers = capacity_rows(connection, tenant)
+    job_rows = [
+        dict(row)
+        for row in connection.execute(
+            select(jobs).where(jobs.c.tenant_id == tenant).limit(10001)
         ).mappings()
     ]
     policy = (
