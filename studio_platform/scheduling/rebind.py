@@ -10,7 +10,7 @@ credential is installed and the tier is switched on.
 
 from sqlalchemy import select, update
 
-from ..providers.hosted_models import BACKEND, MODELS, POOL, chain
+from ..providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS, POOL, chain
 from .decide import HOSTED_WINDOW_SECONDS, hosted_offload
 
 EXPECTED_RUNTIME_S = 300
@@ -41,6 +41,25 @@ def hosted_plan(execution, model_id, now):
         primary_plan=execution,
     )
     return plan
+
+
+def next_plan(job, now):
+    """The route after a refused or failed render, or None for a direct failure.
+
+    A refusal is model-specific (#929), so a job never retries the same model.
+    After the last model it returns to its original plan on our own machines
+    and stays there.
+    """
+    execution = job["execution_plan"]
+    primary = execution.get("primary_plan")
+    if not isinstance(primary, dict):
+        return None
+    current = CONFIGURATIONS.get(execution.get("configuration_id"))
+    tried = [*execution.get("hosted_tried", []), current]
+    for model_id in chain(job["request"]):
+        if model_id not in tried:
+            return {**hosted_plan(primary, model_id, now), "hosted_tried": tried}
+    return {**primary, "hosted_tried": tried}
 
 
 def used_in_window(connection, tenant, now):
@@ -122,8 +141,10 @@ def offload(service, connection, queued, now):
     def tier_of(job):
         return get_tier(job["request"], execution=job["execution_plan"])
 
+    # A job that already went through the hosted chain stays on our machines.
+    fresh = [item for item in queued if "hosted_tried" not in item[0]["execution_plan"]]
     moved = set()
-    for job, _ in hosted_offload(queued, tier_of, tiers, used, now):
+    for job, _ in hosted_offload(fresh, tier_of, tiers, used, now):
         for model_id in chain(job["request"]):
             if MODELS[model_id].configuration_id in live:
                 if rebind(service.repo, connection, job, model_id, now):

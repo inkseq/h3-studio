@@ -930,6 +930,50 @@ class TaskQueue:
             )
             return repo._job(connection, lease.job_id)
 
+    def reroute(self, lease, execution_plan, error_code):
+        """Requeue on another route after a vendor refused or refunded this attempt.
+
+        The attempt is over and cost nothing, so nothing is settled and the
+        credit hold stays. None if the job is no longer in flight here (for
+        example a cancel arrived); the caller then fails it as usual.
+        """
+        identifier(error_code)
+        repo = self.repository
+        with repo.transaction() as connection:
+            job = self._leased(connection, lease)
+            if job["status"] not in ("submitting", "running"):
+                return None
+            connection.execute(
+                update(jobs)
+                .where(jobs.c.id == lease.job_id)
+                .values(
+                    status="queued",
+                    pool=identifier(execution_plan["pool"]),
+                    execution_plan=execution_plan,
+                    expected_runtime_s=execution_plan["expected_runtime_s"],
+                    current_attempt_id=None,
+                    fence=job["fence"] + 1,
+                    lease_worker_id=None,
+                    lease_expires_at=None,
+                    not_before=repo.clock(),
+                    error_code=error_code,
+                    updated_at=repo.clock(),
+                )
+            )
+            connection.execute(
+                update(attempts)
+                .where(attempts.c.id == lease.attempt_id)
+                .values(
+                    status="failed",
+                    error_code=error_code,
+                    upstream_stopped=1,
+                    actual_cost_microusd=0,
+                    updated_at=repo.clock(),
+                )
+            )
+            repo._emit(connection, "job.queued", lease.job_id, {"job_id": lease.job_id})
+            return repo._job(connection, lease.job_id)
+
     def fail(
         self,
         lease,
