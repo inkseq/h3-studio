@@ -48,7 +48,17 @@ OUTCOMES = frozenset({"success", "failure", "unknown", "cancelled"})
 # (Grafana Cloud au-southeast-1 answers in ~1.2 s from the CPU host, #193).
 EXPORT_SECONDS = 5
 PROVIDERS = frozenset(
-    {"vast", "runpod", "lium", "cloudrift", "targon", "modal", "local", "unknown"}
+    {
+        "vast",
+        "runpod",
+        "lium",
+        "cloudrift",
+        "targon",
+        "modal",
+        "modal-dialout",
+        "local",
+        "unknown",
+    }
 )
 GPU_TYPES = frozenset(
     {"rtx5090", "rtx-pro6000", "h100", "h200", "b200", "b300", "unknown"}

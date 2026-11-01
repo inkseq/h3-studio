@@ -607,6 +607,7 @@ class WorkerControl:
                             ("dstack-v1", "runpod"),
                             ("dstack-v1", "lium"),
                             ("dstack-v1", "cloudrift"),
+                            ("dstack-v1", "modal-dialout"),
                             ("modal-v1", "modal"),
                         }
                         or type(admission["lifecycle_version"]) is not int

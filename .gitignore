@@ -1057,6 +1057,8 @@ inventory.json
 
 # RunPod Serverless dial-out workers (#859)
 !studio_platform/runpod_serverless.py
+!studio_platform/modal_dialout.py
+!tests/test_modal_dialout.py
 !tools/runpod_serverless_endpoint.py
 !deploy/runpod-serverless/
 !deploy/runpod-serverless/handler.py

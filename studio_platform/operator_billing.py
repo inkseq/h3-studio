@@ -353,7 +353,8 @@ def _allocations(repo, conn, tenant, owner, body, values):
         row = instance["reference"]
         need(
             row["state"] == "destroyed"
-            and row["provider"] in {"vast", "runpod", "lium", "cloudrift"}
+            and row["provider"]
+            in {"vast", "runpod", "lium", "cloudrift", "modal-dialout"}
             and row["provider_instance_id"],
             "billing_allocation_unconfirmed",
             409,

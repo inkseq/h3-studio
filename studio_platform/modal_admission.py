@@ -33,7 +33,9 @@ def dedicated_ready(connection, job, now):
     """Only a live, compatible, idle original worker can suppress fallback."""
     workers = connection.execute(
         select(registered_workers).where(
-            registered_workers.c.provider.in_(('vast', 'runpod', 'lium', 'cloudrift')),
+            registered_workers.c.provider.in_(
+                ('vast', 'runpod', 'lium', 'cloudrift', 'modal-dialout')
+            ),
             registered_workers.c.pool == job['pool'],
             registered_workers.c.state == 'ready',
             registered_workers.c.current_job_id.is_(None),

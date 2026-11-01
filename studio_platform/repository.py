@@ -1839,7 +1839,8 @@ class Repository:
             or lifecycle.get("version") != 2
             or request.get("lifecycle_version") != 2
             or binding.get("lifecycle_version") != 2
-            or intent["provider"] not in {"vast", "runpod", "lium", "cloudrift"}
+            or intent["provider"]
+            not in {"vast", "runpod", "lium", "cloudrift", "modal-dialout"}
             or intent["hard_deadline"] is not None
             or payload.get("hard_deadline") is not None
             or request.get("hard_deadline") is not None
@@ -3292,7 +3293,7 @@ class Repository:
         if type(continuing) is not bool or (
             continuing
             and (
-                provider not in {"vast", "runpod", "lium", "cloudrift"}
+                provider not in {"vast", "runpod", "lium", "cloudrift", "modal-dialout"}
                 or hard_deadline is not None
                 or capacity_usage is None
             )
