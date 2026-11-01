@@ -69,17 +69,16 @@ The gateway names them as one layer with one contract. The frontend and Inky tal
 
 **How: rebind, not a new claim model.** Workers today claim jobs whose `execution_plan` backend, pool and configuration match their slot exactly (`control._claim_filter`). That stays. Instead:
 
-1. **Alternates at plan time.** Plan creation evaluates the tier's route catalog and stores each admissible route as an **alternate** in the plan: own fleet first, then the hosted or economy chain.
-   - Each alternate passes the same execution-policy check now, so admission authority is unchanged.
-   - The credit quote is per tier and does not change.
-2. **Rebind at dispatch.** `decide()` may rebind a job to one of its stored alternates, never to anything else. It does so only while the job is `queued` with no attempt that started submission. The rebind:
-   - sets `execution_plan.backend`, `pool` and `configuration_id` plus `jobs.pool`;
-   - bumps the job fence;
-   - runs under the capacity lock;
-   - writes an audit event.
+1. **Choose at dispatch, from the catalog.** Inside the demand start's capacity-locked transaction, `scheduling/rebind.offload` takes the jobs that `eligible_jobs` has already confirmed as queued and unsubmitted. A job that has waited past its tier's limit (`decide.hosted_offload`) goes to the first model in `hosted_models.chain()` that has a live slot.
+2. **Rebind.** It rewrites `execution_plan` and `jobs.pool`, bumps the fence, and emits `capacity.hosted_route`. The update only applies while the job is `queued`, has no lease and has the fence that was read. The original plan is kept as `primary_plan`. A submitted hosted attempt is never pulled back.
+3. **Money.**
+   - Route fields (`dispatch_backend`, `output_delivery`, the manifest digest) go.
+   - The frozen `credit_quote`, the budget accounts and the spending snapshot stay.
+   - The USD reservation is only an admission gate: `_settle` records the actual vendor cost whatever was reserved, so a rebind doesn't touch it.
+4. **Switches.** Nothing moves unless the credential is installed (`everyframe_enabled`) and the tier is listed in `INKSEQ_EVERYFRAME_TIERS`, which is empty by default.
+5. **Unchanged.** Claims, fences, settlement and jobs that never wait past the limit behave exactly as today. DBOS `turn` re-reads `job["pool"]` each turn, so a rebound job reaches the hosted slot with no new wake.
 
-   A job is rebound at most once per alternate. A submitted hosted attempt is never pulled back.
-3. **Unchanged.** Claims, fences, settlement and existing jobs without alternates behave exactly as today.
+**Not yet:** a job with an explicit seed should stay on our fleet, but the compiler fills a seed for every job, so explicit seeds can't be told apart yet. Creators no longer set seeds; this only matters for API jobs.
 
 **Inky is beside the gateway, not in front of it.**
 
@@ -401,7 +400,7 @@ The dstack ledger modules (`dstack_capacity`, `dstack_operator`, `dstack_control
 1. **Registry.** Replace the literal provider sets with registry-derived ones. Zero behaviour change, checked by the existing tests.
 2. **Per-lane backoff.** Replace the global brake for start failures. Stuck starts are replaced on another lane.
 3. **`decide()` extraction.** Move `start_after_seconds`, `vast_share`, the lookahead and the fallback lists into the rules table. Add table-driven tests that reproduce today's decisions first.
-3b. **Late binding by rebind.** Plans store admissible alternates, and `decide()` rebinds a queued, unsubmitted job to one of them. The H3-only fields move into the WanGP compiler. It needs the hosted adapter (5a) for a second route to exist, so it lands between 5a and 5c.
+3b. **Late binding by rebind.** `offload` rebinds a queued, unsubmitted job to a hosted model at dispatch, behind the credential and per-tier switches. It needs the hosted adapter (5a), so it lands right after it. Moving the H3-only fields into the WanGP compiler follows separately.
 4. **Capacity interface.** Formalise `CapacityProvider` and move the serverless and Modal clients onto it. `RoutedClient` becomes a registry lookup.
 5. **Hosted offload (#918).** #919's backend core is kept: refused vs uncertain, never resubmit. Its standing slots and hard-coded model go. The sub-steps:
    - **5a.** Registry rows per hosted model; an adapter with attachments, the prompt rules, output verification and the balance read.

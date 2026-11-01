@@ -56,3 +56,38 @@ def dstack_work(queued, covered, rules, machines, now):
     if rules.vast_min_queue is not None:
         work = vast_share(rules, queued, work, now, machines)
     return work
+
+
+# Seconds a job may wait for a machine of ours before going hosted (#918).
+WAIT_LIMITS = {"fast": 30, "standard": 60, "refine": 120}
+# The vendor allows 40 renders per 15 min per account; economy keeps the rest.
+HOSTED_WINDOW_SECONDS = 900
+HOSTED_PER_WINDOW = 25
+HOSTED_PER_OWNER = 10
+
+
+def hosted_offload(queued, tier_of, enabled_tiers, used, now):
+    """Jobs to hand to the hosted API now, oldest first.
+
+    A job goes hosted once it has waited past its tier's limit: a free machine
+    of ours would have claimed it by then. `used` is {owner_id: renders in the
+    current window}; the window and per-owner shares bound what is returned.
+    """
+    total = sum(used.values())
+    owners = dict(used)
+    chosen = []
+    for job, profile in sorted(queued, key=lambda item: item[0]["created_at"]):
+        tier = tier_of(job)
+        limit = WAIT_LIMITS.get(tier)
+        if (
+            tier not in enabled_tiers
+            or limit is None
+            or now - job["created_at"] < limit
+            or total >= HOSTED_PER_WINDOW
+            or owners.get(job["owner_id"], 0) >= HOSTED_PER_OWNER
+        ):
+            continue
+        chosen.append((job, profile))
+        total += 1
+        owners[job["owner_id"]] = owners.get(job["owner_id"], 0) + 1
+    return chosen

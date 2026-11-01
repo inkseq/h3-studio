@@ -33,7 +33,7 @@ WORKFLOW = "inkseq.generation.v1"
 POLL_SECONDS = 10
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 # Slots without a native GPU node: no dstack demand, kept alive by heartbeat_cpu.
-LOCAL_BACKENDS = frozenset({"cpu-render", "runpod-enhance"})
+LOCAL_BACKENDS = frozenset({"cpu-render", "runpod-enhance", "everyframe-render"})
 ACTIVE = frozenset(
     {
         "queued",
@@ -382,6 +382,36 @@ class DurableSlots:
             return
         self.heartbeat_cpu()
 
+    def add_everyframe_slots(self):
+        """CPU slots that submit rebound takes to the hosted API (#918)."""
+        if not getattr(self.settings, "everyframe_enabled", False):
+            return
+        from .control import WorkerSpec
+        from .fleet import SlotConfig
+        from .providers import hosted_models as plan
+
+        for model in plan.MODELS.values():
+            for index in range(model.concurrency or plan.SLOTS_PER_MODEL):
+                worker = f"dbos-{model.configuration_id}-{index}"
+                spec = WorkerSpec(
+                    worker,
+                    plan.POOL,
+                    plan.PROVIDER,
+                    worker,
+                    (),
+                    plan.RECIPES,
+                    model.id,
+                    model.configuration_id,
+                    plan.BACKEND,
+                )
+                try:
+                    self.ensure(worker, SlotConfig(spec, enabled=True))
+                except Exception:
+                    # Optional: cold jobs keep waiting for our own machines.
+                    print("dbos_everyframe_slot_unavailable", flush=True)
+                    return
+        self.heartbeat_cpu()
+
     @contextmanager
     def _cpu_fence(self):
         """Fence all CPU configurations, including a surviving encoder child."""
@@ -634,6 +664,7 @@ class DurableExecutor:
             configure_producer(self.repo)
             self.slots.add_render_slots()
             self.slots.add_enhance_slot()
+            self.slots.add_everyframe_slots()
             # The configured environment is stable across ordinary releases.
             environment = (
                 "staging"

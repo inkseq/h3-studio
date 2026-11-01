@@ -86,7 +86,12 @@ class SlotConfig:
                 raise ValueError("absolute_wangp_runtime_config_required")
         elif self.runtime_config_file != "":
             raise ValueError("unexpected_engine_runtime_config")
-        if self.spec.backend in {"mock", "cpu-render", "runpod-enhance"}:
+        if self.spec.backend in {
+            "mock",
+            "cpu-render",
+            "runpod-enhance",
+            "everyframe-render",
+        }:
             # Serverless enhance reaches RunPod through its own fixed API, not a
             # slot endpoint (#795).
             if self.endpoint or self.allowed_origins or self.comfy_revision:
@@ -528,7 +533,11 @@ def _require_service_backend(slot, settings):
         if backend not in settings.recovery_backends:
             raise ValueError("fleet_recovery_backend_not_explicitly_allowed")
         return
-    switches = {"cpu-render": "render_enabled", "runpod-enhance": "enhance_enabled"}
+    switches = {
+        "cpu-render": "render_enabled",
+        "runpod-enhance": "enhance_enabled",
+        "everyframe-render": "everyframe_enabled",
+    }
     if backend in switches:
         allowed = getattr(settings, switches[backend])
     else:
@@ -587,6 +596,10 @@ def slot_runner(
             from . import enhance_backend
 
             backend = enhance_backend.create(store_factory(settings), settings)
+        elif slot.spec.backend == "everyframe-render":
+            from .providers import everyframe
+
+            backend = everyframe.create(store_factory(settings), settings)
         elif slot.spec.backend == "comfy-worker":
             backend = ComfyBackend(
                 endpoint=slot.endpoint,
@@ -619,7 +632,12 @@ def slot_runner(
                 slot.spec.dispatch_backend == "hatchet-v1" and worker["drain_requested"]
             )
         ):
-            if slot.spec.backend in {"mock", "cpu-render", "runpod-enhance"}:
+            if slot.spec.backend in {
+                "mock",
+                "cpu-render",
+                "runpod-enhance",
+                "everyframe-render",
+            }:
                 control.mark_ready(worker_id, upstream_idle_confirmed=True)
             elif slot.confirmed_idle:
                 # A startup declaration alone is insufficient: the dedicated

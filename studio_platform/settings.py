@@ -101,6 +101,14 @@ def enhance_switch(value, data_dir):
     return (Path(data_dir) / "runtime-secrets" / "runpod-enhance.json").is_file()
 
 
+def everyframe_switch(value, data_dir):
+    """The cold-start backstop (#918) follows the enhance rule: explicit "1"/"0",
+    otherwise on once the host installed its credential into the data volume."""
+    if value is not None:
+        return value == "1"
+    return (Path(data_dir) / "runtime-secrets" / "everyframe.json").is_file()
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -133,6 +141,9 @@ class Settings:
     render_enabled: bool = False
     # Enhance a finished take to 1080P/2K on RunPod Serverless (#795).
     enhance_enabled: bool = False
+    everyframe_enabled: bool = False
+    # Tiers the hosted API may serve; none until the owner switches one on.
+    everyframe_tiers: frozenset = frozenset()
     recovery_backends: tuple[str, ...] = ()
     generation_queue: str = "postgres"
     capacity_no_progress_seconds: int = 600
@@ -512,6 +523,15 @@ class Settings:
             enhance_enabled=enhance_switch(
                 os.environ.get("INKSEQ_ENHANCE_ENABLED"),
                 Path(os.environ.get("SIXNINE_DATA", str(default))),
+            ),
+            everyframe_enabled=everyframe_switch(
+                os.environ.get("INKSEQ_EVERYFRAME_ENABLED"),
+                Path(os.environ.get("SIXNINE_DATA", str(default))),
+            ),
+            everyframe_tiers=frozenset(
+                x.strip()
+                for x in os.environ.get("INKSEQ_EVERYFRAME_TIERS", "").split(",")
+                if x.strip()
             ),
             recovery_backends=tuple(
                 x.strip()
