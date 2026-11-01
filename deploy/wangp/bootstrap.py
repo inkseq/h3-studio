@@ -280,12 +280,18 @@ def install(config, slot_key, token_file, *, launch=True):
                     or import_evidence.get("environment_lock_sha256") != digest(lock)
                     or import_evidence.get("inference_verified") is not False):
                 raise ValueError("runtime_import_receipt_mismatch")
-        model_root = checked_path(config["model_root"])
+        from studio_platform.runtime_hosts.model_cache import cached_root
+        # A complete mounted cache (serverless dial-out, #924) replaces the
+        # download; verify_runtime still hashes every file before load.
+        cache = cached_root(manifest.document)
+        model_root = cache or checked_path(config["model_root"])
         model_root.mkdir(parents=True, exist_ok=True)
         from studio_platform.runtime_hosts.wangp_download import DownloadFailure, run_download, safe_download_failure
         status("model_download")
         try:
-            if config.get("deployment_profile_id"):
+            if cache is not None:
+                pass
+            elif config.get("deployment_profile_id"):
                 from studio_platform.runtime_hosts.wangp_profile_bootstrap import download_profile
                 download_profile(config, python, source, manifest_digest, model_root, base / "model-download", environment, status)
             else:
