@@ -110,6 +110,13 @@ class InkyStore:
             is not None
         )
 
+    def readiness(self, principal, project_id):
+        """Deterministic per-shot material check; no model call and no write."""
+        from .shot_readiness import project_readiness
+
+        with self.repo.engine.connect() as conn:
+            return project_readiness(self.project(conn, principal, project_id))
+
     def read(self, principal, project_id):
         """Pure reads: no locks, cache writes, evaluations or provider callbacks."""
         with self.repo.engine.connect() as conn:

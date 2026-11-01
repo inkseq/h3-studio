@@ -204,6 +204,26 @@ class InkyStoreTests(LedgerCase):
         register_routes(app)
         return TestClient(app)
 
+    def test_http_readiness_is_scoped_and_writes_nothing(self):
+        before = self.snapshot()
+        url = "/v1/inky/readiness?project_id=" + self.scope.project_id
+        with self.client() as client:
+            result = client.get(url)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.headers["cache-control"], "no-store")
+            shot_ids = {
+                entity["id"]
+                for entity in self.project["entities"]
+                if entity["type"] == "shot"
+            }
+            self.assertEqual(
+                {item["shot_id"] for item in result.json()["items"]}, shot_ids
+            )
+            self.assertEqual(
+                client.get("/v1/inky/readiness?project_id=other").status_code, 404
+            )
+        self.assertEqual(before, self.snapshot())
+
     def test_http_reader_ignore_and_read_only_principal(self):
         self.publish()
         before = self.snapshot()

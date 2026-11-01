@@ -12,6 +12,7 @@ PROJECT = Query(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
 def contract():
     return {
         "suggestions": "GET /v1/inky/suggestions?project_id=PROJECT",
+        "readiness": "GET /v1/inky/readiness?project_id=PROJECT",
         "ignore": "POST /v1/inky/suggestions/ID/ignore?project_id=PROJECT",
         "settings": "GET/PATCH /v1/inky/settings?project_id=PROJECT",
         "read_scope": "projects:read",
@@ -69,6 +70,10 @@ def register_routes(app):
     @app.get("/v1/inky/suggestions")
     def read(request: Request, project_id: str = PROJECT):
         return response(store.read(request.state.principal, project_id))
+
+    @app.get("/v1/inky/readiness")
+    def readiness(request: Request, project_id: str = PROJECT):
+        return response(store.readiness(request.state.principal, project_id))
 
     @app.post("/v1/inky/suggestions/{suggestion_id}/ignore")
     def ignore(suggestion_id: str, request: Request, project_id: str = PROJECT):
