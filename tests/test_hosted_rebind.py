@@ -28,6 +28,7 @@ from studio_platform.scheduling.decide import (
 )
 from studio_platform.scheduling import rebind as rebind_module
 from studio_platform.scheduling.rebind import (
+    economy_allowed,
     hold_for_hosted,
     hosted_plan,
     next_plan,
@@ -217,8 +218,11 @@ class RebindLedgerTests(LedgerCase):
         rebind_module._balance.update(usd=None, read_at=None)
         self.addCleanup(rebind_module._balance.update, usd=None, read_at=None)
 
-    def queued_job(self):
+    def queued_job(self, *, economy=False, key="rebind-key"):
         value, _ = compile_request(generation_request(), lambda _: None)
+        if economy:
+            value["priority_class"] = "economy"
+            value["request"]["resolution"] = "768P"
         plan = self.repo.create_plan(
             self.scope,
             copy.deepcopy(value),
@@ -233,7 +237,7 @@ class RebindLedgerTests(LedgerCase):
             estimated_cost_microusd=100_000,
         )
         return self.repo.create_job(
-            self.scope, plan["id"], "rebind-key", budget_account_ids=["owner-budget"]
+            self.scope, plan["id"], key, budget_account_ids=["owner-budget"]
         )
 
     def row(self, identity):
@@ -279,6 +283,162 @@ class RebindLedgerTests(LedgerCase):
                 data_dir=root.name,
             ),
         )
+
+    def vivix_control(self):
+        control = WorkerControl(self.repo)
+        vivix = MODELS["vivix-w1"]
+        worker = "dbos-everyframe-vivix-0"
+        control.register(
+            WorkerSpec(
+                worker,
+                POOL,
+                PROVIDER,
+                worker,
+                (),
+                RECIPES,
+                vivix.id,
+                vivix.configuration_id,
+                BACKEND,
+            )
+        )
+        control.mark_ready(worker, upstream_idle_confirmed=True)
+        return control, worker
+
+    def economy_service(self):
+        return self.service(tiers=("economy",))
+
+    def test_economy_goes_to_vivix_at_once_and_one_at_a_time(self):
+        first = self.queued_job(economy=True, key="e1")
+        second = self.queued_job(economy=True, key="e2")
+        self.vivix_control()
+        service = self.economy_service()
+        queued = [(self.row(first["id"]), {}), (self.row(second["id"]), {})]
+        with self.repo.transaction() as connection:
+            left = offload(service, connection, queued, self.now)
+        self.assertEqual([item[0]["id"] for item in left], [second["id"]])
+        row = self.row(first["id"])
+        self.assertEqual(row["pool"], POOL)
+        self.assertEqual(
+            row["execution_plan"]["configuration_id"],
+            MODELS["vivix-w1"].configuration_id,
+        )
+        queued = [(self.row(second["id"]), {})]
+        with self.repo.transaction() as connection:
+            self.assertEqual(
+                [
+                    item[0]["id"]
+                    for item in offload(service, connection, queued, self.now)
+                ],
+                [second["id"]],
+            )
+
+    def test_economy_never_starts_a_machine_below_the_backlog_line(self):
+        created = self.queued_job(economy=True)
+        job = self.row(created["id"])
+        service = self.economy_service()
+        with self.repo.engine.connect() as connection:
+            self.assertTrue(
+                hold_for_hosted(
+                    service.settings, connection, job, job["created_at"] + 100_000
+                )
+            )
+        with (
+            mock.patch.object(
+                rebind_module,
+                "economy_backlog",
+                return_value=rebind_module.ECONOMY_WARMS_MACHINE_AT,
+            ),
+            self.repo.engine.connect() as connection,
+        ):
+            self.assertFalse(
+                hold_for_hosted(service.settings, connection, job, job["created_at"])
+            )
+
+    def test_a_large_backlog_stays_for_our_machines(self):
+        created = self.queued_job(economy=True)
+        job = self.row(created["id"])
+        self.vivix_control()
+        with (
+            mock.patch.object(
+                rebind_module,
+                "economy_backlog",
+                return_value=rebind_module.ECONOMY_WARMS_MACHINE_AT,
+            ),
+            self.repo.transaction() as connection,
+        ):
+            left = offload(self.economy_service(), connection, [(job, {})], self.now)
+        self.assertEqual(len(left), 1)
+        self.assertEqual(self.row(created["id"])["pool"], "own")
+
+    def test_economy_work_does_not_warm_a_machine_for_clicks(self):
+        self.queued_job(economy=True, key="e1")
+        created = self.queued_job(key="c1")
+        with self.repo.transaction() as connection:
+            rebind(
+                self.repo, connection, self.row(created["id"]), "h3-max-turbo", self.now
+            )
+        economy = self.queued_job(economy=True, key="e2")
+        with self.repo.transaction() as connection:
+            rebind(self.repo, connection, self.row(economy["id"]), "vivix-w1", self.now)
+        with self.repo.engine.connect() as connection:
+            tenant = self.scope.tenant_id
+            self.assertEqual(
+                sum(used_in_window(connection, tenant, self.now).values()), 2
+            )
+            self.assertEqual(
+                sum(
+                    used_in_window(
+                        connection, tenant, self.now, clicks_only=True
+                    ).values()
+                ),
+                1,
+            )
+
+    def test_a_click_is_claimed_before_older_economy_work(self):
+        self.queued_job(economy=True, key="e1")
+        self.now += 10
+        click = self.queued_job(key="c1")
+        queue = WorkerControl(self.repo).queue
+        with self.repo.engine.connect() as connection:
+            ordered, _ = queue.schedule_order(
+                connection,
+                [
+                    {
+                        **self.row(identity),
+                        "priority_class": self.row(identity)["request"].get(
+                            "priority_class"
+                        ),
+                    }
+                    for identity in self._job_ids()
+                ],
+                "own",
+                purpose="reconcile",
+            )
+        self.assertEqual(ordered[0]["id"], click["id"])
+
+    def _job_ids(self):
+        with self.repo.engine.connect() as connection:
+            return [row[0] for row in connection.execute(select(jobs.c.id))]
+
+    def test_economy_rate_is_fixed_and_tier_reads_economy(self):
+        value, _ = compile_request(generation_request(), lambda _: None)
+        tier = get_tier(value)
+        self.assertNotEqual(tier, "economy")
+        value["priority_class"] = "economy"
+        self.assertEqual(get_tier(value), "economy")
+
+    def test_economy_needs_its_switch_and_768p(self):
+        value, _ = compile_request(generation_request(), lambda _: None)
+        value["request"]["resolution"] = "768P"
+        self.assertTrue(economy_allowed(self.economy_service().settings, value))
+        self.assertFalse(economy_allowed(self.service().settings, value))
+        self.assertFalse(
+            economy_allowed(
+                self.service(tiers=("economy",), enabled=False).settings, value
+            )
+        )
+        value["request"]["resolution"] = "480P"
+        self.assertFalse(economy_allowed(self.economy_service().settings, value))
 
     def test_rebound_job_is_claimed_by_the_hosted_slot_with_its_hold_intact(self):
         created = self.queued_job()

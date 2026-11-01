@@ -205,7 +205,9 @@ def vendor_request(compiled, model_id):
 
 
 def need(compiled):
-    """The chain a take needs: plain, references or 2k."""
+    """The chain a take needs: economy, plain, references or 2k."""
+    if (compiled or {}).get("priority_class") == "economy":
+        return "economy"
     request = (compiled or {}).get("request") or {}
     if request.get("resolution") == "2K":
         return "2k"
