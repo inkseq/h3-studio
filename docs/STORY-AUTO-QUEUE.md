@@ -62,7 +62,7 @@ The verdict is stored per card version. The existing Inky source identity covers
 - **Debounce.** A card is queued 60 s after its last edit and only while its verdict is still `ready`. Typing does not create jobs.
 - **Not-ready cards** stay put, and Inky says what is missing (section 3 can fix them in one click).
 
-**Price (proposal, owner to confirm; prices users pay are the owner's).**
+**Price (owner approved, 2026-11-01).**
 
 | | Live today | Economy |
 |---|---|---|
@@ -83,7 +83,53 @@ Fallback never loses money at list credit price. Recheck if packs sell below $0.
 
 **Depends-on cards.** A shot that needs a character picture that doesn't exist yet stays `needs_material`. If the user accepts that picture in fix-all, the picture job runs first. When it lands, the shot turns `ready` and queues itself.
 
-**Turning it off.** Jobs that have not started are cancelled and their holds released. Running jobs finish. The switch never cancels a submitted render, because that render is already paid.
+**Turning it off.** No new shot joins the queue. Inky asks once: "已经排队的 N 个要保留吗？" with [保留] [全部取消]. The default is keep. Cancelled waiting shots release their holds. A shot already rendering always finishes, because that render is already paid.
+
+### Two ways to use it, mixed freely in one project
+
+- **A. Hands-off (the toggle).** Every shot that becomes ready joins the queue by itself, including later ones as the user fixes them.
+  - Turning the toggle on shows one confirm: the usage bar for everything that would queue now, plus an optional cap ("最多用 N 积分").
+  - Past the cap, auto-queue pauses and Inky says so.
+  - A single shot can opt out ("这条不要自动").
+- **B. Picky (per shot).** Each ready shot offers [排队（省积分）] and [马上生成]. Multi-select works for both.
+
+Queue order is the user's storyboard order. Across users the queue is round-robin, so one 100-shot project does not block anyone else.
+
+Auto mode never edits a shot; it only queues what is ready. Fixing shots is the explicit fix-all click in section 3 (Inky v1 advises; fix-all is the user-approved "帮我改" step, #679).
+
+### Shot states (per shot version)
+
+`not ready` → `ready` → `waiting` (economy queue) → `rendering` (at the vendor or on our fleet) → `done`. Two more:
+
+- `generating now`: normal tier, clicked;
+- `failed`: refunded.
+
+Credits move with the state:
+
+- reserved when a shot enters `waiting`;
+- charged on success;
+- released on cancel or final failure.
+
+**One result per shot version.** Auto mode never regenerates a shot that already has a result for its current version, so it cannot loop. A new take is always an explicit user action. The queue key is the shot version, so an edit replaces a queued entry and never duplicates it.
+
+### Cases
+
+| # | Situation | What happens |
+|---|---|---|
+| 1 | Waiting, user wants it now | One confirm showing the usage-bar change, never a per-clip price: "马上生成会多用积分" [马上生成] [继续排队]. If the ETA is under about 2 min: "大约1分钟就好，要加速吗？". Yes: release the economy hold, hold the normal tier, start now. "全部马上生成" does every waiting shot with one confirm |
+| 2 | Already rendering, user wants it now | No upgrade: the vendor can't cancel, so it would pay twice. Show "已经在生成，马上就好" with progress |
+| 3 | Cancel | While waiting: free and immediate, hold released. While rendering: it can't be stopped; tell the user it will finish, keeps the economy charge, and the result is still delivered |
+| 4 | User edits a waiting shot | Replace the queued version in place, keeping its position, and re-run the readiness check. No longer ready: leave the queue, and Inky says why. Already rendering: the old version finishes, and the new version queues again (one more charge). In auto mode, confirm once; in per-shot mode ask "新版本也要排队吗？" |
+| 5 | Toggle turned off mid-way | See "Turning it off" above (default keep) |
+| 6 | Not enough credits | Shots stop entering the queue; nothing fails silently. Auto-queue pauses, Inky offers a top-up, and the queue resumes by itself after the top-up while the toggle is on |
+| 7 | Jev unsure, or not representable on economy | Over 5 reference images, 21:9, over 15 s, 2K or enhance. "这条不能省积分排队", with [马上生成] or [修改] |
+| 8 | Waiting past the deadline (about 30 min) | Promote silently to `h3-max-turbo`, then our fleet, at the same economy charge. We absorb the difference, and the margin stays positive. The ETA updates |
+| 9 | Vendor refusal or failure | Next model in the chain, same charge. If every model fails: `failed`, hold released, Inky explains in plain words with no model names |
+| 10 | User closes the tab | The queue runs server-side. In-app notice plus the existing done notification per shot and per project |
+| 11 | Mixed tiers in one film | Economy output is normalised to the project's resolution (480P/768P), so it cuts together with normal shots. Enhance and 2K stay separate paid steps after generation |
+| 12 | ETA | Per shot: queue position × live per-clip time, never hard-coded. If the ETA passes the deadline, show [马上生成] next to it |
+| 13 | Brand / IP safety | Our own risk lint runs before queueing. Vendors don't filter |
+| 14 | Vendor balance low | The economy queue pauses at Vivix and falls through to turbo or our fleet, and the operator is alerted. Never a user-visible error |
 
 **Visibility.**
 
