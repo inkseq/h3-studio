@@ -730,3 +730,22 @@ test('an enhance job joins the shot takes as an enhanced copy; the original stay
     ),
   );
 });
+
+test('readiness hints follow the version on screen and skip what the editor already shows', async () => {
+  const { readinessHints } = await import('./storyboard-domain.js');
+  const t = (key, values) => key + (values?.names ? ':' + values.names : '');
+  const item = {
+    base_version: 3,
+    findings: [
+      { code: 'action_missing' },
+      { code: 'character_picture_missing', names: ['Mia', 'Tom'] },
+      { code: 'speech_unspecified' },
+    ],
+  };
+  assert.deepEqual(readinessHints(item, 3, t), [
+    'hint.characterPicture:Mia, Tom',
+    'hint.speechUnspecified',
+  ]);
+  assert.deepEqual(readinessHints(item, 4, t), []);
+  assert.deepEqual(readinessHints(undefined, 3, t), []);
+});

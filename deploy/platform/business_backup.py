@@ -25,7 +25,7 @@ HELPERS = Path('/opt/inkseq-release-staging-v1')
 HOSTS = {'staging': 'i-07805df7bd6984bd9', 'production': 'i-03d81d2d153b5e2fd'}
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'}
 PHASES = frozenset({'snapshot', 'handoff', 'transfer'})
-SNAPSHOT_TIMEOUT = 2400  # 1010s observed capture + >2x headroom, still bounded.
+SNAPSHOT_TIMEOUT = 3600  # Captures grew from 1010 s to over 2400 s (2026-11-02); still bounded.
 DIAGNOSTIC_CODES = frozenset({'backup_prior_outcome_requires_reconciliation',
     'backup_prior_receipt_invalid', 'backup_disk_reserve_required', 'backup_release_not_ready',
     'backup_docker_failed_or_unknown', 'backup_hosted_users_unavailable_business_confirmed',

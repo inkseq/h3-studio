@@ -96,7 +96,7 @@ Only finite error codes are printed; subprocess output, arguments and arbitrary
 exception text are omitted. A failure to write diagnostics preserves the original
 exception and intent. Snapshot caller wait rises from 900 to **2400 seconds**,
 over twice the observed 1010s duration. Handoff remains 900s, transfer 1800s;
-systemd bounds the whole daily invocation to 5700s including 600s validation
+systemd bounds the whole daily invocation to 7200s including 600s validation
 headroom. A timeout remains unknown, never a retry permission. The service uses
 `--daily-preserve` during this recovery window, so neither recovery nor subsequent
 scheduled daily copies delete local snapshots. Explicit retention is separate.
@@ -191,7 +191,7 @@ promoter. Do not clear #193 hold until the fresh copy is reconciled.
    never silent redating. Independently recheck that original S3 prefix still has
    no versions or deletion markers before executing.
 3. Invoke `python3 -B business_backup_oom_recovery.py --execute` **once**, with a
-   5700-second outer bound. Snapshot/handoff/transfer bounds remain 2400/900/1800s.
+   7200-second outer bound. Snapshot/handoff/transfer bounds are 3600/900/1800s.
    The exclusive fsynced recovery intent precedes all writes. A fresh private
    `-oom-recapture` directory receives a new read-only database snapshot. The
    previous partial directory stays untouched and its hashes are rechecked.

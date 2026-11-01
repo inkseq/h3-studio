@@ -8,6 +8,9 @@ to zero (workersMin 0) and needs a CUDA 13 driver for the cu130 v9 image.
     python tools/runpod_serverless_endpoint.py --image <repo@sha256:...> \
         --name inkseq-staging-dialout --gpu "NVIDIA GeForce RTX 5090" [--dry-run]
 
+With --network-volume the endpoint is pinned to that volume's data center and
+workers get INKSEQ_MODEL_CACHE, so a cold start skips the model download (#924).
+
 The API key comes from the central registry (`--profile`); it is never printed.
 Prints the template and endpoint ids for the controller's serverless file.
 """
@@ -20,6 +23,8 @@ import re
 import sys
 
 REST = "https://rest.runpod.io/v1"
+# RunPod mounts an endpoint's network volume here; the files sit under ckpts/.
+MODEL_CACHE = "/runpod-volume/ckpts"
 SDK = "runpod==1.12.0"
 HANDLER = Path(__file__).resolve().parents[1] / "deploy/runpod-serverless/handler.py"
 START_COMMAND = (
@@ -31,7 +36,16 @@ START_COMMAND = (
 )
 
 
-def bodies(image, name, gpus, disk_gib, max_workers, execution_seconds):
+def bodies(
+    image,
+    name,
+    gpus,
+    disk_gib,
+    max_workers,
+    execution_seconds,
+    network_volume=None,
+    data_center=None,
+):
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9./:_-]*@sha256:[0-9a-f]{64}", image):
         raise SystemExit("image must be pinned by digest")
     handler = base64.b64encode(HANDLER.read_bytes()).decode()
@@ -60,6 +74,12 @@ def bodies(image, name, gpus, disk_gib, max_workers, execution_seconds):
         "scalerValue": 1,
         "executionTimeoutMs": execution_seconds * 1000,
     }
+    if bool(network_volume) != bool(data_center):
+        raise SystemExit("--network-volume and --data-center go together")
+    if network_volume:
+        template["env"]["INKSEQ_MODEL_CACHE"] = MODEL_CACHE
+        endpoint["networkVolumeId"] = network_volume
+        endpoint["dataCenterIds"] = [data_center]
     return template, endpoint
 
 
@@ -72,6 +92,8 @@ def main(argv=None):
     parser.add_argument("--max-workers", type=int, default=2)
     parser.add_argument("--execution-seconds", type=int, default=7200)
     parser.add_argument("--profile", default=None)
+    parser.add_argument("--network-volume")
+    parser.add_argument("--data-center")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     template, endpoint = bodies(
@@ -81,9 +103,13 @@ def main(argv=None):
         args.disk_gib,
         args.max_workers,
         args.execution_seconds,
+        args.network_volume,
+        args.data_center,
     )
     if args.dry_run:
-        shown = dict(template, env={"INKSEQ_HANDLER_B64": "<handler.py base64>"})
+        shown = dict(
+            template, env={**template["env"], "INKSEQ_HANDLER_B64": "<handler.py base64>"}
+        )
         print(json.dumps({"template": shown, "endpoint": endpoint}, indent=1))
         return 0
     import httpx

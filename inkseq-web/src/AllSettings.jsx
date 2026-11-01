@@ -53,12 +53,13 @@ function useInventory(api, active) {
     let live = true;
     const read = (path) => api.request(path).catch(() => null);
     (async () => {
-      const [inventory, policy] = await Promise.all([
+      const [inventory, policy, balances] = await Promise.all([
         read('/v1/admin/settings-inventory'),
         read('/v1/legal/policy'),
+        read('/v1/admin/provider-balances'),
       ]);
       const next = inventory?.items ? { inventory, policy } : await readEach(read);
-      if (live) setData(next);
+      if (live) setData({ ...next, balances });
     })();
     return () => {
       live = false;
@@ -185,6 +186,71 @@ function Terms({ policy }) {
   );
 }
 
+const PROVIDER_NAMES = {
+  vast: 'Vast',
+  runpod: 'RunPod',
+  lium: 'Lium',
+  cloudrift: 'CloudRift',
+  everyframe: 'EveryFrame',
+  modal: 'Modal',
+  openrouter: 'OpenRouter',
+  aws: 'AWS',
+  google: 'Google Cloud',
+};
+
+function Balance({ row }) {
+  const { t, locale } = useI18n();
+  const link = (
+    <a href={row.console_url} target="_blank" rel="noreferrer">
+      {t('allSettings.balanceConsole')}
+    </a>
+  );
+  if (!row.readable) {
+    return (
+      <SettingRow as="div" label={PROVIDER_NAMES[row.provider] || row.provider}>
+        {link}
+      </SettingRow>
+    );
+  }
+  const amount =
+    row.amount == null
+      ? '—'
+      : row.unit === 'usd'
+        ? '$' + row.amount.toFixed(2)
+        : String(row.amount);
+  const read = row.read_at
+    ? new Intl.DateTimeFormat(locale === 'zh' ? 'zh-CN' : 'en-AU', {
+        dateStyle: 'medium',
+        timeStyle: 'short',
+      }).format(new Date(row.read_at * 1000))
+    : t('allSettings.balanceNotRead');
+  return (
+    <SettingRow
+      as="div"
+      label={PROVIDER_NAMES[row.provider] || row.provider}
+      meta={row.last_read_failed ? t('allSettings.balanceFailed', { time: read }) : read}
+    >
+      <b>
+        {amount}
+        {row.low ? ' · ' + t('allSettings.balanceLow') : ''}
+      </b>{' '}
+      {link}
+    </SettingRow>
+  );
+}
+
+function Balances({ balances }) {
+  const { t } = useI18n();
+  if (!balances?.rows) return null;
+  return (
+    <SettingsSection title={t('allSettings.balances')} help={t('allSettings.balancesHelp')}>
+      {balances.rows.map((row) => (
+        <Balance key={row.provider} row={row} />
+      ))}
+    </SettingsSection>
+  );
+}
+
 export default function AllSettings({ api, active }) {
   const { t } = useI18n();
   const data = useInventory(api, active);
@@ -192,6 +258,7 @@ export default function AllSettings({ api, active }) {
   return (
     <div className="all-settings">
       <p className="muted">{t('allSettings.intro')}</p>
+      <Balances balances={data.balances} />
       {data.inventory ? (
         <>
           <InventoryView inventory={data.inventory} />

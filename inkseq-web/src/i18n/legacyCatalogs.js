@@ -705,6 +705,10 @@ export const legacyCatalogs = {
       'The {slot} image for “{character} / {look}” is missing. Upload it again or explicitly defer it.',
     'projection.missingLook': 'The saved look for “{name}” no longer exists. Choose another.',
     'projection.countLimit': 'Current model/API count limit ({kind}: {max}, total: {total})',
+    'hint.characterPicture':
+      '{names} has no picture yet. Add one, or a first frame, or the person may look different in every shot.',
+    'hint.speechUnspecified':
+      'No spoken lines yet. Write what is said in quotes, or say “no dialogue”, so the voice does not invent words.',
     'hint.focusRefs':
       'Lots of references, or reference videos, may only be partly used. A few focused references usually work better.',
     'hint.writeLines':
@@ -2107,6 +2111,10 @@ export const legacyCatalogs = {
     'legacy.lookImageMissing': '「{character} / {look}」的{slot}图缺失；补传或明确改为稍后补充。',
     'projection.missingLook': '保存的「{name}」造型不存在，请重新选择。',
     'projection.countLimit': '当前模型/API 数量上限（{kind} {max}，总计 {total}）',
+    'hint.characterPicture':
+      '{names} 还没有图片。加一张图或一个首帧，否则这个人物在每个镜头里可能长得不一样。',
+    'hint.speechUnspecified':
+      '还没有写台词。用引号写出要说的话，或写明“无对白”，否则声音可能会自己编内容。',
     'hint.focusRefs':
       '参考素材很多或有参考视频时，模型可能只用上一部分。少而精的参考通常效果更好。',
     'hint.writeLines':

@@ -13,7 +13,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.engine import make_url
 
 from studio_platform.api import create_app
@@ -128,6 +128,30 @@ class ApiTests(unittest.TestCase):
         r = self.client.post("/v1/projects", json={"project": project(ident)})
         self.assertEqual(r.status_code, 201, r.text)
         return r.json()
+
+    def test_economy_plans_need_their_switch(self):
+        self.setup_project()
+        body = generation_request(priority_class="economy")
+        refused = self.client.post("/v1/generation-plans", json=body)
+        self.assertEqual(refused.status_code, 409)
+        with mock.patch(
+            "studio_platform.scheduling.rebind.economy_allowed", return_value=True
+        ):
+            made = self.client.post("/v1/generation-plans", json=body)
+            other = self.client.post(
+                "/v1/generation-plans",
+                json=generation_request(priority_class="urgent"),
+            )
+        self.assertEqual(other.status_code, 409)
+        self.assertEqual(made.status_code, 201, made.text)
+        from studio_platform.repository import plans
+
+        repo = self.client.app.state.repository
+        with repo.engine.connect() as connection:
+            stored = connection.execute(
+                select(plans.c.request).where(plans.c.id == made.json()["plan_id"])
+            ).scalar_one()
+        self.assertEqual(stored["priority_class"], "economy")
 
     def test_public_health_has_neutral_execution_state_for_all_callers(self):
         # Even authenticated callers use the same public liveness contract.

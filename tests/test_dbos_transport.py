@@ -239,7 +239,14 @@ class DurableDomainTests(LedgerCase):
         with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
             slots.add_render_slots()
             slots.add_enhance_slot()
-            self.assertEqual(set(slots._slots), {"dbos-runpod-enhance-v1"})
+            self.assertEqual(
+                set(slots._slots),
+                {
+                    "dbos-runpod-enhance-v1",
+                    "dbos-runpod-enhance-v1-1",
+                    "dbos-runpod-enhance-v1-2",
+                },
+            )
             self.assertEqual(slots.children, {})
             worker = self.control.get("dbos-runpod-enhance-v1")
             self.assertEqual(worker["state"], "ready")

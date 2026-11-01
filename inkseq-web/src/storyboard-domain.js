@@ -605,6 +605,17 @@ export function submitHints(shot, items, t) {
   return hints;
 }
 
+// Only findings for the version on screen count, so a save clears them.
+export function readinessHints(item, version, t) {
+  if (!item || item.base_version !== version) return [];
+  return (item.findings || []).flatMap((finding) => {
+    if (finding.code === 'character_picture_missing')
+      return [t('hint.characterPicture', { names: (finding.names || []).join(', ') })];
+    if (finding.code === 'speech_unspecified') return [t('hint.speechUnspecified')];
+    return [];
+  });
+}
+
 function limitsLabel(limits, t) {
   if (!limits) return '能力尚未读取';
   const known = (value) => (Number.isFinite(value) ? value : '—');

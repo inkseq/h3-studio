@@ -17,7 +17,7 @@ Enhance reuses the existing plan → job → worker → collection path, so hold
 | price | `credits_pricing` | Enhance branch (owner 2026-10-30): 1080P 100 credits per 5 s clip +10 per extra s; 2K 150 +30. Rounded up per started second. Never shown as money |
 | policy | `execution_policy.evaluate` | Pool `enhance`, backend `runpod-enhance`. Blocked unless `settings.enhance_enabled` and an enhance worker is registered |
 | backend | `enhance_backend.py` | RunPod Serverless: `prepare` presigns the source GET and a temp output PUT; `submit` → `/run`; `poll` → `/status`; `cancel` → `/cancel`; `fetch` downloads the temp output into the target dir. The worker never holds storage or RunPod credentials |
-| worker | controller | One CPU `WorkerRunner` slot on pool `enhance` with the `runpod-enhance` backend, registered while `enhance_enabled` |
+| worker | controller | Three CPU `WorkerRunner` slots on pool `enhance` with the `runpod-enhance` backend, registered while `enhance_enabled` |
 | frontend | studio-app → inkseq-web | Enhance action, usage-bar confirm, progress, version switcher |
 
 ## Worker contract (exists: `deploy/enhance/handler.py`)
@@ -29,7 +29,7 @@ Enhance reuses the existing plan → job → worker → collection path, so hold
 - Attention: sage on sm120, otherwise sdpa at 2K (sage2 int8 QK blurs on sm89/sm90).
 
 ## Lanes
-- Primary: RunPod Serverless RTX PRO 6000. Network volumes in 2–3 datacenters; idle timeout 60–120 s.
+- Primary: RunPod Serverless RTX PRO 6000. Network volumes in 2–3 datacenters; idle timeout 60 s, up to 3 workers, so a batch of clips runs side by side and a later clip reuses a warm worker.
 - Second: Modal RTX PRO 6000, after it is measured.
 - 5090: 1080P only.
 - H100/L40S: backstop only, sdpa at 2K.

@@ -379,6 +379,10 @@ class GenerationPlanning:
         project_id = project["id"]
         from .quality_authoring import normalize
 
+        priority_class = None
+        if isinstance(body, dict) and "priority_class" in body:
+            body = dict(body)
+            priority_class = body.pop("priority_class")
         body, quality = normalize(
             self.settings, self.repo, principal, body, stored=stored_selection
         )
@@ -431,6 +435,16 @@ class GenerationPlanning:
             from .repository import request_hash
 
             compiled["quality_selection"] = quality
+            fingerprint = request_hash(compiled)
+        if priority_class is not None:
+            from .repository import request_hash
+            from .scheduling.rebind import economy_allowed
+
+            if priority_class != "economy" or not economy_allowed(
+                self.settings, compiled
+            ):
+                raise Conflict("economy_tier_unavailable")
+            compiled["priority_class"] = "economy"
             fingerprint = request_hash(compiled)
         ref = compiled["client_ref"]
         if not validate_source_ref(project, ref):

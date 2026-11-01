@@ -20,13 +20,13 @@ Six signals:
 | 1 | No machine, an occasional click | Hosted chain once the job passes its wait limit | Not started | Built; passed on staging |
 | 2 | Sustained clicks: 5+ hosted renders in 15 min | Hosted until a machine is warm, then the machine | Starts one | Built; not yet seen live |
 | 3 | A machine is free | The machine, before the wait limit | Already running | Built |
-| 4 | Auto-queue, fewer than 40 shots waiting | Vivix, one at a time | Not started | Not built |
-| 5 | Auto-queue, 40+ shots waiting | The machine, until the backlog is done | Starts one, stays while work remains | Not built |
-| 6 | The machine is running economy work and someone clicks | The click takes the next free slot; past its wait limit it goes hosted. A running render is never interrupted | Keeps running | Not built |
-| 7 | No machine can start | Clicks go hosted; economy goes to Vivix, otherwise waits | Lanes back off and retry | Partly built |
+| 4 | Auto-queue, fewer than 40 shots waiting | Vivix, one at a time | Not started | Built; not yet seen live |
+| 5 | Auto-queue, 40+ shots waiting | The machine, until the backlog is done | Starts one, stays while work remains | Built; not yet seen live |
+| 6 | The machine is running economy work and someone clicks | The click takes the next free slot; past its wait limit it goes hosted. A running render is never interrupted | Keeps running | Built; not yet seen live |
+| 7 | No machine can start | Clicks go hosted; economy goes to Vivix, otherwise waits | Lanes back off and retry | Built; not yet seen live |
 | 8 | Vendor balance under USD 1 | Machines only | Starts as demand needs | Built; not yet seen live |
 | 9 | Hosted refusal, failure or deadline | Next model; after the last, the machine | Starts if needed | Built |
-| 10 | This environment's vendor window is used up | Waits for a machine | Starts after the grace | Partly built |
+| 10 | This environment's vendor window is used up | Waits for a machine | Starts after the grace | Built; not yet seen live |
 | 11 | Backlog finished | Nothing queued | Idle stop | Built |
 
 ## The numbers, and where they come from

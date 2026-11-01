@@ -95,6 +95,25 @@ class CreditOnlyTests(LedgerCase):
         self.seed(100)
         self.policy()
 
+    def test_economy_quote_is_two_credits_per_second_whatever_the_tier_rates(self):
+        compiled = {
+            "recipe_id": "h3-base-fl2va-v1",
+            "request": {"model": "MiniMax-H3-Pruned-Rank8-INT8"},
+            "output_spec": {"frames": 120, "fps": 24, "resolution": "768P"},
+            "priority_class": "economy",
+        }
+        execution = {"pool": "test-pool", "backend": "mock", "expected_runtime_s": 120}
+        with self.repo.engine.connect() as connection:
+            quoted = credits_pricing.quote(
+                connection,
+                self.scope.tenant_id,
+                self.scope.owner_id,
+                compiled,
+                execution=execution,
+            )
+        self.assertEqual(quoted["tier"], "economy")
+        self.assertEqual(quoted["credits"], 10)
+
     def plan(self, *, account_ids=("owner-budget",), alter=None):
         compiled = {
             "recipe_id": "h3-base-fl2va-v1",

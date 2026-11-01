@@ -354,32 +354,34 @@ class DurableSlots:
         self.heartbeat_cpu()
 
     def add_enhance_slot(self):
-        """One CPU slot that submits enhance jobs to RunPod Serverless (#795)."""
+        """CPU slots that submit enhance jobs to RunPod Serverless (#795)."""
         if not getattr(self.settings, "enhance_enabled", False):
             return
         from .control import WorkerSpec
         from .fleet import SlotConfig
         from . import enhance_plans as plan
 
-        worker = "dbos-" + plan.CONFIGURATION
-        spec = WorkerSpec(
-            worker,
-            plan.POOL,
-            "runpod",
-            worker,
-            (),
-            (plan.RECIPE,),
-            plan.MODEL,
-            plan.CONFIGURATION,
-            plan.BACKEND,
-        )
-        try:
-            self.ensure(worker, SlotConfig(spec, enabled=True))
-        except Exception:
-            # Optional: enhance stays unavailable (its plans read "not ready")
-            # and the controller keeps running everything else.
-            print("dbos_enhance_slot_unavailable", flush=True)
-            return
+        for index in range(plan.SLOTS):
+            # The first keeps its original name, so its row carries over.
+            worker = "dbos-" + plan.CONFIGURATION + (f"-{index}" if index else "")
+            spec = WorkerSpec(
+                worker,
+                plan.POOL,
+                "runpod",
+                worker,
+                (),
+                (plan.RECIPE,),
+                plan.MODEL,
+                plan.CONFIGURATION,
+                plan.BACKEND,
+            )
+            try:
+                self.ensure(worker, SlotConfig(spec, enabled=True))
+            except Exception:
+                # Optional: enhance stays unavailable (its plans read "not ready")
+                # and the controller keeps running everything else.
+                print("dbos_enhance_slot_unavailable", flush=True)
+                return
         self.heartbeat_cpu()
 
     def add_everyframe_slots(self):
