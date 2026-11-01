@@ -11,10 +11,11 @@ credential is installed and everyframe-routing.json switches the tier on.
 import json
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 
 from ..providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS, POOL, chain
 from .decide import (
+    ECONOMY_WARMS_MACHINE_AT,
     HOSTED_BALANCE_RESERVE_USD,
     HOSTED_BALANCE_WARN_USD,
     HOSTED_WARMS_MACHINE_AT,
@@ -106,34 +107,88 @@ def next_plan(job, now):
     return {**primary, "hosted_tried": tried}
 
 
-def used_in_window(connection, tenant, now):
+def _economy():
+    from ..repository import jobs
+
+    return jobs.c.request["priority_class"].as_string() == "economy"
+
+
+def used_in_window(connection, tenant, now, *, clicks_only=False):
     """{owner_id: hosted renders in the vendor window, plus any about to start}.
 
     Every submitted attempt counts, including ones a later model replaced: the
-    vendor's limit counts each of them.
+    vendor's limit counts each of them. `clicks_only` drops economy work, which
+    never warms a machine by this count.
     """
     from ..repository import attempts, jobs
 
     used = {}
+    submitted = select(jobs.c.owner_id).select_from(
+        attempts.join(jobs, attempts.c.job_id == jobs.c.id)
+    )
+    waiting = select(jobs.c.owner_id).where(
+        jobs.c.tenant_id == tenant,
+        jobs.c.pool == POOL,
+        jobs.c.status.in_(("queued", "claimed")),
+    )
+    if clicks_only:
+        submitted = submitted.where(func.coalesce(_economy(), False).is_(False))
+        waiting = waiting.where(func.coalesce(_economy(), False).is_(False))
     for (owner,) in connection.execute(
-        select(jobs.c.owner_id)
-        .select_from(attempts.join(jobs, attempts.c.job_id == jobs.c.id))
-        .where(
+        submitted.where(
             jobs.c.tenant_id == tenant,
             attempts.c.worker_id.like("dbos-everyframe-%"),
             attempts.c.submission_started_at >= now - HOSTED_WINDOW_SECONDS,
         )
     ):
         used[owner] = used.get(owner, 0) + 1
-    for (owner,) in connection.execute(
-        select(jobs.c.owner_id).where(
-            jobs.c.tenant_id == tenant,
-            jobs.c.pool == POOL,
-            jobs.c.status.in_(("queued", "claimed")),
-        )
-    ):
+    for (owner,) in connection.execute(waiting):
         used[owner] = used.get(owner, 0) + 1
     return used
+
+
+def economy_backlog(connection, tenant):
+    """Economy shots still waiting for a route."""
+    from ..repository import jobs
+
+    return connection.execute(
+        select(func.count())
+        .select_from(jobs)
+        .where(
+            jobs.c.tenant_id == tenant,
+            jobs.c.status == "queued",
+            jobs.c.pool != POOL,
+            _economy(),
+        )
+    ).scalar_one()
+
+
+def economy_in_flight(connection, tenant):
+    """Whether an economy shot already holds the one hosted place."""
+    from ..repository import jobs
+
+    return (
+        connection.execute(
+            select(jobs.c.id)
+            .where(
+                jobs.c.tenant_id == tenant,
+                jobs.c.pool == POOL,
+                jobs.c.status.notin_(("succeeded", "failed", "cancelled")),
+                _economy(),
+            )
+            .limit(1)
+        ).first()
+        is not None
+    )
+
+
+def economy_allowed(settings, compiled):
+    """The economy tier is 768P only, and off until its routing switch names it."""
+    return (
+        getattr(settings, "everyframe_enabled", False)
+        and "economy" in routing(settings.data_dir)[0]
+        and compiled.get("request", {}).get("resolution") == "768P"
+    )
 
 
 BALANCE_READ_SECONDS = 4 * 3600
@@ -241,13 +296,31 @@ def offload(service, connection, queued, now):
     used = used_in_window(connection, settings.tenant_id, now)
     # A job that already went through the hosted chain stays on our machines.
     fresh = [item for item in queued if "hosted_tried" not in item[0]["execution_plan"]]
+    economy = [item for item in fresh if tier_of(item[0]) == "economy"]
+    clicks = [item for item in fresh if tier_of(item[0]) != "economy"]
     moved = set()
-    for job, _ in hosted_offload(fresh, tier_of, tiers, used, now, per_window=window):
+
+    def move(job):
         for model_id in chain(job["request"]):
             if MODELS[model_id].configuration_id in live:
                 if rebind(service.repo, connection, job, model_id, now):
                     moved.add(job["id"])
                 break
+
+    for job, _ in hosted_offload(clicks, tier_of, tiers, used, now, per_window=window):
+        move(job)
+    # Vivix renders one at a time across all vendor customers, so one economy
+    # shot goes at a time; a backlog this size goes to a machine instead.
+    if (
+        economy
+        and economy_backlog(connection, settings.tenant_id) < ECONOMY_WARMS_MACHINE_AT
+        and not economy_in_flight(connection, settings.tenant_id)
+    ):
+        used = used_in_window(connection, settings.tenant_id, now)
+        for job, _ in hosted_offload(
+            economy, tier_of, tiers, used, now, per_window=window
+        )[:1]:
+            move(job)
     return [item for item in queued if item[0]["id"] not in moved]
 
 
@@ -270,7 +343,16 @@ def hold_for_hosted(settings, connection, job, now):
         or not chain(job["request"])
     ):
         return False
-    used = used_in_window(connection, settings.tenant_id, now)
+    tier = tier_of(job)
+    if tier == "economy":
+        # Auto-queue never hurries: no machine until the backlog pays for one.
+        return (
+            tier in tiers
+            and "hosted_tried" not in job["execution_plan"]
+            and economy_backlog(connection, settings.tenant_id)
+            < ECONOMY_WARMS_MACHINE_AT
+        )
+    used = used_in_window(connection, settings.tenant_id, now, clicks_only=True)
     if sum(used.values()) >= HOSTED_WARMS_MACHINE_AT:
         return False
-    return hosted_has_first_claim(job, tier_of(job), tiers, now)
+    return hosted_has_first_claim(job, tier, tiers, now)

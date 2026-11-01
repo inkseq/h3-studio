@@ -12,6 +12,8 @@ from .credit_schema import CreditSchemaError, prices, ready
 from .identity_schema import users
 
 DEFAULT_RATES = {"fast": 2, "standard": 4, "refine": 12}
+# Credits per output second for the queued 768P tier (owner 2026-11-02).
+ECONOMY_CREDITS_PER_SECOND = 2
 # Runtime profiles that cost more GPU time than their tier's rate covers. Users
 # see only the larger usage, never a per-clip price (owner 2026-10-30): Pika's
 # accelerator measured about +30% GPU time against TaoMate on the same runtime.
@@ -383,7 +385,7 @@ def get_tier(compiled, *, execution=None):
             )
     if tier is None:
         raise PricingError("credit_quote_invalid", "Compiled quality is unavailable.")
-    return tier
+    return "economy" if compiled.get("priority_class") == "economy" else tier
 
 
 def quote(connection, tenant, owner, compiled, *, execution=None):
@@ -446,7 +448,14 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
         if render or enhance
         else resolution_price(price["configuration"], output)
     )
-    rate = 0 if render or enhance else price["rates"][tier] * multiplier
+    economy = tier == "economy"
+    rate = (
+        0
+        if render or enhance
+        else ECONOMY_CREDITS_PER_SECOND
+        if economy
+        else price["rates"][tier] * multiplier
+    )
     from .reference_video_pricing import price as reference_price
 
     amount, reference = (
@@ -458,7 +467,13 @@ def quote(connection, tenant, owner, compiled, *, execution=None):
             price["configuration"],
             compiled,
             Fraction(rate * frames, fps)
-            * PROFILE_CREDIT_MULTIPLIERS.get(compiled.get("deployment_profile_id"), 1),
+            * (
+                1
+                if economy
+                else PROFILE_CREDIT_MULTIPLIERS.get(
+                    compiled.get("deployment_profile_id"), 1
+                )
+            ),
             resolution.get("resolution"),
         )
     )

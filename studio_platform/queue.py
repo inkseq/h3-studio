@@ -302,7 +302,12 @@ class TaskQueue:
         from .queue_reference_guard import columns, eligible
 
         statement = select(
-            jobs.c.id, jobs.c.tenant_id, jobs.c.owner_id, jobs.c.created_at, *columns()
+            jobs.c.id,
+            jobs.c.tenant_id,
+            jobs.c.owner_id,
+            jobs.c.created_at,
+            jobs.c.request["priority_class"].as_string().label("priority_class"),
+            *columns(),
         ).where(
             jobs.c.pool == pool,
             jobs.c.status.in_(states[purpose]),
@@ -378,6 +383,10 @@ class TaskQueue:
             ordered = fair_generation_order(
                 connection, ordered, pool, active, self._owner_key
             )
+        # Economy work takes only what is free; a person waiting always goes first.
+        ordered = sorted(
+            ordered, key=lambda job: job.get("priority_class") == "economy"
+        )
         return ordered, usage
 
     @staticmethod

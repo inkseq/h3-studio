@@ -59,7 +59,7 @@ def dstack_work(queued, covered, rules, machines, now):
 
 
 # Seconds a job may wait for a machine of ours before going hosted (#918).
-WAIT_LIMITS = {"fast": 30, "standard": 60, "refine": 120}
+WAIT_LIMITS = {"fast": 30, "standard": 60, "refine": 120, "economy": 0}
 # The vendor allows 40 renders per 15 min per account, shared by every
 # environment; each environment's share comes from its routing file.
 HOSTED_WINDOW_SECONDS = 900
@@ -98,6 +98,9 @@ HOSTED_GRACE_SECONDS = 30
 # Hosted renders per window at which a machine of ours is cheaper: a 5090 at
 # about USD 0.65/h breaks even near 17 turbo clips an hour at USD 0.038 (#918).
 HOSTED_WARMS_MACHINE_AT = 5
+# Economy shots waiting at which a machine of ours is cheaper than Vivix: each
+# clip saves about USD 0.006, so about 40 clips pay for a boot.
+ECONOMY_WARMS_MACHINE_AT = 40
 # Below this vendor balance hosted stops; jobs stay on our machines.
 HOSTED_BALANCE_RESERVE_USD = 1.0
 HOSTED_BALANCE_WARN_USD = 10.0
