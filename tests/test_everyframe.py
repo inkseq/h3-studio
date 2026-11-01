@@ -92,7 +92,7 @@ class VendorRequestTests(unittest.TestCase):
         )
         # Turbo refuses references (400 bad_attachment), so it never gets them.
         self.assertIsNone(plan.vendor_request(value, "h3-max-turbo"))
-        self.assertEqual(plan.chain(value), ["h3-max-fast"])
+        self.assertEqual(plan.chain(value), ["h3-max-fast", "pika-h3-flex"])
 
     def test_anything_not_exactly_representable_stays_on_our_machines(self):
         inputs = {
