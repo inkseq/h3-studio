@@ -14,7 +14,14 @@ from pathlib import Path
 from sqlalchemy import select, update
 
 from ..providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS, POOL, chain
-from .decide import HOSTED_WINDOW_SECONDS, hosted_has_first_claim, hosted_offload
+from .decide import (
+    HOSTED_BALANCE_RESERVE_USD,
+    HOSTED_BALANCE_WARN_USD,
+    HOSTED_WARMS_MACHINE_AT,
+    HOSTED_WINDOW_SECONDS,
+    hosted_has_first_claim,
+    hosted_offload,
+)
 
 EXPECTED_RUNTIME_S = 300
 # Plan fields that describe the route do not survive a rebind: claims compare
@@ -100,21 +107,78 @@ def next_plan(job, now):
 
 
 def used_in_window(connection, tenant, now):
-    """{owner_id: jobs routed hosted in the current vendor window}."""
-    from ..repository import jobs
+    """{owner_id: hosted renders in the vendor window, plus any about to start}.
+
+    Every submitted attempt counts, including ones a later model replaced: the
+    vendor's limit counts each of them.
+    """
+    from ..repository import attempts, jobs
 
     used = {}
-    for owner, execution in connection.execute(
-        select(jobs.c.owner_id, jobs.c.execution_plan).where(
+    for (owner,) in connection.execute(
+        select(jobs.c.owner_id)
+        .select_from(attempts.join(jobs, attempts.c.job_id == jobs.c.id))
+        .where(
             jobs.c.tenant_id == tenant,
-            jobs.c.pool == POOL,
-            jobs.c.updated_at >= now - HOSTED_WINDOW_SECONDS,
+            attempts.c.worker_id.like("dbos-everyframe-%"),
+            attempts.c.submission_started_at >= now - HOSTED_WINDOW_SECONDS,
         )
     ):
-        routed = execution.get("routed_at")
-        if isinstance(routed, (int, float)) and now - routed < HOSTED_WINDOW_SECONDS:
-            used[owner] = used.get(owner, 0) + 1
+        used[owner] = used.get(owner, 0) + 1
+    for (owner,) in connection.execute(
+        select(jobs.c.owner_id).where(
+            jobs.c.tenant_id == tenant,
+            jobs.c.pool == POOL,
+            jobs.c.status.in_(("queued", "claimed")),
+        )
+    ):
+        used[owner] = used.get(owner, 0) + 1
     return used
+
+
+_balance = {"usd": None, "read_at": None}
+
+
+def refresh_balance(settings, now, *, reader=None):
+    """Read the vendor balance at most every 5 min, outside any transaction.
+
+    An unknown balance leaves hosted open: a refusal costs nothing and the job
+    falls back to our machines. The value is never logged.
+    """
+    if not getattr(settings, "everyframe_enabled", False):
+        return None
+    read_at = _balance["read_at"]
+    if read_at is not None and now - read_at < 300:
+        return _balance["usd"]
+    _balance["read_at"] = now
+    try:
+        usd = (reader or _read_balance)(settings)
+    except Exception:
+        usd = None
+    _balance["usd"] = usd if isinstance(usd, (int, float)) else None
+    if _balance["usd"] is not None and _balance["usd"] < HOSTED_BALANCE_WARN_USD:
+        print("hosted_balance_low", flush=True)
+    return _balance["usd"]
+
+
+def _read_balance(settings):
+    import httpx
+
+    from ..providers.everyframe import API, FILENAME, load_config
+
+    config = load_config(Path(settings.data_dir) / "runtime-secrets" / FILENAME)
+    answer = httpx.get(
+        API + "/key",
+        headers={"Authorization": "Bearer " + config.api_key},
+        timeout=5,
+        trust_env=False,
+        follow_redirects=False,
+    )
+    return answer.json().get("balanceUsd") if answer.status_code == 200 else None
+
+
+def balance_allows_hosted():
+    return _balance["usd"] is None or _balance["usd"] >= HOSTED_BALANCE_RESERVE_USD
 
 
 def live_configurations(connection, now):
@@ -170,7 +234,7 @@ def offload(service, connection, queued, now):
     if not getattr(settings, "everyframe_enabled", False):
         return queued
     tiers, window = routing(settings.data_dir)
-    if not tiers:
+    if not tiers or not balance_allows_hosted():
         return queued
     live = live_configurations(connection, now)
     used = used_in_window(connection, settings.tenant_id, now)
@@ -186,16 +250,26 @@ def offload(service, connection, queued, now):
     return [item for item in queued if item[0]["id"] not in moved]
 
 
-def hold_for_hosted(settings, job, now):
+def hold_for_hosted(settings, connection, job, now):
     """A cold job waits for the hosted API instead of starting a machine for it.
 
     Without this a machine boots for a job that goes hosted a minute later, and
-    is paid for while it idles (found on staging, 2026-11-01). Once the grace
-    passes with the job still queued, machines start as before.
+    is paid for while it idles (found on staging, 2026-11-01). Sustained hosted
+    use stops the wait: a machine of ours is then cheaper, and once warm it takes
+    new jobs before they reach their limit. After the grace, machines start as
+    before.
     """
     if not getattr(settings, "everyframe_enabled", False):
         return False
     tiers, window = routing(settings.data_dir)
-    if not tiers or not window or not chain(job["request"]):
+    if (
+        not tiers
+        or not window
+        or not balance_allows_hosted()
+        or not chain(job["request"])
+    ):
+        return False
+    used = used_in_window(connection, settings.tenant_id, now)
+    if sum(used.values()) >= HOSTED_WARMS_MACHINE_AT:
         return False
     return hosted_has_first_claim(job, tier_of(job), tiers, now)

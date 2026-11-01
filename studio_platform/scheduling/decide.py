@@ -95,6 +95,12 @@ def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
 
 # How long past its wait limit a job may still go hosted before machines start.
 HOSTED_GRACE_SECONDS = 30
+# Hosted renders per window at which a machine of ours is cheaper: a 5090 at
+# about USD 0.65/h breaks even near 17 turbo clips an hour at USD 0.038 (#918).
+HOSTED_WARMS_MACHINE_AT = 5
+# Below this vendor balance hosted stops; jobs stay on our machines.
+HOSTED_BALANCE_RESERVE_USD = 1.0
+HOSTED_BALANCE_WARN_USD = 10.0
 
 
 def hosted_has_first_claim(job, tier, enabled_tiers, now):
