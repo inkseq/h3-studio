@@ -435,6 +435,8 @@ inventory.json
 !studio_platform/scheduling/
 !studio_platform/scheduling/__init__.py
 !studio_platform/scheduling/health.py
+!studio_platform/scheduling/decide.py
+!tests/test_scheduling_decide.py
 !tests/test_lane_backoff.py
 !studio_platform/providers/
 !studio_platform/providers/__init__.py
