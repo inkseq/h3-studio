@@ -39,7 +39,7 @@ Each lane was added as its own slice. The cost is now visible:
 
 **Kind A, worker pool.** The worker runs our image and pulls jobs. Machines come from a capacity provider. Billing is per second of machine time, whether or not it is working. The money risk is an idle or orphaned machine.
 
-**Kind B, hosted per-job API.** The vendor runs the job. It is billed per render at submit time, and the vendor refunds failures itself. The money risk is a double submit. The rule: never resubmit on an uncertain answer, reconcile instead (already in `everyframe_backend`).
+**Kind B, hosted per-job API.** The vendor runs the job. It is billed per render at submit time, and the vendor refunds failures itself. The money risk is a double submit. The rule: never resubmit on an uncertain answer, reconcile instead (already in `providers/everyframe`).
 
 The two kinds stay separate. They have different money semantics, and merging them into one abstraction would hide the difference that matters. They share the scheduler, the registry, cost records and telemetry.
 
@@ -139,7 +139,7 @@ class CapacityProvider(Protocol):
 - per-render price lookup;
 - prompt suffixes such as the EveryFrame no-cut clause (#918).
 
-`enhance_backend` and `everyframe_backend` already follow this shape and become thin adapters.
+`enhance_backend` and `providers/everyframe` already follow this shape and become thin adapters.
 
 ## Scheduling
 
