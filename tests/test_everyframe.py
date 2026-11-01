@@ -216,6 +216,78 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(BackendError):
             backend._call("GET", "/key")
 
+    def test_every_vivix_canvas_normalises_to_the_take_size(self):
+        """Measured canvases (docs/SCHEDULING-SCENARIOS.md) to our 480P and 768P."""
+        backend = self.backend([])
+        for source, size in (
+            ((1264, 720), (832, 480)),
+            ((1264, 720), (1344, 768)),
+            ((720, 1264), (480, 832)),
+            ((720, 1264), (768, 1344)),
+            ((960, 960), (640, 640)),
+            ((832, 1104), (640, 800)),
+        ):
+            with self.subTest(source=source, size=size):
+                with tempfile.TemporaryDirectory() as directory:
+                    raw = Path(directory) / "vendor.mp4"
+                    subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-loglevel",
+                            "error",
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            f"color=c=gray:size={source[0]}x{source[1]}:rate=24:duration=5",
+                            "-f",
+                            "lavfi",
+                            "-i",
+                            "anullsrc=r=48000:cl=mono",
+                            "-shortest",
+                            "-pix_fmt",
+                            "yuv420p",
+                            "-c:a",
+                            "aac",
+                            raw,
+                        ],
+                        check=True,
+                    )
+                    value = job(model="vivix-w1")
+                    value["request"]["output_spec"] = {
+                        "width": size[0],
+                        "height": size[1],
+                        "actual_duration": 5.166667,
+                    }
+                    paths = backend._normalize(value, raw, Path(directory))
+                    info = json.loads(
+                        subprocess.run(
+                            [
+                                "ffprobe",
+                                "-v",
+                                "error",
+                                "-select_streams",
+                                "v",
+                                "-show_entries",
+                                "stream=width,height,avg_frame_rate",
+                                "-of",
+                                "json",
+                                paths["video"],
+                            ],
+                            capture_output=True,
+                            check=True,
+                        ).stdout
+                    )["streams"][0]
+                    self.assertEqual((info["width"], info["height"]), size)
+                    self.assertEqual(info["avg_frame_rate"], "24/1")
+
+    def test_vivix_takes_4_5_but_sends_21_9_to_turbo(self):
+        self.assertIsNotNone(
+            plan.vendor_request(compiled(aspect_ratio="4:5"), "vivix-w1")
+        )
+        self.assertEqual(
+            plan.chain(compiled(aspect_ratio="21:9"), "economy"), ["h3-max-turbo"]
+        )
+
     def test_config_holds_only_the_key_and_never_shows_it(self):
         for value, valid in (
             ({"api_key": "k"}, True),
