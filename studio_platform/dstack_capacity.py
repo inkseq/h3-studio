@@ -958,6 +958,28 @@ class DstackClient:
                 # machine-ID read before any native bootstrap/readiness.
         return True
 
+    def backend_api_key(self, backend):
+        """The account key dstack holds for this backend, for this call's memory only."""
+        config = self._post(
+            f"/api/project/{self.project}/backends/{backend}/config_info", {}
+        )
+        creds = config.get("creds") if isinstance(config, dict) else None
+        _require(
+            isinstance(config, dict)
+            and config.get("type") == backend
+            and isinstance(creds, dict)
+            and creds.get("type") == "api_key",
+            "dstack_provider_inventory_unconfirmed",
+        )
+        key = creds.get("api_key")
+        _require(
+            isinstance(key, str)
+            and 16 <= len(key) <= 4096
+            and not any(char.isspace() for char in key),
+            "dstack_provider_inventory_unconfirmed",
+        )
+        return key
+
     def provider_inventory(self, backend, *, clock=None):
         """Transient complete account read using the SAME configured backend key.
 
@@ -981,24 +1003,7 @@ class DstackClient:
             "dstack_capacity_clock_invalid",
         )
         try:
-            config = self._post(
-                f"/api/project/{self.project}/backends/{backend}/config_info", {}
-            )
-            creds = config.get("creds") if isinstance(config, dict) else None
-            _require(
-                isinstance(config, dict)
-                and config.get("type") == backend
-                and isinstance(creds, dict)
-                and creds.get("type") == "api_key",
-                "dstack_provider_inventory_unconfirmed",
-            )
-            key = creds.get("api_key")
-            _require(
-                isinstance(key, str)
-                and 16 <= len(key) <= 4096
-                and not any(char.isspace() for char in key),
-                "dstack_provider_inventory_unconfirmed",
-            )
+            key = self.backend_api_key(backend)
 
             def read(method, url, *, body=None, params=None):
                 remaining = 30 - (time.monotonic() - started)
