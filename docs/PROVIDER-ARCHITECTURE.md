@@ -1,6 +1,6 @@
 # Provider architecture: one scheduler, two execution kinds, one capacity interface
 
-Status: proposal for owner review, 2026-11-01. It extends [CAPACITY-LANES.md](CAPACITY-LANES.md) (owner approved 2026-10-30) with what the dial-out work (#859) and the hosted-API backstop (#918) have since shown. Nothing here changes production until its step lands.
+Status: owner approved 2026-11-01 ("能"). It extends [CAPACITY-LANES.md](CAPACITY-LANES.md) (owner approved 2026-10-30) with what the dial-out work (#859) and the hosted-API backstop (#918) have since shown. Nothing here changes production until its step lands.
 
 ## Why now
 
@@ -239,7 +239,7 @@ The chain is ordered by the registry price for this exact request (mode × resol
 |---|---|
 | Warm or booting own slot can start within the wait limit | Own fleet. It is about 10× cheaper per clip on a warm 5090 |
 | No such slot | Hosted chain, as above |
-| Shot needs exact reproducibility (same-seed redo, continuity re-render) | Own fleet only, since hosted models don't honour seeds |
+| Job sets an explicit seed (API and admin tools only; owner 2026-11-01 removed seeds from the creator UI) | Own fleet only, since hosted models don't honour seeds |
 | Hosted spend rate over the last 30 min would pay for a machine (break-even ≈ 10% utilisation, ≈ 410 480p clips/day vs turbo) | Counts as demand in the lookahead and starts our own machine. New jobs return to it once it is warm |
 | Vendor unavailable: balance below reserve, rate-limit bucket empty, or every model of the chain in cooldown | Hosted is not an option this tick; own fleet only |
 
@@ -358,7 +358,12 @@ The dstack ledger modules (`dstack_capacity`, `dstack_operator`, `dstack_control
    - **5d.** Jev material gate in the card flow (#679). It is independent of routing and can ship first.
    - **5e.** Production enable per tier by owner switch.
 
-   Owner decision still open: may user-uploaded face photos go to the vendor (terms naming third-party processing)? The look difference is settled: with a first frame they are near-identical.
+   Owner decisions, 2026-11-01:
+   - user-uploaded face photos may go to the vendor; the terms name third-party processing;
+   - the look difference is accepted, given a reference or first frame;
+   - EveryFrame models that carry traffic are chosen after a staging round through this path.
+
+   Background (auto-queue) jobs stay on our own fleet; see [STORY-AUTO-QUEUE.md](STORY-AUTO-QUEUE.md).
 6. **Production dial-out.** Then delete SSH transport.
 7. **Production on `modal-sandbox`.** After a week, delete the old Modal lane.
 
