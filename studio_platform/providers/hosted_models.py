@@ -5,7 +5,13 @@ adapted, how long a render may take before the job moves on, and its list
 price, which only orders a chain; the cost recorded is the vendor's own. The
 owner's decisions of 2026-11-01 set the rows: models that refused faces or IP
 characters in the #929 moderation round are not here at all, and chains are
-ordered by price within what a shot needs. This module never contacts a vendor.
+ordered by price within what a shot needs. Limits, resolutions and plain
+prices come from the vendor's GET /v1/render/models (2026-11-01); omni prices
+are measured (#929), since the vendor table covers plain renders only. The
+real charge comes from the free POST /render/quote and the render itself, but
+quote does not validate the mode, so modes are gated here. The vendor has no
+cancel: a submitted render runs to completion and settles. This module never
+contacts a vendor.
 """
 
 from dataclasses import dataclass
@@ -14,11 +20,10 @@ PROVIDER = "everyframe"
 BACKEND = "everyframe-render"
 POOL = "everyframe"
 RECIPES = ("h3-base-fl2va-v1", "h3-base-ref2va-v1")
-MAX_PROMPT = 50_000
 # Turbo and fast insert their own camera cuts and follow lighting words
 # literally (#918, 2026-11-01); our shots are already split by the storyboard.
 NO_CUT = "Single continuous shot with no cuts, no scene changes and steady lighting."
-RESOLUTIONS = {"480P": "480p", "768P": "768p", "1080P": "1080p", "2K": "2k"}
+RESOLUTIONS = {"480P": "480p", "768P": "768p", "1080P": "1080p", "2K": "2K"}
 
 
 @dataclass(frozen=True)
@@ -35,6 +40,9 @@ class HostedModel:
     # USD per 5 s by (resolution, plain|references); orders chains only.
     price_5s: dict
     deadline_floor_s: int
+    max_prompt: int = 50_000
+    # Vivix ignores the requested size and always renders 1264x720.
+    vendor_resolution: str | None = None
     concurrency: int | None = None  # None: no limit known
 
 
@@ -55,7 +63,11 @@ MODELS = {
             0,
             0,
             True,
-            {("480P", "plain"): 0.038, ("768P", "plain"): 0.06},
+            {
+                ("480P", "plain"): 0.038,
+                ("768P", "plain"): 0.06,
+                ("1080P", "plain"): 0.12,
+            },
             90,
         ),
         HostedModel(
@@ -64,9 +76,9 @@ MODELS = {
             PLAIN | {"omni"},
             H3 | {"2K"},
             WIDE,
+            9,
             3,
-            0,
-            1,
+            3,
             False,  # Pika does not cut on its own.
             {
                 ("480P", "plain"): 0.058,
@@ -78,6 +90,7 @@ MODELS = {
                 ("1080P", "references"): 0.558,
             },
             180,
+            max_prompt=8000,
         ),
         HostedModel(
             "h3-max-fast",
@@ -106,6 +119,7 @@ MODELS = {
             "everyframe-vivix-w1-v1",
             PLAIN | {"omni"},
             frozenset({"480P", "768P"}),
+            # 4:5 comes back as 3:4 and 21:9 as 16:9, so those go to turbo.
             frozenset({"16:9", "9:16", "1:1"}),
             5,
             0,
@@ -117,6 +131,7 @@ MODELS = {
                 for kind in ("plain", "references")
             },
             60,
+            vendor_resolution="720p",
             concurrency=1,
         ),
     )
@@ -155,7 +170,7 @@ def vendor_request(compiled, model_id):
         or request.get("aspect_ratio") not in model.aspects
         or request.get("duration") not in range(5, 16)
         or not isinstance(prompt, str)
-        or not 1 <= len(prompt) <= MAX_PROMPT
+        or not 1 <= len(prompt) <= model.max_prompt - len(NO_CUT) - 1
         or request.get("guides")
         or request.get("video_excerpts")
         or request.get("audio_excerpts")
@@ -172,7 +187,7 @@ def vendor_request(compiled, model_id):
         "modelId": model.id,
         "prompt": prompt,
         "duration": request["duration"],
-        "resolution": RESOLUTIONS[request["resolution"]],
+        "resolution": model.vendor_resolution or RESOLUTIONS[request["resolution"]],
         "aspect": request["aspect_ratio"],
     }
     if request.get("mode") == "fl" and not any(refs.values()):

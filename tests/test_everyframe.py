@@ -133,6 +133,17 @@ class VendorRequestTests(unittest.TestCase):
         # Pika does not cut on its own, so its prompt is left alone.
         body, _ = plan.vendor_request(compiled(), "pika-h3-flex")
         self.assertNotIn(plan.NO_CUT, body["prompt"])
+        # Vivix always renders 720p; Pika takes 2K under the vendor's own name.
+        body, _ = plan.vendor_request(compiled(), "vivix-w1")
+        self.assertEqual(body["resolution"], "720p")
+        body, _ = plan.vendor_request(compiled(resolution="2K"), "pika-h3-flex")
+        self.assertEqual(body["resolution"], "2K")
+        self.assertIsNone(
+            plan.vendor_request(compiled(aspect_ratio="21:9"), "vivix-w1")
+        )
+        self.assertIsNone(
+            plan.vendor_request(compiled(prompt="x" * 8000), "pika-h3-flex")
+        )
         # Refusing models are not in the catalog at all (owner, 2026-11-01).
         self.assertFalse({"seedance-2-5", "kling-4-0"} & set(plan.MODELS))
 
