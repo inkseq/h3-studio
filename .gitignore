@@ -1083,3 +1083,5 @@ inventory.json
 !tools/import_everyframe_credentials.py
 !deploy/platform/everyframe-staging-read-policy.json
 !deploy/platform/everyframe-production-read-policy.json
+!studio_platform/shot_readiness.py
+!tests/test_shot_readiness.py
