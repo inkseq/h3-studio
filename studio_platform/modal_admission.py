@@ -289,6 +289,10 @@ class ModalAdmission:
                 continue
             if now - job['created_at'] < self.start_after_seconds:
                 continue
+            from .scheduling.rebind import hold_for_hosted
+
+            if hold_for_hosted(self.service.settings, job, now):
+                continue
             if len(active) >= self.hosts.spec.max_containers:
                 return {
                     'state': 'blocked',

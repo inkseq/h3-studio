@@ -21,7 +21,10 @@ from studio_platform.providers.hosted_models import (
     RECIPES,
 )
 from studio_platform.repository import jobs
-from studio_platform.scheduling.decide import hosted_offload
+from studio_platform.scheduling.decide import (
+    hosted_has_first_claim,
+    hosted_offload,
+)
 from studio_platform.scheduling.rebind import (
     hosted_plan,
     next_plan,
@@ -74,6 +77,21 @@ class OffloadDecisionTests(unittest.TestCase):
         self.assertEqual(self.ids(queued, used={"b": 25}), [])
         mixed = [job("a1", created=1), job("b1", created=2, owner="b")]
         self.assertEqual(self.ids(mixed, used={"a": 10}), ["b1"])
+
+
+class FirstClaimTests(unittest.TestCase):
+    def test_machines_wait_only_while_the_hosted_api_can_still_take_the_job(self):
+        job = {"created_at": 1000, "execution_plan": {}}
+        tiers = {"standard"}
+        for now, expected in ((1001, True), (1089, True), (1090, False)):
+            with self.subTest(now=now):
+                self.assertEqual(
+                    hosted_has_first_claim(job, "standard", tiers, now), expected
+                )
+        self.assertFalse(hosted_has_first_claim(job, "fast", tiers, 1001))
+        self.assertFalse(hosted_has_first_claim(job, "unknown", {"unknown"}, 1001))
+        back = {"created_at": 1000, "execution_plan": {"hosted_tried": ["x"]}}
+        self.assertFalse(hosted_has_first_claim(back, "standard", tiers, 1001))
 
 
 class RoutingFileTests(unittest.TestCase):

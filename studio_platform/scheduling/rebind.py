@@ -14,7 +14,7 @@ from pathlib import Path
 from sqlalchemy import select, update
 
 from ..providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS, POOL, chain
-from .decide import HOSTED_WINDOW_SECONDS, hosted_offload
+from .decide import HOSTED_WINDOW_SECONDS, hosted_has_first_claim, hosted_offload
 
 EXPECTED_RUNTIME_S = 300
 # Plan fields that describe the route do not survive a rebind: claims compare
@@ -68,6 +68,16 @@ def hosted_plan(execution, model_id, now):
         primary_plan=execution,
     )
     return plan
+
+
+def tier_of(job):
+    """The job's billing tier; None keeps it on our own machines."""
+    from ..credits_pricing import PricingError, get_tier
+
+    try:
+        return get_tier(job["request"], execution=job["execution_plan"])
+    except (PricingError, KeyError, TypeError, ValueError):
+        return None
 
 
 def next_plan(job, now):
@@ -162,14 +172,8 @@ def offload(service, connection, queued, now):
     tiers, window = routing(settings.data_dir)
     if not tiers:
         return queued
-    from ..credits_pricing import get_tier
-
     live = live_configurations(connection, now)
     used = used_in_window(connection, settings.tenant_id, now)
-
-    def tier_of(job):
-        return get_tier(job["request"], execution=job["execution_plan"])
-
     # A job that already went through the hosted chain stays on our machines.
     fresh = [item for item in queued if "hosted_tried" not in item[0]["execution_plan"]]
     moved = set()
@@ -180,3 +184,18 @@ def offload(service, connection, queued, now):
                     moved.add(job["id"])
                 break
     return [item for item in queued if item[0]["id"] not in moved]
+
+
+def hold_for_hosted(settings, job, now):
+    """A cold job waits for the hosted API instead of starting a machine for it.
+
+    Without this a machine boots for a job that goes hosted a minute later, and
+    is paid for while it idles (found on staging, 2026-11-01). Once the grace
+    passes with the job still queued, machines start as before.
+    """
+    if not getattr(settings, "everyframe_enabled", False):
+        return False
+    tiers, window = routing(settings.data_dir)
+    if not tiers or not window or not chain(job["request"]):
+        return False
+    return hosted_has_first_claim(job, tier_of(job), tiers, now)
