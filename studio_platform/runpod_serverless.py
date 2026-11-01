@@ -89,13 +89,13 @@ def validate_config(value):
     return value
 
 
-def boot_input(spec):
+def boot_input(spec, backend=BACKEND):
     """The job input: the run spec's single boot command and its boot env."""
     configuration = spec.get("configuration") if isinstance(spec, dict) else None
     _require(isinstance(configuration, dict), "runpod_serverless_spec_invalid")
     commands, env = configuration.get("commands"), configuration.get("env")
     _require(
-        configuration.get("backends") == [BACKEND]
+        configuration.get("backends") == [backend]
         and isinstance(commands, list)
         and len(commands) == 1
         and isinstance(commands[0], str)
@@ -109,7 +109,13 @@ def boot_input(spec):
 
 
 class RunPodServerlessClient:
-    """The dstack client subset the capacity path uses, for one endpoint."""
+    """The dstack client subset the capacity path uses, for one endpoint.
+
+    Subclasses (modal_dialout) reuse the journal and the dstack-shaped runs and
+    replace only the provider calls: _launch, _status, _cancel and _live.
+    """
+
+    backend = BACKEND
 
     def __init__(self, config, project, *, http=None, clock=time.time):
         self.config = validate_config(config)
@@ -195,8 +201,12 @@ class RunPodServerlessClient:
         return status
 
     # ---- dstack client subset -----------------------------------------
+    @property
+    def instance_name(self):
+        return self.config["endpoint_id"]
+
     def configured_backends(self):
-        return frozenset({BACKEND})
+        return frozenset({self.backend})
 
     def plan(self, spec):
         configuration = spec["configuration"]
@@ -204,7 +214,7 @@ class RunPodServerlessClient:
         price = self.config["hourly_microusd"] / 1_000_000
         offers = []
         if (
-            configuration.get("backends") == [BACKEND]
+            configuration.get("backends") == [self.backend]
             and (not names or self.config["gpu_name"] in names)
             and price <= configuration.get("max_price", price)
         ):
@@ -212,13 +222,12 @@ class RunPodServerlessClient:
         return {"run_spec": spec, "job_plans": [{"offers": offers}]}
 
     def _offer(self, price):
-        c = self.config
         return {
-            "backend": BACKEND,
-            "region": BACKEND,
+            "backend": self.backend,
+            "region": self.backend,
             "price": price,
             "availability": "available",
-            "instance": {"name": c["endpoint_id"], "resources": self._resources()},
+            "instance": {"name": self.instance_name, "resources": self._resources()},
         }
 
     def _resources(self):
@@ -232,7 +241,7 @@ class RunPodServerlessClient:
 
     def apply(self, spec):
         run_name = spec.get("run_name")
-        job = boot_input(spec)
+        job = boot_input(spec, self.backend)
         duration = spec["configuration"].get("max_duration")
         seconds = duration if type(duration) is int and duration > 0 else None
         seconds = min(seconds or MAX_EXECUTION_SECONDS, MAX_EXECUTION_SECONDS)
@@ -245,17 +254,7 @@ class RunPodServerlessClient:
         }
         # Journal before the provider call; a lost answer stays unbound.
         self._write(run_name, record, create=True)
-        value = self._call(
-            "POST",
-            "/run",
-            {
-                "input": job,
-                "policy": {
-                    "executionTimeout": seconds * 1000,
-                    "ttl": (seconds + 3600) * 1000,
-                },
-            },
-        )
+        value = self._launch(run_name, job, seconds)
         job_id = value.get("id")
         _require(
             isinstance(job_id, str) and JOB_ID.fullmatch(job_id),
@@ -278,8 +277,30 @@ class RunPodServerlessClient:
     def stop(self, run_name):
         record = self._read(run_name)
         _require(record is not None and record.get("job_id"), "dstack_exact_run_absent")
-        self._call("POST", "/cancel/" + record["job_id"])
+        self._cancel(record["job_id"])
         return {}
+
+    def _launch(self, run_name, job, seconds):
+        return self._call(
+            "POST",
+            "/run",
+            {
+                "input": job,
+                "policy": {
+                    "executionTimeout": seconds * 1000,
+                    "ttl": (seconds + 3600) * 1000,
+                },
+            },
+        )
+
+    def _cancel(self, job_id):
+        self._call("POST", "/cancel/" + job_id)
+
+    def _live(self):
+        """The provider's own count of queued plus running jobs."""
+        health = self._call("GET", "/health").get("jobs")
+        _require(isinstance(health, dict), "dstack_provider_inventory_unconfirmed")
+        return health.get("inQueue", -1) + health.get("inProgress", -1)
 
     def _run(self, record, status):
         raw = status.get("status")
@@ -295,13 +316,13 @@ class RunPodServerlessClient:
                 else "job-" + record["job_id"]
             )
             submission["job_provisioning_data"] = {
-                "backend": BACKEND,
+                "backend": self.backend,
                 "instance_id": instance,
-                "region": BACKEND,
+                "region": self.backend,
                 "price": self.config["hourly_microusd"] / 1_000_000,
                 "dockerized": True,
                 "instance_type": {
-                    "name": self.config["endpoint_id"],
+                    "name": self.instance_name,
                     "resources": self._resources(),
                 },
             }
@@ -320,7 +341,7 @@ class RunPodServerlessClient:
 
     def provider_inventory(self, backend, *, clock=None):
         """Live jobs of this dedicated endpoint, cross-checked with /health."""
-        _require(backend == BACKEND, "dstack_backend_unsupported")
+        _require(backend == self.backend, "dstack_backend_unsupported")
         observed_at = (clock or self.clock)()
         live = []
         for path in sorted(self.root.glob("sixnine-*.json")):
@@ -335,19 +356,14 @@ class RunPodServerlessClient:
             )
             if status["status"] in LIVE:
                 live.append(self._run(record, status))
-        health = self._call("GET", "/health").get("jobs")
-        _require(
-            isinstance(health, dict)
-            and health.get("inQueue", -1) + health.get("inProgress", -1) == len(live),
-            "dstack_provider_inventory_unconfirmed",
-        )
+        _require(self._live() == len(live), "dstack_provider_inventory_unconfirmed")
         ids = [
             run["latest_job_submission"]["job_provisioning_data"]["instance_id"]
             for run in live
             if "job_provisioning_data" in run["latest_job_submission"]
         ]
         return {
-            "backend": BACKEND,
+            "backend": self.backend,
             "complete": True,
             "observed_at": observed_at,
             "instance_ids": ids,
@@ -355,45 +371,46 @@ class RunPodServerlessClient:
 
 
 class RoutedClient:
-    """dstack for dstack backends, a serverless client for its own backend."""
+    """dstack for dstack backends; each serverless lane for its own backend."""
 
-    def __init__(self, dstack, serverless):
-        self.dstack, self.serverless = dstack, serverless
+    def __init__(self, dstack, *lanes):
+        self.dstack = dstack
+        self.lanes = {lane.backend: lane for lane in lanes}
 
     def __getattr__(self, name):
         return getattr(self.dstack, name)
 
-    @staticmethod
-    def _serverless_spec(spec):
-        return spec.get("configuration", {}).get("backends") == [BACKEND]
+    def _for_spec(self, spec):
+        backends = spec.get("configuration", {}).get("backends")
+        if isinstance(backends, list) and len(backends) == 1:
+            return self.lanes.get(backends[0], self.dstack)
+        return self.dstack
+
+    def _for_run(self, run_name):
+        for lane in self.lanes.values():
+            if lane._read(run_name) is not None:
+                return lane
+        return self.dstack
 
     def configured_backends(self):
-        return frozenset(self.dstack.configured_backends()) | {BACKEND}
+        return frozenset(self.dstack.configured_backends()) | set(self.lanes)
 
     def plan(self, spec):
-        return (self.serverless if self._serverless_spec(spec) else self.dstack).plan(
-            spec
-        )
+        return self._for_spec(spec).plan(spec)
 
     def apply(self, spec):
-        return (self.serverless if self._serverless_spec(spec) else self.dstack).apply(
-            spec
-        )
+        return self._for_spec(spec).apply(spec)
 
     def get(self, *, run_name=None, run_id=None):
-        found = self.serverless.get(run_name=run_name, run_id=run_id)
-        return (
-            found
-            if found is not None
-            else self.dstack.get(run_name=run_name, run_id=run_id)
-        )
+        for lane in self.lanes.values():
+            found = lane.get(run_name=run_name, run_id=run_id)
+            if found is not None:
+                return found
+        return self.dstack.get(run_name=run_name, run_id=run_id)
 
     def stop(self, run_name):
-        if self.serverless._read(run_name) is not None:
-            return self.serverless.stop(run_name)
-        return self.dstack.stop(run_name)
+        return self._for_run(run_name).stop(run_name)
 
     def provider_inventory(self, backend, **kwargs):
-        if backend == BACKEND:
-            return self.serverless.provider_inventory(backend, **kwargs)
-        return self.dstack.provider_inventory(backend, **kwargs)
+        lane = self.lanes.get(backend, self.dstack)
+        return lane.provider_inventory(backend, **kwargs)

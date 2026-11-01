@@ -575,7 +575,7 @@ def safe_failure_summary(job, context=None):
         node_id=_uuid(source.get('node_id')),
         provider=_choice(
             source.get('provider'),
-            {'vast', 'runpod', 'lium', 'cloudrift', 'targon', 'local'},
+            {'vast', 'runpod', 'lium', 'cloudrift', 'modal-dialout', 'targon', 'local'},
             'unknown',
         ),
         gpu_type=_choice(

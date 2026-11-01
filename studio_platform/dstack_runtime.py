@@ -51,6 +51,7 @@ PROVIDERS = {
     "cloudrift": "cloudrift",
     # RunPod Serverless jobs (dial-out only) bill to the same RunPod account.
     "runpod-serverless": "runpod",
+    "modal-dialout": "modal-dialout",
 }
 IDENTITY_FIELDS = (
     "intent_id",

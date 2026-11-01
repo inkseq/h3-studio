@@ -60,6 +60,14 @@ The serverless lane (order step 6) rents through RunPod Serverless instead of ds
 - **Profiles.** `backend: "runpod-serverless"` with `transport: "dialout"`. Jobs bill to the RunPod provider account.
 - **Local check.** `test_dialout_e2e.test_runpod_serverless_job_boots_through_the_real_handler` runs the real handler in a container behind a fake RunPod API, through `DstackCapacity.observe`, then cancels the job.
 
+## Modal lane (dial-out)
+
+`studio_platform/modal_dialout.py` (backend and provider `modal-dialout`) runs the same worker in one Modal sandbox per run.
+- It reuses the RunPod Serverless client's journal, dstack-shaped runs, inventory cross-check and routing. Only the provider calls change: create a sandbox, poll, terminate, and list the app's sandboxes.
+- The verified model Volume is mounted at `/ckpts`, and the worker gets `INKSEQ_MODEL_CACHE=/ckpts/ckpts` (#924). A cold start skips the download, and `verify_runtime` still hashes every file.
+- It is enabled by the operator config key `modal_dialout_file`, a protected JSON file. The Modal SDK loads on first provider use only.
+- The older Modal lane (provider `modal`) is untouched and stays available until this lane is accepted.
+
 ## Local end-to-end check
 
 `tests/test_dialout_e2e.py` runs the whole path on one machine in about 30 seconds, without renting a GPU:

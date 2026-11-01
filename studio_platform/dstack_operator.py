@@ -96,6 +96,9 @@ PROVIDERS = {
     "cloudrift": "cloudrift",
     # RunPod Serverless jobs (dial-out only) bill to the same RunPod account.
     "runpod-serverless": "runpod",
+    # Modal sandboxes running the same dial-out worker (#859); not the
+    # older Modal lane, which keeps provider "modal".
+    "modal-dialout": "modal-dialout",
 }
 # Pinned dstack/gpuhunt scheduler labels, not native CUDA device identities.
 # The native worker still checks the full physical name, capability and VRAM.
@@ -3563,16 +3566,27 @@ def from_environment(repo, settings, *, readiness=None):
         token = _protected_read(config.pop("token_file"), maximum=4096).strip()
         ssh = _protected_read(config.pop("ssh_public_key_file"), maximum=16384).strip()
         client = DstackClient(config["endpoint"], token, config["project"])
+        lanes = []
         if "serverless_file" in config:
             # RunPod Serverless dial-out jobs beside dstack (#859).
-            from .runpod_serverless import RoutedClient, RunPodServerlessClient
+            from .runpod_serverless import RunPodServerlessClient
 
             serverless = json.loads(
                 _protected_read(config.pop("serverless_file"), maximum=16384)
             )
-            client = RoutedClient(
-                client, RunPodServerlessClient(serverless, config["project"])
+            lanes.append(RunPodServerlessClient(serverless, config["project"]))
+        if "modal_dialout_file" in config:
+            # Modal sandboxes running the same dial-out worker (#859).
+            from .modal_dialout import ModalDialoutClient
+
+            modal = json.loads(
+                _protected_read(config.pop("modal_dialout_file"), maximum=16384)
             )
+            lanes.append(ModalDialoutClient(modal, config["project"]))
+        if lanes:
+            from .runpod_serverless import RoutedClient
+
+            client = RoutedClient(client, *lanes)
         config["ssh_public_key"] = ssh
         store = LedgerDstackStore(
             repo,

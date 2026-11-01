@@ -166,7 +166,7 @@ class CloudStageReader:
         if (
             not isinstance(node_id, str)
             or not _UUID.fullmatch(node_id)
-            or provider not in {"vast", "runpod", "lium", "cloudrift"}
+            or provider not in {"vast", "runpod", "lium", "cloudrift", "modal-dialout"}
             or mode not in {"fl", "ref"}
             or not isinstance(profile_id, str)
             or not _PROFILE.fullmatch(profile_id)
