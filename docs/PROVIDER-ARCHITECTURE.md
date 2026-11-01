@@ -43,6 +43,45 @@ Each lane was added as its own slice. The cost is now visible:
 
 The two kinds stay separate. They have different money semantics, and merging them into one abstraction would hide the difference that matters. They share the scheduler, the registry, cost records and telemetry.
 
+## The generation gateway (owner question, 2026-11-01)
+
+The owner asked whether a layer belongs between the frontend and model calls. It does, and most of its parts already exist, spread out:
+
+- `quality_tiers`;
+- `credits_pricing`;
+- `execution_policy`;
+- the queue;
+- `InferenceBackend`.
+
+The gateway names them as one layer with one contract. The frontend and Inky talk only to it, in tiers and shots. Nothing above it names a model.
+
+| Part | Today | Gateway |
+|---|---|---|
+| Shot spec | `job.request` carries H3-specific fields (model, steps, seed, attention) | A route-neutral **shot spec**: prompt, lines with speakers, character pictures, first/last frame, audio, duration, aspect, resolution, tier. Each route compiles it itself: WanGP compiler, EveryFrame compiler (no-cut clause, `<Picture N>`, quoted lines), image compiler |
+| Checks | Spread over preflight and policy | **Hard checks** in the gateway for every job (see below) |
+| Quote and credits | `credits_pricing` by tier | Unchanged. Price depends on tier and length, never on route |
+| Queue | One DBOS queue | One queue with priority classes `interactive` / `economy`. No second queue system; vendor limits are limiters in front of the adapters |
+| Route | **Bound when the plan is created**: `execution_plan.backend/pool/configuration_id`, and a worker claims only an exact match | **Late binding**: a job carries its tier and shot spec, and `decide()` picks the route at dispatch (own fleet, hosted chain, economy chain) |
+| Execution | `InferenceBackend` per backend | Unchanged contract. Route adapters live in `providers/` |
+| Output | Per backend | One normalisation and delivery step: size, fps and duration checks, audio policy, store, one cost row per take |
+
+**Late binding is the one structural change.** Today the route is frozen into the plan. #919 had to decide "hosted or not" when the job was created, from a snapshot that is stale by dispatch time. A job instead keeps its tier and shot spec, and the scheduler binds the route when it is about to run. The worker claim then matches on the bound route, not on the plan. Credits stay with the tier, so a late route change never changes what the user pays.
+
+**Inky is beside the gateway, not in front of it.**
+
+- Inky judges and edits cards: the Jev verdict, fix-all and suggestions. It never generates.
+- A user's click goes straight to the gateway.
+- Shots Inky fixed go through the same gateway as any click, so "Inky advises, the user decides" can't be bypassed.
+
+### Two kinds of checks
+
+| | Hard checks | Jev verdict |
+|---|---|---|
+| Where | Gateway, every job, no model call | Inky, precomputed when a card is saved |
+| What | Required input missing for the mode, model limits (duration, aspect, reference count), brand/IP lint, credits | Vague action, speech without written lines, recurring person without a picture |
+| Clicked "generate" | Refuses with the reason | Read from the card's cached verdict, never computed on the click path. If flagged, one prompt: [仍然生成] [先改一下] [让 Inky 修]. Not yet computed: no prompt. "Don't ask again for this project" is allowed |
+| Economy auto-queue | Must pass | **Must pass.** Nobody clicked, so the system doesn't guess for the user |
+
 ## Shared components
 
 | Component | Today | Target |
@@ -180,7 +219,7 @@ The owner decisions of 2026-11-01 and the evidence in #918/#929 fix the hosted h
 
 ### Before any route: the material gate
 
-Jev (Inky's judgement model, #679) checks every shot **before** it becomes a job and before credits are held. The check runs for both routes, because our own v9 has the same weakness.
+Jev (Inky's judgement model, #679) checks every shot before it becomes a job, on both routes, because our own v9 has the same weakness. It is a gate for the economy auto-queue and a one-time prompt for a click (see "Two kinds of checks").
 
 | Shot | Needs |
 |---|---|
@@ -188,9 +227,7 @@ Jev (Inky's judgement model, #679) checks every shot **before** it becomes a job
 | A speaking part | Written lines in quotes, with the speaker named |
 | Otherwise | An explicit "no dialogue" |
 
-If something is missing, Inky tells the user what to add, and nothing is generated. Text-only shots invent a new person every render, and unscripted speech comes out as gibberish.
-
-Where it sits: the card/shot confirm step calls the gate. The scheduler only ever sees shots that passed it.
+If something is missing, Inky tells the user what to add. Text-only shots invent a new person every render, and unscripted speech comes out as gibberish.
 
 ### Classify the job
 
@@ -350,6 +387,10 @@ The dstack ledger modules (`dstack_capacity`, `dstack_operator`, `dstack_control
 1. **Registry.** Replace the literal provider sets with registry-derived ones. Zero behaviour change, checked by the existing tests.
 2. **Per-lane backoff.** Replace the global brake for start failures. Stuck starts are replaced on another lane.
 3. **`decide()` extraction.** Move `start_after_seconds`, `vast_share`, the lookahead and the fallback lists into the rules table. Add table-driven tests that reproduce today's decisions first.
+3b. **Late binding and the shot spec.**
+   - Plans keep tier plus shot spec, and `decide()` binds the route at dispatch.
+   - The H3-only fields move into the WanGP compiler.
+   - Existing plans keep their bound route until they finish.
 4. **Capacity interface.** Formalise `CapacityProvider` and move the serverless and Modal clients onto it. `RoutedClient` becomes a registry lookup.
 5. **Hosted offload (#918).** #919's backend core is kept: refused vs uncertain, never resubmit. Its standing slots and hard-coded model go. The sub-steps:
    - **5a.** Registry rows per hosted model; an adapter with attachments, the prompt rules, output verification and the balance read.
@@ -363,7 +404,9 @@ The dstack ledger modules (`dstack_capacity`, `dstack_operator`, `dstack_control
    - the look difference is accepted, given a reference or first frame;
    - EveryFrame models that carry traffic are chosen after a staging round through this path.
 
-   Background (auto-queue) jobs stay on our own fleet; see [STORY-AUTO-QUEUE.md](STORY-AUTO-QUEUE.md).
+   Economy (auto-queue) jobs follow [STORY-AUTO-QUEUE.md](STORY-AUTO-QUEUE.md): Vivix W1 first, then turbo, then our fleet.
+
+   Card pictures stay on Google's Nano Banana 2.1 directly. It is about $0.0336 per 1K image, and EveryFrame's resale is 7% dearer.
 6. **Production dial-out.** Then delete SSH transport.
 7. **Production on `modal-sandbox`.** After a week, delete the old Modal lane.
 
