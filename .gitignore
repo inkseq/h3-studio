@@ -16,6 +16,7 @@ inventory.json
 !.dockerignore
 !README.md
 !docs/RUNTIME-INVENTORY.md
+!docs/STORY-AUTO-QUEUE.md
 !docs/PROVIDER-ARCHITECTURE.md
 !AGENTS.md
 !docs/LIGHTSAIL.md
