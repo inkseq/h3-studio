@@ -257,8 +257,8 @@ class EveryFrameBackend:
         ):
             state = "failed"  # Succeeded without the download contract.
         cost = None
-        if state == "succeeded":
-            cost = cost_microusd(render)
+        if state in ("succeeded", "running"):
+            cost = cost_microusd(render)  # Charged when the render starts.
         elif state == "failed":
             cost = 0  # The vendor refunds a failed render to the balance.
         # Upstream error text never crosses into the Outcome.

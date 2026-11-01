@@ -218,7 +218,7 @@ The rules:
 - A job has at most one live attempt. A worker claim and a hosted submit both go through the existing attempt fence. Whoever writes the attempt first wins, and the loser does nothing.
 - If a machine becomes ready after a job was offloaded, it takes the next job. The offloaded job is never pulled back.
 - Hosted uncertainty is resolved by `reconcile` on the same attempt, never by a second submit. Machine uncertainty is resolved by `status`/`inventory`, never by a second launch.
-- A hosted attempt past its deadline is **abandoned, not forgotten**. It stops counting as the live attempt, so the job can move to the next model. It keeps being reconciled until it is terminal, because the vendor still charges if it later succeeds. A late output is stored and costed against the take, but it is never shown in place of the newer attempt.
+- A hosted attempt past its deadline closes and the job moves to the next model. The vendor has no cancel and quotes the cost when it accepts a render, so that cost is recorded on the attempt at the move, and a late output is not collected. If the render later fails and is refunded, the record overstates that one render; no reconcile keeps running for it.
 
 ## Hosted video routing (EveryFrame, #918)
 
@@ -272,10 +272,7 @@ The chain is ordered by the registry price for this exact request (mode × resol
 
 ### Fallback, deadlines and refusals
 
-- **Deadline per model:**
-  - computed as `max(p95 latency × 2, floor)` over the last 50 completed renders;
-  - starting floors: turbo 90 s, fast 120 s, Pika 180 s, Vivix 60 s;
-  - measured batches saw a vendor-side queue of about 250–290 s, so the p95 adapts upward when the vendor is busy.
+- **Deadline per model.** Fixed in the catalog for now: 300 s for turbo, fast and Pika, and 30 min for Vivix. A move pays for a second render, so a deadline must outlast the vendor's measured batch queue (about 250-290 s). Adapting it from our own latency records can come later, once there are records.
 - **Moving down the chain:** a refusal (`failed`, refunded) or a missed deadline moves the job to the **next model in its chain**. A job never retries the same model, because refusals are model-specific (#929).
 - **Retry exceptions:** two cases may retry on the same model, once:
   - a 4xx caused by our own request (validation) fails fast with a code;
@@ -331,8 +328,7 @@ So hosted absorbs cold starts and spikes. Sustained hosted volume warms our own 
                        "2k":        ["pika-h3-flex"],
                        "draft":     ["vivix-w1", "h3-max-turbo"]},
             "order": "price",
-            "deadline": {"p95_factor": 2, "window": 50,
-                         "floor_s": {"h3-max-turbo": 90, "h3-max-fast": 120, "pika-h3-flex": 180, "vivix-w1": 60}},
+            "deadline_s": {"h3-max-turbo": 300, "h3-max-fast": 300, "pika-h3-flex": 300, "vivix-w1": 1800},
             "bucket": {"renders": 40, "per_s": 900, "per_user": 10},
             "balance_usd": {"warn": 10, "reserve": 3}},
  "lanes": {"priority": ["vastai", "lium", "runpod", "cloudrift", "runpod-serverless", "modal-sandbox"],

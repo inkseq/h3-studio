@@ -7,7 +7,7 @@ import tempfile
 from types import SimpleNamespace
 import unittest
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from studio_platform.capabilities import compile_request
 from studio_platform.control import WorkerControl, WorkerSpec
@@ -20,7 +20,7 @@ from studio_platform.providers.hosted_models import (
     PROVIDER,
     RECIPES,
 )
-from studio_platform.repository import jobs
+from studio_platform.repository import attempts, jobs
 from studio_platform.scheduling.decide import (
     hosted_has_first_claim,
     hosted_offload,
@@ -325,6 +325,72 @@ class RebindLedgerTests(LedgerCase):
         row = self.run_hosted(lambda prepared, tag: "rnd_1")
         self.assertEqual(row["status"], "queued")
         self.assertEqual(row["execution_plan"]["hosted_tried"], ["h3-max-turbo"])
+        self.assertEqual(
+            self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000
+        )
+
+    def submitted_ago(self, job_id, seconds):
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(attempts)
+                .where(attempts.c.job_id == job_id)
+                .values(submission_started_at=self.now - seconds)
+            )
+
+    def test_a_render_past_its_deadline_moves_on_and_keeps_its_charge(self):
+        running = lambda tag, task: Outcome(
+            "running", task, actual_cost_microusd=38_000
+        )
+
+        created = self.queued_job()
+        with self.repo.transaction() as connection:
+            rebind(
+                self.repo, connection, self.row(created["id"]), "h3-max-turbo", self.now
+            )
+        control, worker = self.hosted_control()
+        posts = []
+        backend = SimpleNamespace(
+            kind=BACKEND,
+            enabled=True,
+            slot_key="test-slot",
+            prepare=lambda *args: object(),
+            submit=lambda prepared, tag: posts.append(tag) or "rnd_1",
+            poll=running,
+            reconcile=running,
+            close=lambda: None,
+        )
+        with tempfile.TemporaryDirectory() as work:
+            runner = WorkerRunner(
+                self.repo,
+                None,
+                Path(work),
+                backend=backend,
+                control=control,
+                retry_after_s=0,
+                submission_guard=lambda _: True,
+            )
+            runner.run_once(worker, POOL)
+            early = self.row(created["id"])
+            self.assertEqual(early["pool"], POOL)
+            self.assertNotIn("hosted_tried", early["execution_plan"])
+            # Still running just before the deadline.
+            self.submitted_ago(created["id"], TURBO.deadline_s - 1)
+            runner.run_once(worker, POOL)
+            self.assertNotIn("hosted_tried", self.row(created["id"])["execution_plan"])
+            self.submitted_ago(created["id"], TURBO.deadline_s + 1)
+            runner.run_once(worker, POOL)
+        moved = self.row(created["id"])
+        self.assertEqual(moved["status"], "queued")
+        self.assertEqual(moved["error_code"], "hosted_render_deadline")
+        self.assertEqual(moved["execution_plan"]["hosted_tried"], ["h3-max-turbo"])
+        self.assertEqual(len(posts), 1)
+        with self.repo.engine.connect() as connection:
+            charged = connection.execute(
+                select(attempts.c.actual_cost_microusd).where(
+                    attempts.c.job_id == created["id"]
+                )
+            ).scalar_one()
+        self.assertEqual(charged, 38_000)
         self.assertEqual(
             self.repo.get_budget("owner-budget")["reserved_microusd"], 100_000
         )

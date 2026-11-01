@@ -40,7 +40,9 @@ class HostedModel:
     no_cut: bool
     # USD per 5 s by (resolution, plain|references); orders chains only.
     price_5s: dict
-    deadline_floor_s: int
+    # A move pays for a second render, so this outlasts the vendor's measured
+    # batch queue (about 250-290 s, #929). Vivix waits for its shared queue.
+    deadline_s: int
     max_prompt: int = 50_000
     # Vivix ignores the requested size and always renders 1264x720.
     vendor_resolution: str | None = None
@@ -69,7 +71,7 @@ MODELS = {
                 ("768P", "plain"): 0.06,
                 ("1080P", "plain"): 0.12,
             },
-            90,
+            300,
         ),
         HostedModel(
             "pika-h3-flex",
@@ -90,7 +92,7 @@ MODELS = {
                 ("768P", "references"): 0.354,
                 ("1080P", "references"): 0.558,
             },
-            180,
+            300,
             max_prompt=8000,
         ),
         HostedModel(
@@ -111,7 +113,7 @@ MODELS = {
                 ("768P", "references"): 0.24,
                 ("1080P", "references"): 0.48,
             },
-            120,
+            300,
         ),
         HostedModel(
             # Economy only: one render at a time across all vendor customers,
@@ -131,7 +133,7 @@ MODELS = {
                 for resolution in ("480P", "768P")
                 for kind in ("plain", "references")
             },
-            60,
+            1800,
             vendor_resolution="720p",
             concurrency=1,
         ),
