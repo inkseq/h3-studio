@@ -31,7 +31,7 @@ Each lane was added as its own slice. The cost is now visible:
                  (WanGP on a GPU we rent; worker pulls jobs)      (vendor runs the render; we submit once)
                                 │                                               │
                  capacity providers (one interface)               hosted backends (InferenceBackend)
-                 dstack: Vast · RunPod pods · Lium · CloudRift    EveryFrame · RunPod enhance · Boyesir · later fal/…
+                 dstack: Vast · RunPod pods · Lium · CloudRift    EveryFrame · RunPod enhance · later fal/…
                  RunPod Serverless · Modal sandbox
                                 │
                  worker link (shared): boot exchange · chisel dial-out · boot status · model cache
@@ -384,7 +384,7 @@ studio_platform/providers/
     dstack_lanes.py      # vastai · runpod · lium · cloudrift through dstack
     runpod_serverless.py
     modal_sandbox.py     # today's modal_dialout
-    everyframe.py · runpod_enhance.py · boyesir.py
+    everyframe.py · runpod_enhance.py
 studio_platform/scheduling/
     snapshot.py          # read-only state build
     decide.py            # pure rules → decisions
