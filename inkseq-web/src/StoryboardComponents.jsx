@@ -2463,19 +2463,9 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               <HelpTip text={tr('storyboard.keepAudioHelp')} />
             </label>
           </div>
-          {/* Seed lock and takes sit on one line right above Generate (owner, 2026-10-26). */}
+          {/* Takes sit right above Generate (owner, 2026-10-26). Seeds are not a
+              creator choice (owner, 2026-11-01); the API keeps them. */}
           <div className="row ed-gen-options">
-            {shot.versions.length > 0 && (
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={shot.seedLock}
-                  onChange={(e) => upd({ seedLock: e.target.checked })}
-                />
-                {tr('storyboard.seedLock')}
-                <HelpTip text={tr('storyboard.seedLockHelp')} />
-              </label>
-            )}
             <WorkbenchCopies value={copies} onChange={setCopies} max={state.copiesMax} />
           </div>
           {/* Advice right above Generate, always visible (h3-studio#739). */}
