@@ -175,6 +175,35 @@ class FallbackBackendTests(LedgerCase):
             intent = connection.execute(select(instance_intents)).mappings().one()
         self.assertEqual(intent["provider"], "lium")
 
+    def test_a_cooling_primary_lane_is_skipped_for_its_fallback(self):
+        from unittest.mock import patch
+
+        self.stock["runpod"] = self.stock.get("lium", [])
+        service = self.operator(fallback_backends=["lium"])
+        with patch(
+            "studio_platform.scheduling.health.cooling_backends",
+            return_value={"vastai": 10**12},
+        ):
+            preview = service.preview(
+                self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+            )
+        self.assertEqual(self.planned, ["lium"])
+        self.assertEqual({row["backend"] for row in preview["offers"]}, {"lium"})
+
+    def test_every_lane_cooling_refuses_without_planning(self):
+        from unittest.mock import patch
+
+        service = self.operator(fallback_backends=["lium"])
+        with (
+            patch(
+                "studio_platform.scheduling.health.cooling_backends",
+                return_value={"vastai": 10**12, "lium": 10**12},
+            ),
+            self.assertRaisesRegex(OperatorError, "dstack_lane_backoff"),
+        ):
+            service.preview(self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900})
+        self.assertEqual(self.planned, [])
+
     def test_vast_offers_rejected_by_host_policy_fall_through_to_lium(self):
         vast = self.client.__class__.plan(self.client, {})["job_plans"][0]["offers"]
         self.stock["vastai"] = vast

@@ -431,6 +431,10 @@ inventory.json
 !studio_platform/inference/wangp_factory.py
 !studio_platform/runtime_hosts/
 !studio_platform/runtime_hosts/__init__.py
+!studio_platform/scheduling/
+!studio_platform/scheduling/__init__.py
+!studio_platform/scheduling/health.py
+!tests/test_lane_backoff.py
 !studio_platform/providers/
 !studio_platform/providers/__init__.py
 !studio_platform/providers/registry.py

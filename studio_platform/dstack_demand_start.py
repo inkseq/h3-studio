@@ -583,6 +583,8 @@ def _reason(error):
         return 'authority_unavailable'
     if 'changed' in code or 'expired' in code:
         return 'policy_changed'
+    if code == 'dstack_lane_backoff':
+        return 'backoff'
     return (
         'backoff' if isinstance(error, DstackReadRateLimited) else 'offer_unavailable'
     )
