@@ -313,11 +313,15 @@ def _claim(service):
         from .scheduling.decide import Rules, dstack_work
 
         rules = Rules.from_modal_first(getattr(service, 'modal_first', None))
-        from .scheduling.rebind import offload
+        from .scheduling.rebind import hold_for_hosted, offload
 
-        queued = offload(
-            service, connection, eligible_jobs(service, connection, now), now
-        )
+        queued = [
+            item
+            for item in offload(
+                service, connection, eligible_jobs(service, connection, now), now
+            )
+            if not hold_for_hosted(service.settings, item[0], now)
+        ]
         work = dstack_work(
             queued,
             modal_covered_jobs(connection, now),

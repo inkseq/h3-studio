@@ -193,6 +193,29 @@ class BackendTests(unittest.TestCase):
             EveryFrameBackend(Store(), "/unused", slot_key="dbos-1").slot_key, "dbos-1"
         )
 
+    def test_a_redirect_is_not_followed_and_the_key_stays_on_the_api_origin(self):
+        backend = self.backend(
+            [(302, {}), (200, {"render": {"id": "should-not-be-reached"}})]
+        )
+        original = backend._transport.handler
+
+        def redirected(request):
+            response = original(request)
+            if response.status_code == 302:
+                response.headers["Location"] = "https://elsewhere.example/steal"
+            return response
+
+        backend._transport.handler = redirected
+        status, _ = backend._call("GET", "/key")
+        self.assertEqual(status, 302)
+        self.assertEqual(len(self.requests), 1)
+        self.assertEqual(self.requests[0].url.host, "api.everyframe.studio")
+
+    def test_an_oversized_answer_is_refused_while_reading(self):
+        backend = self.backend([(200, b"x" * (2 * 1024**2))])
+        with self.assertRaises(BackendError):
+            backend._call("GET", "/key")
+
     def test_config_holds_only_the_key_and_never_shows_it(self):
         for value, valid in (
             ({"api_key": "k"}, True),

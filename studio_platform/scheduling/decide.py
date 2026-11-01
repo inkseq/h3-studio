@@ -91,3 +91,18 @@ def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
         total += 1
         owners[job["owner_id"]] = owners.get(job["owner_id"], 0) + 1
     return chosen
+
+
+# How long past its wait limit a job may still go hosted before machines start.
+HOSTED_GRACE_SECONDS = 30
+
+
+def hosted_has_first_claim(job, tier, enabled_tiers, now):
+    """True while the hosted API may still take this job, so no machine starts."""
+    limit = WAIT_LIMITS.get(tier)
+    return (
+        tier in enabled_tiers
+        and limit is not None
+        and "hosted_tried" not in job["execution_plan"]
+        and now - job["created_at"] < limit + HOSTED_GRACE_SECONDS
+    )
