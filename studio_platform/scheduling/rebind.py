@@ -136,11 +136,12 @@ def used_in_window(connection, tenant, now):
     return used
 
 
+BALANCE_READ_SECONDS = 4 * 3600
 _balance = {"usd": None, "read_at": None}
 
 
 def refresh_balance(settings, now, *, reader=None):
-    """Read the vendor balance at most every 5 min, outside any transaction.
+    """Read the vendor balance every 4 h (owner 2026-11-01), outside any transaction.
 
     An unknown balance leaves hosted open: a refusal costs nothing and the job
     falls back to our machines. The value is never logged.
@@ -148,7 +149,7 @@ def refresh_balance(settings, now, *, reader=None):
     if not getattr(settings, "everyframe_enabled", False):
         return None
     read_at = _balance["read_at"]
-    if read_at is not None and now - read_at < 300:
+    if read_at is not None and now - read_at < BALANCE_READ_SECONDS:
         return _balance["usd"]
     _balance["read_at"] = now
     try:
