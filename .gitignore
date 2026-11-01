@@ -225,7 +225,6 @@ inventory.json
 !studio_platform/lium_provider.py
 !studio_platform/capacity.py
 !studio_platform/capacity_cli.py
-!studio_platform/boyesir_backend.py
 !docs/WORKER-CLI.zh-CN.md
 !docs/QUEUE-CONTRACT.md
 !docs/WORKER-CONTRACT.md
@@ -248,7 +247,6 @@ inventory.json
 !docs/LIUM-PROVIDER-CONTRACT.md
 !docs/COLD-START-CONTRACT.zh-CN.md
 !docs/API-PROVIDER-COMPATIBILITY.zh-CN.md
-!docs/BOYESIR-ADAPTER-CONTRACT.zh-CN.md
 !docs/HIPPIUS-STORAGE-REVIEW.zh-CN.md
 !docs/LAUNCH-SCALE-NOVEL-PLAN.zh-CN.md
 !docs/VIDEO-API-V1-DRAFT.zh-CN.md
