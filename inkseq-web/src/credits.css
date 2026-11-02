@@ -225,7 +225,17 @@
   }
 }
 
-/* Hosted sign-in (#305): one clear button below the username and password form. */
+/* The password sign-in is the main button; hosted sign-in sits below it (#305). */
+.login-submit {
+  width: 100%;
+  justify-content: center;
+  height: 46px;
+  min-height: 46px;
+  margin-top: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 12px;
+}
 .hosted-sign-in {
   display: flex;
   flex-direction: column;

@@ -82,7 +82,8 @@ export function Login({ onClose, onDone, title, lead }) {
           )}
           <Button
             type="submit"
-            className="qc-primary"
+            variant="primary"
+            className="qc-primary login-submit"
             disabled={c.busy || !c.auth || c.auth.auth_ready === false}
           >
             {t('workspace.copy5')}

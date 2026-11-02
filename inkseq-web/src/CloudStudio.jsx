@@ -101,6 +101,7 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
             <Button
               variant="primary"
               type="submit"
+              className="login-submit"
               disabled={c.busy || c.auth.auth_ready === false}
             >
               {t('account.copy79')}
