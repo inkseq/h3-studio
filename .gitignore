@@ -1090,6 +1090,7 @@ inventory.json
 !tests/test_shot_readiness.py
 !tests/test_hosted_e2e.py
 !tests/test_everyframe_credentials.py
+!tests/test_local_slot_registration.py
 !tests/cassettes/
 !tests/cassettes/everyframe_render.yaml
 !tests/cassettes/everyframe_refused.yaml

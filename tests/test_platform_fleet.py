@@ -7,7 +7,8 @@ import json
 import os
 from pathlib import Path
 import signal
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from studio_platform.control import WorkerSpec
 from studio_platform.fleet import (
@@ -15,6 +16,7 @@ from studio_platform.fleet import (
     SlotConfig,
     read_config,
     run_slot,
+    slot_runner,
 )
 from studio_platform.repository import BudgetExceeded, Conflict
 from studio_platform.settings import Settings
@@ -338,3 +340,171 @@ class FleetTests(LedgerCase):
     def test_continuous_execution_is_retired_before_loading_a_slot(self):
         with self.assertRaisesRegex(ValueError, 'dbos_required'):
             run_slot(None, 'unused', None, once=False)
+
+    def test_default_adapter_constructors_keep_arguments_stores_and_slot_identity(self):
+        cpu = self.cpu_slot()
+        enhance = replace(
+            cpu,
+            spec=WorkerSpec(
+                "enhance",
+                "enhance",
+                "runpod",
+                "enhance",
+                (),
+                ("enhance-v1",),
+                "open-h3-regenerate-2k",
+                "runpod-enhance-v1",
+                "runpod-enhance",
+            ),
+        )
+        hosted = replace(
+            cpu,
+            spec=WorkerSpec(
+                "hosted",
+                "everyframe",
+                "everyframe",
+                "hosted",
+                (),
+                ("h3-base-fl2va-v1", "h3-base-ref2va-v1"),
+                "h3-max-turbo",
+                "everyframe-h3-max-turbo-v1",
+                "everyframe-render",
+            ),
+        )
+        comfy = replace(self.real_slot(), confirmed_idle=True)
+        wangp = replace(
+            comfy,
+            spec=replace(
+                comfy.spec, backend="wangp-worker", engine_manifest_digest="a" * 64
+            ),
+            comfy_revision="",
+            runtime_config_file=str(self.directory / "runtime.json"),
+        )
+        for slot, target in (
+            (self.mock_slot(), "studio_platform.fleet.MockBackend"),
+            (cpu, "studio_platform.render_backend.CPURenderBackend"),
+            (enhance, "studio_platform.enhance_backend.create"),
+            (hosted, "studio_platform.providers.everyframe.create"),
+            (comfy, "studio_platform.fleet.ComfyBackend"),
+            (wangp, "studio_platform.inference.wangp_factory.create_backend"),
+        ):
+            with self.subTest(backend=slot.spec.backend):
+                settings = Settings(
+                    Path(self.temp.name),
+                    execution_backend=slot.spec.backend
+                    if slot is comfy or slot is wangp
+                    else "mock",
+                    generation_enabled=True,
+                    render_enabled=True,
+                    enhance_enabled=True,
+                    everyframe_enabled=True,
+                )
+                backend = SimpleNamespace(
+                    kind=slot.spec.backend,
+                    enabled=True,
+                    slot_key="constructor-owned-key",
+                    close=Mock(),
+                    is_idle=Mock(return_value=True),
+                    manifest=SimpleNamespace(digest="a" * 64),
+                )
+                control = Mock()
+                control.register.return_value = dict(
+                    current_job_id=None,
+                    state="ready",
+                    expires_at=self.now + 120,
+                    drain_requested=False,
+                )
+                stores = [object(), object()]
+                store_factory = Mock(side_effect=stores)
+                runner_factory = Mock()
+                directory = self.directory / slot.spec.worker_id
+                with (
+                    patch(target, return_value=backend) as constructor,
+                    patch("studio_platform.fleet.WorkerControl", return_value=control),
+                ):
+                    with slot_runner(
+                        self.config(slot),
+                        slot.spec.worker_id,
+                        settings,
+                        repository=self.repo,
+                        store_factory=store_factory,
+                        runner_factory=runner_factory,
+                    ):
+                        self.assertEqual(backend.slot_key, "constructor-owned-key")
+                    if slot is enhance or slot is hosted:
+                        constructor.assert_called_once_with(
+                            stores[0], settings, slot_key=slot.spec.worker_id
+                        )
+                        self.assertEqual(store_factory.call_count, 2)
+                        self.assertIs(runner_factory.call_args.args[1], stores[1])
+                    else:
+                        self.assertEqual(store_factory.call_count, 1)
+                        self.assertIs(runner_factory.call_args.args[1], stores[0])
+                        if slot is comfy:
+                            constructor.assert_called_once_with(
+                                endpoint=slot.endpoint,
+                                enabled=True,
+                                allowed_origins=slot.allowed_origins,
+                                comfy_revision=slot.comfy_revision,
+                            )
+                        elif slot is wangp:
+                            constructor.assert_called_once_with(slot, directory)
+                        else:
+                            constructor.assert_called_once_with(
+                                directory / ("render" if slot is cpu else "simulation"),
+                                enabled=True,
+                            )
+                backend.close.assert_called_once_with()
+
+    def test_constructor_failure_preserves_original_registration_without_runner(self):
+        from studio_platform.control import WorkerControl
+
+        slot = self.cpu_slot()
+        settings = Settings(Path(self.temp.name), render_enabled=True)
+        runner = Mock()
+        with (
+            patch(
+                "studio_platform.render_backend.CPURenderBackend",
+                side_effect=ValueError("constructor-failed"),
+            ),
+            self.assertRaisesRegex(ValueError, "constructor-failed"),
+        ):
+            with slot_runner(
+                self.config(slot),
+                slot.spec.worker_id,
+                settings,
+                repository=self.repo,
+                runner_factory=runner,
+            ):
+                self.fail("constructor failure must propagate")
+        self.assertEqual(
+            WorkerControl(self.repo).get(slot.spec.worker_id)["state"], "registered"
+        )
+        runner.assert_not_called()
+
+    def test_injected_factory_still_obeys_gate_and_identity_cleanup(self):
+        slot = self.cpu_slot()
+        factory = Mock(
+            return_value=SimpleNamespace(kind="mock", enabled=True, close=Mock())
+        )
+        runner, store = Mock(), Mock()
+        for enabled, code in (
+            (False, "explicit_service_settings"),
+            (True, "identity_mismatch"),
+        ):
+            settings = Settings(Path(self.temp.name), render_enabled=enabled)
+            with self.assertRaisesRegex(ValueError, code):
+                with slot_runner(
+                    self.config(slot),
+                    slot.spec.worker_id,
+                    settings,
+                    repository=self.repo,
+                    backend_factory=factory,
+                    runner_factory=runner,
+                    store_factory=store,
+                ):
+                    self.fail("invalid adapter must not create a runner")
+            self.assertEqual(factory.call_count, int(enabled))
+        factory.return_value.close.assert_called_once_with()
+        runner.assert_not_called()
+        store.assert_not_called()

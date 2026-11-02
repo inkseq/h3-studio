@@ -22,7 +22,12 @@ from sqlalchemy import select
 from . import workflow_status
 from .repository import Conflict, Scope, identifier, jobs
 from .domain_turns import DomainTurns
-from .providers.registry import CPU_RENDER, LOCAL_BACKENDS
+from .providers.registry import (
+    CPU_RENDER,
+    EVERYFRAME_RENDER,
+    LOCAL_BACKENDS,
+    RUNPOD_ENHANCE,
+)
 from .workflow_schema import (
     INKSEQ_WORKFLOW_SCHEMA as SCHEMA,  # noqa: F401 -- public workflow-schema compatibility export
     WORKFLOW_APPLICATION_NAME as APPLICATION,
@@ -288,6 +293,71 @@ class _Slot:
     lock: object
 
 
+def _local_spec(backend, worker, pool, recipes, model, configuration):
+    from .control import WorkerSpec
+
+    return WorkerSpec(
+        worker,
+        pool,
+        backend.provider,
+        worker,
+        (),
+        recipes,
+        model,
+        configuration,
+        backend.id,
+    )
+
+
+def _render_specs():
+    from .render_plans import POOL, MODEL, RECIPE, CONFIGURATIONS
+
+    for configuration in sorted(set(CONFIGURATIONS.values())):
+        yield _local_spec(
+            CPU_RENDER, "dbos-" + configuration, POOL, (RECIPE,), MODEL, configuration
+        )
+
+
+def _enhance_specs():
+    from . import enhance_plans as plan
+
+    for index in range(plan.SLOTS):
+        # The first keeps its original name, so its row carries over.
+        worker = "dbos-" + plan.CONFIGURATION + (f"-{index}" if index else "")
+        yield _local_spec(
+            RUNPOD_ENHANCE,
+            worker,
+            plan.POOL,
+            (plan.RECIPE,),
+            plan.MODEL,
+            plan.CONFIGURATION,
+        )
+
+
+def _everyframe_specs():
+    from .providers import hosted_models as plan
+
+    for model in plan.MODELS.values():
+        for index in range(model.concurrency or plan.SLOTS_PER_MODEL):
+            yield _local_spec(
+                EVERYFRAME_RENDER,
+                f"dbos-{model.configuration_id}-{index}",
+                plan.POOL,
+                plan.RECIPES,
+                model.id,
+                model.configuration_id,
+            )
+
+
+# Ordered local capabilities only; native capacity still arrives through ensure.
+# Render is required; optional families retain their own failure event and switch.
+LOCAL_SLOT_FAMILIES = (
+    (CPU_RENDER, _render_specs, None),
+    (RUNPOD_ENHANCE, _enhance_specs, "dbos_enhance_slot_unavailable"),
+    (EVERYFRAME_RENDER, _everyframe_specs, "dbos_everyframe_slot_unavailable"),
+)
+
+
 class DurableSlots:
     """In-process adapter registry, not a scheduler or a reconciliation service.
 
@@ -328,90 +398,29 @@ class DurableSlots:
                             slot.spec.worker_id, worker["fence"], lease_seconds=3600
                         )
 
-    def add_render_slots(self):
-        """Original bounded CPU renderer capabilities; no extra service/queue."""
-        if not self.settings.render_enabled:
-            return
-        from .control import WorkerSpec
-        from .fleet import SlotConfig
-        from .render_plans import POOL, MODEL, RECIPE, CONFIGURATIONS
-
-        for configuration in sorted(set(CONFIGURATIONS.values())):
-            worker = "dbos-" + configuration
-            spec = WorkerSpec(
-                worker,
-                POOL,
-                "local-cpu",
-                worker,
-                (),
-                (RECIPE,),
-                MODEL,
-                configuration,
-                CPU_RENDER.id,
+    def add_local_slots(self):
+        """Register enabled local families without changing their failure boundaries."""
+        for backend, specs, unavailable in LOCAL_SLOT_FAMILIES:
+            enabled = (
+                getattr(self.settings, backend.service_switch)
+                if unavailable is None
+                else getattr(self.settings, backend.service_switch, False)
             )
-            self.ensure(worker, SlotConfig(spec, enabled=True))
-        self.heartbeat_cpu()
+            if not enabled:
+                continue
+            from .fleet import SlotConfig
 
-    def add_enhance_slot(self):
-        """CPU slots that submit enhance jobs to RunPod Serverless (#795)."""
-        if not getattr(self.settings, "enhance_enabled", False):
-            return
-        from .control import WorkerSpec
-        from .fleet import SlotConfig
-        from . import enhance_plans as plan
-
-        for index in range(plan.SLOTS):
-            # The first keeps its original name, so its row carries over.
-            worker = "dbos-" + plan.CONFIGURATION + (f"-{index}" if index else "")
-            spec = WorkerSpec(
-                worker,
-                plan.POOL,
-                "runpod",
-                worker,
-                (),
-                (plan.RECIPE,),
-                plan.MODEL,
-                plan.CONFIGURATION,
-                plan.BACKEND,
-            )
-            try:
-                self.ensure(worker, SlotConfig(spec, enabled=True))
-            except Exception:
-                # Optional: enhance stays unavailable (its plans read "not ready")
-                # and the controller keeps running everything else.
-                print("dbos_enhance_slot_unavailable", flush=True)
-                return
-        self.heartbeat_cpu()
-
-    def add_everyframe_slots(self):
-        """CPU slots that submit rebound takes to the hosted API (#918)."""
-        if not getattr(self.settings, "everyframe_enabled", False):
-            return
-        from .control import WorkerSpec
-        from .fleet import SlotConfig
-        from .providers import hosted_models as plan
-
-        for model in plan.MODELS.values():
-            for index in range(model.concurrency or plan.SLOTS_PER_MODEL):
-                worker = f"dbos-{model.configuration_id}-{index}"
-                spec = WorkerSpec(
-                    worker,
-                    plan.POOL,
-                    plan.PROVIDER,
-                    worker,
-                    (),
-                    plan.RECIPES,
-                    model.id,
-                    model.configuration_id,
-                    plan.BACKEND,
-                )
+            for spec in specs():
                 try:
-                    self.ensure(worker, SlotConfig(spec, enabled=True))
-                except Exception:
-                    # Optional: cold jobs keep waiting for our own machines.
-                    print("dbos_everyframe_slot_unavailable", flush=True)
-                    return
-        self.heartbeat_cpu()
+                    self.ensure(spec.worker_id, SlotConfig(spec, enabled=True))
+                except Exception as exc:
+                    if unavailable is None:
+                        raise
+                    # Keep prior registrations and continue the next family.
+                    print(unavailable, "error_type=" + type(exc).__name__, flush=True)
+                    break
+            else:
+                self.heartbeat_cpu()
 
     @contextmanager
     def _cpu_fence(self):
@@ -663,9 +672,7 @@ class DurableExecutor:
         self.slots.__enter__()
         try:
             configure_producer(self.repo)
-            self.slots.add_render_slots()
-            self.slots.add_enhance_slot()
-            self.slots.add_everyframe_slots()
+            self.slots.add_local_slots()
             # The configured environment is stable across ordinary releases.
             environment = (
                 "staging"

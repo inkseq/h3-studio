@@ -330,6 +330,58 @@ def _require_service_backend(slot, settings):
         raise ValueError("fleet_backend_does_not_match_explicit_service_settings")
 
 
+def _mock_adapter(slot, directory, settings, store_factory):
+    return MockBackend(directory / "simulation", enabled=True)
+
+
+def _render_adapter(slot, directory, settings, store_factory):
+    from .render_backend import CPURenderBackend
+
+    return CPURenderBackend(directory / "render", enabled=True)
+
+
+def _enhance_adapter(slot, directory, settings, store_factory):
+    from . import enhance_backend
+
+    return enhance_backend.create(
+        store_factory(settings), settings, slot_key=slot.spec.worker_id
+    )
+
+
+def _everyframe_adapter(slot, directory, settings, store_factory):
+    from .providers import everyframe
+
+    return everyframe.create(
+        store_factory(settings), settings, slot_key=slot.spec.worker_id
+    )
+
+
+def _comfy_adapter(slot, directory, settings, store_factory):
+    return ComfyBackend(
+        endpoint=slot.endpoint,
+        enabled=True,
+        allowed_origins=slot.allowed_origins,
+        comfy_revision=slot.comfy_revision,
+    )
+
+
+def _wangp_adapter(slot, directory, settings, store_factory):
+    # Protected fixed loader; never import a user-supplied factory.
+    from .inference.wangp_factory import create_backend
+
+    return create_backend(slot, directory)
+
+
+ADAPTER_FACTORIES = {
+    MOCK.id: _mock_adapter,
+    CPU_RENDER.id: _render_adapter,
+    RUNPOD_ENHANCE.id: _enhance_adapter,
+    EVERYFRAME_RENDER.id: _everyframe_adapter,
+    COMFY_WORKER.id: _comfy_adapter,
+    WANGP_WORKER.id: _wangp_adapter,
+}
+
+
 @contextmanager
 def slot_runner(
     config,
@@ -370,37 +422,10 @@ def slot_runner(
         directory = config.work_dir / worker_id
         if backend_factory:
             backend = backend_factory(slot, directory)
-        elif slot.spec.backend == MOCK.id:
-            backend = MockBackend(directory / "simulation", enabled=True)
-        elif slot.spec.backend == CPU_RENDER.id:
-            from .render_backend import CPURenderBackend
-
-            backend = CPURenderBackend(directory / "render", enabled=True)
-        elif slot.spec.backend == RUNPOD_ENHANCE.id:
-            from . import enhance_backend
-
-            backend = enhance_backend.create(
-                store_factory(settings), settings, slot_key=slot.spec.worker_id
-            )
-        elif slot.spec.backend == EVERYFRAME_RENDER.id:
-            from .providers import everyframe
-
-            backend = everyframe.create(
-                store_factory(settings), settings, slot_key=slot.spec.worker_id
-            )
-        elif slot.spec.backend == COMFY_WORKER.id:
-            backend = ComfyBackend(
-                endpoint=slot.endpoint,
-                enabled=True,
-                allowed_origins=slot.allowed_origins,
-                comfy_revision=slot.comfy_revision,
-            )
         else:
-            # Fixed, protected configuration loader; never import a user-supplied
-            # factory or route an unconfigured new engine through Comfy.
-            from .inference.wangp_factory import create_backend
-
-            backend = create_backend(slot, directory)
+            backend = ADAPTER_FACTORIES[slot.spec.backend](
+                slot, directory, settings, store_factory
+            )
         if (
             getattr(backend, "kind", None) != slot.spec.backend
             or getattr(backend, "enabled", None) is not True
