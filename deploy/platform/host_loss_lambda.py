@@ -90,17 +90,31 @@ def run(
             results[instance_id] = stop(key, instance_id)
         except Exception as error:
             results[instance_id] = type(error).__name__
+    # A timeout may still have stopped the machine, so anything but a 2xx is unconfirmed.
+    unconfirmed = sorted(
+        instance_id
+        for instance_id, result in results.items()
+        if not (type(result) is int and 200 <= result < 300)
+    )
     summary = {
-        "state": "stopped",
+        "state": "stop_unconfirmed" if unconfirmed else "stopped",
         "list_updated_at": listed.get("updated_at"),
         "results": results,
+        "unconfirmed": unconfirmed,
     }
     if TOPIC:
         sns.publish(
             TopicArn=TOPIC,
-            Subject="Inkseq host lost: paid GPUs stopped",
+            Subject=(
+                "Inkseq host lost: GPU stop NOT confirmed, check the provider"
+                if unconfirmed
+                else "Inkseq host lost: paid GPUs stopped"
+            ),
             Message=json.dumps(summary, sort_keys=True),
         )
+    if unconfirmed:
+        # Lambda retries a failed async event; stopping a stopped machine changes nothing.
+        raise RuntimeError("host_loss_stop_unconfirmed " + ",".join(unconfirmed))
     return summary
 
 
