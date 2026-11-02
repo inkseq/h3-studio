@@ -1,0 +1,9 @@
+.report-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.report-page {
+  overflow-wrap: anywhere;
+}

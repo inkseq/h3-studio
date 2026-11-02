@@ -15,6 +15,7 @@ import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from 
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Clapperboard, Eye, EyeOff, Gauge, Unlink, Volume2, VolumeX, X } from 'lucide-react';
+import ReportProblem from './ReportProblem.jsx';
 import { store } from './store.js';
 import { useStoryboardMediaUrl } from './StoryboardMedia.jsx';
 import { cutFps } from './video-cut-model.js';
@@ -518,6 +519,7 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
           <Clapperboard size={14} />
           {t('film.open')}
         </Button>
+        <ReportProblem account={s.workspace?.mode === 'cloud' ? s.workspace.account : ''} />
         <Button
           variant="ghost"
           className="round"

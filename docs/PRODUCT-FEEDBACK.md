@@ -5,6 +5,22 @@ authentication and configured Sentry destination. No schema migration, analytics
 vendor, worker, retry queue, new credential or infrastructure. This is a contract,
 not deployment evidence. Claude owns settings UI, acceptance and promotion.
 
+## Reports from the site
+
+The report form in the app posts `source: "web"`: categories page, generation,
+payment, account, other; summary up to 4000 characters, newlines allowed; `page`
+(path and view only) and `client` (browser and screen size). Links and emails are
+allowed in the text, credentials are refused. Browser sessions only.
+
+These reports go by email, not to Sentry: one SES message to the recipient in
+`runtime-secrets/feedback-mail.json`, replying to the account's email. Forwarding
+is sent, unknown (kept here, mail failed) or disabled (no config). A story or shot
+that is not on the server yet is dropped from the report rather than refusing it.
+
+The key belongs to the IAM user `inkseq-feedback-mail`, whose policy allows only
+`ses:SendEmail` from `feedback@inkseq.com` to `support@inkseq.com`. SES is still in
+sandbox, which is enough because both sides are on the verified inkseq.com domain.
+
 ## Submit and recover
 
 `POST /v1/feedback` needs a browser session or PAT `projects:read`, and a saved
