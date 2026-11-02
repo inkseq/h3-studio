@@ -4,6 +4,8 @@
   gap: 8px;
   margin-top: 12px;
 }
-.report-page {
+.report-note {
+  display: block;
+  margin-top: 6px;
   overflow-wrap: anywhere;
 }
