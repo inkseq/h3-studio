@@ -1,6 +1,13 @@
 """Additive take metadata and explicit recipe transfer on original authorities."""
 
 from __future__ import annotations
+
+from .quick_chat_state import (
+    QuickChatError,
+    fields,
+    key_check,
+    objects,
+)
 import base64
 import copy
 import hashlib
@@ -57,7 +64,6 @@ class QuickChatTakesMixin:
         }
 
     def set_preferences(self, principal, body, key):
-        from .quick_chat import fields, QuickChatError
 
         fields(body, {"expected_version", *PREFERENCE_DEFAULTS}, {"expected_version"})
         if not principal.allows("__preferences", "projects:write"):
@@ -80,7 +86,6 @@ class QuickChatTakesMixin:
         with self.repo.transaction() as conn:
             owner_reference_gate(conn, self.tenant, principal.owner)
             # Reuse original owner documents for preferences and replay receipts.
-            from .quick_chat import key_check
 
             key_check(key)
             receipt_id = request_hash({"key": key})
@@ -146,7 +151,6 @@ class QuickChatTakesMixin:
             return response
 
     def _copies_allowed(self, principal, copies, conn):
-        from .quick_chat import QuickChatError
 
         if copies > self.preferences(principal, conn=conn)["copies_max"]:
             raise QuickChatError(
@@ -156,7 +160,6 @@ class QuickChatTakesMixin:
             )
 
     def _take(self, conn, principal, session_id, item_id):
-        from .quick_chat import objects
 
         if not isinstance(item_id, str):
             raise NotFound("take_not_found")
@@ -245,7 +248,6 @@ class QuickChatTakesMixin:
         }
 
     def _takes_page(self, principal, session_id, card_id, *, limit, before_cursor):
-        from .quick_chat import objects, QuickChatError
 
         self._access(principal, session_id, "projects:read", "jobs:read")
         if type(limit) is not int or not 1 <= limit <= 100:
@@ -449,7 +451,6 @@ class QuickChatTakesMixin:
             }
 
     def star_take(self, principal, session_id, item_id, body, key):
-        from .quick_chat import objects, fields, QuickChatError
 
         fields(body, {"expected_version", "starred", "title"}, {"expected_version"})
         if (
@@ -523,7 +524,6 @@ class QuickChatTakesMixin:
             return response
 
     def again(self, principal, session_id, card_id, body, key):
-        from .quick_chat import fields, QuickChatError
 
         fields(
             body,
@@ -643,7 +643,6 @@ class QuickChatTakesMixin:
         return dict(row)
 
     def transfer_take(self, principal, session_id, item_id, body, key):
-        from .quick_chat import fields, QuickChatError
         from .generation_draft import input_entries
 
         fields(

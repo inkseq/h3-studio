@@ -525,6 +525,76 @@ class BackupTests(unittest.TestCase):
             backup_local(self.database, self.store.root, source)
         self.assertEqual(verify_local(source)["kind"], "sixnine-local-business-backup")
 
+    def test_export_failure_keeps_private_partial_without_reusing_it(self):
+        from studio_platform import backup
+
+        original = backup._export_business_db
+        destination = self.root / "failed-export"
+        job = self.repo.get_job(self.scope, self.job["id"])
+        calls = []
+
+        def fail_after_export(snapshot, output):
+            calls.append(output)
+            original(snapshot, output)
+            raise RuntimeError("synthetic-private-export-details")
+
+        with (
+            mock.patch.object(
+                backup, "_export_business_db", side_effect=fail_after_export
+            ),
+            self.assertLogs("studio_platform.backup", level="WARNING") as logs,
+        ):
+            with self.assertRaisesRegex(
+                BackupError, "^backup_failed_incomplete_directory_kept$"
+            ):
+                backup_local(self.database, self.store.root, destination)
+            with self.assertRaisesRegex(BackupError, "backup_target_must_be_a_new"):
+                backup_local(self.database, self.store.root, destination)
+        self.assertEqual(
+            logs.output,
+            ["WARNING:studio_platform.backup:backup_failed_incomplete_directory_kept"],
+        )
+        self.assertEqual(calls, [destination / "database.sqlite3"])
+        self.assertTrue((destination / "database.sqlite3").is_file())
+        self.assertFalse((destination / "manifest.json").exists())
+        self.assertEqual(self.repo.get_job(self.scope, self.job["id"]), job)
+        self.assertEqual(
+            self.assets.get("superdan", self.asset["id"])["id"], self.asset["id"]
+        )
+
+    def test_last_manifest_write_failure_retains_verified_media_without_success(self):
+        destination = self.root / "failed-publication"
+        original = Path.open
+        attempts = []
+
+        def fail_manifest(path, *args, **kwargs):
+            if path == destination / "manifest.json":
+                attempts.append(path)
+                raise OSError("synthetic-private-publication-details")
+            return original(path, *args, **kwargs)
+
+        with (
+            mock.patch.object(Path, "open", fail_manifest),
+            self.assertLogs("studio_platform.backup", level="WARNING") as logs,
+        ):
+            with self.assertRaisesRegex(
+                BackupError, "^backup_failed_incomplete_directory_kept$"
+            ):
+                backup_local(self.database, self.store.root, destination)
+            with self.assertRaisesRegex(BackupError, "backup_target_must_be_a_new"):
+                backup_local(self.database, self.store.root, destination)
+        self.assertEqual(
+            logs.output,
+            ["WARNING:studio_platform.backup:backup_failed_incomplete_directory_kept"],
+        )
+        self.assertEqual(attempts, [destination / "manifest.json"])
+        self.assertTrue((destination / "database.sqlite3").is_file())
+        self.assertTrue(list((destination / "media").glob("*.bin")))
+        self.assertFalse((destination / "manifest.json").exists())
+        self.assertEqual(
+            self.assets.get("superdan", self.asset["id"])["id"], self.asset["id"]
+        )
+
     def test_corrupted_media_and_manifest_path_rejected_before_restore_directory(self):
         source = self.backup()
         manifest = verify_local(source)
