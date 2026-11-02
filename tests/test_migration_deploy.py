@@ -831,10 +831,10 @@ class MigrationDeployTests(unittest.TestCase):
         ):
             validate(invalid)
 
-    def test_rendered_controller_settings_reach_its_exact_cpu_slot_child(self):
+    def test_rendered_controller_settings_reach_its_exact_dbos_slot(self):
         from studio_platform.control import WorkerSpec
-        from studio_platform.dstack_controller import SlotProcesses
-        from studio_platform.fleet import SlotConfig, read_config
+        from studio_platform.dbos_transport import DurableSlots
+        from studio_platform.fleet import SlotConfig
         from studio_platform.runtime_catalog import engine_manifest, PROFILE_IDS
         from studio_platform.settings import Settings
 
@@ -908,40 +908,48 @@ class MigrationDeployTests(unittest.TestCase):
                         Path(temporary) / "never-opened-native.json"
                     ),
                 )
-                children = []
+                opened = []
+                with patch.dict(os.environ, selected["controller"], clear=True):
+                    controller_settings = Settings.from_environment()
 
-                def spawn(command, **kwargs):
-                    # Popen's inherited environment is the child's actual Settings
-                    # input. No real process, database, broker or GPU is started.
-                    self.assertNotIn("env", kwargs)
-                    child_settings = Settings.from_environment()
+                @contextlib.contextmanager
+                def runner_context(config, worker_id, settings, *, repository):
+                    # DBOS uses the same settings object instead of serializing
+                    # it into a second polling process. No database/provider I/O.
+                    self.assertIs(settings, controller_settings)
                     self.assertEqual(
-                        (
-                            child_settings.generation_enabled,
-                            child_settings.execution_backend,
-                        ),
+                        (settings.generation_enabled, settings.execution_backend),
                         (
                             app_settings.generation_enabled,
                             app_settings.execution_backend,
                         ),
                     )
-                    self.assertEqual(command[1:3], ["-m", "studio_platform.fleet"])
-                    self.assertEqual(
-                        command[command.index("--slot") + 1], spec.worker_id
+                    self.assertEqual(worker_id, spec.worker_id)
+                    self.assertEqual(config.slot(worker_id).spec, spec)
+                    opened.append(worker_id)
+                    yield SimpleNamespace(
+                        control=SimpleNamespace(
+                            get=lambda _: {
+                                'expires_at': 0,
+                                'state': 'unknown',
+                                'drain_requested': False,
+                            }
+                        ),
+                        backend=SimpleNamespace(),
                     )
-                    fleet = read_config(command[command.index("--config") + 1])
-                    self.assertEqual(fleet.slot(spec.worker_id).spec, spec)
-                    children.append(child_settings)
-                    return SimpleNamespace(poll=lambda: 0, wait=lambda: 0)
 
                 with (
-                    patch.dict(os.environ, selected["controller"], clear=True),
-                    SlotProcesses(
-                        Path(temporary) / "supervisor", popen=spawn
-                    ) as processes,
+                    patch('studio_platform.postgres_dispatch.record_consumer'),
+                    patch('studio_platform.postgres_dispatch.withdraw_consumer'),
+                    DurableSlots(
+                        SimpleNamespace(clock=lambda: 1),
+                        controller_settings,
+                        Path(temporary) / "supervisor",
+                        runner_context=runner_context,
+                    ) as slots,
                 ):
-                    processes.ensure("original-intent", slot)
-                self.assertEqual(len(children), 1)
+                    slots.ensure("original-intent", slot)
+                self.assertEqual(opened, [spec.worker_id])
 
     def test_loopback_split_or_public_management_ports_rejected(self):
         self.assert_rejected(

@@ -1,13 +1,11 @@
-"""CPU-side, explicit multi-slot supervisor. Never provisions a cloud instance.
+"""Slot configuration and bounded domain-runner construction for DBOS.
 
-GPU hosts only run private ComfyUI. Database and object-store credentials stay
-on the CPU control host. PIDs are advisory output, never a source for signalling
-historical/unrelated processes. The default configuration is disabled.
+Database and object-store credentials stay on the CPU control host. This module
+does not start a supervisor, poll the queue or provision a cloud instance.
 """
 
 from __future__ import annotations
 
-import argparse
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 import json
@@ -15,18 +13,12 @@ import math
 import os
 from pathlib import Path
 import re
-import signal
 import stat
-import subprocess
-import sys
-import threading
-import time
 from urllib.parse import urlsplit
 
 from .control import WorkerControl, WorkerSpec, REAL_GPU_BACKENDS, worker_spec_payload
 from .repository import Repository, request_hash
 from .worker import ComfyBackend, MockBackend, WorkerRunner
-from .slot_lock import slot_lock
 
 
 SAFE_WORKER = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
@@ -49,7 +41,7 @@ def _origin(endpoint):
                 or parts.hostname in ("127.0.0.1", "localhost", "::1")
             )
         )
-        parts.port  # Reject invalid/out-of-range ports without echoing the URL.
+        _ = parts.port  # Reject invalid/out-of-range ports without echoing the URL.
     except (ValueError, AttributeError):
         valid = False
     if not valid:
@@ -166,7 +158,7 @@ class FleetConfig:
     def fingerprint(self):
         value = asdict(self)
         value["work_dir"] = str(self.work_dir)
-        for item, slot in zip(value["slots"], self.slots):
+        for item, slot in zip(value["slots"], self.slots, strict=False):
             item["spec"] = worker_spec_payload(slot.spec)
             if not slot.recovery_only:
                 item.pop("recovery_only")
@@ -291,204 +283,6 @@ def read_config(path):
         raise ValueError("fleet_config_unavailable_or_invalid") from None
 
 
-class FleetSupervisor:
-    def __init__(
-        self,
-        config,
-        repository,
-        config_path,
-        *,
-        popen=None,
-        clock=time.monotonic,
-        sleeper=time.sleep,
-    ):
-        self.config, self.repo = config, repository
-        self.config_path = Path(config_path)
-        if not self.config_path.is_absolute():
-            raise ValueError("fleet_config_path_must_be_absolute")
-        self.popen, self.clock, self.sleeper = popen or subprocess.Popen, clock, sleeper
-        self.control = WorkerControl(repository) if repository is not None else None
-        self.children = {}
-        self._stop = threading.Event()
-        self._started = False
-        self._finished = False
-        self._shutdown_called = False
-
-    def snapshot(self):
-        children = []
-        for worker_id, proc in self.children.items():
-            code = proc.poll()
-            children.append(
-                {
-                    "worker_id": worker_id,
-                    "pid": proc.pid,
-                    "exit_code": code,
-                    "state": "running" if code is None else "exited",
-                }
-            )
-        return {
-            "state": "disabled"
-            if not self.config.enabled
-            else "stopped"
-            if self._finished
-            else "draining"
-            if self._stop.is_set()
-            else "running",
-            "children": children,
-        }
-
-    def _save(self):
-        path = self.config.work_dir / "fleet-state.json"
-        temporary = path.with_suffix(".tmp")
-        temporary.write_text(
-            json.dumps(self.snapshot(), sort_keys=True), encoding="utf-8"
-        )
-        temporary.replace(path)
-
-    def start(self):
-        if not self.config.enabled:
-            return self.snapshot()
-        if self._started:
-            raise ValueError("fleet_already_started")
-        if self._stop.is_set() or self.repo is None:
-            raise ValueError("fleet_not_admitting")
-        if (self.config.work_dir / "supervisor-drain.flag").exists():
-            raise ValueError("fleet_drain_marker_requires_explicit_reset")
-        self.repo.create_schema()
-        active = [slot for slot in self.config.slots if slot.enabled]
-        if all(s.spec.backend == "mock" for s in active):
-            from .repository import capacity_gate
-
-            with self.repo.engine.connect() as conn:
-                has_gate = conn.execute(capacity_gate.select()).first() is not None
-            if not has_gate:
-                self.repo.configure_capacity()  # Zero real capacity, never an approval.
-        # No process starts until all configured physical identities pass the
-        # existing global ledger gate. A partial registration holds ownership;
-        # it neither creates cloud resources nor guesses that an instance is idle.
-        for slot in active:
-            if slot.recovery_only:
-                self.control.require_recovery_binding(slot.spec)
-            else:
-                self.control.register(slot.spec)
-        self.config.work_dir.mkdir(parents=True, exist_ok=True)
-        self._started = True
-        try:
-            for slot in active:
-                directory = self.config.work_dir / slot.spec.worker_id
-                directory.mkdir(parents=True, exist_ok=True)
-                flag = directory / "drain.flag"
-                if flag.exists() and not slot.recovery_only:
-                    flag.unlink()  # Only our explicit lifecycle marker, never an asset.
-                kwargs = dict(stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if os.name == "nt":
-                    kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-                else:
-                    kwargs["start_new_session"] = True
-                proc = self.popen(
-                    [
-                        sys.executable,
-                        "-m",
-                        "studio_platform.fleet",
-                        "--config",
-                        str(self.config_path),
-                        "--slot",
-                        slot.spec.worker_id,
-                        "--config-hash",
-                        self.config.fingerprint(),
-                    ],
-                    **kwargs,
-                )
-                self.children[slot.spec.worker_id] = proc
-            self._save()
-            return self.snapshot()
-        except Exception:
-            self.drain()
-            raise RuntimeError("fleet_process_start_failed") from None
-
-    def tick(self):
-        if not self.config.enabled:
-            return self.snapshot()
-        if not self._started:
-            raise ValueError("fleet_not_started")
-        if (self.config.work_dir / "supervisor-drain.flag").exists():
-            self._stop.set()
-        self.control.recover_expired()
-        # No automatic restart. An exited process is not proof of upstream idle.
-        for worker_id, proc in self.children.items():
-            if proc.poll() is not None:
-                self.control.drain(worker_id)
-        self._save()
-        return self.snapshot()
-
-    def drain(self):
-        self._stop.set()
-        if not self.config.enabled or not self._started:
-            return self.snapshot()
-        for worker_id, proc in self.children.items():
-            (self.config.work_dir / worker_id / "drain.flag").touch()
-            try:
-                self.control.drain(worker_id)
-            except Exception:
-                pass  # Lease still expires conservatively, never to idle.
-            if os.name != "nt" and proc.poll() is None:
-                try:
-                    proc.send_signal(signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-        self._save()
-        return self.snapshot()
-
-    def shutdown(self):
-        self._shutdown_called = True
-        self.drain()
-        deadline = self.clock() + self.config.shutdown_grace_s
-        while (
-            any(proc.poll() is None for proc in self.children.values())
-            and self.clock() < deadline
-        ):
-            self.sleeper(min(0.1, max(0, deadline - self.clock())))
-        self._finished = all(proc.poll() is not None for proc in self.children.values())
-        self._save() if self._started else None
-        result = self.snapshot()
-        if any(proc.poll() is None for proc in self.children.values()):
-            result["state"] = "drain_pending"
-        return result  # No blind PID kill or cloud destruction at a timeout.
-
-    def run_forever(self, *, poll_interval_s=1):
-        if not self.config.enabled:
-            return self.snapshot()
-        if not math.isfinite(poll_interval_s) or not 0.01 <= poll_interval_s <= 60:
-            raise ValueError("invalid_fleet_poll_interval")
-        self.config.work_dir.mkdir(parents=True, exist_ok=True)
-        with slot_lock(self.config.work_dir, "fleet-supervisor") as acquired:
-            if not acquired:
-                return {"state": "fleet_busy", "children": []}
-            prior = {}
-            if threading.current_thread() is threading.main_thread():
-                for signum in (signal.SIGTERM, signal.SIGINT):
-                    prior[signum] = signal.getsignal(signum)
-                    signal.signal(signum, lambda *_: self._stop.set())
-            try:
-                self.start()
-                while not self._stop.is_set():
-                    self.tick()
-                    if self.children and all(
-                        proc.poll() is not None for proc in self.children.values()
-                    ):
-                        self._stop.set()
-                        break
-                    self._stop.wait(poll_interval_s)
-                return self.shutdown()
-            finally:
-                try:
-                    if self._started and not self._shutdown_called:
-                        self.shutdown()
-                finally:
-                    for signum, handler in prior.items():
-                        signal.signal(signum, handler)
-
-
 def create_store(settings):
     """Same explicit CPU-side storage selection as the business API."""
     from .storage import LocalObjectStore, S3ObjectStore
@@ -514,16 +308,6 @@ def create_store(settings):
         registry_root=os.environ.get("AI_REGISTRY_ROOT"),
     )
     return S3ObjectStore(config, credentials)
-
-
-def request_drain(config):
-    """Portable operator-only stop request. Never reads/signals a saved PID."""
-    if not config.enabled:
-        return {"state": "disabled", "children": []}
-    if not config.work_dir.is_dir():
-        raise ValueError("fleet_runtime_directory_not_found")
-    (config.work_dir / "supervisor-drain.flag").touch()
-    return {"state": "drain_requested"}
 
 
 def _require_service_backend(slot, settings):
@@ -707,61 +491,12 @@ def slot_runner(
             repo.close()
 
 
-def run_slot(config, worker_id, settings, *, once=False, **kwargs):
-    """CLI compatibility; the DBOS executor uses the same bounded domain runner."""
+def run_slot(config, worker_id, settings, *, once=True, **kwargs):
+    """One offline/operator test turn; production execution is owned by DBOS."""
+    if not once:
+        raise ValueError("dbos_required_for_continuous_execution")
     with slot_runner(config, worker_id, settings, **kwargs) as runner:
         if runner is None:
             return {"state": "disabled", "simulation": False}
         pool = config.slot(worker_id).spec.pool
-        return (
-            runner.run_once(worker_id, pool)
-            if once
-            else runner.run_forever(worker_id, pool)
-        )
-
-
-def main(argv=None):
-    parser = argparse.ArgumentParser(
-        description="Explicit CPU fleet; cloud creation remains disabled"
-    )
-    parser.add_argument("--config", type=Path, required=True)
-    parser.add_argument("--slot")
-    parser.add_argument("--config-hash")
-    parser.add_argument("--once", action="store_true")
-    parser.add_argument("--request-drain", action="store_true")
-    args = parser.parse_args(argv)
-    repo = None
-    try:
-        config = read_config(args.config)
-        if args.config_hash is not None and args.config_hash != config.fingerprint():
-            raise ValueError("fleet_config_changed_before_child_start")
-        if not config.enabled:
-            print(json.dumps({"state": "disabled", "children": []}))
-            return 0
-        if args.request_drain:
-            if args.slot or args.once:
-                raise ValueError("drain_request_cannot_start_workers")
-            print(json.dumps(request_drain(config)))
-            return 0
-        from .settings import Settings
-
-        settings = Settings.from_environment()
-        if args.slot:
-            result = run_slot(config, args.slot, settings, once=args.once)
-        else:
-            if args.once:
-                raise ValueError("supervisor_once_would_leave_unmanaged_children")
-            repo = Repository(settings.database_url)
-            result = FleetSupervisor(config, repo, args.config).run_forever()
-        print(json.dumps(result))
-        return 1 if result and result.get("state") == "drain_pending" else 0
-    except Exception:
-        print(json.dumps({"state": "fleet_configuration_or_runtime_error"}))
-        return 1
-    finally:
-        if repo:
-            repo.close()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        return runner.run_once(worker_id, pool)

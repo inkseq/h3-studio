@@ -7,20 +7,17 @@ notifications wake original-ledger consumers. All dependencies are injected; imp
 
 from __future__ import annotations
 
-from dataclasses import asdict
 import json
+import logging
 import math
 import os
-from pathlib import Path
-import subprocess
-import sys
 import argparse
 import signal
 import threading
 
 from sqlalchemy import or_, select
 
-from .control import WorkerControl, worker_spec_payload
+from .control import WorkerControl
 from .dstack_inventory import known_allocations, read_inventories
 from .dstack_capacity import (
     idle_action,
@@ -48,8 +45,9 @@ from .repository import (
     request_hash,
     scaler_actions,
 )
-from .slot_lock import slot_lock
 from .telemetry import NullTelemetry, configured_telemetry
+
+_logger = logging.getLogger(__name__)
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
 # Cold download stops, checked in order: a stall, then a measured slow host.
@@ -158,7 +156,11 @@ class DstackController:
                 for identity in result["stop_candidates"]
             )
             return result
-        except Exception:
+        except Exception as error:
+            _logger.warning(
+                "dstack_health_observation_unconfirmed error_type=%s",
+                type(error).__name__,
+            )
             return {
                 "state": "observation_unconfirmed",
                 "new_alerts": 0,
@@ -332,7 +334,10 @@ class DstackController:
                 and (allow_due or age < IDLE_SAFETY_SECONDS)
                 and witness["fingerprint"] == self._passive_fingerprint(node)
             )
-        except Exception:
+        except Exception as error:
+            _logger.warning(
+                "dstack_passive_witness_invalid error_type=%s", type(error).__name__
+            )
             matches = False
         if not matches:
             self._passive_unknown.pop(node["intent_id"], None)
@@ -374,7 +379,11 @@ class DstackController:
                 "observed_at": self.repo.clock(),
             }
             return True
-        except Exception:
+        except Exception as error:
+            _logger.warning(
+                "dstack_passive_observation_unconfirmed error_type=%s",
+                type(error).__name__,
+            )
             self._passive_unknown.pop(node["intent_id"], None)
             return False
 
@@ -417,7 +426,10 @@ class DstackController:
             return inspect_pending_invoices(
                 self.repo, self.service.settings.tenant_id, self.capacity.client
             )
-        except Exception:
+        except Exception as error:
+            _logger.warning(
+                "dstack_invoice_check_unavailable error_type=%s", type(error).__name__
+            )
             return {
                 "state": "check_unavailable",
                 "ledger_writes": 0,
@@ -506,7 +518,10 @@ class DstackController:
                 + health_check.get("stop_requested", 0),
                 "provider_mutations": 0,
             }
-        except Exception:
+        except Exception as error:
+            _logger.warning(
+                "dstack_idle_safety_unconfirmed error_type=%s", type(error).__name__
+            )
             self._passive_unknown.clear()
             return {
                 "state": "idle_safety_unconfirmed",
@@ -1211,6 +1226,10 @@ class DstackController:
                     self._cleanup_pending.add(node["intent_id"])
                     closed_since_health = True
             except Exception as error:
+                _logger.warning(
+                    "dstack_controller_observation_failed error_type=%s",
+                    type(error).__name__,
+                )
                 code = (
                     "global_capacity_exceeded"
                     if isinstance(error, BudgetExceeded)
@@ -1261,107 +1280,17 @@ class DstackController:
             ):
                 raise ValueError("dstack_demand_start_result_invalid")
             return value
-        except Exception:
+        except Exception as error:
+            _logger.warning(
+                "dstack_demand_start_observation_failed error_type=%s",
+                type(error).__name__,
+            )
             # A failed response may follow an already committed original start.
             # Do not issue a second command, choose an offer, or expose errors.
             return {
                 "state": "blocked",
                 "reason_code": "dstack_demand_start_observation_failed",
             }
-
-
-class SlotProcesses:
-    """Only CPU worker processes. No arbitrary command or GPU process signal."""
-
-    def __init__(self, work_dir, *, popen=subprocess.Popen):
-        self.work_dir = Path(work_dir)
-        if not self.work_dir.is_absolute():
-            raise ValueError("absolute_dstack_worker_paths_required")
-        self.popen, self.children = popen, {}
-        self._supervisor_lock = None
-
-    def __enter__(self):
-        self.work_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self._supervisor_lock = slot_lock(self.work_dir, "dstack-cpu-supervisor")
-        if not self._supervisor_lock.__enter__():
-            self._supervisor_lock.__exit__(None, None, None)
-            self._supervisor_lock = None
-            raise ValueError("dstack_cpu_supervisor_already_active")
-        return self
-
-    def ensure(self, intent_id, slot):
-        if self._supervisor_lock is None:
-            raise ValueError("dstack_cpu_supervisor_lock_required")
-        prior = self.children.get(intent_id)
-        if prior and prior.poll() is None:
-            return
-        if prior:
-            prior.wait()  # Reap an exited child before replacing this exact slot.
-        directory = self.work_dir / intent_id
-        directory.mkdir(parents=True, exist_ok=True)
-        item = asdict(slot)
-        item.update(worker_spec_payload(slot.spec))
-        item.pop("spec")
-        value = {
-            "version": 2,
-            "work_dir": str(self.work_dir),
-            "enabled": True,
-            "max_children": 1,
-            "shutdown_grace_s": 210,
-            "slots": [item],
-        }
-        path = directory / "fleet.json"
-        temporary = directory / "fleet.tmp"
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as stream:
-            json.dump(value, stream, sort_keys=True)
-            stream.flush()
-            os.fsync(stream.fileno())
-        temporary.replace(path)
-        self.children[intent_id] = self.popen(
-            [
-                sys.executable,
-                "-m",
-                "studio_platform.fleet",
-                "--config",
-                str(path),
-                "--slot",
-                slot.spec.worker_id,
-            ],
-            stdin=subprocess.DEVNULL,
-        )
-
-    def stop(self, intent_id):
-        process = self.children.get(intent_id)
-        if process and process.poll() is None:
-            process.terminate()  # Original job is already terminal and native idle.
-            try:
-                process.wait(timeout=15)
-            except subprocess.TimeoutExpired:
-                process.kill()  # Our CPU child only; GPU job/tag remains durable.
-                process.wait(timeout=5)
-        elif process:
-            process.wait()
-        self.children.pop(intent_id, None)
-
-    def close(self):
-        failure = None
-        try:
-            for intent_id in list(self.children):
-                try:
-                    self.stop(intent_id)
-                except Exception as error:
-                    # Still reap the other children if one refuses shutdown.
-                    failure = failure or error
-        finally:
-            if self._supervisor_lock is not None:
-                self._supervisor_lock.__exit__(None, None, None)
-                self._supervisor_lock = None
-        if failure is not None:
-            raise failure
-
-    def __exit__(self, *_):
-        self.close()
 
 
 def main(argv=None):
@@ -1379,6 +1308,8 @@ def main(argv=None):
     from .modal_controller import load_extension
 
     settings = Settings.from_environment()
+    if settings.generation_queue != "dbos":
+        raise ValueError("dstack_controller_requires_dbos")
     repo = Repository(settings.database_url)
     from .controller_liveness import Progress
 
@@ -1398,31 +1329,28 @@ def main(argv=None):
             repo, service.capacity.store, settings=settings
         )
         modal_extension = load_extension(service, work_dir)
-        if settings.generation_queue == "dbos":
-            from .dbos_transport import DurableExecutor
-            from .api import create_app
-            from .film_workflows import setup_controller_film
+        from .dbos_transport import DurableExecutor
+        from .api import create_app
+        from .film_workflows import setup_controller_film
 
-            film_app = create_app(settings, repository=repo, dstack_operator=service)
-            durable_executor = DurableExecutor(
-                repo,
-                settings,
-                work_dir,
-                runner_context=modal_extension.bindings.runner_context
-                if modal_extension
-                else None,
-                film_setup=lambda DBOS, turns: setup_controller_film(
-                    DBOS, turns, repo, film_app
-                ),
-                account_services=(
-                    film_app.state.account_sessions,
-                    film_app.state.account_deletion,
-                ),
-            ).__enter__()
-            processes = durable_executor.slots
-            durable_executor.import_pending()
-        else:
-            processes = SlotProcesses(work_dir).__enter__()
+        film_app = create_app(settings, repository=repo, dstack_operator=service)
+        durable_executor = DurableExecutor(
+            repo,
+            settings,
+            work_dir,
+            runner_context=modal_extension.bindings.runner_context
+            if modal_extension
+            else None,
+            film_setup=lambda DBOS, turns: setup_controller_film(
+                DBOS, turns, repo, film_app
+            ),
+            account_services=(
+                film_app.state.account_sessions,
+                film_app.state.account_deletion,
+            ),
+        ).__enter__()
+        processes = durable_executor.slots
+        durable_executor.import_pending()
         telemetry = configured_telemetry()
         from .error_monitoring import (
             create_client,
@@ -1491,8 +1419,6 @@ def main(argv=None):
         try:
             if durable_executor:
                 durable_executor.close()
-            elif processes:
-                processes.close()
         finally:
             try:
                 if runtime:
@@ -1508,18 +1434,25 @@ def main(argv=None):
                         if telemetry is not None:
                             try:
                                 telemetry.force_flush(timeout_millis=1000)
-                            except Exception:
-                                pass
+                            except Exception as error:
+                                _logger.warning(
+                                    "dstack_telemetry_flush_failed error_type=%s",
+                                    type(error).__name__,
+                                )
                             try:
                                 telemetry.close()
-                            except Exception:
-                                pass
+                            except Exception as error:
+                                _logger.warning(
+                                    "dstack_telemetry_close_failed error_type=%s",
+                                    type(error).__name__,
+                                )
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except Exception:
+    except Exception as error:
+        _logger.error("dstack_controller_failed error_type=%s", type(error).__name__)
         raise SystemExit(
             "dstack_controller_failed; inspect protected service diagnostics"
         ) from None

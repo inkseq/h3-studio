@@ -1,25 +1,20 @@
-"""Direct CPU slot consumers; PostgreSQL notifications are only wake hints.
+"""Bounded DBOS slot runner and original native-consumer liveness hooks.
 
 The historical hatchet-v1 route remains an immutable execution-plan identity.
 No broker delivery, notification payload or timeout authorizes inference.
 """
 
 import copy
-import signal
-import threading
 from pathlib import Path
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import select, update
 
-from .demand_wakeup import DemandWakeup
 from .dispatch_telemetry import _host_telemetry_context
 from .drain_safe_runner import collection_slot
 from .operator_capacity import operator_nodes
-from .repository import jobs
 from .worker import WorkerRunner
 
 ROUTE = "hatchet-v1"
-IDLE_SECONDS = 30
 
 
 def record_consumer(repo, control, backend, worker_id):
@@ -115,16 +110,13 @@ def withdraw_consumer(repo, control, backend, worker_id, observation):
 
 
 class PostgresSlotRunner(WorkerRunner):
-    def __init__(
-        self, *args, collection_lock_dir, wakeup_factory=DemandWakeup, **kwargs
-    ):
+    def __init__(self, *args, collection_lock_dir, **kwargs):
         super().__init__(*args, **kwargs)
         if self.control is None:
             raise ValueError("queue_requires_durable_worker_control")
         self.collection_lock_dir = Path(collection_lock_dir)
         if not self.collection_lock_dir.is_absolute():
             raise ValueError("absolute_shared_collection_lock_required")
-        self.wakeup_factory = wakeup_factory
         self.worker_id = None
         self._consumer_observation = None
 
@@ -177,82 +169,5 @@ class PostgresSlotRunner(WorkerRunner):
         with collection_slot(self.collection_lock_dir, heartbeat):
             return super()._collect(job, lease, tag, task_id, heartbeat)
 
-    def wait_seconds(self, worker_id, pool):
-        """Timers also wake: retry eligibility, lease recovery and registration."""
-        now = self.repo.clock()
-        worker = self.control.get(worker_id)
-        delay = min(IDLE_SECONDS, max(1, (worker["expires_at"] - now) / 2))
-        with self.repo.engine.connect() as connection:
-            deadlines = connection.execute(
-                select(
-                    func.min(case((jobs.c.not_before > now, jobs.c.not_before))),
-                    func.min(
-                        case((jobs.c.lease_expires_at > now, jobs.c.lease_expires_at))
-                    ),
-                ).where(
-                    jobs.c.pool == pool,
-                    jobs.c.execution_plan["dispatch_backend"].as_string() == ROUTE,
-                    jobs.c.status.in_(
-                        (
-                            "queued",
-                            "claimed",
-                            "submitting",
-                            "running",
-                            "submission_unknown",
-                            "collecting",
-                            "cancel_requested",
-                        )
-                    ),
-                )
-            ).one()
-            for deadline in deadlines:
-                if deadline is not None:
-                    delay = min(delay, deadline - now)
-        return max(0.05, delay)
-
-    def run_forever(self, worker_id, pool, *, poll_interval_s=1):
-        wakeup = self.wakeup_factory(self.repo, self._drain)
-        prior = {}
-        process_shutdown = False
-        completed = False
-
-        def shutdown(*_):
-            nonlocal process_shutdown
-            process_shutdown = True
-            self.drain()
-            wakeup.interrupt()
-
-        if threading.current_thread() is threading.main_thread():
-            for signum in (signal.SIGTERM, signal.SIGINT):
-                prior[signum] = signal.getsignal(signum)
-                signal.signal(signum, shutdown)
-        try:
-            wakeup.subscribe()  # Scan after subscription, including after restart.
-            while not self._drain.is_set():
-                self.run_once(worker_id, pool)
-                if not self._drain.is_set():
-                    wakeup.wait(self.wait_seconds(worker_id, pool))
-            completed = True
-            return {"state": "draining"}
-        finally:
-            try:
-                wakeup.close()
-                # A CPU service restart is not an operator request to retire
-                # capacity. Explicit flags/errors retain durable draining.
-                explicit_stop = (
-                    self.stop_requested is not None and self.stop_requested() is True
-                )
-                if not (completed and process_shutdown) or explicit_stop:
-                    self.control.drain(worker_id)
-                withdraw_consumer(
-                    self.repo,
-                    self.control,
-                    self.backend,
-                    worker_id,
-                    self._consumer_observation,
-                )
-            finally:
-                for signum, handler in prior.items():
-                    signal.signal(signum, handler)
-                if hasattr(self.backend, "close"):
-                    self.backend.close()
+    def run_forever(self, *args, **kwargs):
+        raise ValueError("dbos_required_for_continuous_execution")
