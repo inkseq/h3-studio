@@ -43,8 +43,8 @@ class LocalRegistrationTests(unittest.TestCase):
             if failure is not None and failure(slot):
                 raise ValueError("private-provider-error-sentinel")
 
-        slots.ensure = Mock(side_effect=ensure)
-        slots.heartbeat_cpu = Mock(side_effect=lambda: beats.append(len(seen)))
+        slots.local.ensure = Mock(side_effect=ensure)
+        slots.local.heartbeat = Mock(side_effect=lambda: beats.append(len(seen)))
         return seen, beats
 
     def test_exact_local_worker_identities_order_and_heartbeat_boundaries(self):
@@ -226,10 +226,12 @@ class LocalRegistrationTests(unittest.TestCase):
             with self.subTest(switch=switch):
                 slots = self.slots(**{switch: True})
                 self.capture(slots)
-                slots.heartbeat_cpu.side_effect = RuntimeError("heartbeat-unavailable")
+                slots.local.heartbeat.side_effect = RuntimeError(
+                    "heartbeat-unavailable"
+                )
                 with self.assertRaisesRegex(RuntimeError, "heartbeat-unavailable"):
                     register_local(slots)
-                slots.ensure.side_effect = KeyboardInterrupt
+                slots.local.ensure.side_effect = KeyboardInterrupt
                 with self.assertRaises(KeyboardInterrupt):
                     register_local(slots)
 

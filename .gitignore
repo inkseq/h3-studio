@@ -1102,3 +1102,8 @@ inventory.json
 # #899 shared native capacity contracts/lifecycle
 !studio_platform/capacity_interface.py
 !studio_platform/dialout_capacity.py
+!tests/test_local_slot_owner.py
+
+# #899 local-slot ownership seam (same process; service isolation is #999)
+!studio_platform/slot_turns.py
+!studio_platform/local_slots.py
