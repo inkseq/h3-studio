@@ -12,7 +12,17 @@
 | 已确认与 worker 兼容的 API 展示/发现代码 | Python/API/数据库与镜像检查；批准平台包 | 只更新 app；控制器继续使用启动时固定镜像 |
 | 任务协议、准入、账户/数据结构、计费、调度或依赖 | 批次关键回归及完整发布门槛 | 不兼容时拒绝热更；等待任务和账单安全收尾后迁移 |
 
-`api.py`、schema、存储、编译和依赖均保守计入 worker 指纹。当前仅排除 `frontend.py`、`agent_discovery.py` 和分发 Skill 文件。开发与公开试用阶段，经完整源码和配置独立审查的 app 更新可以保持现有控制器、队列和租赁；不因新增可选起名凭据与 app 出网就要求取消用户任务。现有精确版本批准路径允许明确记录的 app 配置差异：只新增 Google 起名的环境路径、私有秘密挂载和 app 的 edge 网络；数据库、Caddy、初始化、其他挂载、控制器配置与账本不变。其他配置或协议变化仍需要对应迁移方案。单 app 替换可能有短暂请求重试。
+worker 指纹由 `tools/worker_dependencies.py` 静态解析实际依赖：CPU `dstack_controller` 和 `WorkerRunner`、GPU launcher、保留的 Modal 入口、dialout 脚本及其传递导入。函数内、相对导入、包初始化和字面量动态导入都计入；未解析的项目导入、逃逸的动态加载器引用和反射式加载拒绝打包。所有原有 `FIXED` 文件、`package_tool.PRIVATE_FILES`、Modal `EXTRA` 和原生镜像配方也保留。Alembic 按路径发现的整个 Python 迁移目录（包括 `env.py` 和版本文件）也明确计入，不依赖普通 import 才纳入。只读 AST，不加载应用、Alembic 或供应商 SDK。
+
+这不是“全部 API/计费修改与 worker 无关”：当前 controller 实际导入 `api.create_app`，WorkerRunner 实际依赖积分、队列和数据库 schema，这些仍在指纹中。只有没有依赖关系的模块才不影响 worker；后续解除真实依赖后，集合才会自然缩小。指纹策略本身也参与哈希，旧策略与新策略不能直接复用同一兼容标记。API 指纹继续覆盖全部应用 Python 和原有固定输入，哈希编码与契约版本不变；任务 plan hash、原生源码包、运行时 manifest 和历史 retained source identities 不变。
+
+唯一非字面量导入例外是 `dstack_capacity.main` 的独立运维 CLI `--factory`。服务入口不调用它，只导入该模块的具名非 `main` 成员。构建检查拒绝导入 CLI 模块对象、导入/转发 `main`、从该模块星号导入，或在标准 `__main__` 分支外引用 `main`；其他函数的未知动态导入仍拒绝。例外不改变 CLI 的执行能力，也不覆盖新的服务入口。
+
+`worker_compatibility` 目前仅供旧 CPU gpu-scaler 的 app-only 更新/回滚分支比较。当前 dstack 发布走 `maintenance.apply_locked`，尚不使用这个比较来跳过 controller 更新；本项没有改变线上发布流程，不能声称已实现 dstack API/controller 独立上线。开发与公开试用阶段，经完整源码和配置独立审查的 app 更新可以保持现有控制器、队列和租赁；不因新增可选起名凭据与 app 出网就要求取消用户任务。现有精确版本批准路径允许明确记录的 app 配置差异：只新增 Google 起名的环境路径、私有秘密挂载和 app 的 edge 网络；数据库、Caddy、初始化、其他挂载、控制器配置与账本不变。其他配置或协议变化仍需要对应迁移方案。单 app 替换可能有短暂请求重试。
+
+### 前端与 API 的晋级顺序
+
+前端产物的 `api_compatibility` 必须与**目标环境实际已部署的 API** 完全相等，不能拿 main 的版本代替。若同一前端提交还包含新的 API/Python 字节，先完成匹配平台产物的 staging 验收和平台晋级，再晋级该前端。独立前端包须基于已经上线且验收通过的 API 契约构建。不得伪造指纹、将其他提交的验收当作本提交，或放宽 `frontend_release.compatible` 来绕过顺序。
 
 ## 日常批次
 

@@ -387,6 +387,8 @@ inventory.json
 # Independently released UI, API and pinned GPU lifecycle.
 !studio_platform/frontend.py
 !tools/release_contract.py
+!tools/worker_dependencies.py
+!tests/test_worker_dependencies.py
 !tools/ci_changes.py
 !tools/ci_change_scope.py
 !tools/prepare_release.py

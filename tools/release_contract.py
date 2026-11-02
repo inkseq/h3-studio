@@ -1,7 +1,7 @@
 """Conservative source fingerprints for independently released UI/API/workers.
 
 These are compatibility gates, not evidence of testing or model qualification.
-Unknown runtime modules participate automatically. Changes to this policy also
+Transitive worker imports participate automatically. Changes to this policy also
 change both fingerprints, so narrowing it requires one drained deployment.
 """
 from __future__ import annotations
@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 import stat
+
+from tools.worker_dependencies import worker_source_paths
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXED = (
@@ -24,6 +26,7 @@ FIXED = (
     'deploy/wangp/profiles/h3-unpruned33b-bf16-sdpa-p3-256gib-single-controls-v4.json',
     'platform_app.py', 'comfy_workflow.py', 'comfy-object-info.json',
     'requirements.lock.txt', 'Dockerfile.platform', 'tools/release_contract.py',
+    'tools/worker_dependencies.py',
     'deploy/platform/compose.yaml', 'deploy/platform/check_config.py',
     'deploy/platform/Caddyfile', 'deploy/platform/init_database.py',
     'deploy/wangp/profiles/h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-lowram-v1.json',
@@ -39,11 +42,6 @@ FIXED = (
 )
 AGENT_FILES = ('skills/inkseq/SKILL.md', 'skills/inkseq/scripts/sixnine.py', 'skills/inkseq/scripts/inkseq.py',
     'skills/inkseq/reference/api.md', 'skills/inkseq/reference/recovery.md')
-# These modules serve static files or describe Agent discovery; neither runs
-# worker code or owns database/job schemas. api.py remains deliberately included.
-WORKER_EXCLUSIONS = frozenset(('studio_platform/frontend.py', 'studio_platform/agent_discovery.py', *AGENT_FILES))
-
-
 def source_paths(root=ROOT):
     root = Path(root)
     module_dir = root / 'studio_platform'
@@ -77,5 +75,5 @@ def digest_sources(root, paths):
 def build_contracts(root=ROOT):
     names = source_paths(root)
     return {'version': 1, 'api_compatibility': digest_sources(root, names),
-            'worker_compatibility': digest_sources(root, set(names) - WORKER_EXCLUSIONS),
+            'worker_compatibility': digest_sources(root, set(FIXED) | set(worker_source_paths(root))),
             'frontend_contract': 'sixnine-web-v1'}
