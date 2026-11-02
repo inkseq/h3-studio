@@ -464,7 +464,7 @@ test('successful saved storyboard job uses shot version without mistaking the se
     assert.equal(result.data.oldVersion, false);
     assert.equal(
       !!h.store.exportProject().entities.find((e) => e.id === h.shot).data.selectedAssetId,
-      false,
+      true,
     );
     h.store.editProject(
       (p) =>

@@ -23,7 +23,7 @@ COMPACT_CGROUP = Path('/sys/fs/cgroup/inkseq.slice/inkseq-staging.slice') / COMP
 COMPACT_SWAP = ROOT / 'staging.swap'
 MIB = 1024**2
 COMPACT_SERVICE_MIB = {'db': 384, 'db-init': 128, 'caddy': 96, 'app': 512,
-    'dstack': 768, 'hatchet-db': 256, 'hatchet': 384, 'dispatch': 128, 'controller': 640}
+    'dstack': 768, 'hatchet-db': 256, 'hatchet': 384, 'dispatch': 128, 'controller': 1024}
 COMPACT_UNITS = {
     '/etc/systemd/system/inkseq-staging-workload.slice': '7d5b6b0b2a7f5114ddc79cce167b0a429d93733a2bd4b2deda9274fd01357bdb',
     '/etc/systemd/system/srv-sixnine-staging.swap.swap': '0086edba93a00323a6793a4b69cf1095dad72cb7f2fba8b6bf41ee9644fb3235',

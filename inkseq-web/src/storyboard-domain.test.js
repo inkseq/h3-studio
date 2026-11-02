@@ -579,7 +579,7 @@ test('profile look imageIds empty explicitly clears gallery while absent imageId
   assert.deepEqual(looks[0].images, []);
   assert.deepEqual(looks[1].images, ['photo']);
 });
-test('look voice binding and chosen asset remain explicit; succeeded new jobs do not auto-adopt', () => {
+test('look voice binding stays explicit; a succeeded new job becomes the chosen take', () => {
   const p = fixture();
   const hero = character('hero', 'photo', 'main-voice');
   hero.data.voices.push({ id: 'other', assetId: 'look-voice', clipStart: 3 });
@@ -596,7 +596,7 @@ test('look voice binding and chosen asset remain explicit; succeeded new jobs do
     client_ref: { project_id: 'project', shot_id: 'shot', shot_version: 1 },
     artifacts: [{ id: 'new-result', kind: 'video', mime: 'video/mp4' }],
   });
-  assert.equal(view(p).shots[0].chosen, 'keep');
+  assert.equal(view(p).shots[0].chosen, 'result-new-result');
   assert.ok(view(p).shots[0].versions.some((v) => v.artifactId === 'new-result'));
 });
 test('storyboard preflight snapshot invalidates when shared look, clip start or global style changes', async () => {

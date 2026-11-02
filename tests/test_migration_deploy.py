@@ -759,7 +759,7 @@ class MigrationDeployTests(unittest.TestCase):
         )
 
     def test_real_compose_merge_shared_namespace_pins_and_memory(self):
-        self.assertEqual(self.receipt["service_memory_cap_mib"], 2528)
+        self.assertEqual(self.receipt["service_memory_cap_mib"], 2912)
         self.assertGreaterEqual(self.receipt["host_reserve_mib"], 512)
         self.assertEqual(self.receipt["gpu_operations"], 0)
         services = self.document["services"]

@@ -66,3 +66,47 @@ test('foreign project results cannot attach to the quick project even when artif
   assert.equal(mergeJobCandidate(project, job).changed, false);
   assert.deepEqual(project, before);
 });
+
+function freshResult(changes = {}) {
+  const project = freestyleProject('New takes'),
+    shot = project.entities.find((e) => e.type === 'shot');
+  shot.data.selectedAssetId = 'older-take';
+  const job = {
+    id: 'job-new',
+    status: 'succeeded',
+    recipe_id: 'h3-base-fl2va-v1',
+    client_ref: { project_id: project.id, shot_id: shot.id, shot_version: shot.version },
+    artifacts: [{ id: 'art-new', kind: 'video', content_type: 'video/mp4' }],
+    ...changes,
+  };
+  return { project, shot, job };
+}
+test('a new take becomes the current take of its shot', () => {
+  const { project, shot, job } = freshResult();
+  mergeJobCandidate(project, job);
+  assert.equal(shot.data.selectedAssetId, 'result-art-new');
+});
+test('a shot cut into segments keeps its current take', () => {
+  const { project, shot, job } = freshResult();
+  shot.data.videoSegments = [{ start: 0, end: 2 }];
+  mergeJobCandidate(project, job);
+  assert.equal(shot.data.selectedAssetId, 'older-take');
+  assert.ok(shot.data.candidateIds.includes('result-art-new'));
+});
+test('a take from an older shot version waits; an enhanced copy does not', () => {
+  const stale = freshResult();
+  stale.job.client_ref.shot_version = stale.shot.version - 1;
+  mergeJobCandidate(stale.project, stale.job);
+  assert.equal(stale.shot.data.selectedAssetId, 'older-take');
+  const enhanced = freshResult({ recipe_id: 'enhance-v1' });
+  enhanced.job.client_ref.shot_version = enhanced.shot.version - 1;
+  mergeJobCandidate(enhanced.project, enhanced.job);
+  assert.equal(enhanced.shot.data.selectedAssetId, 'result-art-new');
+});
+test('polling the same finished job again does not undo a later choice', () => {
+  const { project, shot, job } = freshResult();
+  mergeJobCandidate(project, job);
+  shot.data.selectedAssetId = 'older-take';
+  mergeJobCandidate(project, job);
+  assert.equal(shot.data.selectedAssetId, 'older-take');
+});

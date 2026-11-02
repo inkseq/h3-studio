@@ -156,7 +156,7 @@ services:
 
   controller:
     <<: *cpu-service
-    mem_limit: 640m
+    mem_limit: 1g
     pids_limit: 192
     command: [python, -m, studio_platform.dstack_controller]
     healthcheck:
