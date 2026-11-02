@@ -51,6 +51,16 @@ Second app host, read replicas and more GPU pools wait for a measured need: wait
 5. Infrastructure: database and alerts, run by Claude because it needs a maintenance window.
 6. Split large files last, so nothing about to be deleted gets split first.
 
+## Media isolation preparation (#899, 2026-11-03)
+
+`LocalSlotOwner` owns local registration, heartbeats and CPU operation fences;
+`SlotContexts` and the finite-turn helpers retain the original shared ordered
+registry, context shutdown and job/attempt behavior. `DurableSlots` still runs
+both local and native work in the controller process under one supervisor fence.
+This extraction does **not** isolate media memory or startup failures. The actual
+same-image media service, independent cgroup, resource qualification and adoption
+remain [#999](https://github.com/inkseq/h3-studio/issues/999); #813 is not complete.
+
 ## References
 
 - FastAPI, generating clients: https://fastapi.tiangolo.com/advanced/generate-clients/

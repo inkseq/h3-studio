@@ -107,3 +107,7 @@ deploy/wangp/profiles/*
 # #899 shared native capacity contract/lifecycle (also covered by module wildcard).
 !studio_platform/capacity_interface.py
 !studio_platform/dialout_capacity.py
+
+# #899 local-slot ownership seam (also covered by module wildcard).
+!studio_platform/slot_turns.py
+!studio_platform/local_slots.py

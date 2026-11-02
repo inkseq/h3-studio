@@ -258,7 +258,7 @@ class DurableDomainTests(LedgerCase):
             self.directory, auth_mode="local-test", enhance_enabled=True
         )
         with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
-            with patch.object(slots, "ensure", side_effect=ValueError("boom")):
+            with patch.object(slots.local, "ensure", side_effect=ValueError("boom")):
                 slots.add_local_slots()
             self.assertEqual(slots._slots, {})
 
@@ -297,7 +297,7 @@ class DurableDomainTests(LedgerCase):
                 )
             # Holding the shared operation mutex prevents even the new slot
             # from leasing; distinct configuration rows add no CPU capacity.
-            slots._cpu_operation.acquire()
+            slots.local.operation_lock.acquire()
             try:
                 slots.turn(
                     self.scope.tenant_id,
@@ -306,7 +306,7 @@ class DurableDomainTests(LedgerCase):
                     jobs[5]["id"],
                 )
             finally:
-                slots._cpu_operation.release()
+                slots.local.operation_lock.release()
             self.assertEqual(
                 self.repo.get_job(self.scope, jobs[5]["id"])["attempt_no"], 0
             )
@@ -315,7 +315,9 @@ class DurableDomainTests(LedgerCase):
             def occupied_fence():
                 yield False, None
 
-            with patch.object(slots, "_cpu_fence", side_effect=occupied_fence) as fence:
+            with patch.object(
+                slots.local, "cpu_fence", side_effect=occupied_fence
+            ) as fence:
                 slots.turn(
                     self.scope.tenant_id,
                     self.scope.owner_id,
@@ -347,7 +349,7 @@ class DurableDomainTests(LedgerCase):
     )
     def test_cpu_fence_survives_parent_close_across_configurations(self):
         slots = DurableSlots(self.repo, Mock(), self.directory)
-        with slots._cpu_fence() as (acquired, descriptor):
+        with slots.local.cpu_fence() as (acquired, descriptor):
             self.assertTrue(acquired)
             child = subprocess.Popen(
                 [sys.executable, "-c", "import sys;sys.stdin.read()"],
@@ -358,12 +360,12 @@ class DurableDomainTests(LedgerCase):
             )
         try:
             other = DurableSlots(self.repo, Mock(), self.directory)
-            with other._cpu_fence() as (acquired, descriptor):
+            with other.local.cpu_fence() as (acquired, descriptor):
                 self.assertFalse(acquired)
                 self.assertIsNone(descriptor)
         finally:
             child.communicate(timeout=5)
-        with slots._cpu_fence() as (acquired, descriptor):
+        with slots.local.cpu_fence() as (acquired, descriptor):
             self.assertTrue(acquired)
 
 
