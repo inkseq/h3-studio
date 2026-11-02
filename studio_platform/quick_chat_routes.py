@@ -5,8 +5,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 
-from .quick_chat import QuickChatService, QuickChatError, default_next_settings
-from .quick_chat_assistant import QuickChatAssistant, model_schema
+from .quick_chat import QuickChatError, default_next_settings
+from .quick_chat_assistant import model_schema
 from .quick_chat_titles import TITLE_MODEL
 from .capabilities import capabilities
 from .repository import request_hash
@@ -327,19 +327,11 @@ def agent_contract():
     }
 
 
-def register_routes(
-    app, *, hooks=None, assistant=None, assistant_enabled=False, title_generator=None
-):
+def register_routes(app, *, service):
     settings = app.state.settings
-    service = QuickChatService(
-        app.state.repository,
-        app.state.assets,
-        settings,
-        app.state.storage,
-        hooks=hooks,
-        assistant=assistant or QuickChatAssistant(app.state.assets, app.state.storage),
-        assistant_enabled=assistant_enabled,
-        title_generator=title_generator,
+    assistant_enabled, title_generator = (
+        service.assistant_enabled,
+        service.title_generator,
     )
     app.state.quick_chat = service
 

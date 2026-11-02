@@ -273,13 +273,17 @@ def selected_recipe_current(project, shot_id, original, defaults, capabilities):
         return False
 
 
-class FilmRuns:
-    def __init__(self, app, *, enqueue=None):
-        self.app = app
-        self.repo = app.state.repository
-        self.tenant = app.state.settings.tenant_id
-        self.access = app.state.generation_access
-        self.enqueue = enqueue
+class FilmExecution:
+    """Finite accepted-film turns, independent of HTTP authoring composition."""
+
+    def __init__(
+        self, *, repo, settings, access, submit_batch, evaluate_policy, resolve_source
+    ):
+        self.repo, self.settings, self.access = repo, settings, access
+        self.tenant = settings.tenant_id
+        self.submit_batch = submit_batch
+        self.evaluate_policy = evaluate_policy
+        self.resolve_source = resolve_source
 
     def execution_context(self, tenant, owner, project_id, run_id):
         """Controller-only input to its existing Auth grant revalidator.
@@ -395,7 +399,7 @@ class FilmRuns:
         self.repo._content_write_guard(conn, scope, payload)
         if (
             len(__import__('json').dumps(payload, ensure_ascii=False).encode())
-            > self.app.state.settings.max_project_bytes
+            > self.settings.max_project_bytes
         ):
             raise Conflict("film_document_size_limit")
         if row is None:
@@ -516,6 +520,371 @@ class FilmRuns:
             result["estimate"], hide_dollars=hide_dollars
         )
         return result
+
+    def _admit(self, principal, value, items, suffix):
+        pending = [
+            item
+            for item in items
+            if not item.get("job_id")
+            or self.access.job(principal, item["job_id"])["status"]
+            in {"planned", "blocked"}
+        ]
+        if not pending:
+            return value
+        result = self.submit_batch(
+            principal,
+            {
+                "client_project_id": value["project_id"],
+                "plan_ids": [item["plan_id"] for item in items],
+            },
+            value["id"] + ":" + suffix,
+        )
+        links = {item["plan_id"]: item.get("job_id") for item in result["items"]}
+
+        def link(current):
+            target = (
+                current["generation"]
+                if suffix == "shots"
+                else current["chapters"]
+                if suffix == "chapters"
+                else [current["export"]]
+            )
+            for item in target:
+                if links.get(item["plan_id"]):
+                    if item.get("job_id") not in {None, links[item["plan_id"]]}:
+                        raise Conflict("film_job_identity_conflict")
+                    item["job_id"] = links[item["plan_id"]]
+
+        return self._mutate(principal, value["project_id"], value["id"], link)
+
+    def _result(self, principal, project_id, job_id):
+        job = self.access.job(principal, job_id)
+        if job["status"] != "succeeded":
+            return job["status"], None
+        videos = [
+            item
+            for item in self.repo.list_artifacts(
+                self.access.scope(principal, project_id), job_id
+            )
+            if item["metadata"].get("kind") == "video"
+        ]
+        if len(videos) != 1:
+            raise Conflict("film_video_result_unconfirmed")
+        artifact = self.access.artifact(principal, videos[0]["id"])
+        entity = {
+            "id": "film-take-" + artifact["id"],
+            "type": "video",
+            "title": "Film take",
+            "version": 1,
+            "order": 0,
+            "parentId": None,
+            "description": "",
+            "status": "ready",
+            "data": {"cloudArtifactId": artifact["id"]},
+        }
+        return "succeeded", {"artifact_id": artifact["id"], "entity": entity}
+
+    def _render_plan(self, principal, value, label, compiled, blockers):
+        if blockers:
+            raise Conflict("film_render_input_blocked")
+        compiled["film_source_ref"] = {
+            "run_id": value["id"],
+            "snapshot_hash": value["snapshot_hash"],
+        }
+        plan_id = str(uuid.uuid5(uuid.NAMESPACE_URL, value["id"] + ":" + label))
+        digest = request_hash(compiled)
+        admission = self.evaluate_policy(
+            compiled, self.access.scope(principal, value["project_id"]), digest
+        )
+        from .credits_pricing import quote as quote_credits
+
+        with self.repo.engine.connect() as connection:
+            credit_quote = quote_credits(
+                connection,
+                self.tenant,
+                principal.owner,
+                compiled,
+                execution=admission.execution,
+            )
+        if credit_quote is not None:
+            admission.execution["credit_quote"] = credit_quote
+        freeze_generation_policy(
+            self.repo, self.tenant, principal.owner, compiled, admission.execution
+        )
+        digest = request_hash(compiled)
+        self.repo.create_plan(
+            self.access.scope(principal, value["project_id"]),
+            compiled,
+            admission.execution,
+            expires_at=admission.expires_at,
+            estimated_cost_microusd=0,
+            plan_id=plan_id,
+        )
+
+        def register(current):
+            current["plan_hashes"][plan_id] = digest
+            target = (
+                current["export"]
+                if label == "export"
+                else next(
+                    item for item in current["chapters"] if item["chapter_id"] == label
+                )
+            )
+            target["plan_id"] = plan_id
+
+        return self._mutate(principal, value["project_id"], value["id"], register)
+
+    def _waiting(self, principal, value, phase, error_code=None):
+        if value["phase"] != phase or value.get("error_code") != error_code:
+            self._mutate(
+                principal,
+                value["project_id"],
+                value["id"],
+                lambda current: (
+                    current.update(phase=phase, error_code=error_code)
+                    if not current["cancel_requested"]
+                    else None
+                ),
+            )
+        return {
+            "terminal": False,
+            "phase": phase,
+            "error_code": error_code,
+            "wait_seconds": 10,
+        }
+
+    def record_business_block(self, principal, project_id, run_id, code):
+        """Known refusals wait visibly for same-run resume, never auto-retry work."""
+        if code not in EXECUTION_BLOCKS:
+            raise ValueError("film_execution_block_invalid")
+        self.access.project(principal, project_id, "jobs:write")
+        with self.repo.engine.connect() as conn:
+            value = copy.deepcopy(
+                self._row(conn, principal, project_id, run_id)["payload"]
+            )
+        if value["phase"] in TERMINAL:
+            return {"terminal": True, "phase": value["phase"]}
+        if value.get("accepted_at") is None:
+            raise Conflict("film_confirmation_required")
+        return self._waiting(principal, value, "blocked", code)
+
+    def turn(self, principal, project_id, run_id):
+        """One bounded domain turn. The workflow supplies durable waiting."""
+        self.access.project(principal, project_id, "jobs:write")
+        with self.repo.engine.connect() as conn:
+            value = copy.deepcopy(
+                self._row(conn, principal, project_id, run_id)["payload"]
+            )
+        if value["workflow_version"] != VERSION:
+            raise Conflict("film_workflow_version_mismatch")
+        if value["phase"] in TERMINAL:
+            return {"terminal": True, "phase": value["phase"]}
+        if value["cancel_requested"]:
+            states = []
+            for item in [*value["generation"], *value["chapters"], value["export"]]:
+                if item.get("job_id"):
+                    self.repo.request_cancel(
+                        self.access.scope(principal, project_id), item["job_id"]
+                    )
+                    states.append(self.access.job(principal, item["job_id"])["status"])
+            if all(state in JOB_TERMINAL for state in states):
+                self._mutate(
+                    principal,
+                    project_id,
+                    run_id,
+                    lambda current: current.update(phase="cancelled"),
+                )
+                return {"terminal": True, "phase": "cancelled"}
+            return {"terminal": False, "phase": "cancel_requested", "wait_seconds": 10}
+        if value.get("accepted_at") is None:
+            raise Conflict("film_confirmation_required")
+        if value["phase"] == "blocked" and value.get("error_code") in EXECUTION_BLOCKS:
+            return self._waiting(principal, value, "blocked", value["error_code"])
+        value = self._admit(principal, value, value["generation"], "shots")
+        results = copy.deepcopy(value["results"])
+        for item in value["generation"]:
+            if not item.get("job_id"):
+                return self._waiting(principal, value, "admission_blocked")
+            status, result = self._result(principal, project_id, item["job_id"])
+            if status in {"failed", "cancelled"}:
+                return self._waiting(
+                    principal, value, "blocked", "film_original_job_failed"
+                )
+            if status != "succeeded":
+                return self._waiting(principal, value, "generating")
+            results[item["shot_id"]] = result
+        if results != value["results"] or value["phase"] == "generating":
+            value = self._mutate(
+                principal,
+                project_id,
+                run_id,
+                lambda current: current.update(results=results, phase="chapters"),
+            )
+        authoring = frozen_story(value["project"], {}, chapters=value["chapters"])
+        project = frozen_story(authoring, results)
+        for chapter in value["chapters"]:
+            if not chapter["plan_id"]:
+                options = {
+                    key: item
+                    for key, item in value["options"].items()
+                    if item is not None
+                }
+                burn_subtitles = options.pop("burn_subtitles", False)
+                compiled, _, blockers, _ = compile_render(
+                    {
+                        "client_ref": {
+                            "project_id": project_id,
+                            "chapter_id": chapter["chapter_id"],
+                        },
+                        **options,
+                    },
+                    project,
+                    lambda entity, kind: self.resolve_source(
+                        principal, project_id, entity, kind
+                    ),
+                    contract_version=value.get("render_contract_version", 3),
+                )
+                if burn_subtitles:
+                    from .caption_server import compile_subtitles
+                    from .render_plans import render_source_hash
+
+                    # Consent belongs to the accepted authoring snapshot. Only
+                    # this run's selected media changes in the render copy;
+                    # never manufacture a new confirmation for those results.
+                    original_shots = ordered_chapter(authoring, chapter["chapter_id"])[
+                        2
+                    ]
+                    subtitles, _, caption_blockers, _ = compile_subtitles(
+                        authoring,
+                        chapter["chapter_id"],
+                        original_shots,
+                        compiled["output_spec"]["frame_count"],
+                        render_version=value.get("render_contract_version", 3),
+                    )
+                    blockers.extend(caption_blockers)
+                    compiled["request"]["render"]["subtitles"] = subtitles
+                    compiled["server_source_hash"] = render_source_hash(
+                        project,
+                        chapter["chapter_id"],
+                        burn_subtitles=True,
+                        contract_version=value.get("render_contract_version", 3),
+                    )
+                value = self._render_plan(
+                    principal, value, chapter["chapter_id"], compiled, blockers
+                )
+        value = self._admit(principal, value, value["chapters"], "chapters")
+        chapter_results = []
+        for chapter in value["chapters"]:
+            if not chapter.get("job_id"):
+                return self._waiting(principal, value, "admission_blocked")
+            status, result = self._result(principal, project_id, chapter["job_id"])
+            if status != "succeeded":
+                return self._waiting(
+                    principal,
+                    value,
+                    "chapters" if status not in JOB_TERMINAL else "blocked",
+                    "film_original_job_failed" if status in JOB_TERMINAL else None,
+                )
+            if chapter["artifact_id"] != result["artifact_id"]:
+                if chapter["artifact_id"] is not None:
+                    raise Conflict("film_result_identity_conflict")
+
+                def record_chapter(current):
+                    target = next(
+                        item
+                        for item in current["chapters"]
+                        if item["chapter_id"] == chapter["chapter_id"]  # noqa: B023 -- called synchronously in this iteration
+                    )
+                    if target["artifact_id"] not in {None, result["artifact_id"]}:  # noqa: B023 -- called synchronously in this iteration
+                        raise Conflict("film_result_identity_conflict")
+                    target["artifact_id"] = result["artifact_id"]  # noqa: B023 -- called synchronously in this iteration
+
+                value = self._mutate(principal, project_id, run_id, record_chapter)
+            job = self.access.job(principal, chapter["job_id"])
+            records = self.repo.list_artifacts(
+                self.access.scope(principal, project_id), job["id"]
+            )
+
+            def snapshot(item):
+                self.access.artifact(principal, item["id"])
+                meta = item["metadata"]
+                return {
+                    "kind": meta["kind"],
+                    "simulation": job["request"].get("simulation", False),  # noqa: B023 -- called synchronously in this iteration
+                    "object": {
+                        "key": meta["object_key"],
+                        "size_bytes": meta["size_bytes"],
+                        "sha256": meta["sha256"],
+                        "content_type": meta.get("content_type", meta.get("mime")),
+                    },
+                }
+
+            chapter_results.append(
+                {
+                    "chapter_id": chapter["chapter_id"],
+                    "output_spec": job["request"]["output_spec"],
+                    "video": snapshot(
+                        next(
+                            item
+                            for item in records
+                            if item["metadata"]["kind"] == "video"
+                        )
+                    ),
+                    "audio": next(
+                        (
+                            snapshot(item)
+                            for item in records
+                            if item["metadata"]["kind"] == "audio"
+                        ),
+                        None,
+                    ),
+                }
+            )
+            if value.get("render_contract_version") == 5:
+                chapter_results[-1]["render_version"] = 5
+        if not value["export"]["plan_id"]:
+            compiled = compile_film_export(project_id, run_id, chapter_results)
+            value = self._render_plan(principal, value, "export", compiled, [])
+        value = self._admit(principal, value, [value["export"]], "export")
+        if not value["export"].get("job_id"):
+            return self._waiting(principal, value, "admission_blocked")
+        status, result = self._result(principal, project_id, value["export"]["job_id"])
+        if status == "succeeded":
+
+            def finish(current):
+                current["export"]["artifact_id"] = result["artifact_id"]
+                current["phase"] = "completed"
+
+            self._mutate(principal, project_id, run_id, finish)
+            return {"terminal": True, "phase": "completed"}
+        return self._waiting(
+            principal,
+            value,
+            "exporting" if status not in JOB_TERMINAL else "blocked",
+            "film_original_job_failed" if status in JOB_TERMINAL else None,
+        )
+
+
+class FilmRuns(FilmExecution):
+    """HTTP authoring API over the same accepted-film execution core."""
+
+    def __init__(self, app, *, enqueue=None):
+        super().__init__(
+            repo=app.state.repository,
+            settings=app.state.settings,
+            access=app.state.generation_access,
+            submit_batch=lambda *args, **kwargs: app.state.submit_generation_batch(
+                *args, **kwargs
+            ),
+            evaluate_policy=lambda *args, **kwargs: (
+                app.state.generation_planning.policies.evaluate(*args, **kwargs)
+            ),
+            resolve_source=lambda *args, **kwargs: app.state.resolve_render_source(
+                *args, **kwargs
+            ),
+        )
+        self.app = app
+        self.enqueue = enqueue
 
     def preflight(self, principal, project_id, body, key):
         from .credits_pricing import public_quote
@@ -1016,346 +1385,3 @@ class FilmRuns:
         with self.repo.transaction() as conn:
             self.enqueue(conn, self.tenant, principal.owner, project_id, run_id)
         return self.public(value, principal)
-
-    def _admit(self, principal, value, items, suffix):
-        pending = [
-            item
-            for item in items
-            if not item.get("job_id")
-            or self.access.job(principal, item["job_id"])["status"]
-            in {"planned", "blocked"}
-        ]
-        if not pending:
-            return value
-        result = self.app.state.submit_generation_batch(
-            principal,
-            {
-                "client_project_id": value["project_id"],
-                "plan_ids": [item["plan_id"] for item in items],
-            },
-            value["id"] + ":" + suffix,
-        )
-        links = {item["plan_id"]: item.get("job_id") for item in result["items"]}
-
-        def link(current):
-            target = (
-                current["generation"]
-                if suffix == "shots"
-                else current["chapters"]
-                if suffix == "chapters"
-                else [current["export"]]
-            )
-            for item in target:
-                if links.get(item["plan_id"]):
-                    if item.get("job_id") not in {None, links[item["plan_id"]]}:
-                        raise Conflict("film_job_identity_conflict")
-                    item["job_id"] = links[item["plan_id"]]
-
-        return self._mutate(principal, value["project_id"], value["id"], link)
-
-    def _result(self, principal, project_id, job_id):
-        job = self.access.job(principal, job_id)
-        if job["status"] != "succeeded":
-            return job["status"], None
-        videos = [
-            item
-            for item in self.repo.list_artifacts(
-                self.access.scope(principal, project_id), job_id
-            )
-            if item["metadata"].get("kind") == "video"
-        ]
-        if len(videos) != 1:
-            raise Conflict("film_video_result_unconfirmed")
-        artifact = self.access.artifact(principal, videos[0]["id"])
-        entity = {
-            "id": "film-take-" + artifact["id"],
-            "type": "video",
-            "title": "Film take",
-            "version": 1,
-            "order": 0,
-            "parentId": None,
-            "description": "",
-            "status": "ready",
-            "data": {"cloudArtifactId": artifact["id"]},
-        }
-        return "succeeded", {"artifact_id": artifact["id"], "entity": entity}
-
-    def _render_plan(self, principal, value, label, compiled, blockers):
-        if blockers:
-            raise Conflict("film_render_input_blocked")
-        compiled["film_source_ref"] = {
-            "run_id": value["id"],
-            "snapshot_hash": value["snapshot_hash"],
-        }
-        plan_id = str(uuid.uuid5(uuid.NAMESPACE_URL, value["id"] + ":" + label))
-        digest = request_hash(compiled)
-        admission = self.app.state.generation_planning.policies.evaluate(
-            compiled, self.access.scope(principal, value["project_id"]), digest
-        )
-        from .credits_pricing import quote as quote_credits
-
-        with self.repo.engine.connect() as connection:
-            credit_quote = quote_credits(
-                connection,
-                self.tenant,
-                principal.owner,
-                compiled,
-                execution=admission.execution,
-            )
-        if credit_quote is not None:
-            admission.execution["credit_quote"] = credit_quote
-        freeze_generation_policy(
-            self.repo, self.tenant, principal.owner, compiled, admission.execution
-        )
-        digest = request_hash(compiled)
-        self.repo.create_plan(
-            self.access.scope(principal, value["project_id"]),
-            compiled,
-            admission.execution,
-            expires_at=admission.expires_at,
-            estimated_cost_microusd=0,
-            plan_id=plan_id,
-        )
-
-        def register(current):
-            current["plan_hashes"][plan_id] = digest
-            target = (
-                current["export"]
-                if label == "export"
-                else next(
-                    item for item in current["chapters"] if item["chapter_id"] == label
-                )
-            )
-            target["plan_id"] = plan_id
-
-        return self._mutate(principal, value["project_id"], value["id"], register)
-
-    def _waiting(self, principal, value, phase, error_code=None):
-        if value["phase"] != phase or value.get("error_code") != error_code:
-            self._mutate(
-                principal,
-                value["project_id"],
-                value["id"],
-                lambda current: (
-                    current.update(phase=phase, error_code=error_code)
-                    if not current["cancel_requested"]
-                    else None
-                ),
-            )
-        return {
-            "terminal": False,
-            "phase": phase,
-            "error_code": error_code,
-            "wait_seconds": 10,
-        }
-
-    def record_business_block(self, principal, project_id, run_id, code):
-        """Known refusals wait visibly for same-run resume, never auto-retry work."""
-        if code not in EXECUTION_BLOCKS:
-            raise ValueError("film_execution_block_invalid")
-        self.access.project(principal, project_id, "jobs:write")
-        with self.repo.engine.connect() as conn:
-            value = copy.deepcopy(
-                self._row(conn, principal, project_id, run_id)["payload"]
-            )
-        if value["phase"] in TERMINAL:
-            return {"terminal": True, "phase": value["phase"]}
-        if value.get("accepted_at") is None:
-            raise Conflict("film_confirmation_required")
-        return self._waiting(principal, value, "blocked", code)
-
-    def turn(self, principal, project_id, run_id):
-        """One bounded domain turn. The workflow supplies durable waiting."""
-        self.access.project(principal, project_id, "jobs:write")
-        with self.repo.engine.connect() as conn:
-            value = copy.deepcopy(
-                self._row(conn, principal, project_id, run_id)["payload"]
-            )
-        if value["workflow_version"] != VERSION:
-            raise Conflict("film_workflow_version_mismatch")
-        if value["phase"] in TERMINAL:
-            return {"terminal": True, "phase": value["phase"]}
-        if value["cancel_requested"]:
-            states = []
-            for item in [*value["generation"], *value["chapters"], value["export"]]:
-                if item.get("job_id"):
-                    self.repo.request_cancel(
-                        self.access.scope(principal, project_id), item["job_id"]
-                    )
-                    states.append(self.access.job(principal, item["job_id"])["status"])
-            if all(state in JOB_TERMINAL for state in states):
-                self._mutate(
-                    principal,
-                    project_id,
-                    run_id,
-                    lambda current: current.update(phase="cancelled"),
-                )
-                return {"terminal": True, "phase": "cancelled"}
-            return {"terminal": False, "phase": "cancel_requested", "wait_seconds": 10}
-        if value.get("accepted_at") is None:
-            raise Conflict("film_confirmation_required")
-        if value["phase"] == "blocked" and value.get("error_code") in EXECUTION_BLOCKS:
-            return self._waiting(principal, value, "blocked", value["error_code"])
-        value = self._admit(principal, value, value["generation"], "shots")
-        results = copy.deepcopy(value["results"])
-        for item in value["generation"]:
-            if not item.get("job_id"):
-                return self._waiting(principal, value, "admission_blocked")
-            status, result = self._result(principal, project_id, item["job_id"])
-            if status in {"failed", "cancelled"}:
-                return self._waiting(
-                    principal, value, "blocked", "film_original_job_failed"
-                )
-            if status != "succeeded":
-                return self._waiting(principal, value, "generating")
-            results[item["shot_id"]] = result
-        if results != value["results"] or value["phase"] == "generating":
-            value = self._mutate(
-                principal,
-                project_id,
-                run_id,
-                lambda current: current.update(results=results, phase="chapters"),
-            )
-        authoring = frozen_story(value["project"], {}, chapters=value["chapters"])
-        project = frozen_story(authoring, results)
-        for chapter in value["chapters"]:
-            if not chapter["plan_id"]:
-                options = {
-                    key: item
-                    for key, item in value["options"].items()
-                    if item is not None
-                }
-                burn_subtitles = options.pop("burn_subtitles", False)
-                compiled, _, blockers, _ = compile_render(
-                    {
-                        "client_ref": {
-                            "project_id": project_id,
-                            "chapter_id": chapter["chapter_id"],
-                        },
-                        **options,
-                    },
-                    project,
-                    lambda entity, kind: self.app.state.resolve_render_source(
-                        principal, project_id, entity, kind
-                    ),
-                    contract_version=value.get("render_contract_version", 3),
-                )
-                if burn_subtitles:
-                    from .caption_server import compile_subtitles
-                    from .render_plans import render_source_hash
-
-                    # Consent belongs to the accepted authoring snapshot. Only
-                    # this run's selected media changes in the render copy;
-                    # never manufacture a new confirmation for those results.
-                    original_shots = ordered_chapter(authoring, chapter["chapter_id"])[
-                        2
-                    ]
-                    subtitles, _, caption_blockers, _ = compile_subtitles(
-                        authoring,
-                        chapter["chapter_id"],
-                        original_shots,
-                        compiled["output_spec"]["frame_count"],
-                        render_version=value.get("render_contract_version", 3),
-                    )
-                    blockers.extend(caption_blockers)
-                    compiled["request"]["render"]["subtitles"] = subtitles
-                    compiled["server_source_hash"] = render_source_hash(
-                        project,
-                        chapter["chapter_id"],
-                        burn_subtitles=True,
-                        contract_version=value.get("render_contract_version", 3),
-                    )
-                value = self._render_plan(
-                    principal, value, chapter["chapter_id"], compiled, blockers
-                )
-        value = self._admit(principal, value, value["chapters"], "chapters")
-        chapter_results = []
-        for chapter in value["chapters"]:
-            if not chapter.get("job_id"):
-                return self._waiting(principal, value, "admission_blocked")
-            status, result = self._result(principal, project_id, chapter["job_id"])
-            if status != "succeeded":
-                return self._waiting(
-                    principal,
-                    value,
-                    "chapters" if status not in JOB_TERMINAL else "blocked",
-                    "film_original_job_failed" if status in JOB_TERMINAL else None,
-                )
-            if chapter["artifact_id"] != result["artifact_id"]:
-                if chapter["artifact_id"] is not None:
-                    raise Conflict("film_result_identity_conflict")
-
-                def record_chapter(current):
-                    target = next(
-                        item
-                        for item in current["chapters"]
-                        if item["chapter_id"] == chapter["chapter_id"]  # noqa: B023 -- called synchronously in this iteration
-                    )
-                    if target["artifact_id"] not in {None, result["artifact_id"]}:  # noqa: B023 -- called synchronously in this iteration
-                        raise Conflict("film_result_identity_conflict")
-                    target["artifact_id"] = result["artifact_id"]  # noqa: B023 -- called synchronously in this iteration
-
-                value = self._mutate(principal, project_id, run_id, record_chapter)
-            job = self.access.job(principal, chapter["job_id"])
-            records = self.repo.list_artifacts(
-                self.access.scope(principal, project_id), job["id"]
-            )
-
-            def snapshot(item):
-                self.access.artifact(principal, item["id"])
-                meta = item["metadata"]
-                return {
-                    "kind": meta["kind"],
-                    "simulation": job["request"].get("simulation", False),  # noqa: B023 -- called synchronously in this iteration
-                    "object": {
-                        "key": meta["object_key"],
-                        "size_bytes": meta["size_bytes"],
-                        "sha256": meta["sha256"],
-                        "content_type": meta.get("content_type", meta.get("mime")),
-                    },
-                }
-
-            chapter_results.append(
-                {
-                    "chapter_id": chapter["chapter_id"],
-                    "output_spec": job["request"]["output_spec"],
-                    "video": snapshot(
-                        next(
-                            item
-                            for item in records
-                            if item["metadata"]["kind"] == "video"
-                        )
-                    ),
-                    "audio": next(
-                        (
-                            snapshot(item)
-                            for item in records
-                            if item["metadata"]["kind"] == "audio"
-                        ),
-                        None,
-                    ),
-                }
-            )
-            if value.get("render_contract_version") == 5:
-                chapter_results[-1]["render_version"] = 5
-        if not value["export"]["plan_id"]:
-            compiled = compile_film_export(project_id, run_id, chapter_results)
-            value = self._render_plan(principal, value, "export", compiled, [])
-        value = self._admit(principal, value, [value["export"]], "export")
-        if not value["export"].get("job_id"):
-            return self._waiting(principal, value, "admission_blocked")
-        status, result = self._result(principal, project_id, value["export"]["job_id"])
-        if status == "succeeded":
-
-            def finish(current):
-                current["export"]["artifact_id"] = result["artifact_id"]
-                current["phase"] = "completed"
-
-            self._mutate(principal, project_id, run_id, finish)
-            return {"terminal": True, "phase": "completed"}
-        return self._waiting(
-            principal,
-            value,
-            "exporting" if status not in JOB_TERMINAL else "blocked",
-            "film_original_job_failed" if status in JOB_TERMINAL else None,
-        )

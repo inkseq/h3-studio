@@ -206,18 +206,22 @@ class BatchService:
         return self.get(principal, batch_id)
 
 
-def register_routes(app):
-    repo = app.state.repository
-    service = BatchService(repo, app.state.settings.tenant_id)
-    app.state.batches = service
+class BatchAdmission:
+    """Finite original admission shared by HTTP and the film worker."""
 
-    def activate(principal, record, job_id):
-        latest = service.get(principal, record["id"])
-        task_scope = app.state.scope(principal, record["project_id"])
+    def __init__(self, core, *, enqueue=None):
+        self.repo, self.settings = core.repository, core.settings
+        self.access, self.read, self.admission = core.access, core.read, core.admission
+        self.enqueue = enqueue or core.admission.enqueue
+        self.service = BatchService(self.repo, self.settings.tenant_id)
+
+    def activate(self, principal, record, job_id):
+        latest = self.service.get(principal, record["id"])
+        task_scope = self.access.scope(principal, record["project_id"])
         if latest["cancel_requested"]:
-            repo.request_cancel(task_scope, job_id)
+            self.repo.request_cancel(task_scope, job_id)
             return
-        job = repo.get_job(task_scope, job_id)
+        job = self.repo.get_job(task_scope, job_id)
         if job["status"] == "planned":
             # Admission is durable before a worker can claim the task. A crash
             # between creation and linking leaves an inert, idempotent task.
@@ -235,7 +239,7 @@ def register_routes(app):
                     ),
                     None,
                 )
-                app.state.enqueue_planned(
+                self.enqueue(
                     principal,
                     job,
                     confirmation_required=required,
@@ -243,10 +247,11 @@ def register_routes(app):
                 )
             except Conflict:
                 # A racing retry/cancel may already have transitioned this job.
-                if repo.get_job(task_scope, job_id)["status"] == "planned":
+                if self.repo.get_job(task_scope, job_id)["status"] == "planned":
                     raise
 
     def visible(
+        self,
         principal,
         record,
         *,
@@ -257,17 +262,17 @@ def register_routes(app):
     ):
         cancellation = {}
         if not summary:
-            app.state.authorized_project(principal, record["project_id"], "jobs:read")
+            self.access.project(principal, record["project_id"], "jobs:read")
             pairs = {
                 item["job_id"]: record["project_id"]
                 for item in record["items"]
                 if item["job_id"]
             }
-            job_records = repo.get_job_summaries_for_owner(
-                service.tenant, principal.owner, pairs
+            job_records = self.repo.get_job_summaries_for_owner(
+                self.service.tenant, principal.owner, pairs
             )
-            cancellation = repo.get_job_cancellation_fields(
-                service.tenant,
+            cancellation = self.repo.get_job_cancellation_fields(
+                self.service.tenant,
                 principal.owner,
                 pairs,
                 expected_states={
@@ -277,8 +282,8 @@ def register_routes(app):
                     for ident, row in job_records.items()
                 },
             )
-            artifact_records = repo.list_artifacts_for_jobs(
-                service.tenant,
+            artifact_records = self.repo.list_artifacts_for_jobs(
+                self.service.tenant,
                 principal.owner,
                 {
                     ident: record["project_id"]
@@ -295,7 +300,7 @@ def register_routes(app):
             if item["job_id"]:
                 state = statuses[item["job_id"]]
                 if not summary:
-                    value["job"] = app.state.public_job(
+                    value["job"] = self.read.public_job(
                         job_records[item["job_id"]],
                         artifact_records=artifact_records.get(item["job_id"], []),
                         cancellation=cancellation[item["job_id"]],
@@ -343,26 +348,18 @@ def register_routes(app):
             "summary": summary,
         }
 
-    @app.post("/v1/batches", status_code=202)
-    def submit_batch(
-        request: Request,
-        body: dict,
-        idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    ):
-        return submit_generation_batch(request.state.principal, body, idempotency_key)
-
-    def submit_generation_batch(principal, body, idempotency_key):
+    def submit(self, principal, body, idempotency_key):
         if set(body) != {"client_project_id", "plan_ids"}:
             raise HTTPException(422, "批次仅接受项目与已预检计划列表")
         project_id = body["client_project_id"]
         from .generation_admission import reject_managed
 
         reject_managed(
-            app.state.authorized_project(principal, project_id, "jobs:write")["payload"]
+            self.access.project(principal, project_id, "jobs:write")["payload"]
         )
         # Reservation occurs before per-item validation so partial admission can
         # recover after a process crash. Ownership is still checked for every plan.
-        record = service.reserve(
+        record = self.service.reserve(
             principal, project_id, body["plan_ids"], idempotency_key
         )
         from .spending_limits import check_submission_confirmation
@@ -372,20 +369,20 @@ def register_routes(app):
             if not item["job_id"] and not item["error_code"]:
                 pending_plans.append(item["plan_id"])
             elif item["job_id"]:
-                job = repo.get_job_for_owner(
-                    service.tenant, principal.owner, item["job_id"]
+                job = self.repo.get_job_for_owner(
+                    self.service.tenant, principal.owner, item["job_id"]
                 )
                 if job["status"] in {"planned", "blocked"}:
                     pending_plans.append(item["plan_id"])
         check = check_submission_confirmation(
-            repo,
-            service.tenant,
+            self.repo,
+            self.service.tenant,
             principal,
             [] if record["cancel_requested"] else pending_plans,
         )
         for index, item in enumerate(record["items"]):
             if item["plan_id"] in pending_plans:
-                service.record_item(
+                self.service.record_item(
                     principal,
                     record["id"],
                     index,
@@ -397,32 +394,32 @@ def register_routes(app):
         for index, item in enumerate(record["items"]):
             if not item["job_id"] and (
                 item["error_code"]
-                or service.get(principal, record["id"])["cancel_requested"]
+                or self.service.get(principal, record["id"])["cancel_requested"]
             ):
                 continue
             try:
                 if item["job_id"]:
-                    activate(principal, record, item["job_id"])
-                    service.record_item(
+                    self.activate(principal, record, item["job_id"])
+                    self.service.record_item(
                         principal, record["id"], index, {"error_code": None}
                     )
                     continue
-                plan = app.state.owned_plan(principal, item["plan_id"])
+                plan = self.access.plan(principal, item["plan_id"])
                 if plan["project_id"] != project_id:
                     raise NotFound("plan_not_found")
-                job = app.state.create_from_plan(
+                job = self.admission.create(
                     principal,
                     item["plan_id"],
                     f'batch:{record["id"]}:{index}',
                     initial_status="planned",
                 )
-                service.record_item(
+                self.service.record_item(
                     principal,
                     record["id"],
                     index,
                     {"job_id": job["id"], "error_code": None},
                 )
-                activate(principal, record, job["id"])
+                self.activate(principal, record, job["id"])
             except (
                 NotFound,
                 Conflict,
@@ -434,11 +431,11 @@ def register_routes(app):
                 from .agent_management import record_refusal
 
                 record_refusal(
-                    service.repo.engine,
-                    app.state.settings.tenant_id,
+                    self.service.repo.engine,
+                    self.settings.tenant_id,
                     principal,
                     str(error),
-                    service.repo.clock(),
+                    self.service.repo.clock(),
                 )
                 from .spending_limits import SpendingConfirmationRequired
 
@@ -461,12 +458,32 @@ def register_routes(app):
                         if isinstance(error, NotFound)
                         else "plan_no_longer_valid"
                     )
-                service.record_item(
+                self.service.record_item(
                     principal, record["id"], index, {"error_code": code}
                 )
-        return visible(principal, service.get(principal, record["id"]))
+        return self.visible(principal, self.service.get(principal, record["id"]))
 
-    app.state.submit_generation_batch = submit_generation_batch
+
+def register_routes(app):
+    repo = app.state.repository
+    admission = BatchAdmission(
+        app.state.services,
+        enqueue=lambda *args, **kwargs: app.state.enqueue_planned(*args, **kwargs),
+    )
+    service = admission.service
+    app.state.batches = service
+    visible = admission.visible
+    submit_generation_batch = admission.submit
+
+    @app.post("/v1/batches", status_code=202)
+    def submit_batch(
+        request: Request,
+        body: dict,
+        idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    ):
+        return submit_generation_batch(request.state.principal, body, idempotency_key)
+
+    app.state.submit_generation_batch = admission.submit
 
     @app.get("/v1/batches")
     def list_batches(

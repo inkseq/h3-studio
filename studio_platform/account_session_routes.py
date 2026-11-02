@@ -3,13 +3,10 @@
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse
 
-from .account_sessions import AccountSessions, SessionError
+from .account_sessions import SessionError
 
 
-def register_routes(app, *, cookie):
-    service = AccountSessions(
-        app.state.repository, app.state.auth, app.state.settings, app.state.workos_auth
-    )
+def register_routes(app, *, cookie, service):
     app.state.account_sessions = service
     app.state.auth.session_checker = service.check
 

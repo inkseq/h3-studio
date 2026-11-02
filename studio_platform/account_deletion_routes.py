@@ -3,17 +3,10 @@
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse
 
-from .account_deletion import AccountDeletion, DeletionError
+from .account_deletion import DeletionError
 
 
-def register_routes(app, *, cookie):
-    service = AccountDeletion(
-        app.state.repository,
-        app.state.auth,
-        app.state.settings,
-        app.state.workos_auth,
-        app.state.quick_chat,
-    )
+def register_routes(app, *, cookie, service):
     app.state.account_deletion = service
 
     @app.exception_handler(DeletionError)

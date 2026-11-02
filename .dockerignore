@@ -111,3 +111,7 @@ deploy/wangp/profiles/*
 # #899 local-slot ownership seam (also covered by module wildcard).
 !studio_platform/slot_turns.py
 !studio_platform/local_slots.py
+
+# #899 shared HTTP/controller service composition
+!studio_platform/application_services.py
+!studio_platform/render_sources.py

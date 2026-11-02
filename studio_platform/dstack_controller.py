@@ -1304,10 +1304,10 @@ def main(argv=None):
         )
         modal_extension = load_extension(service, work_dir)
         from .dbos_transport import DurableExecutor
-        from .api import create_app
+        from .application_services import create_controller_services
         from .film_workflows import setup_controller_film
 
-        film_app = create_app(settings, repository=repo, dstack_operator=service)
+        workflow_services = create_controller_services(settings, repository=repo)
         durable_executor = DurableExecutor(
             repo,
             settings,
@@ -1316,11 +1316,11 @@ def main(argv=None):
             if modal_extension
             else None,
             film_setup=lambda DBOS, turns: setup_controller_film(
-                DBOS, turns, repo, film_app
+                DBOS, turns, repo, workflow_services.film, workflow_services.auth
             ),
             account_services=(
-                film_app.state.account_sessions,
-                film_app.state.account_deletion,
+                workflow_services.accounts.sessions,
+                workflow_services.accounts.deletion,
             ),
         ).__enter__()
         processes = durable_executor.slots

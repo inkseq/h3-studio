@@ -23,14 +23,14 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.concurrency import run_in_threadpool
 
-from .assets import AssetService, AssetNotFound
+from .assets import AssetNotFound
 from .media_renditions import public_renditions, RENDITIONS
 from .upload_route import AssetUploadRoute
-from .auth import Auth, SessionUnavailable
+from .auth import SessionUnavailable
 from .identity import require_admin
 from .capabilities import VERSION, capabilities, version_matches
 from .media import MediaBusy
-from .repository import Repository, NotFound, Conflict, BudgetExceeded, artifacts, jobs
+from .repository import NotFound, Conflict, BudgetExceeded
 from .settings import Settings
 from .storage import (
     LocalObjectStore,
@@ -39,7 +39,6 @@ from .storage import (
     VIDEO_SIGNING_BUCKET_SECONDS,
     VIDEO_SIGNING_VALIDITY_SECONDS,
 )
-from .storage_config import S3StorageConfig, load_configured_storage_credentials
 from .http_limits import (
     ADMISSION_SCOPE_KEY,
     BodyLimitMiddleware,
@@ -51,7 +50,6 @@ from .http_limits import (
     is_asset_upload,
     body_limit,
 )
-from .execution_policy import ExecutionPolicies
 from .render_plans import RECIPE as RENDER_RECIPE, compile_render
 from .agent_discovery import PUBLIC_PATHS as AGENT_PUBLIC_PATHS, DISCOVERY_LINK
 from .agent_connect_routes import (
@@ -61,8 +59,7 @@ from .agent_connect_routes import (
     register_routes as register_agent_connect_routes,
 )
 from .frontend import FRONTEND_CONTRACT, STATIC_CACHE_SCOPE_KEY, is_public_frontend
-from .generation_admission import GenerationAdmission, reject_managed
-from .generation_services import GenerationAccess, GenerationPlanning, GenerationRead
+from .generation_admission import reject_managed
 from .operator_capacity import (
     OperatorRegistry,
 )  # Register additive tables before create_schema.
@@ -99,55 +96,21 @@ def create_app(
     story_chat_image_client=None,
     story_chat_billing=None,
 ):
-    settings.data_dir.mkdir(parents=True, exist_ok=True)
-    repo = repository or Repository(settings.database_url)
-    if settings.generation_queue == "dbos":
-        from .dbos_transport import configure_producer
+    from .application_services import create_core
 
-        configure_producer(repo)
-    repo.create_schema()
-    if storage is None:
-        if settings.storage_provider == "local":
-            storage = LocalObjectStore(settings.data_dir / "objects")
-        elif settings.storage_provider == "r2":
-            import os
-
-            cfg = S3StorageConfig(
-                "r2",
-                settings.storage_endpoint,
-                settings.storage_region,
-                settings.storage_bucket,
-                "cloudflare-r2",
-                settings.storage_profile,
-                enabled=True,
-            )
-            credentials = load_configured_storage_credentials(
-                cfg,
-                credentials_file=settings.storage_credential_file,
-                registry_root=os.environ.get("AI_REGISTRY_ROOT"),
-            )
-            storage = S3ObjectStore(cfg, credentials)
-        else:
-            raise ValueError(
-                "此远端存储需要显式注入已审阅的store与凭据入口；不使用默认AWS账户"
-            )
-    from .staging_qa import enabled as staging_qa_enabled
-
-    auth = Auth(
-        repo.engine,
-        tenant=settings.tenant_id,
-        mode=settings.auth_mode,
-        session_seconds=settings.session_seconds,
-        staging_qa=staging_qa_enabled(settings),
+    services = create_core(
+        settings,
+        repository=repository,
+        storage=storage,
+        capabilities_provider=lambda: capabilities(settings),
     )
-    asset_service = AssetService(
-        repo.engine,
-        storage,
-        settings.data_dir,
-        tenant=settings.tenant_id,
-        max_bytes=settings.max_upload_bytes,
+    repo, storage, auth, asset_service, execution_policies = (
+        services.repository,
+        services.storage,
+        services.auth,
+        services.assets,
+        services.policies,
     )
-    execution_policies = ExecutionPolicies(settings, repo)
     upload_admission = UploadAdmission()
     request_admission = RequestAdmission()
 
@@ -180,15 +143,11 @@ def create_app(
     app.state.assets, app.state.settings = asset_service, settings
     app.state.upload_admission = upload_admission
     app.state.request_admission = request_admission
-    generation_access = GenerationAccess(repo, settings.tenant_id)
-    generation_read = GenerationRead(repo, generation_access)
-    generation_planning = GenerationPlanning(
-        repo=repo,
-        assets=asset_service,
-        settings=settings,
-        policies=execution_policies,
-        access=generation_access,
-        read=generation_read,
+    app.state.services = services
+    generation_access, generation_read, generation_planning = (
+        services.access,
+        services.read,
+        services.planning,
     )
     app.state.generation_access = generation_access
     app.state.generation_read = generation_read
@@ -1043,65 +1002,7 @@ def create_app(
             expected_version=body["expected_version"],
         )
 
-    def resolve_render_source(principal, project_id, entity, kind):
-        data = entity.get("data", {})
-        artifact_id, asset_id = data.get("cloudArtifactId"), data.get("cloudAssetId")
-        if artifact_id:
-            if not isinstance(artifact_id, str):
-                raise NotFound("source_not_found")
-            with repo.engine.connect() as connection:
-                row = (
-                    connection.execute(
-                        select(artifacts)
-                        .join(jobs, artifacts.c.job_id == jobs.c.id)
-                        .where(
-                            artifacts.c.id == artifact_id,
-                            jobs.c.tenant_id == settings.tenant_id,
-                            jobs.c.owner_id == principal.owner,
-                            jobs.c.project_id == project_id,
-                            jobs.c.status == "succeeded",
-                        )
-                    )
-                    .mappings()
-                    .first()
-                )
-            if row is None:
-                raise NotFound("source_not_found")
-            metadata = row["metadata"]
-            job = owned_job(principal, row["job_id"])
-            if metadata.get("kind") != kind or not metadata.get("validated"):
-                raise ValueError("成片来源尚未校验")
-            return {
-                "kind": kind,
-                "duration": metadata.get("duration_s"),
-                "source_job_id": row["job_id"],
-                "artifact_id": row["id"],
-                "object": {
-                    "key": metadata["object_key"],
-                    "size_bytes": metadata["size_bytes"],
-                    "sha256": metadata["sha256"],
-                    "content_type": metadata.get("content_type", metadata.get("mime")),
-                },
-                "simulation": job["execution_plan"].get("backend") == "mock"
-                or job["request"].get("simulation") is True,
-            }
-        if not isinstance(asset_id, str):
-            raise ValueError("需要先把所选本机素材上传到当前云项目")
-        try:
-            asset = asset_service.get(principal.owner, asset_id, project_id)
-        except AssetNotFound:
-            raise NotFound("source_not_found") from None
-        if asset.get("status") != "ready" or asset.get("kind") != kind:
-            raise ValueError("素材尚未就绪或类型不符")
-        return {
-            "kind": kind,
-            "duration": asset["metadata"].get("source_duration"),
-            "source_job_id": None,
-            "artifact_id": None,
-            "object": asset["original"],
-            "simulation": False,
-        }
-
+    resolve_render_source = services.render_sources.resolve
     app.state.resolve_render_source = resolve_render_source
 
     @app.post("/v1/render-plans", status_code=201)
@@ -1176,15 +1077,7 @@ def create_app(
             "simulation": compiled["simulation"],
         }
 
-    generation_admission = GenerationAdmission(
-        repo=repo,
-        assets=asset_service,
-        settings=settings,
-        policies=execution_policies,
-        access=generation_access,
-        planning=generation_planning,
-        capabilities_provider=lambda: capabilities(settings),
-    )
+    generation_admission = services.admission
     app.state.generation_admission = generation_admission
 
     def create_from_plan(principal, plan_id, idempotency_key, initial_status=None):
@@ -1366,38 +1259,17 @@ def create_app(
     app.state.create_from_plan = create_from_plan
     app.state.enqueue_planned = enqueue_planned
     app.state.public_job = public_job
-    from .quick_chat import QuickChatHooks
+    from .application_services import create_quick_chat
     from .quick_chat_routes import register_routes as register_quick_chat_routes
 
-    def quick_cancel(principal, job_id):
-        job = owned_job(principal, job_id, "jobs:write")
-        return public_job(
-            repo.request_cancel(scope(principal, job["project_id"]), job_id)
-        )
-
-    hooks = quick_chat_hooks or QuickChatHooks(
-        preflight=generation_admission.preflight,
-        create_planned=generation_admission.create_planned,
-        enqueue=lambda p, j, confirmation_required=False, spending_settings_version=None: (
-            generation_admission.enqueue(
-                p,
-                j,
-                business=True,
-                confirmation_required=confirmation_required,
-                spending_settings_version=spending_settings_version,
-            )
-        ),
-        public_job=generation_read.job,
-        cancel=quick_cancel,
-        refresh_planned=generation_admission.refresh_planned,
-    )
-    register_quick_chat_routes(
-        app,
-        hooks=hooks,
+    chat = create_quick_chat(
+        services,
+        hooks=quick_chat_hooks,
         assistant=assistant,
         assistant_enabled=assistant_enabled,
         title_generator=title_generator,
     )
+    register_quick_chat_routes(app, service=chat)
     from .quick_chat_recovery import QuickChatRecovery
 
     app.state.quick_chat_recovery = QuickChatRecovery(app.state.quick_chat)
@@ -1481,15 +1353,21 @@ def create_app(
     register_staging_qa_routes(app)
     from .workos_routes import register_routes as register_workos_routes
 
+    from .application_services import create_accounts
+
+    accounts = create_accounts(services, app.state.quick_chat)
     register_workos_routes(
-        app, cookie=COOKIE, browser_handle_seconds=BROWSER_HANDLE_SECONDS
+        app,
+        cookie=COOKIE,
+        browser_handle_seconds=BROWSER_HANDLE_SECONDS,
+        service=accounts.workos,
     )
     from .account_session_routes import register_routes as register_session_routes
 
-    register_session_routes(app, cookie=COOKIE)
+    register_session_routes(app, cookie=COOKIE, service=accounts.sessions)
     from .account_deletion_routes import register_routes as register_deletion_routes
 
-    register_deletion_routes(app, cookie=COOKIE)
+    register_deletion_routes(app, cookie=COOKIE, service=accounts.deletion)
     from .credits_routes import register_routes as register_credit_routes
 
     register_credit_routes(app)
