@@ -28,6 +28,7 @@ from .inference.wangp_contract import HostReadiness, safe_model_progress
 from .dstack_control_plane import control_plane, foreign_usage, provider_retry_after
 from .worker_boot import boot_commands, boot_env, boot_record, boot_valid
 from .capacity_memory import vast_ram_floor
+from .capacity_interface import CapacityTransport
 from .providers.registry import RUNPOD, VASTAI
 
 from .dstack_inventory import (
@@ -1632,7 +1633,7 @@ def live_capacity_usage(
 class DstackCapacity:
     def __init__(
         self,
-        client: DstackClient,
+        client: CapacityTransport,
         store: DstackStore,
         *,
         clock=time.time,
@@ -1673,12 +1674,12 @@ class DstackCapacity:
                 "dstack_intent_binding_changed",
             )
         if prior.get("apply_started"):
-            return self.observe(request.intent_id)
+            return self.reconcile(request.intent_id)
         # Exact pre-read refuses a collision; list absence is never proof.
         existing = self.client.get(run_name=request.run_name)
         _require(existing is None, "dstack_existing_run_requires_reconciliation")
         if not self.store.begin_apply(request.intent_id, binding):
-            return self.observe(request.intent_id)
+            return self.reconcile(request.intent_id)
         try:
             run = self.client.apply(binding["run_spec"])
             assert_run_owned(run, binding, self.client.project)
@@ -1701,6 +1702,14 @@ class DstackCapacity:
                 },
             )
         return self.observe(request.intent_id)
+
+    def reconcile(self, intent_id):
+        """Observe the same original binding; never create or choose a new lane.
+
+        The existing funded-readiness and ledger rules still apply. Terminal
+        history uses observe_terminal instead, which cannot bootstrap a worker.
+        """
+        return self.observe(intent_id)
 
     def observe_terminal(self, intent_id):
         """Refresh only an exact owned terminal run, without native activity.

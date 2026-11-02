@@ -425,3 +425,27 @@ The dstack ledger modules (`dstack_capacity`, `dstack_operator`, `dstack_control
 | Kubernetes cluster-autoscaler | Apache-2.0 | Expander chain (priority → least-waste/price → random); node-group backoff 5 m → 30 m, reset 3 h; `max-node-provision-time` | Pod-scheduling simulation (our jobs are one GPU each) |
 | LiteLLM Router | MIT | Per-deployment cooldown on failures; ordered fallbacks; per-error retry policy; per-deployment limits | Request-level retries on the same vendor (refunded generic failures need another model, #929) |
 | GitHub Actions JIT runners / Buildkite agents | MIT | Already used for dial-out: one-time registration token, worker pulls work | — |
+
+
+## Current capacity contract (#899 item 6)
+
+`capacity_interface.CapacityService` is the native-worker boundary: `plan`,
+`start`, `observe`, `stop` and same-original `reconcile`. Current native lanes
+share `DstackCapacity` and `LedgerDstackStore`; adding the interface does not add
+another queue, ledger or provider-selection policy. `observe_terminal` remains a
+separate narrow operation that cannot bootstrap/fund a worker. A terminal or
+absent host and its outstanding supplier obligation remain independent facts.
+
+`CapacityTransport` describes the existing transport below that coordinator.
+`dialout_capacity.DialoutCapacityClient` owns the shared create-only journal,
+original lookup, status projection and inventory reconciliation. RunPod Serverless
+and Modal dial-out are sibling vendor adapters; neither inherits the other.
+`RoutedClient` retains the selected single backend and original journal routing.
+Historical `runpod_serverless` import names remain compatibility aliases.
+
+This is a bounded extraction, not a new neutral on-disk format. Existing dstack
+run specs, status vocabulary, journal fields, ownership digests and receipts stay
+byte-compatible. Moving those payloads behind fully neutral transient types is a
+separate follow-up: allocation proofs, native readiness and invoice readers must
+continue to understand all original records. Hosted per-job `InferenceBackend`
+and the retained historical `modal-v1` lane are outside this native-host contract.
