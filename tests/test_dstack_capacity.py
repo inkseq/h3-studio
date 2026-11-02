@@ -321,6 +321,81 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.client.stop_count, 0)
 
+    def second_look(self, node, intent, *, now, checked=None):
+        from types import SimpleNamespace
+
+        from studio_platform.dstack_controller import (
+            DstackController,
+        )
+
+        controller = SimpleNamespace(
+            repo=SimpleNamespace(clock=lambda: now),
+            capacity=self.capacity,
+            _removal_checked_at=checked if checked is not None else {},
+        )
+        DstackController._refresh_pending_removal(controller, node, intent)
+        return controller._removal_checked_at
+
+    def test_no_capacity_start_settles_on_a_later_look_and_stops_holding_its_job(self):
+        # It fails within a minute, and the proof needs a read 300 s later (#982).
+        self.start()
+        self.client.run = no_capacity_run(self.client.run)
+        for submission in (
+            self.client.run["latest_job_submission"],
+            self.client.run["jobs"][0]["job_submissions"][0],
+        ):
+            submission["finished_at"] = "2026-10-30T12:00:00Z"
+        terminal = 1793361600.0  # 2026-10-30T12:00:00Z
+        read_at = [terminal + 33]
+        self.client.provider_inventory = lambda backend: {
+            "backend": backend,
+            "complete": True,
+            "observed_at": read_at[0],
+            "instance_ids": [],
+            "labels": [],
+        }
+        first = self.capacity.observe(INTENT)
+        self.assertEqual(first["reason_code"], "dstack_no_capacity_billing_pending")
+        self.store.record(INTENT, {**first, "observed_at": terminal + 33})
+        node = {
+            "intent_id": INTENT,
+            "desired_state": "running",
+            "payload": {"dstack": self.store.load(INTENT)},
+        }
+        intent = {"provider_instance_id": None, "state": "destroying"}
+        # Too soon: no account read at all.
+        inventory = Mock(side_effect=self.client.provider_inventory)
+        self.client.provider_inventory = inventory
+        checked = self.second_look(node, intent, now=terminal + 60)
+        self.assertEqual(checked, {})
+        inventory.assert_not_called()
+        # A look inside the window proves nothing and is rate limited afterwards.
+        read_at[0] = terminal + 120
+        checked = self.second_look(node, intent, now=terminal + 120)
+        self.assertEqual(self.store.load(INTENT)["billing_state"], "unsettled")
+        calls = inventory.call_count
+        self.second_look(node, intent, now=terminal + 130, checked=checked)
+        self.assertEqual(inventory.call_count, calls)
+        # Past the window the same look settles it, without provider writes.
+        read_at[0] = terminal + 301
+        self.second_look(node, intent, now=terminal + 301, checked=checked)
+        settled = self.store.load(INTENT)
+        self.assertEqual(settled["billing_state"], "no_charge_confirmed")
+        self.assertEqual(settled["reason_code"], "dstack_never_allocated")
+        self.native.assert_not_called()
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+        # A reconciled or settled start is left alone.
+        inventory.reset_mock()
+        for done_node, done_intent in (
+            (node, {"provider_instance_id": None, "state": "destroyed"}),
+            (
+                {**node, "payload": {"dstack": settled}},
+                {"provider_instance_id": None, "state": "destroying"},
+            ),
+        ):
+            self.second_look(done_node, done_intent, now=terminal + 900)
+        inventory.assert_not_called()
+
     def test_stock_no_capacity_settles_only_when_the_account_lacks_this_run(self):
         # dstack Sky runs stock dstack: no typed Vast rejections exist (#868).
         self.start()

@@ -50,6 +50,8 @@ from .telemetry import NullTelemetry, configured_telemetry
 _logger = logging.getLogger(__name__)
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
+# Each look reads the whole provider account, so these stay rarer than removal checks.
+ABSENCE_CHECK_SECONDS = 60
 # Cold download stops, checked in order: a stall, then a measured slow host.
 DOWNLOAD_STOP_CHECKS = {
     "dstack_download_timebox_exceeded": download_timebox_due,
@@ -1121,7 +1123,18 @@ class DstackController:
         """Bounded exact terminal read; no native boot, invoice or invented proof."""
         binding = node["payload"].get("dstack", {})
         now = self.repo.clock()
-        if (
+        # A start that found no machine fails within a minute, but its proof of no
+        # charge needs an account read at least LATE_CREATE_SECONDS later. Without
+        # this second look its job waits forever (#982).
+        awaiting_absence = (
+            binding.get("reason_code") == "dstack_no_capacity_billing_pending"
+            and binding.get("state") == "stopped"
+            and binding.get("dstack_status") == "failed"
+            and binding.get("run_id")
+            and not intent.get("provider_instance_id")
+            and intent.get("state") != "destroyed"
+        )
+        if not awaiting_absence and (
             node["desired_state"] != "stopped"
             or binding.get("state") != "stopped"
             or binding.get("dstack_status")
@@ -1136,7 +1149,12 @@ class DstackController:
         last = self._removal_checked_at.get(
             node["intent_id"], binding.get("observed_at")
         )
-        if type(last) not in (int, float) or not math.isfinite(last) or now - last < 30:
+        wait = ABSENCE_CHECK_SECONDS if awaiting_absence else 30
+        if (
+            type(last) not in (int, float)
+            or not math.isfinite(last)
+            or now - last < wait
+        ):
             return
         # Stamp before I/O: even a failed/unknown GET cannot become a hot loop.
         self._removal_checked_at[node["intent_id"]] = now
