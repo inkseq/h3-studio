@@ -152,3 +152,43 @@ test('cancelling has no misleading resume/cancel action, and every supplied code
   assert.ok(button(unauthorized, 'Continue'));
   assert.match(unauthorized, /sign-in expired/);
 });
+
+test('a person on credits can start a film: usage bar instead of dollars, no estimate error', () => {
+  const credits = { credits: 21, estimate: { quote_known: true, final_bill: false } };
+  const html = render({
+    state: { run: run(credits), pending: null, busy: false },
+    usage: React.createElement('i', { className: 'usage' }),
+  });
+  assert.match(html, /class="usage"/);
+  assert.doesNotMatch(html, /\$|estimate the cost/);
+  assert.ok(!button(html, 'Make film')[1].includes('disabled'));
+  const short = render({ state: { run: run(credits), pending: null, busy: false }, short: true });
+  assert.ok(button(short, 'Make film')[1].includes('disabled'));
+  const unknown = render({
+    state: { run: run({ ...credits, credits: null }), pending: null, busy: false },
+  });
+  assert.match(unknown, /estimate the cost/);
+  assert.ok(button(unknown, 'Make film')[1].includes('disabled'));
+});
+
+test('a film with nothing to generate shows no price', () => {
+  const html = render({
+    state: {
+      run: run({
+        estimate: { quote_known: true, cost_microusd: 0 },
+        counts: {
+          shots: 1,
+          reused: 1,
+          generate: 0,
+          generated_completed: 0,
+          chapters_completed: 0,
+          export_completed: 0,
+        },
+      }),
+      pending: null,
+      busy: false,
+    },
+  });
+  assert.doesNotMatch(html, /\$0/);
+  assert.ok(!button(html, 'Make film')[1].includes('disabled'));
+});

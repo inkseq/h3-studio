@@ -19,6 +19,7 @@ from studio_platform.repository import (
     jobs,
     outbox,
 )
+from studio_platform.enhance_plans import RECIPE
 from studio_platform.result_collection import collect
 from studio_platform.source_snapshot import source_snapshot
 from test_platform_queue import VALID_ARTIFACT
@@ -174,6 +175,125 @@ class ResultCollectionTests(LedgerCase):
         self.assertEqual(
             data["selectedVideoRange"], self.shot(value)["data"]["selectedVideoRange"]
         )
+
+    def chosen_with_track(self, **track):
+        value = self.document()["payload"]
+        new_entity(
+            value,
+            {
+                "id": "chosen",
+                "type": "video",
+                "data": {"fileId": "file", "duration": 5},
+            },
+        )
+        self.shot(value)["data"]["selectedAssetId"] = "chosen"
+        value.setdefault("journey", {}).setdefault("sound", {})["mode"] = "mixed"
+        value["journey"].setdefault("soundTracks", {})["chapter"] = [
+            {
+                "id": "own",
+                "shotId": "shot",
+                "assetId": "old-audio",
+                "fileId": "old-file",
+                "role": "generated",
+                "offset": 0,
+                "start": 0,
+                "end": 5,
+                "duration": 5,
+                "gain": 0.4,
+                "muted": False,
+                "generatedFrom": {
+                    "jobId": "old-job",
+                    "videoEntityId": "chosen",
+                    "videoArtifactId": "old-video",
+                    "audioArtifactId": "old-audio-file",
+                },
+                **track,
+            }
+        ]
+        self.save(value)
+
+    def test_new_take_becomes_the_chosen_take_and_brings_its_sound(self):
+        self.chosen_with_track()
+        audio = {
+            **VALID_ARTIFACT,
+            "kind": "audio",
+            "content_type": "audio/flac",
+        }
+        done = self.complete(self.collecting(self.make_job()), [VALID_ARTIFACT, audio])
+        receipt = done["result"]["project_collection"]
+        project = self.document()["payload"]
+        self.assertEqual(
+            self.shot()["data"]["selectedAssetId"], receipt["selected_entity_id"]
+        )
+        self.assertIn("chosen", [e["id"] for e in project["entities"]])
+        video_id, audio_id = done["result"]["artifact_ids"]
+        track = project["journey"]["soundTracks"]["chapter"][0]
+        self.assertEqual(track["assetId"], "result-" + audio_id)
+        self.assertEqual(track["gain"], 0.4)
+        self.assertEqual(
+            track["generatedFrom"],
+            {
+                "jobId": done["id"],
+                "videoEntityId": "result-" + video_id,
+                "videoArtifactId": video_id,
+                "audioArtifactId": audio_id,
+            },
+        )
+
+    def test_new_take_without_sound_mutes_the_old_track(self):
+        self.chosen_with_track()
+        self.complete(self.collecting(self.make_job()))
+        track = self.document()["payload"]["journey"]["soundTracks"]["chapter"][0]
+        self.assertTrue(track["muted"])
+        self.assertTrue(track["needsReview"])
+
+    def test_silenced_clip_stays_silent_with_a_new_take(self):
+        self.chosen_with_track(muted=True)
+        audio = {
+            **VALID_ARTIFACT,
+            "kind": "audio",
+            "content_type": "audio/flac",
+        }
+        self.complete(self.collecting(self.make_job()), [VALID_ARTIFACT, audio])
+        track = self.document()["payload"]["journey"]["soundTracks"]["chapter"][0]
+        self.assertTrue(track["muted"])
+
+    def enhance_job(self, source, **ref):
+        value = self.document()["payload"]
+        request = {
+            "recipe_id": RECIPE,
+            "client_ref": {
+                "project_id": "project-1",
+                "entity_id": source,
+                "shot_id": "shot",
+                "shot_version": self.shot(value)["version"] - 1,
+                **ref,
+            },
+        }
+        plan = self.repo.create_plan(
+            self.scope,
+            request,
+            {"pool": "test-pool", "expected_runtime_s": 120},
+            expires_at=self.now + 1000,
+            estimated_cost_microusd=100_000,
+        )
+        return self.repo.create_job(
+            self.scope,
+            plan["id"],
+            uuid.uuid4().hex,
+            budget_account_ids=("owner-budget",),
+        )
+
+    def test_enhanced_copy_replaces_its_source_only_while_it_is_chosen(self):
+        self.chosen_with_track(muted=True)
+        done = self.complete(self.collecting(self.enhance_job("chosen")))
+        ident = done["result"]["artifact_ids"][0]
+        self.assertEqual(self.shot()["data"]["selectedAssetId"], "result-" + ident)
+        project = self.document()["payload"]
+        media = next(e for e in project["entities"] if e["id"] == "result-" + ident)
+        self.assertFalse(media["data"]["oldVersion"])
+        self.complete(self.collecting(self.enhance_job("another")))
+        self.assertEqual(self.shot()["data"]["selectedAssetId"], "result-" + ident)
 
     def test_newer_job_prevents_old_completion_selection(self):
         first = self.make_job()

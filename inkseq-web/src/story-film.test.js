@@ -4,6 +4,7 @@ import {
   createFilmClient,
   createFilmController,
   filmGrantMatches,
+  filmQuoted,
   filmLinkRun,
   filmReceipt,
 } from './story-film.js';
@@ -398,6 +399,18 @@ test('spending grant is limited to exact frozen plan identities, account and con
       detail,
       'one',
     ),
+    false,
+  );
+});
+
+test('a film quoted in credits matches its grant by plan, without a dollar figure', () => {
+  const run = filmFixture({ credits: 21, estimate: { quote_known: true, final_bill: false } });
+  const detail = { plan_id: run.generation[0].plan_id, estimate_microusd: 5 };
+  assert.equal(filmQuoted(run), true);
+  assert.equal(filmGrantMatches({ account: 'one', run }, detail, 'one'), true);
+  assert.equal(filmQuoted({ ...run, credits: null }), false);
+  assert.equal(
+    filmGrantMatches({ account: 'one', run: { ...run, credits: null } }, detail, 'one'),
     false,
   );
 });

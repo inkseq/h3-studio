@@ -77,14 +77,20 @@ export function filmReceipt(run, projectId, expected = null) {
         run.counts.chapters_completed === run.chapters.length))
   );
 }
+// Under credits the server quotes in credits and removes the dollar figure for non-admins.
+export function filmQuoted(run) {
+  if (run?.estimate?.quote_known !== true) return false;
+  return 'credits' in run
+    ? Number.isSafeInteger(run.credits) && run.credits >= 0
+    : money(run.estimate.cost_microusd);
+}
 export function filmGrantMatches(approval, detail, account) {
   if (
     !approval ||
     approval.account !== account ||
-    approval.run.estimate?.quote_known !== true ||
-    !money(approval.run.estimate.cost_microusd) ||
+    !filmQuoted(approval.run) ||
     !money(detail?.estimate_microusd) ||
-    detail.estimate_microusd > approval.run.estimate.cost_microusd
+    detail.estimate_microusd > (approval.run.estimate.cost_microusd ?? Infinity)
   )
     return false;
   const expected = approval.run.generation.map((item) => item.plan_id);
@@ -343,8 +349,7 @@ export function createFilmController({ api, storage, getContext, keyFactory }) {
           run?.phase !== 'preflight' ||
           live.dirty ||
           live.serverVersion !== run.project_version ||
-          run.estimate?.quote_known !== true ||
-          !money(run.estimate?.cost_microusd)
+          !filmQuoted(run)
         )
           throw Error('film.confirmChanged');
         const op = commands.begin('film-submit', { preflight_id: run.id, confirm: true });
