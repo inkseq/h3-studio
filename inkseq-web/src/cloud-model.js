@@ -1,3 +1,4 @@
+import { ENHANCE_RECIPE } from './enhance-take.js';
 import { formatMoneyMicros } from './money.js';
 import { translate } from './i18n/locale.js';
 import { boundVideoRange } from './video-cut-model.js';
@@ -871,6 +872,15 @@ function importArtifact(project, job, artifact, { shot, old, same, audioSeen, no
   if (shot && !isAudio) {
     shot.data.candidateIds = [...new Set([...(shot.data.candidateIds || []), id])];
     if (old) shot.status = 'review';
+    // A new take becomes the shot's take (owner, 2026-11-02). Two cases stay the person's call:
+    // a take from an older version of the shot (an enhanced copy never is, its source is the
+    // same take), and a shot already cut into segments, which belong to the current file.
+    if (
+      artifact.kind === 'video' &&
+      (!old || job.recipe_id === ENHANCE_RECIPE) &&
+      !(shot.data.videoSegments || []).length
+    )
+      shot.data.selectedAssetId = id;
   }
   return id;
 }
