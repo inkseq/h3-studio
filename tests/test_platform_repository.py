@@ -7,11 +7,14 @@ creates/drops only its own ledger_test_<uuid> schema. Never use a production URL
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
+import pickle
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import uuid
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import Table, create_engine, select, text
 from sqlalchemy.engine import make_url
 
 from studio_platform.repository import (
@@ -20,6 +23,7 @@ from studio_platform.repository import (
     NotFound,
     Repository,
     Scope,
+    budget_reservations,
 )
 
 
@@ -100,6 +104,142 @@ class LedgerCase(unittest.TestCase):
 
 
 class RepositoryTests(LedgerCase):
+    def test_document_commit_boundary_failure_preserves_original_version(self):
+        self.repo.put_document(self.scope, "note", "one", {"version": "original"})
+        original = self.repo.get_document(self.scope, "note", "one")
+        with (
+            patch.object(
+                self.repo,
+                "_sequence_job_events",
+                side_effect=RuntimeError("commit-boundary"),
+            ),
+            self.assertRaisesRegex(RuntimeError, "commit-boundary"),
+        ):
+            self.repo.put_document(
+                self.scope,
+                "note",
+                "one",
+                {"version": "replacement"},
+                expected_version=1,
+            )
+        self.assertEqual(self.repo.get_document(self.scope, "note", "one"), original)
+
+    def test_job_transport_failure_rolls_back_original_job_budget_and_event(self):
+        plan = self.plan()
+        budget = self.repo.get_budget("owner-budget")
+        events = self.repo.pending_events()
+
+        def fail(connection, job_id, event_id, **kwargs):
+            self.assertTrue(connection.in_transaction())
+            self.assertEqual(self.repo._job(connection, job_id)["status"], "queued")
+            self.assertEqual(kwargs["event_type"], "job.created")
+            self.assertTrue(event_id)
+            raise RuntimeError("transport-write")
+
+        self.repo.generation_transport = SimpleNamespace(job_event=fail)
+        with self.assertRaisesRegex(RuntimeError, "transport-write"):
+            self.repo.create_job(
+                self.scope, plan["id"], "original", budget_account_ids=["owner-budget"]
+            )
+        self.repo.generation_transport = None
+        self.assertIsNone(self.repo.lookup_job_by_idempotency(self.scope, "original"))
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+        self.assertEqual(self.repo.pending_events(), events)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(connection.execute(select(budget_reservations)).all(), [])
+        job = self.repo.create_job(
+            self.scope, plan["id"], "original", budget_account_ids=["owner-budget"]
+        )
+        self.assertTrue(job["created"])
+        self.assertEqual(len(self.repo.list_jobs(self.scope)), 1)
+
+    def test_later_sorted_budget_refusal_rolls_back_earlier_reservation(self):
+        self.repo.configure_budget(
+            "z-tight", tenant_id=self.scope.tenant_id, limit_microusd=50_000
+        )
+        before = self.repo.get_budget("owner-budget")
+        with self.assertRaises(BudgetExceeded):
+            self.repo.create_job(
+                self.scope,
+                self.plan()["id"],
+                "later-budget-refused",
+                budget_account_ids=["z-tight", "owner-budget"],
+            )
+        self.assertEqual(self.repo.get_budget("owner-budget"), before)
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(connection.execute(select(budget_reservations)).all(), [])
+        self.assertEqual(self.repo.list_jobs(self.scope), [])
+
+    def test_instance_event_failure_rolls_back_reservation_before_retry(self):
+        self.repo.configure_pool("gpu", max_instances=2, max_physical_gpus=2)
+        original = self.repo._emit
+        budget = self.repo.get_budget("owner-budget")
+        events = self.repo.pending_events()
+
+        def fail(*args, **kwargs):
+            original(*args, **kwargs)
+            raise RuntimeError("event-write")
+
+        arguments = dict(
+            hard_deadline=1100,
+            reserved_cost_microusd=500_000,
+            budget_account_ids=["owner-budget"],
+            dry_run=False,
+        )
+        with (
+            patch.object(self.repo, "_emit", side_effect=fail),
+            self.assertRaisesRegex(RuntimeError, "event-write"),
+        ):
+            self.repo.reserve_instance_intent(
+                self.scope, "gpu", "original", **arguments
+            )
+        self.assertEqual(self.repo.list_instance_intents(), [])
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+        self.assertEqual(self.repo.pending_events(), events)
+        self.assertTrue(
+            self.repo.reserve_instance_intent(
+                self.scope, "gpu", "original", **arguments
+            )["created"]
+        )
+
+    def test_exact_budget_boundary_remains_reserved_for_unknown_original_intent(self):
+        self.repo.configure_pool("gpu", max_instances=2, max_physical_gpus=2)
+        self.repo.configure_budget(
+            "owner-budget",
+            tenant_id=self.scope.tenant_id,
+            owner_id=self.scope.owner_id,
+            limit_microusd=500_000,
+        )
+        original = self.repo.reserve_instance_intent(
+            self.scope,
+            "gpu",
+            "original",
+            hard_deadline=1100,
+            reserved_cost_microusd=500_000,
+            budget_account_ids=["owner-budget"],
+            dry_run=False,
+        )
+        self.repo.update_instance(original["id"], "creating")
+        self.repo.update_instance(original["id"], "creation_unknown")
+        self.now = 1200
+        with self.assertRaisesRegex(BudgetExceeded, "budget_exceeded"):
+            self.repo.reserve_instance_intent(
+                self.scope,
+                "gpu",
+                "second",
+                hard_deadline=1500,
+                reserved_cost_microusd=1,
+                budget_account_ids=["owner-budget"],
+                dry_run=False,
+            )
+        self.assertEqual(
+            self.repo.get_budget("owner-budget")["reserved_microusd"], 500_000
+        )
+        self.assertEqual(
+            self.repo.list_instance_intents()[0]["state"], "creation_unknown"
+        )
+        self.assertEqual(len(self.repo.list_instance_intents()), 1)
+
     def test_hidden_story_chat_filter_is_typed_scoped_and_before_pagination(self):
         scope = Scope(self.scope.tenant_id, self.scope.owner_id, "__projects")
 
@@ -760,6 +900,49 @@ class RepositoryTests(LedgerCase):
         self.assertEqual(
             self.repo.get_budget("owner-budget")["reserved_microusd"], 500_000
         )
+
+
+class RepositoryImportCompatibilityTests(unittest.TestCase):
+    def test_shared_ledger_objects_keep_original_exports_and_pickle_identity(self):
+        from studio_platform import repository, repository_schema
+
+        for name in (
+            "LedgerError",
+            "NotFound",
+            "Conflict",
+            "BudgetExceeded",
+            "LeaseLost",
+            "InvalidTransition",
+            "Scope",
+        ):
+            with self.subTest(name=name):
+                original_path = getattr(repository, name)
+                self.assertIs(original_path, getattr(repository_schema, name))
+                self.assertEqual(original_path.__module__, "studio_platform.repository")
+        scope = Scope("tenant", "owner", "project")
+        self.assertEqual(pickle.loads(pickle.dumps(scope)), scope)
+        self.assertIs(repository.metadata, repository_schema.metadata)
+
+    def test_responsibility_modules_reference_the_same_original_tables(self):
+        from studio_platform import (
+            repository,
+            repository_budgets,
+            repository_capacity,
+            repository_documents,
+            repository_jobs,
+        )
+
+        for module in (
+            repository_budgets,
+            repository_capacity,
+            repository_documents,
+            repository_jobs,
+        ):
+            for name, value in vars(module).items():
+                if isinstance(value, Table):
+                    with self.subTest(module=module.__name__, table=name):
+                        self.assertIs(value, getattr(repository, name))
+                        self.assertIs(value.metadata, repository.metadata)
 
 
 if __name__ == "__main__":
