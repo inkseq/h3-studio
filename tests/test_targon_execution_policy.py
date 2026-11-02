@@ -3,6 +3,7 @@
 import copy
 import json
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -21,9 +22,15 @@ class TargonExecutionPolicyTests(unittest.TestCase):
     def test_rollout_policies_remain_runtime_required_after_partial_native_evidence(
         self,
     ):
-        loaded = read_profiles(FIXTURE.resolve())
+        # A Windows-mounted checkout may expose group-write bits. Exercise the
+        # real permission check on an operator-owned copy, as runtime requires.
+        with tempfile.TemporaryDirectory() as directory:
+            profile_path = Path(directory) / 'profiles.json'
+            profile_path.write_bytes(FIXTURE.read_bytes())
+            profile_path.chmod(0o600)
+            loaded = read_profiles(profile_path.resolve())
         self.assertEqual(len(loaded), 2)
-        for mode, value in zip(('fl', 'ref'), self.policies):
+        for mode, value in zip(('fl', 'ref'), self.policies, strict=False):
             with self.subTest(mode=mode):
                 profile = get_profile(value['deployment_profile_id'])
                 self.assertEqual(len(profile['verified_cases']), 2)
@@ -128,7 +135,7 @@ class TargonExecutionPolicyTests(unittest.TestCase):
                     validate_policy(value)
 
     def test_missing_historical_mode_cases_do_not_hide_implemented_support(self):
-        for mode, value in zip(('fl', 'ref'), self.policies):
+        for mode, value in zip(('fl', 'ref'), self.policies, strict=False):
             with self.subTest(mode=mode):
                 profile = get_profile(value['deployment_profile_id'])
                 case = next(c for c in profile['verified_cases'] if c['mode'] == mode)
@@ -161,7 +168,7 @@ class TargonExecutionPolicyTests(unittest.TestCase):
                     )
 
     def test_missing_implemented_mode_mapping_still_fails_closed(self):
-        for mode, value in zip(('fl', 'ref'), self.policies):
+        for mode, value in zip(('fl', 'ref'), self.policies, strict=False):
             with self.subTest(mode=mode):
                 profile = get_profile(value['deployment_profile_id'])
                 profile['models'] = [
