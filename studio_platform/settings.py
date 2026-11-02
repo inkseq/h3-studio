@@ -101,6 +101,15 @@ def enhance_switch(value, data_dir):
     return (Path(data_dir) / "runtime-secrets" / "runpod-enhance.json").is_file()
 
 
+def inky_file(value, data_dir):
+    """Inky and Jev: the explicit file, otherwise the credential the host installed
+    into the data volume, as Enhance does. Neither means off."""
+    if value:
+        return Path(value)
+    path = Path(data_dir) / "runtime-secrets" / "inky.json"
+    return path if path.is_file() else None
+
+
 def everyframe_switch(value, data_dir):
     """The cold-start backstop (#918) follows the enhance rule: explicit "1"/"0",
     otherwise on once the host installed its credential into the data volume."""
@@ -534,9 +543,10 @@ class Settings:
             title_config_file=Path(os.environ["SIXNINE_TITLE_CONFIG_FILE"])
             if os.environ.get("SIXNINE_TITLE_CONFIG_FILE")
             else None,
-            inky_config_file=Path(os.environ["INKSEQ_INKY_CONFIG_FILE"])
-            if os.environ.get("INKSEQ_INKY_CONFIG_FILE")
-            else None,
+            inky_config_file=inky_file(
+                os.environ.get("INKSEQ_INKY_CONFIG_FILE"),
+                Path(os.environ.get("SIXNINE_DATA", str(default))),
+            ),
             langfuse_config_file=Path(os.environ["INKSEQ_LANGFUSE_CONFIG_FILE"])
             if os.environ.get("INKSEQ_LANGFUSE_CONFIG_FILE")
             else None,
