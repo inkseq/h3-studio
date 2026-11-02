@@ -1,20 +1,17 @@
-// WorkOS AuthKit sign-in (h3-studio#305): Google, GitHub or email on a hosted page.
-// Shown only when /api/auth/config reports it. It sits first inside the existing username
-// form; the username fields after it stay folded away until "existing account" is opened.
-import React, { useState } from 'react';
+// WorkOS AuthKit sign-in (h3-studio#305): Google or email on a hosted page. Shown only when
+// /api/auth/config reports it, below the username and password form (owner, 2026-11-02).
+import React from 'react';
 import { Button } from './ui/Button.jsx';
 import { LogIn } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { hostedSignInEnabled, hostedSignInUrl } from './account-access.js';
 
-// `passwordFirst` opens with the username form unfolded (an existing password account, #305).
-export default function HostedSignIn({ auth, passwordFirst = false }) {
+export default function HostedSignIn({ auth }) {
   const { t } = useI18n();
-  const [legacy, setLegacy] = useState(passwordFirst);
   if (!hostedSignInEnabled(auth)) return null;
   const here = () => window.location.pathname + window.location.search;
   return (
-    <div className={'hosted-sign-in' + (legacy ? ' legacy-open' : '')}>
+    <div className="hosted-sign-in">
       <Button
         variant="primary"
         className="keep-label hosted-sign-in-main"
@@ -32,14 +29,6 @@ export default function HostedSignIn({ auth, passwordFirst = false }) {
         <a href="/content">{t('signIn.contentPolicy')}</a>
         {t('signIn.consentAfter')}
       </small>
-      <Button
-        variant="link"
-        className="hosted-sign-in-legacy"
-        aria-expanded={legacy}
-        onClick={() => setLegacy(!legacy)}
-      >
-        {t(legacy ? 'signIn.hideUsername' : 'signIn.orUsername')}
-      </Button>
     </div>
   );
 }

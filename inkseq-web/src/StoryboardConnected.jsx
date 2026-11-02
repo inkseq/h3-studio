@@ -83,9 +83,10 @@ function receiptCost(receipt) {
 }
 // Name the shot an estimate refused and say why, instead of a generic "fix something".
 function shotRefusal(problem, live, t, locale) {
-  if (problem?.message !== 'workbench.inputsInvalid' || !problem.shotId) return problem;
+  if (problem?.message !== 'workbench.inputsInvalid') return problem;
   const index = live.shots.findIndex((shot) => shot.id === problem.shotId);
-  if (index < 0) return problem;
+  // Never show the raw key: without the shot, say the general thing.
+  if (index < 0) return Error(t('workbench.inputsInvalid'));
   const shot = live.shots[index],
     why = storyboardPresentation(expandStoryboard(shot, live, { locale }), locale).warnings[0];
   return Error(
