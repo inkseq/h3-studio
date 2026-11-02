@@ -30,15 +30,25 @@ CATEGORIES = (
     "documentation",
     "other",
     "model_limit",
+    "page",
+    "generation",
+    "payment",
+    "account",
 )
+# The form people use on the site.
+WEB_CATEGORIES = ("page", "generation", "payment", "account", "other")
 OWNER_HOURLY = 30
 ACTOR_HOURLY = 10
-PRIVATE_TEXT = re.compile(
-    r"https?://|mailto:|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|"
+CREDENTIAL_TEXT = (
     r"\bBearer\s+\S+|\bsk-[A-Za-z0-9_-]{12,}|\bAKIA[A-Z0-9]{16}|"
-    r"-----BEGIN|\b(?:password|api[_-]?key|access[_-]?token|cookie)\s*[:=]",
-    re.I,
+    r"-----BEGIN|\b(?:password|api[_-]?key|access[_-]?token|cookie)\s*[:=]"
 )
+PRIVATE_TEXT = re.compile(
+    r"https?://|mailto:|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|" + CREDENTIAL_TEXT, re.I
+)
+# A person writing to us may paste a link or their email, but never a credential.
+WEB_PRIVATE_TEXT = re.compile(CREDENTIAL_TEXT, re.I)
+AGENT_SUMMARY_MAX = 280
 
 
 class FeedbackBody(BaseModel):
@@ -50,11 +60,17 @@ class FeedbackBody(BaseModel):
         "documentation",
         "other",
         "model_limit",
+        "page",
+        "generation",
+        "payment",
+        "account",
     ]
     severity: Literal["low", "medium", "high"]
-    summary: StrictStr = Field(min_length=1, max_length=280)
+    summary: StrictStr = Field(min_length=1, max_length=4000)
     suggestion: StrictStr = Field(default="", max_length=500)
-    source: Literal["story_chat", "agent", "telegram", "system"]
+    source: Literal["story_chat", "agent", "telegram", "system", "web"]
+    page: StrictStr = Field(default="", max_length=200)
+    client: StrictStr = Field(default="", max_length=320)
     project_id: StrictStr | None = Field(
         default=None, min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$"
     )
@@ -71,8 +87,21 @@ class FeedbackBody(BaseModel):
     def privacy(self):
         if not self.summary.strip():
             raise ValueError("feedback_summary_required")
+        web = self.source == "web"
+        if web and (self.category not in WEB_CATEGORIES):
+            raise ValueError("feedback_category_invalid")
+        if not web and (self.page or self.client):
+            raise ValueError("feedback_page_web_only")
+        if not web and len(self.summary) > AGENT_SUMMARY_MAX:
+            raise ValueError("feedback_summary_too_long")
+        for value in (self.page, self.client):
+            if any(ord(c) < 32 for c in value):
+                raise ValueError("feedback_private_text_refused")
+        pattern, lines = (WEB_PRIVATE_TEXT, "\n\r\t") if web else (PRIVATE_TEXT, "")
         for value in (self.summary, self.suggestion, self.intent):
-            if PRIVATE_TEXT.search(value) or any(ord(c) < 32 for c in value):
+            if pattern.search(value) or any(
+                ord(c) < 32 and c not in lines for c in value
+            ):
                 raise ValueError("feedback_private_text_refused")
         if (self.shot_id and not self.project_id) or (
             self.artifact_id and not self.shot_id
@@ -243,6 +272,45 @@ class ProductFeedback:
                     write=False,
                 )
 
+    def web_references(self, conn, principal, parsed):
+        """A report still goes through when its story or shot is not on the server yet."""
+        for dropped in (
+            {},
+            {"artifact_id": None},
+            {"artifact_id": None, "shot_id": None},
+            {"artifact_id": None, "shot_id": None, "project_id": None},
+        ):
+            kept = parsed.model_copy(update=dropped)
+            try:
+                self.references(conn, principal, kept)
+                return kept
+            except (NotFound, Conflict, ValueError, HTTPException):
+                continue
+        return kept
+
+    def email(self, principal, report):
+        from .feedback_mail import load_config, send
+        from .identity import _public_profile
+
+        settings = self.app.state.settings
+        try:
+            config = load_config(settings.data_dir)
+            if config is None:
+                return "disabled"
+            with self.repo.engine.connect() as conn:
+                profile = _public_profile(principal, conn, self.tenant)
+            send(
+                config,
+                report,
+                profile,
+                settings.sentry_environment,
+                client=getattr(self.app.state, "feedback_mail_client", None),
+            )
+            return "sent"
+        except Exception as error:
+            print("feedback_mail_failed " + type(error).__name__, flush=True)
+            return "unknown"
+
     def settings_value(self, conn, principal):
         row = self.row(conn, principal, "feedback_settings", "preferences")
         return {
@@ -321,7 +389,10 @@ class ProductFeedback:
             type(limit) is not int
             or not 1 <= limit <= 100
             or (category and category not in CATEGORIES)
-            or (source and source not in {"story_chat", "agent", "telegram", "system"})
+            or (
+                source
+                and source not in {"story_chat", "agent", "telegram", "system", "web"}
+            )
         ):
             raise ValueError("feedback_filter_invalid")
         query = select(documents).where(*self.where(principal, "product_feedback"))
@@ -365,12 +436,28 @@ class ProductFeedback:
         parsed = FeedbackBody.model_validate(body)
         if parsed.include_context:
             raise HTTPException(403, "feedback_context_disabled")
-        body = parsed.model_dump()
+        web = parsed.source == "web"
+        if web and principal.machine:
+            raise HTTPException(403, "feedback_forbidden")
+        # Older saved reports have no page or client, and must still replay.
+        body = {
+            name: value
+            for name, value in parsed.model_dump().items()
+            if name not in ("page", "client") or value
+        }
         ident = request_hash({"actor": principal.actor_id, "key": key})
         fingerprint = request_hash(body)
         with self.repo.transaction() as conn:
             owner_reference_gate(conn, self.tenant, principal.owner)
-            self.references(conn, principal, parsed)
+            if web:
+                parsed = self.web_references(conn, principal, parsed)
+                body.update(
+                    project_id=parsed.project_id,
+                    shot_id=parsed.shot_id,
+                    artifact_id=parsed.artifact_id,
+                )
+            else:
+                self.references(conn, principal, parsed)
             old = self.row(conn, principal, "product_feedback", ident)
             if old:
                 if old["payload"].get("content_deleted"):
@@ -378,7 +465,8 @@ class ProductFeedback:
                 if old["payload"]["fingerprint"] != fingerprint:
                     raise Conflict("feedback_idempotency_conflict")
                 return old["payload"]["response"]
-            if not self.settings_value(conn, principal)["enabled"]:
+            # The opt-out covers automatic reports; a person pressing Send has chosen to.
+            if not web and not self.settings_value(conn, principal)["enabled"]:
                 raise HTTPException(403, "feedback_disabled")
             now, actor = self.repo.clock(), request_hash(principal.actor_id)
             recent = select(func.count()).where(
@@ -436,6 +524,23 @@ class ProductFeedback:
                 },
             }
             self.put(conn, principal, "product_feedback", ident, report)
+        if web:
+            # Outside any transaction: a slow mail service must not hold the database.
+            report["response"] = {
+                **response,
+                "forwarding": self.email(principal, report),
+            }
+            with self.repo.transaction() as conn:
+                self.put(
+                    conn,
+                    principal,
+                    "product_feedback",
+                    ident,
+                    report,
+                    version=2,
+                    exists=True,
+                )
+            return report["response"]
         # Only this original invocation reaches forwarding. A replay returns above.
         # Persist pending first, then serialize opt-out/deletion with the one enqueue.
         with self.repo.transaction() as conn:

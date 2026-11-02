@@ -4,6 +4,8 @@ import copy
 import json
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -31,9 +33,23 @@ class Sink:
         self.items.append(envelope)
 
 
+class Mail:
+    def __init__(self):
+        self.sent = []
+        self.error = None
+
+    def send_email(self, **args):
+        if self.error:
+            raise self.error
+        self.sent.append(args)
+
+
 class FeedbackTests(LedgerCase):
     def setUp(self):
         super().setUp()
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.tmp = directory.name
         self.sink = Sink()
         self.client = SimpleNamespace(
             dsn=DSN, options={"environment": "staging"}, transport=self.sink
@@ -331,3 +347,108 @@ class FeedbackTests(LedgerCase):
         ):
             self.assertEqual(forward_feedback(client, record), "disabled")
         self.assertEqual(len(self.sink.items), 1)
+
+    def web_report(self, **changes):
+        return {
+            "category": "generation",
+            "severity": "medium",
+            "summary": "The take never finished.\nSee https://example.com/a or a@b.co",
+            "source": "web",
+            "page": "/?view=workspace",
+            "client": "Browser 1 1280x900",
+            **changes,
+        }
+
+    def mailed(self, config=True):
+        self.app.state.settings = SimpleNamespace(
+            tenant_id=self.scope.tenant_id,
+            data_dir=str(self.tmp),
+            sentry_environment="staging",
+        )
+        self.app.state.feedback_mail_client = self.mail = Mail()
+        path = Path(self.tmp) / "runtime-secrets" / "feedback-mail.json"
+        path.parent.mkdir(exist_ok=True)
+        if config:
+            path.write_text(
+                json.dumps(
+                    {
+                        "access_key_id": "x",
+                        "secret_access_key": "y",
+                        "region": "ap-southeast-1",
+                        "sender": "feedback@inkseq.com",
+                        "recipient": "support@inkseq.com",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+    def test_web_report_is_emailed_once_and_not_sent_to_sentry(self):
+        self.mailed()
+        receipt = self.post("web-one", self.web_report())
+        self.assertEqual(receipt["forwarding"], "sent")
+        self.assertEqual(self.post("web-one", self.web_report()), receipt)
+        self.assertEqual(len(self.mail.sent), 1)
+        self.assertEqual(self.sink.items, [])
+        sent = self.mail.sent[0]
+        self.assertEqual(sent["Destination"]["ToAddresses"], ["support@inkseq.com"])
+        text = sent["Content"]["Simple"]["Body"]["Text"]["Data"]
+        self.assertIn("The take never finished.", text)
+        self.assertIn("/?view=workspace", text)
+        self.assertIn(receipt["report_id"][:8].upper(), text)
+        self.assertIn("[staging]", sent["Content"]["Simple"]["Subject"]["Data"])
+
+    def test_web_report_survives_a_mail_failure_or_no_mail_setup(self):
+        self.mailed(config=False)
+        self.assertEqual(
+            self.post("web-a", self.web_report())["forwarding"], "disabled"
+        )
+        self.mailed()
+        self.mail.error = OSError("down")
+        receipt = self.post("web-b", self.web_report())
+        self.assertEqual(receipt["forwarding"], "unknown")
+        self.assertEqual(
+            self.service.get(self.principal, receipt["report_id"]), receipt
+        )
+
+    def test_web_report_keeps_only_references_that_exist(self):
+        self.mailed()
+        receipt = self.post(
+            "web-c",
+            self.web_report(project_id=self.scope.project_id, shot_id="not-saved-yet"),
+        )
+        self.assertEqual(receipt["forwarding"], "sent")
+        text = self.mail.sent[0]["Content"]["Simple"]["Body"]["Text"]["Data"]
+        self.assertIn(self.scope.project_id, text)
+        self.assertNotIn("not-saved-yet", text)
+        self.post("web-d", self.web_report(project_id="missing-story"))
+        self.assertNotIn(
+            "missing-story",
+            self.mail.sent[1]["Content"]["Simple"]["Body"]["Text"]["Data"],
+        )
+
+    def test_web_report_refuses_credentials_and_machines(self):
+        self.mailed()
+        for text in ("password: abc", "sk-" + "a" * 20, "Bearer token"):
+            with self.assertRaises(ValidationError):
+                FeedbackBody.model_validate(self.web_report(summary=text))
+        with self.assertRaises(HTTPException):
+            self.post(
+                "web-e",
+                self.web_report(),
+                principal=replace(
+                    self.principal, machine=True, scopes=("projects:read",)
+                ),
+            )
+        self.assertEqual(self.mail.sent, [])
+
+    def test_web_limits_do_not_loosen_agent_reports(self):
+        long = "x" * 281
+        with self.assertRaises(ValidationError):
+            FeedbackBody.model_validate({**self.body, "summary": long})
+        with self.assertRaises(ValidationError):
+            FeedbackBody.model_validate({**self.body, "page": "/"})
+        with self.assertRaises(ValidationError):
+            FeedbackBody.model_validate({**self.body, "summary": "see https://a.co"})
+        FeedbackBody.model_validate(self.web_report(summary="y" * 4000))
+        with self.assertRaises(ValidationError):
+            FeedbackBody.model_validate(self.web_report(category="tool_error"))
