@@ -22,6 +22,7 @@ from pydantic_core import PydanticCustomError
 
 from .capabilities import LIMITS, RECIPES
 from .generation_draft import control_schema
+from .quick_chat_state import QuickChatError
 
 
 MAX_FIELD_ERRORS = 12
@@ -298,9 +299,6 @@ def validate_card_request(body, *, revising=False):
     try:
         model.model_validate(body)
     except ValidationError as error:
-        # Imported lazily to keep the schema usable by routes without a cycle.
-        from .quick_chat import QuickChatError
-
         raise QuickChatError(
             "invalid_request",
             "请求字段不符合创作契约；请按字段提示修正。",
