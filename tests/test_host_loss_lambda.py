@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "deploy" / "platform"))
 import host_loss_lambda as stopper  # noqa: E402
@@ -17,6 +17,9 @@ def alarm(name="Inkseq-production-MonitorHeartbeat", state="ALARM"):
 
 class StopperTests(unittest.TestCase):
     def setUp(self):
+        patcher = patch.object(stopper, "TOPIC", "arn:topic")
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.ssm = Mock()
         self.ssm.get_parameter.return_value = {
             "Parameter": {
@@ -68,6 +71,21 @@ class StopperTests(unittest.TestCase):
         self.assertEqual(result["state"], "stopped")
         self.stop.assert_called_once_with("k", "100")
         self.assertEqual(result["results"], {"100": 200})
+        self.assertEqual(result["unconfirmed"], [])
+        self.assertIn("paid GPUs stopped", self.sns.publish.call_args.kwargs["Subject"])
+
+    def test_a_failed_stop_is_never_reported_as_stopped(self):
+        for answer in (
+            {"side_effect": TimeoutError("late")},
+            {"return_value": 500},
+        ):
+            self.sns.reset_mock()
+            self.stop = Mock(**answer)
+            with self.assertRaisesRegex(RuntimeError, "unconfirmed 100"):
+                self.run_with(alarm(), Mock(side_effect=OSError("down")))
+            published = self.sns.publish.call_args.kwargs
+            self.assertIn("NOT confirmed", published["Subject"])
+            self.assertEqual(json.loads(published["Message"])["unconfirmed"], ["100"])
 
 
 if __name__ == "__main__":
