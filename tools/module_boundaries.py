@@ -51,11 +51,13 @@ DOMAINS = (
             "settlement_recovery",
             "welcome_eligibility",
             "rent_journal",
+            "repository_budgets",
         ),
     ),
     (
         "capacity",
         (
+            "repository_capacity",
             "capacity",
             "dstack",
             "modal",
@@ -106,6 +108,8 @@ DOMAINS = (
     (
         "jobs",
         (
+            "repository_jobs",
+            "inference",
             "queue",
             "job_",
             "generation_",

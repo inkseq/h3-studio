@@ -769,6 +769,113 @@ class QuickChatTests(unittest.TestCase):
             self.turn(key="after-recovery")["error_code"], "assistant_disabled"
         )
 
+    def test_recovery_fences_late_assistant_card_without_repeating_call(self):
+        entered, release = threading.Event(), threading.Event()
+        fake = FakeAssistant(response={"reply": "ready", "card": {"prompt": "A cup"}})
+        complete = fake.complete
+
+        def delayed(*args):
+            result = complete(*args)
+            entered.set()
+            if not release.wait(5):
+                raise AssertionError("test assistant release missing")
+            return result
+
+        fake.complete = delayed
+        self.service.assistant, self.service.assistant_enabled = fake, True
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pending = pool.submit(self.turn)
+            try:
+                self.assertTrue(entered.wait(5))
+                now = self.repo.clock()
+                self.repo.clock = lambda: now + 200
+                self.assertEqual(self.service.recover_assistant_runs(), 1)
+            finally:
+                release.set()
+            result = pending.result(timeout=5)
+        self.assertEqual(result["status"], "unknown")
+        self.assertIsNone(result["card_id"])
+        self.assertEqual(result["assistant_run"]["fence"], 2)
+        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual(self.service.recover_assistant_runs(), 0)
+        with self.repo.engine.connect() as conn:
+            self.assertFalse(
+                conn.execute(select(objects).where(objects.c.kind == "card")).first()
+            )
+            self.assertFalse(
+                conn.execute(
+                    select(events).where(events.c.type == "assistant.completed")
+                ).first()
+            )
+        with self.assertRaises(QuickChatError) as error:
+            self.turn(key="still-unacknowledged")
+        self.assertEqual(error.exception.code, "assistant_run_active")
+
+    def test_chat_record_and_error_aliases_share_original_identity(self):
+        from studio_platform import (
+            quick_chat,
+            quick_chat_history,
+            quick_chat_routes,
+            quick_chat_state,
+        )
+
+        self.assertEqual(
+            quick_chat_history._tables(),
+            (quick_chat.objects, quick_chat.operations, quick_chat.events),
+        )
+        for table in quick_chat_history._tables():
+            self.assertIs(table.metadata, quick_chat.metadata)
+        self.assertIs(quick_chat_routes.QuickChatError, QuickChatError)
+        self.assertIs(type(quick_chat_history._error("fixture")), QuickChatError)
+        for name in (
+            "metadata",
+            "objects",
+            "operations",
+            "events",
+            "QuickChatError",
+            "QuickChatHooks",
+        ):
+            self.assertIs(getattr(quick_chat, name), getattr(quick_chat_state, name))
+
+    def test_broad_failure_logs_keep_private_exception_text_out(self):
+        from studio_platform.quick_chat import cursor_decode
+
+        sentinel = "private-test-exception-sentinel"
+        self.service.assistant = FakeAssistant(error=RuntimeError(sentinel))
+        self.service.assistant_enabled = True
+        with self.assertLogs(
+            "studio_platform.quick_chat_turns", level="WARNING"
+        ) as logs:
+            result = self.turn()
+        self.assertEqual(result["status"], "unknown")
+        self.assertEqual(result["error_code"], "assistant_call_unknown")
+        self.assertIn("quick_chat_assistant_failed", str(logs.output))
+        self.assertNotIn(sentinel, str(logs.output))
+        artifact_id, _ = self.jpeg_artifact()
+        with (
+            mock.patch.object(
+                self.app.state.storage, "open", side_effect=RuntimeError(sentinel)
+            ),
+            self.assertLogs(
+                "studio_platform.quick_chat_cards", level="WARNING"
+            ) as logs,
+        ):
+            result = self.service.result_import(
+                self.principal,
+                self.sid,
+                {"source_artifact_id": artifact_id},
+                "failed-read",
+            )
+        self.assertEqual(result["error_code"], "result_import_unknown")
+        self.assertIn("quick_chat_result_import_failed", str(logs.output))
+        self.assertNotIn(sentinel, str(logs.output))
+        with self.assertLogs("studio_platform.quick_chat_state", level="INFO") as logs:
+            with self.assertRaises(QuickChatError) as error:
+                cursor_decode(sentinel, self.principal, self.sid, "older")
+        self.assertEqual(error.exception.code, "invalid_cursor")
+        self.assertIn("quick_chat_cursor_rejected", str(logs.output))
+        self.assertNotIn(sentinel, str(logs.output))
+
     def test_submission_unique_across_actors_and_new_keys(self):
         revision = self.card(copies=3)["revision"]
         pf = self.preflight(revision)
@@ -1518,6 +1625,48 @@ class QuickChatTests(unittest.TestCase):
         asset = self.app.state.assets.get("superdan", imported["asset_id"])
         self.assertEqual(asset["mime"], "image/webp")
         self.assertTrue(asset["file_name"].endswith(".webp"))
+
+    def test_result_import_read_failures_preserve_journal_without_upload(self):
+        artifact_id, object_key = self.jpeg_artifact()
+        with self.app.state.storage.open(object_key) as source:
+            original = source.read()
+        body = {"source_artifact_id": artifact_id}
+        failures = (
+            ("short", original[:-1], "failed", "result_integrity_failed"),
+            ("long", original + b"x", "failed", "result_integrity_failed"),
+            (
+                "hash",
+                bytes([original[0] ^ 1]) + original[1:],
+                "failed",
+                "result_integrity_failed",
+            ),
+            ("read", None, "unknown", "result_import_unknown"),
+        )
+        for name, raw, status, code in failures:
+            with (
+                self.subTest(name=name),
+                mock.patch.object(self.app.state.assets, "upload") as upload,
+                mock.patch.object(
+                    self.app.state.storage,
+                    "open",
+                    side_effect=RuntimeError("private-storage-sentinel")
+                    if raw is None
+                    else None,
+                    return_value=io.BytesIO(raw or b""),
+                ),
+            ):
+                result = self.service.result_import(
+                    self.principal, self.sid, body, "import-" + name
+                )
+            self.assertEqual(result["status"], status)
+            self.assertEqual(result["error_code"], code)
+            self.assertIsNone(result["asset_id"])
+            upload.assert_not_called()
+            with self.repo.engine.connect() as conn:
+                replay = self.service._replay(
+                    conn, self.principal, "import:" + self.sid, "import-" + name, body
+                )
+            self.assertEqual(replay, result["id"])
 
 
 if __name__ == "__main__":

@@ -6,6 +6,10 @@ one supplier call durably before leaving SQL; recovery never repeats that call.
 
 from __future__ import annotations
 
+from .quick_chat_state import (
+    objects,
+)
+
 import copy
 import re
 import unicodedata
@@ -215,7 +219,6 @@ class QuickChatTitleMixin:
         """Fence stale one-shot work without sending text to any provider."""
         if older_than_s < 180:
             raise ValueError("invalid_title_recovery_window")
-        from .quick_chat import objects
 
         cutoff = self.repo.clock() - older_than_s
         with self.repo.transaction() as conn:

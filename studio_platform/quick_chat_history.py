@@ -6,6 +6,13 @@ reconciles only its original immutable keys, outside every database transaction.
 
 from __future__ import annotations
 
+from .quick_chat_state import (
+    QuickChatError,
+    events,
+    objects,
+    operations,
+)
+
 import copy
 import hashlib
 import json
@@ -45,13 +52,11 @@ ZERO = {
 
 
 def _tables():
-    from .quick_chat import objects, operations, events
 
     return objects, operations, events
 
 
 def _error(code, message="创作记录状态已变化，请重新预览。", status=409):
-    from .quick_chat import QuickChatError
 
     return QuickChatError(code, message, status)
 
@@ -494,7 +499,6 @@ class QuickChatHistoryMixin:
 
     def _cleanup_one_object_locked(self, record, index):
         """External IO over one durable intent. Unknown results never restore."""
-        from .quick_chat import objects
         from .quick_chat_migration import assert_legacy_mutable
 
         owner = record["owner"]
@@ -620,7 +624,6 @@ class QuickChatHistoryMixin:
             )
 
     def _finish_history_purge(self, record):
-        from .quick_chat import objects
         from .quick_chat_migration import assert_legacy_mutable
 
         owner = record["owner"]
@@ -761,7 +764,6 @@ class QuickChatHistoryMixin:
             )
 
     def process_history_cleanup(self, *, limit=10, max_objects=10):
-        from .quick_chat import objects
 
         if (
             type(limit) is not int

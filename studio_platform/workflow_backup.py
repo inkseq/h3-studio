@@ -143,7 +143,7 @@ def export(connection, directory, *, deadline=None):
 
 
 def read(directory, expected):
-    from .backup import _regular
+    from .backup_files import _regular
 
     raw = _regular(directory / FILE, max_bytes=MAX_BYTES).read_bytes()
     value = json.loads(raw)
@@ -178,7 +178,7 @@ def read(directory, expected):
 
 
 def inspect_file(directory):
-    from .backup import _regular
+    from .backup_files import _regular
     from .workflow_backup_stream import inspect
 
     with _regular(directory / FILE, max_bytes=MAX_BYTES).open('rb') as source:
@@ -276,7 +276,7 @@ def main(argv=None):
     args = parser.parse_args(argv)
     engine = None
     try:
-        from .backup import _regular, _digest
+        from .backup_files import _regular, _digest
         from .settings import database_url_from_environment
         from .schema_baseline import adopt_baseline, adopt_workflows, compare_schema
         from .workflow_schema import schema_exists
