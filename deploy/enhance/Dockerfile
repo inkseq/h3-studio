@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3.12 pyth
     && rm -rf /var/lib/apt/lists/* && python3.12 -m venv /opt/venv
 RUN pip install torch==2.10.0+cu130 torchvision==0.25.0+cu130 torchaudio==2.10.0+cu130 \
         --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple
-ARG COMFY_COMMIT=63be2f9b82ad0dac88a7ceaa28a9cf3154125a18
-ARG REGENERATE_COMMIT=9b686c5
+ARG COMFY_COMMIT=40316cf008b2fd8663263270669eb4da23f89d2c
+ARG REGENERATE_COMMIT=40316cf008b2fd8663263270669eb4da23f89d2c
 ARG UPSCALER_COMMIT=40316cf008b2fd8663263270669eb4da23f89d2c
 RUN git clone https://github.com/comfyanonymous/ComfyUI /opt/ComfyUI && git -C /opt/ComfyUI checkout -q $COMFY_COMMIT \
     && git clone https://github.com/rdh9616/ComfyUI-Open-H3-Regenerate /opt/ComfyUI/custom_nodes/ComfyUI-Open-H3-Regenerate \
