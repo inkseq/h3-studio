@@ -25,6 +25,7 @@ from .dstack_operator import BACKEND_MARKER, PROVIDERS
 from .dstack_runtime import DstackNativeRuntime, DstackRuntimeConfig, IDENTITY_FIELDS
 from .native_runtime_document import prepared_runtime_document
 from .operator_capacity import operator_nodes
+from .providers.registry import CLOUDRIFT, LIUM
 from .repository import attempts, jobs, registered_workers
 from .runtime_catalog import engine_manifest, get_profile
 from .wangp_bootstrap import SOURCE_NAMES, read_sources
@@ -153,10 +154,10 @@ def coordinates_for_run(binding, run):
     dockerized, proxy = provisioning.get("dockerized"), provisioning.get("ssh_proxy")
     _require(
         dockerized is False
-        and (proxy is None or binding["backend"] == "lium")
+        and (proxy is None or binding["backend"] == LIUM.id)
         or dockerized is True
         and proxy is None
-        and binding["backend"] == "cloudrift",
+        and binding["backend"] == CLOUDRIFT.id,
         "dstack_ssh_topology_unsupported",
     )
     runtime = latest.get("job_runtime_data")

@@ -476,7 +476,17 @@ class DownloadTests(unittest.TestCase):
             )
             # A trusted catalog identity alone cannot redirect unreviewed bytes.
             profile['components']['transformer_ref']['files'][0]['sha256'] = '0' * 64
+            previous_stat = metadata.stat()
             metadata.write_text(json.dumps(profile))
+            # This same-size rewrite must be a new catalog revision. Fast local
+            # filesystems can otherwise retain the cache's exact stat key.
+            os.utime(
+                metadata,
+                ns=(
+                    previous_stat.st_atime_ns,
+                    previous_stat.st_mtime_ns + 1_000_000_000,
+                ),
+            )
             changed = catalog.engine_manifest(alias, 'ref')
             sdk = Mock()
             with self.assertRaisesRegex(ValueError, 'model_download_locator_invalid'):

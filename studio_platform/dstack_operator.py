@@ -64,7 +64,7 @@ from .repository import (
 from .dstack_inventory import OPTIONAL_PROFILE_FIELDS as OPTIONAL, fallbacks_valid
 from .dstack_inventory import profile_backends, request_options
 from .runtime_catalog import engine_manifest, get_profile
-from .providers.registry import BACKEND_PROVIDERS
+from .providers.registry import BACKEND_PROVIDERS, VASTAI
 
 BACKEND_MARKER = "dstack-v1"
 MAX_HOST_CANDIDATES = 10
@@ -535,7 +535,7 @@ class LedgerDstackStore:
                     value.pop("host_observation"), now=self.repo.clock()
                 )
                 require(
-                    binding["backend"] == "vastai"
+                    binding["backend"] == VASTAI.id
                     and physical["provider_instance_id"]
                     == value.get(
                         "provider_instance_id", binding.get("provider_instance_id")
@@ -1100,7 +1100,7 @@ class LedgerDstackStore:
                 and review.get("run_id") == binding.get("run_id")
                 and binding.get("dstack_status") == "failed"
                 and binding.get("state") == "stopped"
-                and review.get("provider") == binding.get("backend") == "vastai"
+                and review.get("provider") == binding.get("backend") == VASTAI.id
                 and review.get("complete_account_empty") is True
                 and _finite(review.get("observed_at"))
                 and 0 <= self.repo.clock() - review["observed_at"] <= 30
@@ -2104,7 +2104,7 @@ class DstackOperator:
                 self.capacity.plan(candidate, self.config["ssh_public_key"]),
                 candidate,
             )
-            if offers and backend == "vastai":
+            if offers and backend == VASTAI.id:
                 try:
                     candidate, offers, store = self._vast_host_selection(
                         candidate, offers, demand_job_id
@@ -2865,7 +2865,7 @@ class DstackOperator:
     def _validate_start_hosts(self, connection, profile, original, now, demand_job_id):
         """Re-read exact Vast offer identities before reserving the original intent."""
         host_selection = original.get("host_selection")
-        if profile["backend"] == "vastai":
+        if profile["backend"] == VASTAI.id:
             from .host_policy import HostPolicyStore, selection
 
             require(host_selection is not None, "host_selection_required")

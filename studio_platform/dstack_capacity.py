@@ -28,6 +28,7 @@ from .inference.wangp_contract import HostReadiness, safe_model_progress
 from .dstack_control_plane import control_plane, foreign_usage, provider_retry_after
 from .worker_boot import boot_commands, boot_env, boot_record, boot_valid
 from .capacity_memory import vast_ram_floor
+from .providers.registry import RUNPOD, VASTAI
 
 from .dstack_inventory import (
     CLOUDRIFT_INSTANCES_URL,
@@ -340,7 +341,7 @@ class CapacityRequest:
             "dstack_reliability_invalid",
         )
         if self.host_selection is not None:
-            _require(self.backend == "vastai", "dstack_host_backend_invalid")
+            _require(self.backend == VASTAI.id, "dstack_host_backend_invalid")
             try:
                 from .host_policy import selection
 
@@ -400,7 +401,7 @@ class CapacityRequest:
                 "sixnine_manifest": self.manifest_digest,
             },
         }
-        if self.backend == "vastai":
+        if self.backend == VASTAI.id:
             configuration["backend_options"] = [
                 {
                     "type": "vastai",
@@ -719,7 +720,7 @@ class DstackClient:
         creds = config.get("creds") if isinstance(config, dict) else None
         _require(
             isinstance(config, dict)
-            and config.get("type") == "vastai"
+            and config.get("type") == VASTAI.id
             and isinstance(creds, dict)
             and creds.get("type") == "api_key",
             "dstack_host_account_unconfirmed",
@@ -740,7 +741,7 @@ class DstackClient:
         Unknown physical IDs are omitted; an offer ID is never a machine ID.
         Native planning still qualifies resources and its verified-first filter.
         """
-        _require(request.backend == "vastai", "dstack_host_backend_invalid")
+        _require(request.backend == VASTAI.id, "dstack_host_backend_invalid")
         observed = clock()
         query = {
             "direct_port_count": {"gte": 1},
@@ -1018,7 +1019,7 @@ class DstackClient:
                 )
 
             ids, aliases, labels = [], {}, []
-            if backend == "vastai":
+            if backend == VASTAI.id:
                 params = {
                     "limit": 25,
                     "select_cols": '["id","label"]',
@@ -1236,7 +1237,7 @@ def assert_run_owned(run, binding, project):
         and all(
             isinstance(observed, dict)
             and all(observed.get(key) == value for key, value in desired.items())
-            for observed, desired in zip(actual_options, wanted_options)
+            for observed, desired in zip(actual_options, wanted_options, strict=False)
         ),
         "dstack_run_binding_mismatch",
     )
@@ -1751,7 +1752,7 @@ class DstackCapacity:
         )
         binding = self.store.load(intent_id)
         _require(
-            binding.get("backend") == "vastai" and binding.get("run_id"),
+            binding.get("backend") == VASTAI.id and binding.get("run_id"),
             "dstack_no_allocation_review_unconfirmed",
         )
         run = self.client.get(run_id=binding["run_id"])
@@ -1960,7 +1961,7 @@ class DstackCapacity:
             )
             message = submission.get("termination_reason_message")
             if (
-                binding.get("backend") == "runpod"
+                binding.get("backend") == RUNPOD.id
                 and isinstance(message, str)
                 and message.startswith("sixnine_runpod_outcome_v1:")
             ):
@@ -2153,12 +2154,12 @@ class DstackCapacity:
         An expected/selected offer is not an allocated host. Old unknown runs
         remain compatible; new enforced selectors fail closed before readiness.
         """
-        if binding.get("backend") != "vastai":
+        if binding.get("backend") != VASTAI.id:
             return None
         strict = binding.get("host_selection") is not None
         try:
             _require(
-                provisioning.get("backend") == "vastai",
+                provisioning.get("backend") == VASTAI.id,
                 "dstack_host_allocation_unconfirmed",
             )
             instance = provisioning.get("instance_id")

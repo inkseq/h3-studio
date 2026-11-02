@@ -17,6 +17,16 @@ import stat
 from urllib.parse import urlsplit
 
 from .control import WorkerControl, WorkerSpec, REAL_GPU_BACKENDS, worker_spec_payload
+from .providers.registry import (
+    COMFY_WORKER,
+    CPU_RENDER,
+    EVERYFRAME_RENDER,
+    MOCK,
+    NO_ENDPOINT_BACKENDS,
+    RUNPOD_ENHANCE,
+    SERVICE_SWITCHES,
+    WANGP_WORKER,
+)
 from .repository import Repository, request_hash
 from .worker import ComfyBackend, MockBackend, WorkerRunner
 
@@ -70,7 +80,7 @@ class SlotConfig:
             raise ValueError("invalid_fleet_slot")
         if self.recovery_only and self.spec.backend not in REAL_GPU_BACKENDS:
             raise ValueError("recovery_requires_real_engine")
-        if self.spec.backend == "wangp-worker":
+        if self.spec.backend == WANGP_WORKER.id:
             if (
                 not isinstance(self.runtime_config_file, str)
                 or not Path(self.runtime_config_file).is_absolute()
@@ -78,17 +88,12 @@ class SlotConfig:
                 raise ValueError("absolute_wangp_runtime_config_required")
         elif self.runtime_config_file != "":
             raise ValueError("unexpected_engine_runtime_config")
-        if self.spec.backend in {
-            "mock",
-            "cpu-render",
-            "runpod-enhance",
-            "everyframe-render",
-        }:
+        if self.spec.backend in NO_ENDPOINT_BACKENDS:
             # Serverless enhance reaches RunPod through its own fixed API, not a
             # slot endpoint (#795).
             if self.endpoint or self.allowed_origins or self.comfy_revision:
                 raise ValueError("cpu_slot_cannot_have_gpu_endpoint")
-        elif self.spec.backend == "wangp-worker":
+        elif self.spec.backend == WANGP_WORKER.id:
             if (
                 self.comfy_revision
                 or not isinstance(self.allowed_origins, tuple)
@@ -142,7 +147,7 @@ class FleetConfig:
                 if identity in devices:
                     raise ValueError("duplicate_fleet_physical_gpu")
                 devices.add(identity)
-        if "mock" in backends and len(backends) > 1:
+        if MOCK.id in backends and len(backends) > 1:
             raise ValueError("simulation_and_real_fleets_must_be_separate")
         if self.enabled and sum(s.enabled for s in self.slots) > self.max_children:
             raise ValueError("fleet_child_limit_exceeded")
@@ -235,7 +240,7 @@ def read_config(path):
             ):
                 raise ValueError("invalid_fleet_slot_fields")
             if value["version"] == 1 and (
-                item["backend"] == "wangp-worker"
+                item["backend"] == WANGP_WORKER.id
                 or item.get("engine_manifest_digest", "") != ""
                 or item.get("recovery_only", False) is not False
                 or item.get("dispatch_backend", "legacy") != "legacy"
@@ -317,13 +322,8 @@ def _require_service_backend(slot, settings):
         if backend not in settings.recovery_backends:
             raise ValueError("fleet_recovery_backend_not_explicitly_allowed")
         return
-    switches = {
-        "cpu-render": "render_enabled",
-        "runpod-enhance": "enhance_enabled",
-        "everyframe-render": "everyframe_enabled",
-    }
-    if backend in switches:
-        allowed = getattr(settings, switches[backend])
+    if backend in SERVICE_SWITCHES:
+        allowed = getattr(settings, SERVICE_SWITCHES[backend])
     else:
         allowed = settings.execution_backend == backend and settings.generation_enabled
     if not allowed:
@@ -355,7 +355,7 @@ def slot_runner(
     try:
         repo.create_schema()
         control = WorkerControl(repo, capacity_usage=capacity_usage)
-        if slot.spec.backend == "mock":
+        if slot.spec.backend == MOCK.id:
             from .repository import capacity_gate
 
             with repo.engine.connect() as conn:
@@ -370,25 +370,25 @@ def slot_runner(
         directory = config.work_dir / worker_id
         if backend_factory:
             backend = backend_factory(slot, directory)
-        elif slot.spec.backend == "mock":
+        elif slot.spec.backend == MOCK.id:
             backend = MockBackend(directory / "simulation", enabled=True)
-        elif slot.spec.backend == "cpu-render":
+        elif slot.spec.backend == CPU_RENDER.id:
             from .render_backend import CPURenderBackend
 
             backend = CPURenderBackend(directory / "render", enabled=True)
-        elif slot.spec.backend == "runpod-enhance":
+        elif slot.spec.backend == RUNPOD_ENHANCE.id:
             from . import enhance_backend
 
             backend = enhance_backend.create(
                 store_factory(settings), settings, slot_key=slot.spec.worker_id
             )
-        elif slot.spec.backend == "everyframe-render":
+        elif slot.spec.backend == EVERYFRAME_RENDER.id:
             from .providers import everyframe
 
             backend = everyframe.create(
                 store_factory(settings), settings, slot_key=slot.spec.worker_id
             )
-        elif slot.spec.backend == "comfy-worker":
+        elif slot.spec.backend == COMFY_WORKER.id:
             backend = ComfyBackend(
                 endpoint=slot.endpoint,
                 enabled=True,
@@ -407,7 +407,7 @@ def slot_runner(
         ):
             raise ValueError("fleet_adapter_identity_mismatch")
         if (
-            slot.spec.backend == "wangp-worker"
+            slot.spec.backend == WANGP_WORKER.id
             and getattr(getattr(backend, "manifest", None), "digest", None)
             != slot.spec.engine_manifest_digest
         ):
@@ -420,12 +420,7 @@ def slot_runner(
                 slot.spec.dispatch_backend == "hatchet-v1" and worker["drain_requested"]
             )
         ):
-            if slot.spec.backend in {
-                "mock",
-                "cpu-render",
-                "runpod-enhance",
-                "everyframe-render",
-            }:
+            if slot.spec.backend in NO_ENDPOINT_BACKENDS:
                 control.mark_ready(worker_id, upstream_idle_confirmed=True)
             elif slot.confirmed_idle:
                 # A startup declaration alone is insufficient: the dedicated

@@ -31,6 +31,7 @@ from .repository import (
     money,
     manually_reviewed_inactive,
 )
+from .providers.registry import VASTAI
 from .operator_capacity import (
     ACTIVE_COMMANDS,
     advance_command_revision,
@@ -391,7 +392,7 @@ def validate_reviewed_instance(value, proof, now, accounts, selected, excluded):
             "settlement_owned_run_unconfirmed",
         )
         require(
-            binding.get("backend") == "vastai"
+            binding.get("backend") == VASTAI.id
             and row["provider"] == "vast"
             and isinstance(binding.get("run_id"), str)
             and binding["run_id"]

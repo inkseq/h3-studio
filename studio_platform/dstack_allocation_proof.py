@@ -13,6 +13,8 @@ import json
 import re
 import uuid
 
+from .providers.registry import LIUM, RUNPOD, VASTAI
+
 PREFIX = "sixnine_vast_attempts_v1:"
 NO_FLEET_MESSAGE = (
     "No matching fleet found. Possible reasons: "
@@ -30,7 +32,7 @@ NO_FLEET_SOURCE = "native_dstack_0225_no_fleet_v1"
 # timed out client-side can still finish at the provider, so the read must come
 # at least LATE_CREATE_SECONDS after the submission finished.
 ACCOUNT_ABSENT_SOURCE = "provider_account_absent_v1"
-MAX_PROJECT_LENGTH = {"vastai": 27, "lium": 30, "runpod": 19}
+MAX_PROJECT_LENGTH = {VASTAI.id: 27, LIUM.id: 30, RUNPOD.id: 19}
 LABEL_BACKENDS = frozenset(MAX_PROJECT_LENGTH)
 RUN_MARKER_LENGTH = 16
 LATE_CREATE_SECONDS = 300
@@ -109,7 +111,7 @@ def validate_proof(value, binding):
             not in (
                 LABEL_BACKENDS
                 if value["source"] == ACCOUNT_ABSENT_SOURCE
-                else {"vastai"}
+                else {VASTAI.id}
             )
             or any(
                 binding.get(key) is not None

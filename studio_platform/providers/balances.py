@@ -19,6 +19,7 @@ from .everyframe import API as EVERYFRAME_API
 from .everyframe import FILENAME as EVERYFRAME_FILE
 from .everyframe import load_config
 from .hosted_models import catalog_changes
+from .registry import CLOUDRIFT, EVERYFRAME_RENDER, LIUM, RUNPOD, VASTAI
 
 READ_SECONDS = 4 * 3600
 FILENAME = "provider-balances.json"
@@ -83,19 +84,25 @@ class Source:
 
 
 SOURCES = (
-    Source("vast", "https://cloud.vast.ai/billing/", 10.0, _vast, "vastai"),
-    Source("runpod", "https://console.runpod.io/user/billing", 10.0, _runpod, "runpod"),
-    Source("lium", "https://lium.io", 10.0, _lium, "lium"),
+    Source(VASTAI.provider, "https://cloud.vast.ai/billing/", 10.0, _vast, VASTAI.id),
+    Source(
+        RUNPOD.provider,
+        "https://console.runpod.io/user/billing",
+        10.0,
+        _runpod,
+        RUNPOD.id,
+    ),
+    Source(LIUM.provider, "https://lium.io", 10.0, _lium, LIUM.id),
     # The reply carries no currency, and one reading did not settle its unit.
     Source(
-        "cloudrift",
+        CLOUDRIFT.provider,
         "https://console.cloudrift.ai",
         None,
         _cloudrift,
-        "cloudrift",
+        CLOUDRIFT.id,
         "raw",
     ),
-    Source("everyframe", "https://everyframe.studio", 10.0, _everyframe),
+    Source(EVERYFRAME_RENDER.provider, "https://everyframe.studio", 10.0, _everyframe),
     # No key on the servers, or post-paid: read these in their consoles.
     Source("modal", "https://modal.com/settings/usage"),
     Source("openrouter", "https://openrouter.ai/settings/credits"),

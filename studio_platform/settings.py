@@ -10,6 +10,8 @@ from pathlib import Path
 import stat
 from urllib.parse import urlsplit
 
+from .providers.registry import MOCK, PRIMARY_EXECUTION_BACKENDS, REAL_GPU_BACKENDS
+
 
 def public_origin_from_environment():
     """Prefer the product-neutral name; a conflicting legacy alias is invalid."""
@@ -29,7 +31,8 @@ def _public_https_origin(value):
         raise ValueError("PUBLIC_ORIGIN must be one exact public HTTPS origin")
     try:
         parsed = urlsplit(value)
-        parsed.port  # Reject malformed/out-of-range authorities before matching Host.
+        # Reject malformed/out-of-range authorities before matching Host.
+        _ = parsed.port
     except ValueError:
         raise ValueError(
             "PUBLIC_ORIGIN must be one exact public HTTPS origin"
@@ -370,7 +373,7 @@ class Settings:
                 _public_https_origin(alias)
             if self.auth_mode != "password":
                 raise ValueError("Public deployments require password authentication")
-            if self.execution_backend == "mock":
+            if self.execution_backend == MOCK.id:
                 raise ValueError("Public deployments cannot present mock generation")
             if self.local_ui_origins:
                 raise ValueError(
@@ -388,21 +391,13 @@ class Settings:
                 or local.fragment
             ):
                 raise ValueError("Local UI origins must be exact loopback HTTP origins")
-        if self.execution_backend not in {
-            "disabled",
-            "mock",
-            "comfy-worker",
-            "wangp-worker",
-        }:
+        if self.execution_backend not in PRIMARY_EXECUTION_BACKENDS:
             raise ValueError("Unsupported execution backend")
         if (
             not isinstance(self.recovery_backends, tuple)
             or any(not isinstance(value, str) for value in self.recovery_backends)
             or len(set(self.recovery_backends)) != len(self.recovery_backends)
-            or any(
-                value not in {"comfy-worker", "wangp-worker"}
-                for value in self.recovery_backends
-            )
+            or any(value not in REAL_GPU_BACKENDS for value in self.recovery_backends)
         ):
             raise ValueError("Recovery backends must explicitly name real engines")
         if self.generation_enabled and self.execution_backend == "disabled":

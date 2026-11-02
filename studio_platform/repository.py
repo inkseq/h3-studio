@@ -46,7 +46,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 from .budget_policy import effective_budget_limit, fixed_cap_retired
-from .providers.registry import DSTACK_V1_PROVIDERS
+from .providers.registry import DSTACK_V1_PROVIDERS, REAL_GPU_BACKENDS
 
 
 class LedgerError(Exception):
@@ -1984,7 +1984,7 @@ class Repository:
         queued onto a destroyed instance or changed into a different purchase.
         """
         if (
-            execution.get("backend") not in {"comfy-worker", "wangp-worker"}
+            execution.get("backend") not in REAL_GPU_BACKENDS
             or execution.get("enabled") is not True
             or execution.get("admission_state") == "waiting_capacity"
         ):

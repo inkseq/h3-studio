@@ -16,8 +16,10 @@ contacts a vendor.
 
 from dataclasses import dataclass
 
-PROVIDER = "everyframe"
-BACKEND = "everyframe-render"
+from .registry import EVERYFRAME_RENDER
+
+PROVIDER = EVERYFRAME_RENDER.provider
+BACKEND = EVERYFRAME_RENDER.id
 POOL = "everyframe"
 RECIPES = ("h3-base-fl2va-v1", "h3-base-ref2va-v1")
 SLOTS_PER_MODEL = 4

@@ -20,9 +20,10 @@ import re
 import time
 
 from .dstack_capacity import DstackError
+from .providers.registry import MODAL_DIALOUT
 from .runpod_serverless import RunPodServerlessClient, _require
 
-BACKEND = "modal-dialout"
+BACKEND = MODAL_DIALOUT.id
 MOUNT = "/ckpts"
 CACHE = MOUNT + "/ckpts"  # The verified model files under the Volume root.
 CONFIG_KEYS = frozenset(

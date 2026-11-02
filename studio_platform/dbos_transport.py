@@ -22,6 +22,7 @@ from sqlalchemy import select
 from . import workflow_status
 from .repository import Conflict, Scope, identifier, jobs
 from .domain_turns import DomainTurns
+from .providers.registry import CPU_RENDER, LOCAL_BACKENDS
 from .workflow_schema import (
     INKSEQ_WORKFLOW_SCHEMA as SCHEMA,  # noqa: F401 -- public workflow-schema compatibility export
     WORKFLOW_APPLICATION_NAME as APPLICATION,
@@ -32,8 +33,6 @@ QUEUE = "inkseq-generation-v1"
 WORKFLOW = "inkseq.generation.v1"
 POLL_SECONDS = 10
 TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
-# Slots without a native GPU node: no dstack demand, kept alive by heartbeat_cpu.
-LOCAL_BACKENDS = frozenset({"cpu-render", "runpod-enhance", "everyframe-render"})
 ACTIVE = frozenset(
     {
         "queued",
@@ -348,7 +347,7 @@ class DurableSlots:
                 (RECIPE,),
                 MODEL,
                 configuration,
-                "cpu-render",
+                CPU_RENDER.id,
             )
             self.ensure(worker, SlotConfig(spec, enabled=True))
         self.heartbeat_cpu()
@@ -527,7 +526,7 @@ class DurableSlots:
         for slot in candidates:
             if slot.spec.pool != job["pool"] or not slot.lock.acquire(blocking=False):
                 continue
-            cpu = slot.spec.backend == "cpu-render"
+            cpu = slot.spec.backend == CPU_RENDER.id
             acquired_cpu = False
             try:
                 if cpu:

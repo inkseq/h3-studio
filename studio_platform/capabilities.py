@@ -9,6 +9,8 @@ import re
 import secrets
 import time
 
+from .providers.registry import MOCK, REAL_GPU_BACKENDS
+
 from comfy_workflow import (
     COMFY_COMMIT,
     ASPECT_RATIOS,
@@ -188,20 +190,17 @@ def capabilities(settings):
             "status": "disabled"
             if offline
             else "simulation"
-            if settings.execution_backend == "mock"
+            if settings.execution_backend == MOCK.id
             else "unavailable",
             "reason": "生成执行尚未开启，作品与素材可以继续编辑。"
             if offline
             else "当前为模拟流程，不代表真实模型生成。"
-            if settings.execution_backend == "mock"
+            if settings.execution_backend == MOCK.id
             else "当前执行范围尚未确认；模型支持的输入不代表已在此云端开放。",
             "capacity_checked": False,
             "preflight_required": True,
         }
-    if settings.generation_enabled and settings.execution_backend in {
-        "comfy-worker",
-        "wangp-worker",
-    }:
+    if settings.generation_enabled and settings.execution_backend in REAL_GPU_BACKENDS:
         # Public operational defaults are separate from model defaults. Never
         # serialize the operator policy (budget identities/pool bindings), and
         # never modify compile_request or a caller's explicitly chosen values.
@@ -406,7 +405,7 @@ def capabilities(settings):
         },
         "execution_enabled": settings.generation_enabled,
         "execution_backend": settings.execution_backend,
-        "simulation": settings.execution_backend == "mock",
+        "simulation": settings.execution_backend == MOCK.id,
         "unavailable": controls_metadata()["unavailable"],
         "notes": [
             "是否已实现、历史推理证据、当前执行容量分别表示。",
