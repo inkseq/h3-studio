@@ -14,6 +14,10 @@
 
 `api.py`、schema、存储、编译和依赖均保守计入 worker 指纹。当前仅排除 `frontend.py`、`agent_discovery.py` 和分发 Skill 文件。开发与公开试用阶段，经完整源码和配置独立审查的 app 更新可以保持现有控制器、队列和租赁；不因新增可选起名凭据与 app 出网就要求取消用户任务。现有精确版本批准路径允许明确记录的 app 配置差异：只新增 Google 起名的环境路径、私有秘密挂载和 app 的 edge 网络；数据库、Caddy、初始化、其他挂载、控制器配置与账本不变。其他配置或协议变化仍需要对应迁移方案。单 app 替换可能有短暂请求重试。
 
+### 前端与 API 的晋级顺序
+
+前端产物的 `api_compatibility` 必须与**目标环境实际已部署的 API** 完全相等，不能拿 main 的版本代替。若同一前端提交还包含新的 API/Python 字节，先完成匹配平台产物的 staging 验收和平台晋级，再晋级该前端。独立前端包须基于已经上线且验收通过的 API 契约构建。不得伪造指纹、将其他提交的验收当作本提交，或放宽 `frontend_release.compatible` 来绕过顺序。
+
 ## 日常批次
 
 1. 编辑 canonical 前端 `../video-studio-design/studio-app`；通过 `python tools/sync_web_source.py --write` 同步发布快照。不要直接维护两份前端。
