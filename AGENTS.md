@@ -6,6 +6,7 @@
 - **Staging: just do it.** No zero-work proofs, receipt files, CAS read-back chains or approvals. Broken? Roll back or redeploy. One line in the issue afterwards.
 - **Production: one check, one read-back.** Confirm no running job before a change and read the result back once. Approval is still needed only for: spend over USD 50, deleting user data, changing prices or charging users.
 - **A Claude-assigned task inside these limits is owner-authorized.** Execute Claude runbook steps without waiting for another owner confirmation.
+- **Test locally before every push.** Run the complete affected tests and fix what they find; CI is the record, not how problems get found. A changed limit or constant means every test and rule that pins it (owner, repeated, 2026-11-02).
 - **Smallest end-to-end first.** Prove any new feature/provider by hand once, then add integration, guards and tests. No large code before a working run.
 - **Short updates:** at most 5 lines (done / result / next). No receipt IDs or hashes unless something failed.
 - **Stuck 30 minutes? Ask Claude instead of adding guards.** If your own guard blocks a normal operation, loosen or delete it first.

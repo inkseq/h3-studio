@@ -886,3 +886,4 @@ early-stage mode the immutable-binding rule is a cautious-era guard, and a v9
 profile, rebinding, default switch and Modal change are not worth one measured
 sm120 GPU. Attention resolves per device: sage2 on cc 12.x, sdpa elsewhere;
 Modal stays L40S/sdpa.
+- 2026-11-02: Run the complete affected tests locally before every push; CI is the record, not how problems get found.

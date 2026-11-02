@@ -16,6 +16,102 @@ BASE = "b" * 40
 MAIN = "refs/heads/main"
 
 
+class TestedInPullRequestTests(unittest.TestCase):
+    TREE = "c" * 40
+
+    def run_row(self, **changes):
+        return {
+            "path": ".github/workflows/ci.yml",
+            "conclusion": "success",
+            "head_repository": {"full_name": ci.REPOSITORY},
+            "head_commit": {"tree_id": self.TREE},
+            **changes,
+        }
+
+    def was_tested(self, rows):
+        with patch.object(
+            ci.subprocess, "check_output", return_value=(self.TREE + "\n").encode()
+        ):
+            return ci.tested_in_pull_request(
+                Path("."), SHA, read_json=lambda path: {"workflow_runs": rows}
+            )
+
+    def test_only_a_passed_run_on_this_tree_in_this_repository_counts(self):
+        self.assertTrue(self.was_tested([self.run_row()]))
+        self.assertFalse(self.was_tested([]))
+        self.assertFalse(
+            self.was_tested([self.run_row(head_commit={"tree_id": "d" * 40})])
+        )
+        self.assertFalse(self.was_tested([self.run_row(conclusion="failure")]))
+        self.assertFalse(
+            self.was_tested([self.run_row(path=".github/workflows/x.yml")])
+        )
+        self.assertFalse(
+            self.was_tested(
+                [self.run_row(head_repository={"full_name": "fork/h3-studio"})]
+            )
+        )
+
+    def test_any_doubt_runs_the_tests(self):
+        def broken(_):
+            raise ValueError("staging_baseline_unavailable")
+
+        with patch.object(
+            ci.subprocess, "check_output", return_value=(self.TREE + "\n").encode()
+        ):
+            self.assertFalse(
+                ci.tested_in_pull_request(Path("."), SHA, read_json=broken)
+            )
+            self.assertFalse(
+                ci.tested_in_pull_request(Path("."), SHA, read_json=lambda _: {})
+            )
+
+    def plan_main(self, tested):
+        with (
+            patch.object(
+                ci, "git_changes", return_value=[("M", "studio_platform/worker.py")]
+            ),
+            patch.object(
+                ci,
+                "staging_platform_baseline",
+                return_value={"commit": BASE, "run_id": 1, "run_attempt": 1},
+            ),
+            patch.object(ci, "tested_in_pull_request", return_value=tested),
+        ):
+            return ci.plan("push", {"before": BASE}, SHA, MAIN, Path("."))
+
+    def test_main_skips_only_the_test_jobs_and_still_builds(self):
+        result = self.plan_main(True)
+        self.assertFalse(result["python"])
+        self.assertFalse(result["postgres"])
+        self.assertTrue(result["frontend"])
+        self.assertTrue(result["containers"])
+        self.assertEqual(result["action"], "stage-platform")
+
+    def test_main_without_a_passed_pull_request_runs_everything(self):
+        result = self.plan_main(False)
+        self.assertTrue(result["python"])
+        self.assertTrue(result["postgres"])
+        self.assertNotIn("tested_in_pr", result)
+
+    def test_a_pull_request_itself_always_runs_its_tests(self):
+        with (
+            patch.object(
+                ci, "git_changes", return_value=[("M", "studio_platform/worker.py")]
+            ),
+            patch.object(ci, "tested_in_pull_request", return_value=True) as tested,
+        ):
+            result = ci.plan(
+                "pull_request",
+                {"pull_request": {"base": {"sha": BASE}}},
+                SHA,
+                "refs/pull/1/merge",
+                Path("."),
+            )
+        self.assertTrue(result["python"])
+        tested.assert_not_called()
+
+
 class ChangeClassificationTests(unittest.TestCase):
     def assert_full(self, result):
         self.assertEqual(result["category"], "full")
