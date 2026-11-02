@@ -17,7 +17,6 @@ import json
 import math
 import os
 import re
-from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -33,6 +32,7 @@ from .inference.protocol import (
 )
 from .media import ffmpeg
 from .protected_config import read_protected_json
+from .providers.http import VendorHTTP
 
 API = "https://api.runpod.ai/v2/"
 FILENAME = "runpod-enhance.json"
@@ -122,7 +122,7 @@ class RunPodEnhanceBackend:
     ):
         self.store, self.config_file, self.enabled = store, Path(config_file), enabled
         self.slot_key = slot_key or "runpod-" + CONFIGURATION
-        self._transport, self._config = transport, None
+        self._http, self._config = VendorHTTP(timeout=30, transport=transport), None
         self.cost_resolver = self._cost
 
     def __repr__(self):
@@ -142,15 +142,12 @@ class RunPodEnhanceBackend:
         return self._config
 
     def close(self):
-        if self._transport is not None:
-            self._transport.close()
-        self._transport, self._config = None, None
+        self._http.close(close_unused_transport=True)
+        self._config = None
 
     def _call(self, method, path, body=None):
         """(status, JSON dict or None). The key and URLs never reach logs or errors."""
         config = self.config()
-        if self._transport is None:
-            self._transport = httpx.HTTPTransport(retries=0, trust_env=False)
         request = httpx.Request(
             method,
             API + config.endpoint_id + path,
@@ -165,17 +162,9 @@ class RunPodEnhanceBackend:
             },
         )
         try:
-            with closing(self._transport.handle_request(request)) as response:
-                content = response.read()
-                if len(content) > 1024**2:
-                    raise ValueError
-                data = (
-                    json.loads(content) if 200 <= response.status_code < 300 else None
-                )
-                if data is not None and type(data) is not dict:
-                    raise ValueError
-                return response.status_code, data
+            return self._http.json(request, limit=1024**2)
         except Exception:
+            print("runpod_enhance_response_unavailable", flush=True)
             raise BackendError("runpod_enhance_response_unavailable") from None
 
     def prepare(self, job, tag, store, heartbeat):

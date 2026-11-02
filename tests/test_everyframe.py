@@ -181,8 +181,9 @@ class BackendTests(unittest.TestCase):
                 return httpx.Response(status, content=payload)
             return httpx.Response(status, json=payload)
 
+        self.transport = httpx.MockTransport(handle)
         backend = EveryFrameBackend(
-            store or Store(), "/unused", transport=httpx.MockTransport(handle)
+            store or Store(), "/unused", transport=self.transport
         )
         backend._config = Config("key-1")
         return backend
@@ -199,7 +200,7 @@ class BackendTests(unittest.TestCase):
         backend = self.backend(
             [(302, {}), (200, {"render": {"id": "should-not-be-reached"}})]
         )
-        original = backend._transport.handler
+        original = self.transport.handler
 
         def redirected(request):
             response = original(request)
@@ -207,7 +208,7 @@ class BackendTests(unittest.TestCase):
                 response.headers["Location"] = "https://elsewhere.example/steal"
             return response
 
-        backend._transport.handler = redirected
+        self.transport.handler = redirected
         status, _ = backend._call("GET", "/key")
         self.assertEqual(status, 302)
         self.assertEqual(len(self.requests), 1)

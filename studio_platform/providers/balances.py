@@ -6,7 +6,7 @@ data volume. A provider without a balance API shows its console link, never an
 invented number. Keys stay in this call's memory and values are never logged.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
@@ -58,11 +58,29 @@ def _cloudrift(client, key):
     return answer.raise_for_status().json()["data"]["balance"]
 
 
-def _everyframe(client, key):
+def read_everyframe_balance(client, key):
+    """One response, projected separately by scheduling and the admin snapshot."""
     answer = client.get(
         EVERYFRAME_API + "/key", headers={"Authorization": "Bearer " + key}
     )
-    return answer.raise_for_status().json()["balanceUsd"]
+    amount = (
+        answer.json().get("balanceUsd") if 200 <= answer.status_code < 300 else None
+    )
+    return answer.status_code, amount
+
+
+@dataclass(frozen=True)
+class BalanceObservation:
+    read_at: float
+    status: int | None
+    amount: int | float | None = field(repr=False)
+
+
+def _everyframe(client, key):
+    status, amount = read_everyframe_balance(client, key)
+    if not 200 <= status < 300:
+        raise ValueError("provider_balance_unconfirmed")
+    return amount
 
 
 def _catalog(client, key):
@@ -162,7 +180,7 @@ def _key(source, settings, client):
     ).api_key
 
 
-def read_all(settings, client, *, now=None, transport=None):
+def read_all(settings, client, *, now=None, transport=None, everyframe_balance=None):
     """Read every provider once and store the rows; one failure never blocks the rest."""
     now = time.time() if now is None else now
     previous = {row["provider"]: row for row in read_stored(settings)["rows"]}
@@ -178,11 +196,25 @@ def read_all(settings, client, *, now=None, transport=None):
                 continue
             old = previous[source.provider]
             try:
-                amount = source.read(session, _key(source, settings, client))
+                read_at = now
+                if source.provider == "everyframe" and everyframe_balance is not None:
+                    # A failed supplied read is still a read: never retry it here.
+                    if (
+                        everyframe_balance.status is None
+                        or not 200 <= everyframe_balance.status < 300
+                    ):
+                        raise ValueError("provider_balance_unconfirmed")
+                    amount, read_at = (
+                        everyframe_balance.amount,
+                        everyframe_balance.read_at,
+                    )
+                else:
+                    amount = source.read(session, _key(source, settings, client))
                 if isinstance(amount, bool) or not isinstance(amount, (int, float)):
                     raise ValueError("provider_balance_unconfirmed")
-                rows[source.provider] = {"amount": amount, "read_at": now}
+                rows[source.provider] = {"amount": amount, "read_at": read_at}
             except Exception:
+                print("provider_balance_unconfirmed " + source.provider, flush=True)
                 rows[source.provider] = {
                     "amount": old["amount"],
                     "read_at": old["read_at"],
@@ -198,6 +230,7 @@ def read_all(settings, client, *, now=None, transport=None):
                 ),
             )
         except Exception:
+            print("provider_catalog_unavailable", flush=True)
             changes = []
     path = _path(settings)
     scratch = path.with_suffix(".tmp")
@@ -217,7 +250,7 @@ def read_all(settings, client, *, now=None, transport=None):
 _running = threading.Lock()
 
 
-def refresh_in_background(settings, client, now):
+def refresh_in_background(settings, client, now, *, everyframe_balance=None):
     """Start one read when due; returns whether it started."""
     attempted = read_stored(settings)["attempted_at"]
     if isinstance(attempted, (int, float)) and now - attempted < READ_SECONDS:
@@ -227,7 +260,7 @@ def refresh_in_background(settings, client, now):
 
     def run():
         try:
-            read_all(settings, client, now=now)
+            read_all(settings, client, now=now, everyframe_balance=everyframe_balance)
         except Exception:
             print("provider_balance_read_failed", flush=True)
         finally:
