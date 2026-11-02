@@ -4,6 +4,7 @@ import { Dialog } from './ui/Dialog.jsx';
 import { Clapperboard, Save } from 'lucide-react';
 import { StoryboardVideo } from './StoryboardMedia.jsx';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
+import { CreditUsageBar, creditShortfall, useCredits } from './CreditsUI.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { download } from './media.js';
 import {
@@ -48,10 +49,12 @@ function browserStorage() {
 function FilmSoundChoice({ disabled }) {
   const { t } = useI18n();
   const project = useSyncExternalStore(store.subscribe, () => store.getState().project);
+  const [picked, setPicked] = useState('');
   const mode = project.journey?.sound?.mode;
-  const tracks = Object.values(project.journey?.soundTracks || {}).flat();
-  const value = mode === 'silent' ? 'silent' : tracks.length ? 'editor' : mode ? 'editor' : '';
-  const choose = (next) =>
+  // Only a saved mode counts, tracks alone do not: the server refuses a film without one.
+  const value = !mode ? '' : mode === 'silent' ? 'silent' : picked === 'clips' ? 'clips' : 'editor';
+  const choose = (next) => {
+    setPicked(next);
     store.editProject((p) => {
       p.journey ||= {};
       if (next === 'silent') {
@@ -70,6 +73,7 @@ function FilmSoundChoice({ disabled }) {
         }
       p.journey.sound = { ...(p.journey.sound || {}), mode: 'mixed' };
     });
+  };
   return (
     <label>
       {t('film.sound')}
@@ -97,7 +101,8 @@ export default function StoryFilmControl({
 }) {
   const { t } = useI18n(),
     active = usePageActive(),
-    location = useAppLocation();
+    location = useAppLocation(),
+    balance = useCredits(cloudState.account)?.available;
   const [open, setOpen] = useState(false),
     [confirmed, setConfirmed] = useState(false),
     [resolution, setResolution] = useState('720P'),
@@ -247,6 +252,12 @@ export default function StoryFilmControl({
         aria-label={t('film.completedNotice')}
       />
     ) : null;
+  // Choosing a sound answers this one; the rest stay until the next attempt.
+  const shown = state.error || readError,
+    problem =
+      shown === 'film_sound_plan_required' && workspaceState.project.journey?.sound?.mode
+        ? ''
+        : shown;
   return (
     <span className="story-film-control">
       <Button
@@ -310,9 +321,7 @@ export default function StoryFilmControl({
               </Button>
             </div>
           )}
-          {(state.error || readError) && (
-            <p role="alert">{t(filmProblem(state.error || readError))}</p>
-          )}
+          {problem && <p role="alert">{t(filmProblem(problem))}</p>}
           {state.pending && (
             <div className="film-pending" role="status">
               <p>{t('film.pending')}</p>
@@ -342,6 +351,12 @@ export default function StoryFilmControl({
               })
             }
             preview={preview}
+            usage={
+              Number.isInteger(run?.credits) ? (
+                <CreditUsageBar credits={run.credits} balance={balance} />
+              ) : null
+            }
+            short={creditShortfall(run?.credits, balance)}
           />
           {state.busy && <p role="status">{t('film.busy')}</p>}
           {notice && <p role="status">{notice}</p>}

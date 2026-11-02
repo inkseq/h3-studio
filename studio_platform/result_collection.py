@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 
 from .content_lifecycle import assert_project_writable
+from .enhance_plans import RECIPE
 from .project_validation import validate_project
 from .repository import Conflict, documents, jobs
 from .source_snapshot import source_snapshot
@@ -113,6 +114,41 @@ def _simulation(job):
     )
 
 
+def _clip_sound_follows(project, shot, video, audio):
+    """The shot's own sound track moves to its new take; film export refuses a stale one.
+
+    A take without a separate sound file mutes the track and leaves it to review.
+    """
+    scene = next((e for e in project["entities"] if e["id"] == shot["parentId"]), None)
+    tracks = (
+        project.get("journey", {})
+        .get("soundTracks", {})
+        .get(scene and scene.get("parentId"), [])
+    )
+    for index, track in enumerate(tracks):
+        if (
+            not track.get("generatedFrom")
+            or track.get("detached")
+            or track.get("shotId") != shot["id"]
+        ):
+            continue
+        if audio is None:
+            tracks[index] = {**track, "muted": True, "needsReview": True}
+            continue
+        tracks[index] = {
+            **track,
+            "assetId": audio["id"],
+            "fileId": audio["data"]["fileId"],
+            "needsReview": False,
+            "generatedFrom": {
+                "jobId": video["data"]["sourceJobId"],
+                "videoEntityId": video["id"],
+                "videoArtifactId": video["data"]["cloudArtifactId"],
+                "audioArtifactId": audio["data"]["cloudArtifactId"],
+            },
+        }
+
+
 def collect(repo, conn, job, artifact_ids, specs):
     """Return a durable closed receipt; unexpected DB failures roll back completion.
 
@@ -191,13 +227,17 @@ def collect(repo, conn, job, artifact_ids, specs):
         .limit(1)
     ).first()
     data = shot["data"]
+    # A new take becomes the shot's take (owner, 2026-11-02). An enhanced copy has no
+    # source hash: it replaces its source take while that take is still the chosen one.
+    enhanced = job["request"].get("recipe_id") == RECIPE and data.get(
+        "selectedAssetId"
+    ) == ref.get("entity_id")
     may_select = (
-        fresh
+        (fresh or enhanced)
         and not later
         and not _simulation(job)
         and job["status"] != "cancel_requested"
         and shot["type"] == "shot"
-        and not data.get("selectedAssetId")
         and not data.get("selectedVideoRange")
         and not data.get("videoSegments")
     )
@@ -206,7 +246,7 @@ def collect(repo, conn, job, artifact_ids, specs):
         .isoformat()
         .replace("+00:00", "Z")
     )
-    bound, selected = [], None
+    bound, selected, audio = [], None, None
     for ident, spec in media:
         found = [
             e for e in project["entities"] if e["data"].get("cloudArtifactId") == ident
@@ -224,11 +264,13 @@ def collect(repo, conn, job, artifact_ids, specs):
                 ident,
                 spec,
                 now,
-                stale=not fresh,
+                stale=not (fresh or enhanced),
                 order=sum(e["parentId"] is None for e in project["entities"]),
             )
             project["entities"].append(entity)
         bound.append(entity["id"])
+        if spec["kind"] == "audio":
+            audio = entity
         if spec["kind"] in {"video", "image"}:
             candidates = data.setdefault("candidateIds", [])
             if entity["id"] not in candidates:
@@ -236,6 +278,9 @@ def collect(repo, conn, job, artifact_ids, specs):
             if may_select and selected is None:
                 data["selectedAssetId"] = entity["id"]
                 selected = entity["id"]
+                video = entity
+    if selected and video["type"] == "video":
+        _clip_sound_follows(project, shot, video, audio)
     if project == original:
         return _receipt("unchanged", entity_ids=bound, project_version=row["version"])
     if shot["data"] != next(

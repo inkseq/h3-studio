@@ -3,7 +3,7 @@ import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { Download, RefreshCw, Square, Play, Check } from 'lucide-react';
 import { formatMoneyMicros } from './money.js';
-import { filmTerminal } from './story-film.js';
+import { filmQuoted, filmTerminal } from './story-film.js';
 
 export function filmProblem(code) {
   const own = [
@@ -56,6 +56,8 @@ export function FilmRunView({
   onCancel,
   onDownload,
   preview,
+  usage = null,
+  short = false,
 }) {
   const run = state.run;
   if (!run) return state.pending ? <p role="status">{t('film.pending')}</p> : null;
@@ -63,10 +65,9 @@ export function FilmRunView({
     preflight = run.phase === 'preflight',
     terminal = filmTerminal(run),
     stale = dirty || currentVersion !== run.project_version || !optionsMatch;
-  const quoted =
-    run.estimate?.quote_known === true &&
-    Number.isSafeInteger(run.estimate.cost_microusd) &&
-    run.estimate.cost_microusd >= 0;
+  const quoted = filmQuoted(run),
+    // Credits show as the usage bar (owner, 2026-10-29); nothing to generate costs nothing.
+    dollars = !('credits' in run) && count.generate > 0;
   const locked = state.busy || !!state.pending;
   const steps = [
     ['generate', count.generated_completed, count.generate],
@@ -103,12 +104,19 @@ export function FilmRunView({
       )}
       {preflight && (
         <>
-          <strong className="film-estimate">
-            {quoted
-              ? t('film.estimate', { amount: formatMoneyMicros(run.estimate.cost_microusd) })
-              : t('film.estimateUnknown')}
-          </strong>
-          <p className="muted">{t('film.estimateNote')}</p>
+          {usage}
+          {!quoted ? (
+            <strong className="film-estimate">{t('film.estimateUnknown')}</strong>
+          ) : (
+            dollars && (
+              <>
+                <strong className="film-estimate">
+                  {t('film.estimate', { amount: formatMoneyMicros(run.estimate.cost_microusd) })}
+                </strong>
+                <p className="muted">{t('film.estimateNote')}</p>
+              </>
+            )
+          )}
           {stale && <p role="alert">{t('film.changed')}</p>}
           <label className="film-check">
             <input
@@ -117,11 +125,11 @@ export function FilmRunView({
               disabled={locked || stale || !quoted}
               onChange={(event) => onConfirmed(event.target.checked)}
             />
-            {t('film.confirmLabel')}
+            {t(dollars ? 'film.confirmLabel' : 'film.confirmPlain')}
           </label>
           <Button
             variant="primary"
-            disabled={locked || stale || !quoted || !confirmed}
+            disabled={locked || stale || !quoted || !confirmed || short}
             onClick={onConfirm}
           >
             <Play size={14} />
