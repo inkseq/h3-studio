@@ -11,6 +11,7 @@ from sqlalchemy import select, func
 
 import test_storyboard_versions as fixtures
 from studio_platform.api import create_app
+from studio_platform.application_services import create_controller_services
 from studio_platform.auth import Principal
 from studio_platform.film_runs import film_scope
 from studio_platform.repository import jobs, plans, NotFound, artifacts, attempts
@@ -213,8 +214,9 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
             {'preflight_id': preview['id'], 'confirm': True},
             'real-chain-confirm',
         )
+        execution = create_controller_services(app.state.settings, repository=repo).film
         self.assertEqual(
-            service.turn(principal, 'story-one', preview['id'])['phase'], 'generating'
+            execution.turn(principal, 'story-one', preview['id'])['phase'], 'generating'
         )
         scope = film_scope(self.settings.tenant_id, 'superdan', 'story-one')
 
@@ -262,7 +264,7 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
         # This reached State.resolve_render_source through real compile_render
         # before the wiring correction, rather than an injected fake resolver.
         self.assertEqual(
-            service.turn(principal, 'story-one', preview['id'])['phase'], 'chapters'
+            execution.turn(principal, 'story-one', preview['id'])['phase'], 'chapters'
         )
         chapter_ids = [item['job_id'] for item in value()['chapters']]
         self.assertEqual(len(chapter_ids), 2)
@@ -284,13 +286,13 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
         for job_id in chapter_ids:
             finish(renderer, job_id, POOL)
         self.assertEqual(
-            service.turn(principal, 'story-one', preview['id'])['phase'], 'exporting'
+            execution.turn(principal, 'story-one', preview['id'])['phase'], 'exporting'
         )
         export_id = value()['export']['job_id']
         self.assertIsNotNone(export_id)
         finish(renderer, export_id, POOL)
         self.assertEqual(
-            service.turn(principal, 'story-one', preview['id']),
+            execution.turn(principal, 'story-one', preview['id']),
             {'terminal': True, 'phase': 'completed'},
         )
         completed = value()
@@ -301,7 +303,7 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
             ]
         self.assertEqual(counts[0:2], [6, 6])
         self.assertEqual(
-            service.turn(principal, 'story-one', preview['id']),
+            execution.turn(principal, 'story-one', preview['id']),
             {'terminal': True, 'phase': 'completed'},
         )
         self.assertEqual(value(), completed)
@@ -316,6 +318,10 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
         self.assertEqual(self.current(), frozen)
         self.assertEqual(completed['project'], frozen['project'])
         self.assertEqual(len(wakes), 1)
+        self.assertEqual(
+            service.turn(principal, 'story-one', preview['id']),
+            {'terminal': True, 'phase': 'completed'},
+        )
 
 
 if __name__ == '__main__':

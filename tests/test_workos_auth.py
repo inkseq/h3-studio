@@ -631,6 +631,7 @@ class WorkOSAuthTests(LedgerCase):
         )
 
     def test_https_browser_callback_is_public_cookie_bound_and_profile_is_usable(self):
+        from http.cookies import SimpleCookie
         from fastapi.testclient import TestClient
         from studio_platform.api import create_app
         from studio_platform.settings import Settings
@@ -670,6 +671,15 @@ class WorkOSAuthTests(LedgerCase):
                 (302, "/story?project=web"),
             )
             self.assertEqual(result.headers["cache-control"], "no-store")
+            cookies = SimpleCookie()
+            for header in result.headers.get_list("set-cookie"):
+                cookies.load(header)
+            session = cookies["sixnine_session"]
+            self.assertEqual(session["max-age"], str(365 * 86400))
+            self.assertEqual(session["path"], "/")
+            self.assertEqual(session["samesite"], "lax")
+            self.assertTrue(session["secure"])
+            self.assertTrue(session["httponly"])
             who = client.get("/api/auth/me").json()
             self.assertEqual(who["authentication"], "workos")
             self.assertEqual(who["role"], "user")

@@ -21,8 +21,7 @@ from .control import WorkerControl
 from .dstack_inventory import known_allocations, read_inventories
 from .dstack_capacity import (
     idle_action,
-    assert_run_owned,
-    terminal_no_allocation_shape,
+    terminal_review_candidate,
     request_from_document,
 )
 from .capacity_policy import cold_unadmitted_runtime, window_open
@@ -57,49 +56,6 @@ DOWNLOAD_STOP_CHECKS = {
     "dstack_download_timebox_exceeded": download_timebox_due,
     "dstack_download_too_slow": download_too_slow,
 }
-
-
-def _terminal_review_candidate(run, binding, project):
-    """Scheduling evidence only; an unknown allocator result stays unknown."""
-    try:
-        from .dstack_allocation_proof import ATTEMPT_FIELDS, PREFIX, _unique_object
-
-        assert_run_owned(run, binding, project)
-        if (
-            run.get("id") != binding.get("run_id")
-            or not terminal_no_allocation_shape(run, binding)
-            or run["jobs"][0].get("job_connection_info") is not None
-        ):
-            return False
-        message = run["latest_job_submission"].get("termination_reason_message")
-        if (
-            not isinstance(message, str)
-            or len(message.encode()) > 8192
-            or not message.startswith(PREFIX)
-        ):
-            return False
-        marker = json.loads(message[len(PREFIX) :], object_pairs_hook=_unique_object)
-        selected = {item["offer_id"] for item in binding["host_selection"]["offers"]}
-        return (
-            isinstance(marker, dict)
-            and set(marker) == {"version", "outcome", "attempted_count", "attempts"}
-            and type(marker["version"]) is int
-            and marker["version"] == 1
-            and marker["outcome"] == "unknown"
-            and isinstance(marker["attempts"], list)
-            and 1 <= len(marker["attempts"]) <= 25
-            and type(marker["attempted_count"]) is int
-            and marker["attempted_count"] == len(marker["attempts"])
-            and all(
-                isinstance(item, dict)
-                and set(item) == ATTEMPT_FIELDS
-                and item["ask_id"] in selected
-                and item["contract_id"] is None
-                for item in marker["attempts"]
-            )
-        )
-    except (ValueError, TypeError, KeyError, AttributeError):
-        return False
 
 
 class DstackController:
@@ -367,7 +323,7 @@ class DstackController:
                     return False
             fingerprint = self._passive_fingerprint(node)
             binding = node["payload"].get("dstack", {})
-            if not fingerprint or not _terminal_review_candidate(
+            if not fingerprint or not terminal_review_candidate(
                 run, binding, self.capacity.client.project
             ):
                 return False
@@ -491,7 +447,7 @@ class DstackController:
                     continue
                 if self.repo.clock() - witness["observed_at"] >= IDLE_SAFETY_SECONDS:
                     run = client.get(run_id=binding["run_id"])
-                    if not _terminal_review_candidate(
+                    if not terminal_review_candidate(
                         run, binding, client.project
                     ) or witness["fingerprint"] != self._passive_fingerprint(node):
                         self._passive_unknown.pop(node["intent_id"], None)
@@ -1348,10 +1304,10 @@ def main(argv=None):
         )
         modal_extension = load_extension(service, work_dir)
         from .dbos_transport import DurableExecutor
-        from .api import create_app
+        from .application_services import create_controller_services
         from .film_workflows import setup_controller_film
 
-        film_app = create_app(settings, repository=repo, dstack_operator=service)
+        workflow_services = create_controller_services(settings, repository=repo)
         durable_executor = DurableExecutor(
             repo,
             settings,
@@ -1360,11 +1316,11 @@ def main(argv=None):
             if modal_extension
             else None,
             film_setup=lambda DBOS, turns: setup_controller_film(
-                DBOS, turns, repo, film_app
+                DBOS, turns, repo, workflow_services.film, workflow_services.auth
             ),
             account_services=(
-                film_app.state.account_sessions,
-                film_app.state.account_deletion,
+                workflow_services.accounts.sessions,
+                workflow_services.accounts.deletion,
             ),
         ).__enter__()
         processes = durable_executor.slots

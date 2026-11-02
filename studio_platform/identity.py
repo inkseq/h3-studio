@@ -174,7 +174,7 @@ def require_admin(
     return principal.owner
 
 
-def _public_profile(current, connection, tenant):
+def public_profile(current, connection, tenant):
     """Expose only the current human's profile, never bearer-owner PII."""
     unavailable = {"display_name": None, "email": None}
     if current is None or current.machine:
@@ -200,7 +200,7 @@ def public_identity(principal, repository, settings):
     """Account profile fields; dollar reservations are not product credits."""
     with repository.engine.connect() as connection:
         current = hydrate(principal, connection, settings.tenant_id)
-        profile = _public_profile(current, connection, settings.tenant_id)
+        profile = public_profile(current, connection, settings.tenant_id)
     if current is None:
         return {"role": "user", "status": "suspended", "user_id": None, **profile}
     role = current.role

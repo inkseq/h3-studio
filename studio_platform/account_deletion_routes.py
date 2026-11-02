@@ -3,17 +3,10 @@
 from fastapi import Header, Request
 from fastapi.responses import JSONResponse
 
-from .account_deletion import AccountDeletion, DeletionError
+from .account_deletion import DeletionError
 
 
-def register_routes(app):
-    service = AccountDeletion(
-        app.state.repository,
-        app.state.auth,
-        app.state.settings,
-        app.state.workos_auth,
-        app.state.quick_chat,
-    )
+def register_routes(app, *, cookie, service):
     app.state.account_deletion = service
 
     @app.exception_handler(DeletionError)
@@ -37,14 +30,12 @@ def register_routes(app):
         body: dict,
         key: str | None = Header(None, alias="Idempotency-Key"),
     ):
-        from .api import COOKIE
-
         result = JSONResponse(
             service.confirm(request.state.principal, body, key),
             status_code=202,
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
-        result.delete_cookie(COOKIE, path="/")
+        result.delete_cookie(cookie, path="/")
         return result
 
     return service
