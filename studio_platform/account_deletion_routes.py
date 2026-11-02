@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from .account_deletion import AccountDeletion, DeletionError
 
 
-def register_routes(app):
+def register_routes(app, *, cookie):
     service = AccountDeletion(
         app.state.repository,
         app.state.auth,
@@ -37,14 +37,12 @@ def register_routes(app):
         body: dict,
         key: str | None = Header(None, alias="Idempotency-Key"),
     ):
-        from .api import COOKIE
-
         result = JSONResponse(
             service.confirm(request.state.principal, body, key),
             status_code=202,
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
-        result.delete_cookie(COOKIE, path="/")
+        result.delete_cookie(cookie, path="/")
         return result
 
     return service

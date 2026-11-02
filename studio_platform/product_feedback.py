@@ -290,7 +290,7 @@ class ProductFeedback:
 
     def email(self, principal, report):
         from .feedback_mail import load_config, send
-        from .identity import _public_profile
+        from .identity import public_profile
 
         settings = self.app.state.settings
         try:
@@ -298,7 +298,7 @@ class ProductFeedback:
             if config is None:
                 return "disabled"
             with self.repo.engine.connect() as conn:
-                profile = _public_profile(principal, conn, self.tenant)
+                profile = public_profile(principal, conn, self.tenant)
             send(
                 config,
                 report,

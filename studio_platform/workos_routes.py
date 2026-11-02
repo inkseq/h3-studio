@@ -20,7 +20,7 @@ BROWSER_ERRORS = {
 }
 
 
-def register_routes(app, *, service=None):
+def register_routes(app, *, cookie, browser_handle_seconds, service=None):
     service = service or WorkOSAuth(
         app.state.repository, app.state.auth, app.state.settings
     )
@@ -137,13 +137,11 @@ def register_routes(app, *, service=None):
             principal=request.state.principal,
             cancelled="error" in query,
         )
-        from .api import BROWSER_HANDLE_SECONDS, COOKIE
-
         result = clear_state(RedirectResponse(value["return_to"], status_code=302))
         result.set_cookie(
-            COOKIE,
+            cookie,
             value["token"],
-            max_age=BROWSER_HANDLE_SECONDS,
+            max_age=browser_handle_seconds,
             httponly=True,
             secure=True,
             samesite="lax",

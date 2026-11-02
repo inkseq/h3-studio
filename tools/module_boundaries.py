@@ -168,8 +168,12 @@ def domain(module):
     return "platform"
 
 
-def edges(package=PACKAGE):
-    """Sorted cross-domain (source, target) module edges, excluding into platform."""
+def import_edges(package=PACKAGE):
+    """Top-level module imports, including local imports and shared-domain edges.
+
+    This deliberately retains the ratchet's existing top-level scope; package
+    internals and dynamic imports are not a complete dependency graph.
+    """
     found = set()
     for path in sorted(package.glob("*.py")):
         source = path.stem
@@ -194,10 +198,17 @@ def edges(package=PACKAGE):
             for target in targets:
                 if not (package / (target + ".py")).exists():
                     continue  # subpackages (inference, runtime_hosts) stay internal
-                a, b = domain(source), domain(target)
-                if a != b and b != "platform":
-                    found.add((source, target))
+                found.add((source, target))
     return sorted(found)
+
+
+def edges(package=PACKAGE):
+    """Sorted cross-domain (source, target) module edges, excluding into platform."""
+    return [
+        (source, target)
+        for source, target in import_edges(package)
+        if domain(source) != domain(target) and domain(target) != "platform"
+    ]
 
 
 def summary(pairs):

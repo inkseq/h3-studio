@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse
 from .account_sessions import AccountSessions, SessionError
 
 
-def register_routes(app):
+def register_routes(app, *, cookie):
     service = AccountSessions(
         app.state.repository, app.state.auth, app.state.settings, app.state.workos_auth
     )
@@ -27,15 +27,13 @@ def register_routes(app):
         body: dict,
         key: str | None = Header(None, alias="Idempotency-Key"),
     ):
-        from .api import COOKIE
-
         value = service.revoke_all(request.state.principal, body, key)
         response = JSONResponse(
             value,
             status_code=200 if value["state"] == "completed" else 202,
             headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
         )
-        response.delete_cookie(COOKIE, path="/")
+        response.delete_cookie(cookie, path="/")
         return response
 
     return service

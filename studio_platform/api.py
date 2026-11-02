@@ -1481,13 +1481,15 @@ def create_app(
     register_staging_qa_routes(app)
     from .workos_routes import register_routes as register_workos_routes
 
-    register_workos_routes(app)
+    register_workos_routes(
+        app, cookie=COOKIE, browser_handle_seconds=BROWSER_HANDLE_SECONDS
+    )
     from .account_session_routes import register_routes as register_session_routes
 
-    register_session_routes(app)
+    register_session_routes(app, cookie=COOKIE)
     from .account_deletion_routes import register_routes as register_deletion_routes
 
-    register_deletion_routes(app)
+    register_deletion_routes(app, cookie=COOKIE)
     from .credits_routes import register_routes as register_credit_routes
 
     register_credit_routes(app)
