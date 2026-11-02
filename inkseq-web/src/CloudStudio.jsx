@@ -72,7 +72,6 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
           </>
         ) : (
           <form onSubmit={login}>
-            <HostedSignIn auth={c.auth} />
             <label>
               {t('account.copy76')}
               <input
@@ -107,6 +106,7 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
               {t('account.copy79')}
             </Button>
             {c.auth.auth_ready === false && <p role="alert">{t('account.copy80')}</p>}
+            <HostedSignIn auth={c.auth} />
           </form>
         )}
         <FloatingMessage tone="error" text={c.error ? c.error : null} />
