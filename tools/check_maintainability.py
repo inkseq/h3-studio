@@ -16,10 +16,9 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = "tools/maintainability-baseline.json"
 LIMIT = 1500
-# Owner, 2026-10-31: module line caps and function complexity only warn during
-# feature development; they are refactored back down afterwards (#899). Rules
-# that catch defects (unused names, bugbear, SQL) stay enforced.
-ENFORCE_MODULE_LINES = False
+# #899 restores structural limits after responsibility splits. Existing function
+# complexity is ratcheted; modules may not grow past the 1,500-line ceiling.
+ENFORCE_MODULE_LINES = True
 STRUCTURE_RULES = frozenset({"C901"})
 ZERO_RULES = ("F401", "F841", "B023", "S608")
 

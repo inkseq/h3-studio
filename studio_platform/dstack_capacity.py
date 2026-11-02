@@ -151,6 +151,7 @@ def terminal_review_candidate(run, binding, project):
     except (ValueError, TypeError, KeyError, AttributeError):
         return False
 
+
 class DstackCapacity:
     def __init__(
         self,

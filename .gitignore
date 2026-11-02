@@ -1135,3 +1135,11 @@ inventory.json
 !studio_platform/api_errors.py
 !studio_platform/asset_routes.py
 !studio_platform/generation_routes.py
+!studio_platform/backup_schema.py
+!studio_platform/backup_files.py
+!studio_platform/backup_media.py
+!studio_platform/asset_source_preparation.py
+!studio_platform/render_request.py
+!studio_platform/inference/mock.py
+!studio_platform/quick_chat_migration_projection.py
+!tests/test_refactor_small_boundaries.py
