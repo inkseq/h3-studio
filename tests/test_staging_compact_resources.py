@@ -73,8 +73,8 @@ class CompactResourceTests(unittest.TestCase):
 
     def test_closed_profile_preserves_all_caps_and_physical_reserve(self):
         selected = self.validate()
-        self.assertEqual(sum(target.COMPACT_SERVICE_MIB.values()), 3296)
-        self.assertLessEqual(3296, selected['resident_mib'] + selected['swap_mib'])
+        self.assertEqual(sum(target.COMPACT_SERVICE_MIB.values()), 3680)
+        self.assertLessEqual(3680, selected['resident_mib'] + selected['swap_mib'])
         self.assertGreaterEqual(
             selected['minimum_host_mib'] - selected['resident_mib'], 512
         )
