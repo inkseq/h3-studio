@@ -165,7 +165,7 @@ def snapshot(
 
 
 def inspect_file(directory):
-    from .backup import _digest, _regular
+    from .backup_files import _digest, _regular
     from .workos_config import unique_pairs
 
     path = _regular(directory / FILE, max_bytes=MAX_BYTES)

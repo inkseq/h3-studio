@@ -7,8 +7,8 @@ from .backup_loss_policy import classification
 
 
 def missing_object(item, store, evidence):
-    # Imported lazily because backup owns the public error contract.
-    from .backup import BackupError
+    # Keep the public error identity without importing the backup coordinator.
+    from .backup_schema import BackupError
 
     provider = item.get('provider', 'local')
     if provider == 'local':

@@ -46,7 +46,7 @@ def ready(connection, *, schema=None):
 
 
 def sqlite_revision(db, *, published=False):
-    from .backup import BackupError
+    from .backup_schema import BackupError
     from .schema_version import read_sqlite_schema_version, SchemaVersionError
 
     try:
