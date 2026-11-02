@@ -20,6 +20,7 @@ from .operator_capacity import (
     operator_policy,
     require,
 )
+from .providers.registry import VASTAI
 from .repository import outbox, request_hash
 
 MAX_NODES = 4096
@@ -169,7 +170,7 @@ def bound_observation(node, *, now):
         bound = payload["dstack"]
         require(
             payload.get("capacity_backend") == "dstack-v1"
-            and bound.get("backend") == "vastai"
+            and bound.get("backend") == VASTAI.id
             and bound.get("provider_instance_id") == value["provider_instance_id"],
             "host_observation_binding_invalid",
         )

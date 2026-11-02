@@ -20,6 +20,7 @@ import threading
 import time
 
 from .render_limits import MAX_AUDIO_TRACKS
+from .providers.registry import CPU_RENDER
 from . import media
 from .caption_server import validate_normalized_subtitles
 from .storage import (
@@ -387,7 +388,7 @@ class _Cancelled(Exception):
 class CPURenderBackend:
     """Local rough-cut processing; cost 0 means no separate user charge here."""
 
-    kind = "cpu-render"
+    kind = CPU_RENDER.id
 
     def __init__(
         self,
@@ -1184,7 +1185,7 @@ class CPURenderBackend:
         manifest.write_text(
             "".join(
                 "file '" + path.name + "'\n" + f"duration {shot['frames'] / 24:.12f}\n"
-                for path, shot in zip(clips, render["shots"])
+                for path, shot in zip(clips, render["shots"], strict=False)
             ),
             encoding="ascii",
         )

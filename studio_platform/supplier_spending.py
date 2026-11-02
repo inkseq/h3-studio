@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from .capacity_settings import admission_snapshot, read_policy
 from .dstack_test_budget import day_window, node_guard
+from .providers.registry import INTERNAL_BACKENDS, REAL_GPU_BACKENDS
 from .repository import (
     BudgetExceeded,
     budget_accounts,
@@ -22,7 +23,6 @@ from .repository import (
 )
 from .spending_limits import ADMIN_OWNER, lock_owner
 
-INTERNAL_BACKENDS = frozenset({"mock", "cpu-render", "comfy-worker", "wangp-worker"})
 TIMEZONE = "Australia/Sydney"
 
 
@@ -375,7 +375,7 @@ def admit_job(connection, scope, execution, now, *, estimated_cost_microusd, job
     quote = execution.get("credit_quote")
     paid = (
         estimated_cost_microusd > 0
-        or execution.get("backend") in {"wangp-worker", "comfy-worker"}
+        or execution.get("backend") in REAL_GPU_BACKENDS
         or isinstance(quote, dict)
         and quote.get("credits", 0) > 0
     )

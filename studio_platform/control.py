@@ -14,7 +14,17 @@ from sqlalchemy import and_, case, func, insert, inspect, select, update
 
 from .queue import TaskQueue
 from .inference.outputs import validate_delivery_policy
-from .providers.registry import ADMISSION_PAIRS
+from .providers.registry import (
+    COMFY_WORKER,
+    CPU_RENDER,
+    EVERYFRAME_RENDER,
+    RUNPOD_ENHANCE,
+    WANGP_WORKER,
+    ADMISSION_PAIRS,
+    LOCAL_BACKENDS,
+    REAL_GPU_BACKENDS,
+    WORKER_BACKENDS,
+)
 from .repository import (
     BudgetExceeded,
     Conflict,
@@ -33,7 +43,6 @@ from .repository import (
 
 
 TERMINAL = {"succeeded", "failed", "cancelled"}
-REAL_GPU_BACKENDS = frozenset({"comfy-worker", "wangp-worker"})
 
 
 def registration_capacity_projection(
@@ -125,7 +134,7 @@ class WorkerSpec:
     recipe_ids: tuple[str, ...]
     model_id: str
     configuration_id: str
-    backend: str = "comfy-worker"
+    backend: str = COMFY_WORKER.id
     engine_manifest_digest: str = ""
     output_delivery: str = ""
     dispatch_backend: str = "legacy"
@@ -143,15 +152,9 @@ class WorkerSpec:
             self.configuration_id,
         ):
             identifier(value)
-        if self.backend not in {
-            "mock",
-            "cpu-render",
-            "runpod-enhance",
-            "everyframe-render",
-            *REAL_GPU_BACKENDS,
-        }:
+        if self.backend not in WORKER_BACKENDS:
             raise ValueError("invalid_worker_backend")
-        if self.backend == "wangp-worker":
+        if self.backend == WANGP_WORKER.id:
             if not isinstance(self.engine_manifest_digest, str) or not re.fullmatch(
                 r"[0-9a-f]{64}", self.engine_manifest_digest
             ):
@@ -160,11 +163,7 @@ class WorkerSpec:
             raise ValueError("unexpected_engine_manifest")
         if (
             not isinstance(self.physical_gpu_ids, tuple)
-            or (
-                not self.physical_gpu_ids
-                and self.backend
-                not in {"cpu-render", "runpod-enhance", "everyframe-render"}
-            )
+            or (not self.physical_gpu_ids and self.backend not in LOCAL_BACKENDS)
             or len(set(self.physical_gpu_ids)) != len(self.physical_gpu_ids)
             or len(self.physical_gpu_ids) > 8
         ):
@@ -180,7 +179,7 @@ class WorkerSpec:
         if self.backend == "mock":
             if self.provider != "mock" or self.model_id != "SIMULATION":
                 raise ValueError("simulation_identity_required")
-        elif self.backend == "cpu-render":
+        elif self.backend == CPU_RENDER.id:
             if (
                 self.provider != "local-cpu"
                 or self.physical_gpu_ids
@@ -195,7 +194,7 @@ class WorkerSpec:
                 or self.recipe_ids != ("chapter-roughcut-v1",)
             ):
                 raise ValueError("cpu_render_identity_required")
-        elif self.backend == "runpod-enhance":
+        elif self.backend == RUNPOD_ENHANCE.id:
             # Serverless: RunPod owns the GPUs, so no physical device ids (#795).
             if (
                 self.provider != "runpod"
@@ -205,7 +204,7 @@ class WorkerSpec:
                 or self.recipe_ids != ("enhance-v1",)
             ):
                 raise ValueError("enhance_identity_required")
-        elif self.backend == "everyframe-render":
+        elif self.backend == EVERYFRAME_RENDER.id:
             # Hosted per-render API (#918): no devices, one catalog identity.
             from .providers.hosted_models import CONFIGURATIONS, PROVIDER, RECIPES
 
@@ -225,7 +224,7 @@ class WorkerSpec:
 def worker_spec_payload(spec):
     """Keep historical registration hashes unchanged; bind new engines explicitly."""
     value = asdict(spec)
-    if spec.backend != "wangp-worker":
+    if spec.backend != WANGP_WORKER.id:
         value.pop("engine_manifest_digest")
     if not spec.output_delivery:
         value.pop("output_delivery")
@@ -258,7 +257,7 @@ def require_delivery_configuration(
         select(capacity_approvals.c.payload).where(
             capacity_approvals.c.configuration_id == configuration_id,
             func.coalesce(
-                capacity_approvals.c.payload["backend"].as_string(), "comfy-worker"
+                capacity_approvals.c.payload["backend"].as_string(), COMFY_WORKER.id
             )
             == backend,
         )
@@ -402,7 +401,7 @@ class WorkerControl:
         model_id,
         configuration_id,
         recipe_id=None,
-        backend="comfy-worker",
+        backend=COMFY_WORKER.id,
         engine_manifest_digest=None,
         output_delivery="",
         expected_runtime_s=None,
@@ -423,15 +422,9 @@ class WorkerControl:
         validate_delivery_policy(backend, output_delivery)
         if recipe_id is not None:
             identifier(recipe_id)
-        if backend not in {
-            "mock",
-            "cpu-render",
-            "runpod-enhance",
-            "everyframe-render",
-            *REAL_GPU_BACKENDS,
-        }:
+        if backend not in WORKER_BACKENDS:
             raise ValueError("invalid_worker_backend")
-        if backend == "wangp-worker" and (
+        if backend == WANGP_WORKER.id and (
             not isinstance(engine_manifest_digest, str)
             or not re.fullmatch(r"[0-9a-f]{64}", engine_manifest_digest)
         ):
@@ -481,7 +474,7 @@ class WorkerControl:
                 or spec["model_id"] != model_id
                 or spec.get("dispatch_backend", "legacy") != dispatch_backend
                 or spec["configuration_id"] != configuration_id
-                or backend == "wangp-worker"
+                or backend == WANGP_WORKER.id
                 and spec.get("engine_manifest_digest") != engine_manifest_digest
                 or spec.get("output_delivery", "") != output_delivery
                 or recipe_id is not None
@@ -547,7 +540,7 @@ class WorkerControl:
         with repo.transaction() as connection:
             limits = (
                 None
-                if spec.backend == "cpu-render"
+                if spec.backend == CPU_RENDER.id
                 else repo._lock_capacity(connection)
             )
             require_delivery_configuration(
@@ -631,7 +624,7 @@ class WorkerControl:
                         or admission["pool"] != spec.pool
                         or not isinstance(admission["intent_id"], str)
                         or not admission["intent_id"]
-                        or spec.backend != "wangp-worker"
+                        or spec.backend != WANGP_WORKER.id
                         or spec.dispatch_backend != "hatchet-v1"
                         or len(spec.physical_gpu_ids) != 1
                     ):
@@ -673,7 +666,7 @@ class WorkerControl:
                 updated_at=repo.clock(),
             )
             connection.execute(insert(registered_workers).values(**row))
-            if spec.backend == "cpu-render":
+            if spec.backend == CPU_RENDER.id:
                 from sqlalchemy.dialects.postgresql import insert as pg_insert
                 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -805,12 +798,12 @@ class WorkerControl:
             return False
         if spec["backend"] == "mock":
             return spec["provider"] == "mock" and spec["model_id"] == "SIMULATION"
-        if spec["backend"] == "wangp-worker" and execution.get(
+        if spec["backend"] == WANGP_WORKER.id and execution.get(
             "engine_manifest_digest"
         ) != spec.get("engine_manifest_digest"):
             return False
         return (
-            spec["backend"] == "everyframe-render"
+            spec["backend"] == EVERYFRAME_RENDER.id
             or effective.get("model") == spec["model_id"]
         ) and execution.get("configuration_id") == spec["configuration_id"]
 
@@ -835,7 +828,7 @@ class WorkerControl:
             bindings.append(
                 jobs.c.request["recipe_id"].as_string().in_(spec["recipe_ids"])
             )
-        if spec["backend"] == "everyframe-render":
+        if spec["backend"] == EVERYFRAME_RENDER.id:
             # The hosted backend serves the job's tier, not its model id (#918).
             bindings.append(
                 jobs.c.execution_plan["configuration_id"].as_string()
@@ -858,7 +851,7 @@ class WorkerControl:
                     == spec["configuration_id"],
                 )
             )
-        if spec["backend"] == "wangp-worker":
+        if spec["backend"] == WANGP_WORKER.id:
             bindings.append(
                 jobs.c.execution_plan["engine_manifest_digest"].as_string()
                 == spec["engine_manifest_digest"]
@@ -1299,7 +1292,7 @@ class WorkerControl:
         with self.repo.transaction() as connection:
             # CPU rendering is not a GPU lease and needs no cloud capacity gate.
             peek = self._worker(connection, worker_id)
-            if peek["spec"].get("backend") != "cpu-render":
+            if peek["spec"].get("backend") != CPU_RENDER.id:
                 self.repo._lock_capacity(connection)
             worker = self._worker(connection, worker_id, lock=True)
             if worker["current_job_id"]:

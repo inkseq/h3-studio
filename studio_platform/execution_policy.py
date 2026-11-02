@@ -17,6 +17,7 @@ import stat
 import string
 
 from .budget_policy import effective_budget_limit
+from .providers.registry import CPU_RENDER, WANGP_WORKER
 from .capabilities import MODEL, RECIPES
 from .control import WorkerControl, REAL_GPU_BACKENDS
 from .inference.outputs import (
@@ -127,7 +128,7 @@ def validate_policy(value):
         raise ValueError("Invalid dispatch backend")
     if (
         value.get("dispatch_backend") == "hatchet-v1"
-        and value.get("backend") != "wangp-worker"
+        and value.get("backend") != WANGP_WORKER.id
     ):
         raise ValueError("Hatchet dispatch requires the explicit WanGP execution path")
     expected_model = MODEL
@@ -135,7 +136,7 @@ def validate_policy(value):
         from .runtime_catalog import get_profile
 
         expected_model = get_profile(value["deployment_profile_id"])["model_id"]
-        if value["backend"] != "wangp-worker" or len(value["recipe_ids"]) != 1:
+        if value["backend"] != WANGP_WORKER.id or len(value["recipe_ids"]) != 1:
             raise ValueError("Deployment profiles require an explicit WanGP mode")
     if (
         value["id"] != POLICY
@@ -151,7 +152,7 @@ def validate_policy(value):
         raise ValueError("gpu_delivery_requires_explicit_deployment_profile")
     if "output_delivery" in value and not value["output_delivery"]:
         raise ValueError("Explicit output delivery must name a supported policy")
-    if value["backend"] == "wangp-worker":
+    if value["backend"] == WANGP_WORKER.id:
         if not isinstance(value.get("engine_manifest_digest"), str) or not re.fullmatch(
             r"[0-9a-f]{64}", value["engine_manifest_digest"]
         ):
@@ -292,7 +293,7 @@ def validate_policy(value):
         "encoder_device",
         "ref_image_size",
     }
-    if value["backend"] == "wangp-worker":
+    if value["backend"] == WANGP_WORKER.id:
         # The first WanGP recipe has no generic reference-image resizing
         # control. Do not require a fabricated Comfy default in its snapshot.
         required_controls.remove("ref_image_size")
@@ -374,7 +375,7 @@ def validate_policy(value):
                 )
         # Saved resource/cost policy remains authoritative. Measurements neither
         # constrain combinations nor promise performance or worker readiness.
-    elif value["backend"] == "wangp-worker" and recipes == ["h3-base-ref2va-v1"]:
+    elif value["backend"] == WANGP_WORKER.id and recipes == ["h3-base-ref2va-v1"]:
         from .inference.wangp_ref_compiler import validate_envelope
 
         if (
@@ -654,13 +655,13 @@ class ExecutionPolicies:
                     model_id=RENDER_MODEL,
                     configuration_id=configuration,
                     recipe_id=RECIPE,
-                    backend="cpu-render",
+                    backend=CPU_RENDER.id,
                 )
                 if not capacity["ready"] + capacity["busy"]:
                     blockers.append("章节粗剪工作机尚未就绪，请稍后重试")
             execution = {
                 "pool": POOL,
-                "backend": "cpu-render",
+                "backend": CPU_RENDER.id,
                 "configuration_id": configuration,
                 "quote_known": True,
                 "enabled": not blockers,
@@ -788,7 +789,7 @@ class ExecutionPolicies:
         ):
             blockers.append("执行池未验收此模型或配方")
         if (
-            backend == "wangp-worker"
+            backend == WANGP_WORKER.id
             and compiled["recipe_id"] == "h3-base-ref2va-v1"
             and policy["recipe_ids"] != ["h3-base-ref2va-v1"]
         ):
@@ -919,7 +920,7 @@ class ExecutionPolicies:
                 backend=backend,
                 **(
                     {"engine_manifest_digest": policy["engine_manifest_digest"]}
-                    if backend == "wangp-worker"
+                    if backend == WANGP_WORKER.id
                     else {}
                 ),
                 expected_runtime_s=quote["expected_runtime_s"],
@@ -1042,7 +1043,7 @@ class ExecutionPolicies:
         )
         if demand:
             base["demand_start"] = demand
-        if backend == "wangp-worker":
+        if backend == WANGP_WORKER.id:
             base["engine_manifest_digest"] = policy["engine_manifest_digest"]
         if "dispatch_backend" in policy:
             base["dispatch_backend"] = policy["dispatch_backend"]
@@ -1108,7 +1109,7 @@ class ExecutionPolicies:
             != current.execution.get("output_delivery")
             or previous.get("delivery_spec") != current.execution.get("delivery_spec")
             or previous.get("demand_start") != current.execution.get("demand_start")
-            or previous.get("backend") == "wangp-worker"
+            or previous.get("backend") == WANGP_WORKER.id
             and previous.get("engine_manifest_digest")
             != current.execution.get("engine_manifest_digest")
         ):
@@ -1251,7 +1252,7 @@ class ExecutionPolicies:
             return bool(
                 self.settings.render_enabled
                 and execution.get("enabled") is True
-                and execution.get("backend") == "cpu-render"
+                and execution.get("backend") == CPU_RENDER.id
                 and execution.get("pool") == POOL
                 and execution.get("configuration_id") == configuration
                 and job["request"]["request"].get("model") == RENDER_MODEL
@@ -1290,7 +1291,7 @@ class ExecutionPolicies:
                 and execution.get("output_delivery", "")
                 == policy.get("output_delivery", "")
                 and (
-                    policy["backend"] != "wangp-worker"
+                    policy["backend"] != WANGP_WORKER.id
                     or execution.get("engine_manifest_digest")
                     == policy["engine_manifest_digest"]
                 )

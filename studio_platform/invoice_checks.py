@@ -15,6 +15,7 @@ import uuid
 
 from sqlalchemy import insert, select, literal, or_, and_
 
+from .providers.registry import VASTAI
 from .repository import (
     budget_accounts,
     budget_reservations,
@@ -230,7 +231,7 @@ def inspect_pending_invoices(repo, tenant, client):
         if r["provider"] == "vast"
         and r["payload"].get("capacity_backend") == "dstack-v1"
         and r["payload"].get("tenant_id") == tenant
-        and r["payload"].get("dstack", {}).get("backend") == "vastai"
+        and r["payload"].get("dstack", {}).get("backend") == VASTAI.id
         and r["payload"]["dstack"].get("provider_instance_id")
         == r["provider_instance_id"]
         and isinstance(r["provider_instance_id"], str)

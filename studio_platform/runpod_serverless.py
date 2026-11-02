@@ -27,8 +27,9 @@ import uuid
 import httpx
 
 from .dstack_capacity import DstackError
+from .providers.registry import RUNPOD_SERVERLESS
 
-BACKEND = "runpod-serverless"
+BACKEND = RUNPOD_SERVERLESS.id
 API = "https://api.runpod.ai/v2/"
 # RunPod job status → (dstack run status, dstack job submission status).
 STATUSES = {

@@ -8,9 +8,11 @@ prices. It never contacts a provider.
 
 import math
 
+from .providers.registry import RUNPOD_ENHANCE
+
 RECIPE = "enhance-v1"  # Public: users may see it; MODEL stays internal.
 POOL = "enhance"
-BACKEND = "runpod-enhance"
+BACKEND = RUNPOD_ENHANCE.id
 MODEL = "open-h3-regenerate-2k"
 CONFIGURATION = "runpod-enhance-v1"
 # In flight at once. Matches workersMax on the RunPod endpoints, which bill only

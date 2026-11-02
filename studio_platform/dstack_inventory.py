@@ -7,7 +7,7 @@ A malformed reply raises InventoryUnconfirmed; it is never read as empty.
 """
 
 import re
-from .providers.registry import DSTACK_BACKENDS
+from .providers.registry import CLOUDRIFT, DSTACK_BACKENDS, LIUM
 
 RUNPOD_GRAPHQL_URL = "https://api.runpod.io/graphql"
 LIUM_PODS_URL = "https://lium.io/api/pods"
@@ -46,7 +46,7 @@ def _ids(rows, exact_keys=None):
 
 
 def read_ids(backend, read):
-    if backend == "lium":
+    if backend == LIUM.id:
         rows = read("GET", LIUM_PODS_URL)
         ids = _ids(rows)
         # Before Lium returns a pod ID, dstack records the pod name: keep names
@@ -58,7 +58,7 @@ def read_ids(backend, read):
                 aliases[name] = row["id"]
             labels.append(name if isinstance(name, str) else None)
         return ids, aliases, labels
-    if backend == "cloudrift":
+    if backend == CLOUDRIFT.id:
         body = {
             "version": CLOUDRIFT_API_VERSION,
             "data": {"selector": {"ByStatus": {"statuses": LIVE_CLOUDRIFT}}},

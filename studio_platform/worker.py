@@ -27,6 +27,12 @@ _slot_lock = slot_lock
 
 from .media import ffmpeg, probe
 from .queue import TaskQueue
+from .providers.registry import (
+    CPU_RENDER,
+    MOCK,
+    STANDALONE_EXECUTION_BACKENDS,
+    WANGP_WORKER,
+)
 from .repository import Conflict, LeaseLost, Scope, money
 from .storage import ObjectAlreadyExists, ObjectNotFound, StorageWriteUncertain  # noqa: F401 -- public worker compatibility export
 from .telemetry import ERROR_CODES as TELEMETRY_ERROR_CODES, NullStage, NullTelemetry
@@ -68,7 +74,7 @@ class MockBackend:
         self.slot_key = (
             "mock-" + hashlib.sha256(str(self.state_dir).encode()).hexdigest()
         )
-        self.kind = "mock"
+        self.kind = MOCK.id
 
     def prepare(self, job, tag, store, heartbeat):
         if not self.enabled:
@@ -575,7 +581,7 @@ class WorkerRunner:
             "state": state or job["status"],
             "simulation": isinstance(self.backend, MockBackend)
             or (
-                self.backend.kind == "cpu-render"
+                self.backend.kind == CPU_RENDER.id
                 and any(
                     source.get("simulation") is True
                     for source in job["request"].get("sources", {}).values()
@@ -657,7 +663,7 @@ class WorkerRunner:
             self.queue.heartbeat(lease, lease_seconds=900)
             if self.control:
                 self.control.heartbeat(worker_id, slot_fence, lease_seconds=900)
-            if self.backend.kind == "cpu-render":
+            if self.backend.kind == CPU_RENDER.id:
                 current = self.repo.get_job(self._scope(job), job["id"])
                 if current["status"] == "cancel_requested":
                     self.backend.cancel(tag, "cpu-render-" + tag)
@@ -687,7 +693,7 @@ class WorkerRunner:
                     # No submission intent/POST exists. Retained input/cache
                     # evidence stays untouched; do not grow attempts forever
                     # against an operator-managed cache with no automatic GC.
-                    if self.backend.kind == "cpu-render":
+                    if self.backend.kind == CPU_RENDER.id:
                         return self._fail(
                             job,
                             lease,
@@ -782,7 +788,7 @@ class WorkerRunner:
             outcome = self.backend.poll(tag, task_id)
             if (
                 outcome.state == "unknown"
-                and self.backend.kind == "cpu-render"
+                and self.backend.kind == CPU_RENDER.id
                 and job["status"] != "cancel_requested"
                 and callable(getattr(self.backend, "resume", None))
             ):
@@ -806,7 +812,7 @@ class WorkerRunner:
                             error_code="render_resume_identity_unconfirmed",
                         )
                     )
-            if outcome.state == "running" and self.backend.kind == "wangp-worker":
+            if outcome.state == "running" and self.backend.kind == WANGP_WORKER.id:
                 from .capacity_watchdog import record_engine_progress
 
                 record_engine_progress(self.repo, self.queue, lease)
@@ -832,7 +838,8 @@ class WorkerRunner:
                 # into public/durable error fields. It cannot authorize retry.
                 code = (
                     safe_failure_code(getattr(outcome, "error_code", None))
-                    if self.backend.kind == "wangp-worker" and outcome.state == "failed"
+                    if self.backend.kind == WANGP_WORKER.id
+                    and outcome.state == "failed"
                     else None
                 )
                 if outcome.state == "failed":
@@ -1466,7 +1473,7 @@ def main(argv=None):
         description="Sixnine worker; disabled unless explicitly selected"
     )
     parser.add_argument(
-        "--backend", choices=("disabled", "mock", "comfy-worker"), default="disabled"
+        "--backend", choices=STANDALONE_EXECUTION_BACKENDS, default="disabled"
     )
     parser.add_argument("--worker-id", required=True)
     parser.add_argument("--pool", required=True)
@@ -1510,7 +1517,7 @@ def main(argv=None):
         repo = Repository(settings.database_url)
         repo.create_schema()
         control = WorkerControl(repo)
-        if args.backend == "mock":
+        if args.backend == MOCK.id:
             backend = MockBackend(args.work_dir / "simulation", enabled=True)
             spec = WorkerSpec(
                 args.worker_id,
@@ -1521,7 +1528,7 @@ def main(argv=None):
                 tuple(args.recipe_id),
                 "SIMULATION",
                 "simulation-v1",
-                backend="mock",
+                backend=MOCK.id,
             )
             # Mock-only registration consumes no GPUs/instances and grants no cloud permission.
             # Do not overwrite an existing approved real global ceiling.
@@ -1568,7 +1575,7 @@ def main(argv=None):
         if worker["state"] in ("registered", "ready"):
             control.mark_ready(
                 args.worker_id,
-                upstream_idle_confirmed=args.backend == "mock" or args.confirmed_idle,
+                upstream_idle_confirmed=args.backend == MOCK.id or args.confirmed_idle,
             )
         elif (
             worker["state"] in ("unknown", "draining")
@@ -1576,7 +1583,7 @@ def main(argv=None):
         ):
             control.mark_ready(
                 args.worker_id,
-                upstream_idle_confirmed=args.backend == "mock" or args.confirmed_idle,
+                upstream_idle_confirmed=args.backend == MOCK.id or args.confirmed_idle,
             )
         store = LocalObjectStore(settings.data_dir / "objects")
         from .execution_policy import ExecutionPolicies
