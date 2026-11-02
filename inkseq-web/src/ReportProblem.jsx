@@ -102,11 +102,11 @@ function ReportDialog({ account, onClose }) {
           onChange={(event) => edit(setText)(event.target.value)}
         />
       </label>
-      <small className="muted">{t('report.steps')}</small>
-      <small className="muted report-page">
+      <small className="muted report-note">{t('report.steps')}</small>
+      <small className="muted report-note">
         {t(inStory ? 'report.pageStory' : 'report.page', { page })}
       </small>
-      <small className="muted">{t('report.privacy')}</small>
+      <small className="muted report-note">{t('report.privacy')}</small>
       {problem && <p role="alert">{t(problem)}</p>}
       <div className="report-actions">
         <Button disabled={busy} onClick={onClose}>
