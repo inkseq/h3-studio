@@ -16,11 +16,12 @@ from sqlalchemy import func, select, update
 from ..providers.balances import BalanceObservation, read_everyframe_balance
 from ..providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS, POOL, chain
 from .decide import (
-    ECONOMY_WARMS_MACHINE_AT,
-    HOSTED_BALANCE_RESERVE_USD,
+    ECONOMY_WARMS_MACHINE_AT as ECONOMY_WARMS_MACHINE_AT,
+    HOSTED_BALANCE_RESERVE_USD as HOSTED_BALANCE_RESERVE_USD,
     HOSTED_BALANCE_WARN_USD,
-    HOSTED_WARMS_MACHINE_AT,
+    HOSTED_WARMS_MACHINE_AT as HOSTED_WARMS_MACHINE_AT,
     HOSTED_WINDOW_SECONDS,
+    SCENARIOS,
     hosted_has_first_claim,
     hosted_offload,
 )
@@ -249,7 +250,7 @@ def _read_balance(settings):
 
 
 def balance_allows_hosted():
-    return _balance["usd"] is None or _balance["usd"] >= HOSTED_BALANCE_RESERVE_USD
+    return SCENARIOS["low_vendor_balance"].offload(_balance["usd"])
 
 
 def live_configurations(connection, now):
@@ -328,7 +329,9 @@ def offload(service, connection, queued, now):
     # shot goes at a time; a backlog this size goes to a machine instead.
     if (
         economy
-        and economy_backlog(connection, settings.tenant_id) < ECONOMY_WARMS_MACHINE_AT
+        and SCENARIOS["small_economy_backlog"].offload(
+            economy_backlog(connection, settings.tenant_id)
+        )
         and not economy_in_flight(connection, settings.tenant_id)
     ):
         used = used_in_window(connection, settings.tenant_id, now)
@@ -364,10 +367,11 @@ def hold_for_hosted(settings, connection, job, now):
         return (
             tier in tiers
             and "hosted_tried" not in job["execution_plan"]
-            and economy_backlog(connection, settings.tenant_id)
-            < ECONOMY_WARMS_MACHINE_AT
+            and SCENARIOS["large_economy_backlog"].hold(
+                economy_backlog(connection, settings.tenant_id)
+            )
         )
     used = used_in_window(connection, settings.tenant_id, now, clicks_only=True)
-    if sum(used.values()) >= HOSTED_WARMS_MACHINE_AT:
+    if not SCENARIOS["sustained_clicks"].hold(used):
         return False
     return hosted_has_first_claim(job, tier, tiers, now)

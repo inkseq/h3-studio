@@ -13,10 +13,14 @@ Today's rules, unchanged and table-tested:
   left once a new machine would be ready, or for a job that has waited
   `vast_after_seconds` (Modal refused or failed it).
 
-Later steps add hosted offload and the economy class here.
+SCENARIOS maps the eleven documented cases to their decision owners. Hosted
+predicates are applied at the original call sites, not as a global route
+selector: several cases may apply at once. Claims, money, provider operations
+and idle stopping remain with their transactional owners.
 """
 
 from dataclasses import dataclass
+from typing import Callable
 
 
 @dataclass(frozen=True)
@@ -66,6 +70,15 @@ HOSTED_WINDOW_SECONDS = 900
 HOSTED_PER_OWNER = 10
 
 
+def _wait_elapsed(job, tier, enabled_tiers, now):
+    limit = WAIT_LIMITS.get(tier)
+    return (
+        tier in enabled_tiers
+        and limit is not None
+        and not now - job["created_at"] < limit
+    )
+
+
 def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
     """Jobs to hand to the hosted API now, oldest first.
 
@@ -78,14 +91,9 @@ def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
     chosen = []
     for job, profile in sorted(queued, key=lambda item: item[0]["created_at"]):
         tier = tier_of(job)
-        limit = WAIT_LIMITS.get(tier)
-        if (
-            tier not in enabled_tiers
-            or limit is None
-            or now - job["created_at"] < limit
-            or total >= per_window
-            or owners.get(job["owner_id"], 0) >= HOSTED_PER_OWNER
-        ):
+        if not SCENARIOS["occasional_click"].offload(
+            job, tier, enabled_tiers, now
+        ) or not SCENARIOS["window_full"].offload(total, owners, job, per_window):
             continue
         chosen.append((job, profile))
         total += 1
@@ -106,8 +114,7 @@ HOSTED_BALANCE_RESERVE_USD = 1.0
 HOSTED_BALANCE_WARN_USD = 10.0
 
 
-def hosted_has_first_claim(job, tier, enabled_tiers, now):
-    """True while the hosted API may still take this job, so no machine starts."""
+def _first_claim(job, tier, enabled_tiers, now):
     limit = WAIT_LIMITS.get(tier)
     return (
         tier in enabled_tiers
@@ -115,3 +122,68 @@ def hosted_has_first_claim(job, tier, enabled_tiers, now):
         and "hosted_tried" not in job["execution_plan"]
         and now - job["created_at"] < limit + HOSTED_GRACE_SECONDS
     )
+
+
+def _small_economy(backlog):
+    return backlog < ECONOMY_WARMS_MACHINE_AT
+
+
+@dataclass(frozen=True)
+class Scenario:
+    """One documentation row; absent facets stay with the named owner.
+
+    Facets intentionally receive only the facts needed at their call site.
+    There is no common context, evaluator or permission to perform an action.
+    """
+
+    number: int
+    owner: str
+    offload: Callable[..., bool] | None = None
+    hold: Callable[..., bool] | None = None
+
+
+SCENARIOS = {
+    "occasional_click": Scenario(
+        1, "scheduling.rebind.offload / hold_for_hosted", _wait_elapsed, _first_claim
+    ),
+    "sustained_clicks": Scenario(
+        2,
+        "scheduling.rebind.hold_for_hosted",
+        hold=lambda used: not sum(used.values()) >= HOSTED_WARMS_MACHINE_AT,
+    ),
+    "ready_machine": Scenario(
+        3, "control.WorkerControl.claim / modal_admission.dedicated_ready"
+    ),
+    "small_economy_backlog": Scenario(
+        4, "scheduling.rebind.offload", offload=_small_economy
+    ),
+    "large_economy_backlog": Scenario(
+        5, "scheduling.rebind.hold_for_hosted", hold=_small_economy
+    ),
+    "click_during_economy": Scenario(6, "queue.TaskQueue.schedule_order / claim"),
+    "no_machine_can_start": Scenario(7, "dstack_demand_start.start_once"),
+    "low_vendor_balance": Scenario(
+        8,
+        "scheduling.rebind.balance_allows_hosted",
+        offload=lambda usd: usd is None or usd >= HOSTED_BALANCE_RESERVE_USD,
+    ),
+    "hosted_fallback": Scenario(
+        9, "worker.WorkerRunner._reroute / _past_deadline / scheduling.rebind.next_plan"
+    ),
+    "window_full": Scenario(
+        10,
+        "scheduling.decide.hosted_offload",
+        offload=lambda total, owners, job, window: (
+            not (total >= window or owners.get(job["owner_id"], 0) >= HOSTED_PER_OWNER)
+        ),
+    ),
+    "backlog_finished": Scenario(
+        11,
+        "dstack_controller.DstackController._reconcile_observed_node / dstack_capacity.idle_action",
+    ),
+}
+
+
+def hosted_has_first_claim(job, tier, enabled_tiers, now):
+    """True while the hosted API may still take this job, so no machine starts."""
+    return SCENARIOS["occasional_click"].hold(job, tier, enabled_tiers, now)

@@ -64,6 +64,16 @@ class ControlTests(LedgerCase):
         self.control.register(spec)
         self.control.mark_ready(spec.worker_id, upstream_idle_confirmed=True)
 
+    def test_scenario_03_ready_machine_claims_without_a_route_change(self):
+        self.ready(self.spec())
+        job = self.controlled_job()
+        claim = self.control.claim("worker", "control-test")
+        self.assertEqual(claim.job["id"], job["id"])
+        self.assertEqual(claim.job["execution_plan"], job["execution_plan"])
+        self.assertEqual(claim.job["attempt_no"], 1)
+        self.assertEqual(claim.job["created_at"], self.now)
+        self.assertIsNone(self.control.claim("worker", "control-test"))
+
     def test_known_instance_deadline_skips_long_jobs_but_admits_a_short_one(self):
         self.repo.configure_pool("control-test", max_instances=1, max_physical_gpus=1)
         intent = self.repo.reserve_instance_intent(
