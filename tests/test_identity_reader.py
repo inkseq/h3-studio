@@ -1,6 +1,7 @@
 """Disposable account authority bridge tests; no live identity or cloud calls."""
 
 from pathlib import Path
+from dataclasses import replace
 import secrets
 import tempfile
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from sqlalchemy import Column, MetaData, String, Table, inspect, insert, update
 
 from studio_platform.auth import Auth, AuthenticationError, Principal
 from studio_platform.identity import (
+    public_profile,
     capacity_owner_known,
     is_admin,
     lock_account_gate,
@@ -74,6 +76,51 @@ class IdentityReaderTests(unittest.TestCase):
         with self.repo.engine.begin() as connection:
             connection.execute(
                 update(users).where(users.c.owner == "superdan").values(**values)
+            )
+
+    def test_profile_unavailable_and_legacy_paths_do_not_read_account_rows(self):
+        # No database capability: machine identities must never reveal their owner.
+        connection = object()
+        unavailable = {"display_name": None, "email": None}
+        for principal in (None, replace(self.original, machine=True)):
+            with self.subTest(principal=principal):
+                self.assertEqual(
+                    public_profile(principal, connection, "sixnine"), unavailable
+                )
+        self.assertEqual(
+            public_profile(self.original, connection, "sixnine"),
+            {"display_name": "superdan", "email": None},
+        )
+
+    def test_profile_reads_only_current_active_human_in_supplied_connection(self):
+        self.adopt()
+        principal = self.auth.session(self.token)
+        with self.repo.engine.begin() as connection:
+            # Uncommitted profile edits are visible on this exact connection.
+            connection.execute(
+                update(users).values(
+                    display_name="Current creator", email="creator@example.test"
+                )
+            )
+            self.assertEqual(
+                public_profile(principal, connection, "sixnine"),
+                {"display_name": "Current creator", "email": "creator@example.test"},
+            )
+            for current, tenant in (
+                (replace(principal, owner="another-owner"), "sixnine"),
+                (replace(principal, user_id="another-user"), "sixnine"),
+                (principal, "another-tenant"),
+                (replace(principal, machine=True), "sixnine"),
+            ):
+                with self.subTest(current=current, tenant=tenant):
+                    self.assertEqual(
+                        public_profile(current, connection, tenant),
+                        {"display_name": None, "email": None},
+                    )
+            connection.execute(update(users).values(status="suspended"))
+            self.assertEqual(
+                public_profile(principal, connection, "sixnine"),
+                {"display_name": None, "email": None},
             )
 
     def test_readers_never_create_users_and_preserve_legacy_split(self):

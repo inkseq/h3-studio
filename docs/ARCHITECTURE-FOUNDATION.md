@@ -42,6 +42,26 @@ Where the code is today: about 130,000 lines in 301 modules, 555 recorded cross-
 
 Second app host, read replicas and more GPU pools wait for a measured need: waiting time or concurrency at its limit.
 
+## Current domain interfaces (#899 item 9)
+
+- Identity owns `public_profile(current, connection, tenant)`. Feedback uses this
+  connection-scoped projection instead of a private identity helper; machine
+  principals receive no owner profile. The legitimate feedback-to-identity import
+  remains, and the caller retains its existing connection and error handling.
+- The API composition root passes its cookie name and browser-handle lifetime
+  into WorkOS, account-session and account-deletion routers. Their request handlers
+  no longer import the composition root; provider checks and cookie attributes are
+  unchanged.
+- Capacity owns `terminal_review_candidate`. Both controller reconciliation and
+  idle cadence use the same pure evidence check without importing each other.
+  This check grants no settlement authority: an unknown rental still requires its
+  original billing reconciliation.
+- `tools/module_boundaries.py` exposes raw top-level imports for focused reverse-
+  dependency checks, including same-domain and shared-platform imports. Its
+  existing cross-domain ratchet and baseline policy are unchanged. Package
+  internals and dynamic imports are still outside that scanner; this slice does
+  not claim complete graph enforcement or that all domain cycles are removed.
+
 ## Order
 
 1. Fix the known faults first, because the refactor must not change behaviour: the host-loss report and #982.

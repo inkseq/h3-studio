@@ -6,6 +6,7 @@ Live/queued work and uncertain reads retain the existing fast controller loop.
 
 from sqlalchemy import select
 
+from .dstack_capacity import terminal_review_candidate
 from .repository import attempts, jobs
 
 MAINTENANCE_SECONDS = 60
@@ -157,13 +158,12 @@ class IdleCadence:
             return max(0, self._stamp + MAINTENANCE_SECONDS - now)
         self._stamp = self._identity = None
         client = controller.capacity.client
-        from .dstack_controller import _terminal_review_candidate
 
         # Each ambiguous creation must be an owned TERMINAL run with no runtime
         # evidence. Unknown provider allocation is not a reason to sleep longer.
         for node, fingerprint in uncertain:
             binding = node["payload"]["dstack"]
-            if not _terminal_review_candidate(
+            if not terminal_review_candidate(
                 client.get(run_id=binding["run_id"]), binding, client.project
             ):
                 return self._fast("run_evidence_unconfirmed")

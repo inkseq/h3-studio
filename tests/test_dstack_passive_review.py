@@ -11,11 +11,11 @@ from unittest.mock import Mock
 from sqlalchemy import insert, select, update
 
 from studio_platform.demand_wakeup import run_demand_loop
-from studio_platform.dstack_capacity import terminal_no_allocation
-from studio_platform.dstack_controller import (
-    DstackController,
-    _terminal_review_candidate,
+from studio_platform.dstack_capacity import (
+    terminal_no_allocation,
+    terminal_review_candidate,
 )
+from studio_platform.dstack_controller import DstackController
 from studio_platform.operator_capacity import operator_commands, operator_nodes
 from studio_platform.repository import (
     attempts,
@@ -349,7 +349,7 @@ class PassiveReviewTests(LedgerCase):
         node_id = self.unknown()
         binding = self.node(node_id)["payload"]["dstack"]
         run = copy.deepcopy(self.client.runs[binding["run_name"]])
-        self.assertTrue(_terminal_review_candidate(run, binding, self.client.project))
+        self.assertTrue(terminal_review_candidate(run, binding, self.client.project))
         for changes in (
             {"provider_instance_id": "123"},
             {"runtime_incarnation": "ever-loaded"},
@@ -357,7 +357,7 @@ class PassiveReviewTests(LedgerCase):
             {"bootstrap_started": True},
         ):
             self.assertFalse(
-                _terminal_review_candidate(
+                terminal_review_candidate(
                     run, {**binding, **changes}, self.client.project
                 )
             )
@@ -373,8 +373,35 @@ class PassiveReviewTests(LedgerCase):
                 changed["latest_job_submission"]
             )
             self.assertFalse(
-                _terminal_review_candidate(changed, binding, self.client.project)
+                terminal_review_candidate(changed, binding, self.client.project)
             )
+
+    def test_terminal_review_refuses_malformed_or_unbound_unknown_evidence(self):
+        node_id = self.unknown()
+        binding = self.node(node_id)["payload"]["dstack"]
+        run = copy.deepcopy(self.client.runs[binding["run_name"]])
+        before = self.ledger()
+        for message in (None, 7, "unrelated", "sixnine_vast_attempts_v1:{", "x" * 8193):
+            changed = copy.deepcopy(run)
+            changed["latest_job_submission"]["termination_reason_message"] = message
+            changed["jobs"][0]["job_submissions"][0] = copy.deepcopy(
+                changed["latest_job_submission"]
+            )
+            with self.subTest(message_type=type(message).__name__):
+                self.assertFalse(
+                    terminal_review_candidate(changed, binding, self.client.project)
+                )
+        for current, authority in (
+            ({**run, "id": "another-run"}, binding),
+            ({**run, "jobs": None}, binding),
+            (run, {**binding, "host_selection": {"offers": []}}),
+            (None, binding),
+            (run, None),
+        ):
+            self.assertFalse(
+                terminal_review_candidate(current, authority, self.client.project)
+            )
+        self.assertEqual(self.ledger(), before)
 
 
 class DestroyingPassiveReviewTests(PassiveReviewTests):

@@ -1143,6 +1143,8 @@ class AccountDeletionTests(LedgerCase):
             )
             self.assertEqual(result.status_code, 202)
             self.assertEqual(result.json()["state"], "pending")
+            self.assertTrue(result.headers["set-cookie"].startswith(COOKIE + "="))
+            self.assertIn("Path=/", result.headers["set-cookie"])
             self.assertIn("Max-Age=0", result.headers["set-cookie"])
             self.assertEqual(result.headers["cache-control"], "no-store")
         self.assertEqual(self.provider.calls, [])

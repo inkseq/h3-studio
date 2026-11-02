@@ -10,13 +10,12 @@ from .repository import identifier, Conflict, BudgetExceeded
 from .domain_turns import DomainTurns
 
 
-def setup_controller_film(DBOS, domain_turns, repo, app):
+def setup_controller_film(DBOS, domain_turns, repo, service, auth):
     repo.generation_transport.client.register_queue(VERSION, polling_interval_sec=10)
-    service = app.state.film_runs
 
     def principal_for(tenant, owner, project_id, run_id):
         grant = service.execution_context(tenant, owner, project_id, run_id)
-        return app.state.auth.workflow_principal(owner, grant)
+        return auth.workflow_principal(owner, grant)
 
     register_film_workflows(DBOS, service, principal_for, domain_turns=domain_turns)
 
