@@ -213,7 +213,7 @@ class DurableDomainTests(LedgerCase):
 
         settings = Settings(self.directory, auth_mode="local-test", render_enabled=True)
         with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
-            slots.add_render_slots()
+            slots.add_local_slots()
             self.assertEqual(
                 set(slots._slots),
                 {
@@ -237,8 +237,7 @@ class DurableDomainTests(LedgerCase):
             self.directory, auth_mode="local-test", enhance_enabled=True
         )
         with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
-            slots.add_render_slots()
-            slots.add_enhance_slot()
+            slots.add_local_slots()
             self.assertEqual(
                 set(slots._slots),
                 {
@@ -260,9 +259,8 @@ class DurableDomainTests(LedgerCase):
         )
         with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
             with patch.object(slots, "ensure", side_effect=ValueError("boom")):
-                slots.add_enhance_slot()
+                slots.add_local_slots()
             self.assertEqual(slots._slots, {})
-            slots.add_render_slots()
 
     def test_startup_v5_claim_is_exact_and_all_versions_share_the_cpu_fence(self):
         from studio_platform.render_plans import CONFIGURATIONS, MODEL, POOL, RECIPE
@@ -270,7 +268,7 @@ class DurableDomainTests(LedgerCase):
 
         settings = Settings(self.directory, auth_mode="local-test", render_enabled=True)
         with DurableSlots(self.repo, settings, self.directory / "executor") as slots:
-            slots.add_render_slots()
+            slots.add_local_slots()
             jobs = {}
             for version in (1, 2, 3, 4, 5):
                 plan = self.repo.create_plan(
