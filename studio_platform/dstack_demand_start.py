@@ -630,7 +630,9 @@ def start_once(service):
     client = getattr(getattr(service, "capacity", None), "client", None)
     if callable(getattr(client, "backend_api_key", None)):
         refresh_in_background(
-            service.settings, client, service.repo.clock(),
+            service.settings,
+            client,
+            service.repo.clock(),
             everyframe_balance=balance_observation(service.settings),
         )
     result, claim = _claim(service)
