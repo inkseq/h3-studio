@@ -19,9 +19,8 @@ from pathlib import Path
 import re
 import time
 
-from .dstack_capacity import DstackError
 from .providers.registry import MODAL_DIALOUT
-from .runpod_serverless import RunPodServerlessClient, _require
+from .dialout_capacity import DialoutCapacityClient, _require
 
 BACKEND = MODAL_DIALOUT.id
 MOUNT = "/ckpts"
@@ -77,14 +76,11 @@ def validate_config(value):
     return value
 
 
-class ModalDialoutClient(RunPodServerlessClient):
+class ModalDialoutClient(DialoutCapacityClient):
     backend = BACKEND
 
     def __init__(self, config, project, *, sdk=None, clock=time.time):
-        self.config = validate_config(config)
-        self.project, self.clock = project, clock
-        self.root = Path(config["state_dir"])
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        super().__init__(validate_config(config), project, clock=clock)
         self._sdk, self._client, self._app = sdk, None, None
 
     @property
@@ -106,8 +102,10 @@ class ModalDialoutClient(RunPodServerlessClient):
                 self._app = self._sdk.App.lookup(
                     c["app_name"], create_if_missing=True, client=self._client
                 )
-            except Exception:
-                raise DstackError("dstack_api_unavailable") from None
+            except Exception as error:
+                raise self._provider_error(
+                    "initialize", "dstack_api_unavailable", error
+                ) from None
         return self._sdk, self._client, self._app
 
     def _launch(self, run_name, job, seconds):
@@ -134,8 +132,8 @@ class ModalDialoutClient(RunPodServerlessClient):
                 timeout=seconds,
                 client=client,
             )
-        except Exception:
-            raise DstackError("dstack_api_rejected") from None
+        except Exception as error:
+            raise self._provider_error("create", "dstack_api_rejected", error) from None
         identity = sandbox.object_id
         return {"id": identity, "status": "IN_PROGRESS", "workerId": identity}
 
@@ -146,8 +144,10 @@ class ModalDialoutClient(RunPodServerlessClient):
         sdk, client, _ = self._modal()
         try:
             code = sdk.Sandbox.from_id(record["job_id"], client=client).poll()
-        except Exception:
-            raise DstackError("dstack_api_unavailable") from None
+        except Exception as error:
+            raise self._provider_error(
+                "status", "dstack_api_unavailable", error
+            ) from None
         if code is None:
             return {"status": "IN_PROGRESS", "workerId": record["job_id"]}
         status = {
@@ -171,13 +171,17 @@ class ModalDialoutClient(RunPodServerlessClient):
         sdk, client, _ = self._modal()
         try:
             sdk.Sandbox.from_id(job_id, client=client).terminate()
-        except Exception:
-            raise DstackError("dstack_api_unavailable") from None
+        except Exception as error:
+            raise self._provider_error(
+                "cancel", "dstack_api_unavailable", error
+            ) from None
 
     def _live(self):
         """Running sandboxes in this dedicated app, by Modal's own listing."""
         sdk, client, app = self._modal()
         try:
             return sum(1 for _ in sdk.Sandbox.list(app_id=app.app_id, client=client))
-        except Exception:
-            raise DstackError("dstack_provider_inventory_unconfirmed") from None
+        except Exception as error:
+            raise self._provider_error(
+                "inventory", "dstack_provider_inventory_unconfirmed", error
+            ) from None

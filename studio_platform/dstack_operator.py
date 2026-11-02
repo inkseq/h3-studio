@@ -29,6 +29,7 @@ from .dstack_capacity import (
     live_capacity_usage,
 )
 from .capacity_policy import window_open, cold_unadmitted_runtime
+from .capacity_interface import CapacityService
 from .capacity_memory import configured_ram, require_preview_ram, catalog_resources
 
 # Compatibility names for retained callers; all current call sites use the contract.
@@ -1183,7 +1184,7 @@ class DstackOperator:
         self,
         repo,
         settings,
-        capacity=None,
+        capacity: CapacityService | None = None,
         profile_config=None,
         *,
         provider_inventory=None,
@@ -3587,7 +3588,7 @@ def from_environment(repo, settings, *, readiness=None):
             )
             lanes.append(ModalDialoutClient(modal, config["project"]))
         if lanes:
-            from .runpod_serverless import RoutedClient
+            from .dialout_capacity import RoutedClient
 
             client = RoutedClient(client, *lanes)
         config["ssh_public_key"] = ssh

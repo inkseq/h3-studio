@@ -1098,3 +1098,7 @@ inventory.json
 !tests/cassettes/everyframe_render.yaml
 !tests/cassettes/everyframe_refused.yaml
 !docs/SCHEDULING-SCENARIOS.md
+
+# #899 shared native capacity contracts/lifecycle
+!studio_platform/capacity_interface.py
+!studio_platform/dialout_capacity.py

@@ -103,3 +103,7 @@ deploy/wangp/profiles/*
 !skills/inkseq/reference/
 !skills/inkseq/reference/api.md
 !skills/inkseq/reference/recovery.md
+
+# #899 shared native capacity contract/lifecycle (also covered by module wildcard).
+!studio_platform/capacity_interface.py
+!studio_platform/dialout_capacity.py
