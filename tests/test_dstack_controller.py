@@ -3,16 +3,16 @@
 from dataclasses import replace
 import copy
 from contextlib import contextmanager
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from types import SimpleNamespace
 from sqlalchemy import insert, select, update
 from studio_platform.control import WorkerSpec
 from studio_platform.dstack_controller import DstackController
-from studio_platform.dstack_controller import SlotProcesses
 from studio_platform.fleet import SlotConfig
 from studio_platform.operator_capacity import OperatorError, operator_nodes
 from studio_platform.repository import (
     attempts,
+    Conflict,
     budget_reservations,
     instance_intents,
     jobs,
@@ -26,58 +26,104 @@ import test_dstack_operator as fixture
 import unittest
 import tempfile
 from pathlib import Path
-import subprocess
+import threading
 
 
-class SlotProcessesTests(unittest.TestCase):
-    def test_only_one_supervisor_owns_workers_and_release_allows_recovery(self):
+class DurableSlotShutdownTests(unittest.TestCase):
+    """Characterize current DBOS shutdown; no provider or database calls."""
+
+    def slots(self, directory):
+        from studio_platform.dbos_transport import DurableSlots
+
+        return DurableSlots(None, None, Path(directory))
+
+    def test_only_one_executor_owns_slots_and_release_allows_recovery(self):
         with tempfile.TemporaryDirectory() as directory:
-            work = Path(directory) / "new-work-dir"
-            broker = Path(directory) / "broker.json"
-            first = SlotProcesses(work).__enter__()
+            first = self.slots(directory).__enter__()
             try:
                 with self.assertRaisesRegex(ValueError, "already_active"):
-                    SlotProcesses(work).__enter__()
+                    self.slots(directory).__enter__()
             finally:
                 first.close()
-            with SlotProcesses(work):
+            with self.slots(directory):
                 pass
 
-    def test_supervisor_reaps_its_cpu_children_without_provider_calls(self):
-        class Child:
-            def __init__(self):
-                self.alive = True
-                self.signals = []
-
-            def poll(self):
-                return None if self.alive else 0
-
-            def terminate(self):
-                self.signals.append("terminate")
-
-            def kill(self):
-                self.signals.append("kill")
-                self.alive = False
-
-            def wait(self, timeout=None):
-                if self.alive:
-                    raise subprocess.TimeoutExpired("owned-cpu-child", timeout)
-                self.signals.append("reap")
-                return 0
-
+    def test_active_turn_cannot_be_stopped_or_released(self):
         with tempfile.TemporaryDirectory() as directory:
-            child = Child()
-            with SlotProcesses(Path(directory)) as processes:
-                processes.children["owned-slot"] = child
-            self.assertEqual(child.signals, ["terminate", "kill", "reap"])
-            self.assertEqual(processes.children, {})
-            self.assertIsNone(processes._supervisor_lock)
+            slots = self.slots(directory).__enter__()
+            item = SimpleNamespace(lock=threading.Lock(), context=Mock())
+            item.context.__exit__ = Mock()
+            slots._slots['original'] = item
+            item.lock.acquire()
+            try:
+                with self.assertRaisesRegex(Conflict, 'dbos_domain_turn_still_active'):
+                    slots.stop('original')
+                self.assertIs(slots._slots['original'], item)
+                item.context.__exit__.assert_not_called()
+            finally:
+                item.lock.release()
+                slots._slots.clear()
+                slots.close()
 
-    def test_worker_spawn_requires_supervisor_ownership(self):
+    def test_failed_context_close_retains_slot_and_fence_for_reconciliation(self):
         with tempfile.TemporaryDirectory() as directory:
-            processes = SlotProcesses(Path(directory))
-            with self.assertRaisesRegex(ValueError, "lock_required"):
-                processes.ensure("slot", None)
+            slots = self.slots(directory).__enter__()
+            context = Mock()
+            context.__exit__ = Mock(side_effect=TimeoutError('synthetic close timeout'))
+            item = SimpleNamespace(
+                lock=threading.Lock(),
+                context=context,
+                spec=SimpleNamespace(dispatch_backend='legacy'),
+            )
+            slots._slots['original'] = item
+            try:
+                with self.assertRaises(TimeoutError):
+                    slots.close()
+                self.assertIs(slots._slots['original'], item)
+                self.assertIsNotNone(slots._fence)
+                self.assertTrue(slots._closing)
+                self.assertFalse(item.lock.locked())
+            finally:
+                context.__exit__.side_effect = None
+                slots.close()
+
+    def test_retired_queue_mode_fails_before_opening_database(self):
+        from studio_platform import dstack_controller
+
+        with (
+            patch.object(dstack_controller.os, 'name', 'posix'),
+            patch(
+                'studio_platform.settings.Settings.from_environment',
+                return_value=SimpleNamespace(generation_queue='postgres'),
+            ),
+            patch('studio_platform.repository.Repository') as repository,
+        ):
+            with self.assertRaisesRegex(ValueError, 'dstack_controller_requires_dbos'):
+                dstack_controller.main(['--once'])
+        repository.assert_not_called()
+
+    def test_unconfirmed_demand_preserves_response_and_logs_no_exception_payload(self):
+        controller = object.__new__(DstackController)
+        controller.service = SimpleNamespace(
+            demand_start_once=Mock(
+                side_effect=TimeoutError('private-payload-sentinel')
+            ),
+        )
+        with self.assertLogs(
+            'studio_platform.dstack_controller', level='WARNING'
+        ) as log:
+            result = controller._demand_start()
+        self.assertEqual(
+            result,
+            {
+                'state': 'blocked',
+                'reason_code': 'dstack_demand_start_observation_failed',
+            },
+        )
+        self.assertIn('dstack_demand_start_observation_failed', log.output[0])
+        self.assertIn('TimeoutError', log.output[0])
+        self.assertNotIn('private-payload-sentinel', '\n'.join(log.output))
+        controller.service.demand_start_once.assert_called_once_with()
 
 
 class DstackControllerTests(fixture.DstackOperatorTests):

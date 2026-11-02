@@ -1,6 +1,6 @@
 # CPU控制面与多槽执行
 
-2026-10-04。`studio_platform/fleet.py`。默认disabled、max_children=0，不建立SSH隧道、不下载权重、不调用provider租机/销毁API。测试只用临时数据库、fake进程句柄、注入CPU/backend/store，没有新启动真实GPU或长期fleet进程。
+2026-11-02 更新：`studio_platform/fleet.py` 保留槽配置与单次 runner 构造。持续执行由 `dstack_controller` 的 DBOS `DurableSlots` 管理；旧 `FleetSupervisor`、fleet CLI 与非 DBOS 子进程循环已退役。本文的 SSH/Comfy 配置仍用于现存兼容路径，不表示新增部署应使用旧 supervisor。
 
 ## 拓扑
 
@@ -25,9 +25,9 @@ flowchart LR
 
 - `SlotConfig(spec:WorkerSpec,enabled=False,endpoint='',allowed_origins=(),comfy_revision='',confirmed_idle=False)`：精确实例/物理卡/pool/model/config/recipe绑定。真实origin不得含认证、query或path；HTTP仅loopback，远程为明确HTTPS。allowed_origins必须只有完全相符origin；实际Comfy revision为40位小写commit。重复GPU、worker或endpoint拒绝。
 - `FleetConfig(work_dir,slots=(),enabled=False,max_children=0,shutdown_grace_s=210)`：显式绝对工作目录，最大32子进程。enabled时至少一个明确启用槽且不超max_children；CPU模拟与真实槽不混入同一fleet。
-- `read_config(absolute_path)`：仅受信操作员JSON（Linux禁止组/其他用户写），最多256KiB，拒绝未支持字段。`fingerprint()`覆盖所有manifest值；子进程验证父进程传的hash后才加载Settings，启动间配置被编辑会安全退出。
-- `FleetSupervisor(config,repo,config_path,popen=...,clock=...,sleeper=...)`：`start/tick/drain/shutdown/run_forever`。默认不动DB、不建目录、不spawn；启用后全槽先通过持久Control登记/跨池总容量，再启动独立CPU子进程。PID来自本次创建的Popen句柄，保存的历史PID不作为发信号依据。
-- `run_slot(config,worker_id,settings,repository=None,store_factory=...,backend_factory=None,runner_factory=WorkerRunner,once=False)`：子进程执行接口；factory用于隔离验收。Settings的backend与generation_enabled必须明确匹配。真实首次/失联空闲恢复需confirmed_idle声明及当前private `/queue`确认为空；不能靠历史benchmark或进程活着假定就绪。已有未结束current_job只核对原attempt。
+- `read_config(absolute_path)`：仅受信操作员JSON（Linux禁止组/其他用户写），最多256KiB，拒绝未支持字段。`fingerprint()`覆盖所有manifest值；此数据接口仍保留，已不启动子进程。
+- `slot_runner(...)`：给 DBOS 创建有界 runner 上下文；槽租约与 fence 由 `DurableSlots` 管理。关闭上下文不等于供应商机器已停止或费用已结算。
+- `run_slot(config,worker_id,settings,repository=None,store_factory=...,backend_factory=None,runner_factory=WorkerRunner,once=True)`：只执行一个阶段，factory用于隔离验收；`once=False` 明确拒绝。Settings的backend与generation_enabled必须明确匹配。真实首次/失联空闲恢复需confirmed_idle声明及当前private `/queue`确认为空；不能靠历史benchmark或进程活着假定就绪。已有未结束current_job只核对原attempt。
 
 每槽独立`work_dir/<worker_id>`；数据库和store沿用CPU Settings，同一API/worker必须指向同一账本和私有objects。model/config/recipe的登记精确匹配不构成模型权重的密码学证明，实际模型/硬件资格须独立验收并由执行策略引用。
 
@@ -39,7 +39,7 @@ R2使用与现有API相同的S3StorageConfig与中央load_storage_credentials入
 
 Fleet只运行被任务计划指定的池；它不会自动将5090、96GB卡、B200互换或套用另一配置。现执行策略只对明确已验收pool/config准入；多GPU登记不代表不同硬件配置都获得资格，不自动改变模型、画质、参数或价格。
 
-## CLI与退出
+## 配置与退出
 
 受信manifest的最小安全形态（仍需使用当前主机的真实绝对目录）为：
 
@@ -49,18 +49,11 @@ Fleet只运行被任务计划指定的池；它不会自动将5090、96GB卡、B
 
 每slot字段为worker_id、pool、provider、instance_id、physical_gpu_ids数组、recipe_ids数组、model_id、configuration_id、backend、enabled、endpoint、allowed_origins数组、comfy_revision、confirmed_idle。字段名不能加API key、DB URL、SSH key或密码；凭据使用Settings已有FILE/中央加载入口。
 
-```text
-python -m studio_platform.fleet --config /data/operator/fleet.json
-python -m studio_platform.fleet --config /data/operator/fleet.json --request-drain
-```
+旧 `python -m studio_platform.fleet`、`--request-drain` 和 `--slot` 命令已移除，不能用它们启动或排空服务。部署入口是 `python -m studio_platform.dstack_controller`，要求 `generation_queue=dbos`；原 PostgreSQL 数据库、任务记录和历史 `hatchet-v1` 路由标识仍保留。
 
-首个命令只有明确enabled才启动CPU子进程。`--slot ID --once`供明确单次阶段验收；supervisor不支持--once后遗留无人管理子进程。--request-drain只写本fleet的supervisor-drain.flag，既不加载数据库/存储凭据，也不读取/杀历史PID；适用于Windows没有可靠SIGTERM投递的后台进程。该标记保留，重新启动前须操作员核对任务并明确重置这一生命周期标记，不能用泛化清理命令删除资产。
+DBOS 停止槽时先等活动阶段退出，再关闭上下文并释放自己的 fence。未退出或关闭失败不删除槽状态，也不宣称机器已空闲。drain 停止新 claim 并保留 current_job、预算和上游 ID；过期或 unknown 不因进程存活而自动复活。
 
-POSIX同时向本次仍活着的子进程发送SIGTERM；Windows用drain.flag，由worker在循环/阶段心跳核对。子进程无可见窗口，stdout/stderr不采集原始响应；安全状态写fleet-state.json，只含worker_id/PID/exit_code/state。正常idle续已有效注册心跳；过期或unknown不因进程存活而自动复活。
-
-drain停止新claim并保留current_job、fence、预算和上游ID；标记跨失联/当前任务完成保持。shutdown最多等待配置grace，超时返回drain_pending，不谎称完成、GPU空闲或云实例已停，也不盲杀未知PID。当前FFmpeg/HTTP阶段各有超时，完整收集可能超过210s；grace按部署和输入包络配置，超时由操作员/容器控制面继续核对。
-
-子进程退出不自动重启，也不释放设备登记或云预算；管理员可按原worker重新启动以核对，不创建新生成/新GPU。停止CPU进程、drain/retire、删除目录都不会停止GPU供应商计费，云TTL/销毁核验属于独立控制面。默认创建仍为0。
+停止 CPU 服务、drain/retire 或删除目录都不会停止 GPU 供应商计费；云实例停止与费用核对仍属于原供应商控制面。旧 supervisor 的 PID 文件和 drain 标记不再是当前服务的控制接口，历史文件不得作为杀进程或释放预算的依据。
 # CPU 章节合成槽补充
 
 `cpu-render` 可与真实 `comfy-worker` 共用 CPU 控制主机，但模拟 mock 仍独立。CPU SlotConfig 没有 endpoint、allowed origins 或 Comfy revision；明确 `provider=local-cpu`、`model_id=sixnine-chapter-roughcut-v1`、`recipe_ids=(chapter-roughcut-v1,)`、`physical_gpu_ids=()`。新作业 `render.version=3` 精确匹配 `configuration_id=cpu-render-v3`，默认无字幕，可显式烧录已经确认的字幕；历史 v1/v2 收尾 worker 必须分别使用 `cpu-render-v1`/`cpu-render-v2`，三种配置不能互接。`platform_cpu_slots` 将一个 CPU instance ID 固定给一个 worker，不能用不同 worker ID 无限重复注册；同实例升级须先以原身份和工作目录收完旧任务再退役，或使用另一 CPU 实例。CPU 不占 GPU 全局 gate 或 registered_devices。

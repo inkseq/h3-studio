@@ -12,6 +12,15 @@
 - **Stuck 30 minutes? Ask Claude instead of adding guards.** If your own guard blocks a normal operation, loosen or delete it first.
 - **Deploy-helper or server-config changes are done only when live on BOTH staging and production.**
 
+## Local verification
+- Match CI with Ubuntu 24.04 (WSL is fine), Python 3.12 and Node 22.23.4. In an isolated venv, install `requirements.dispatch.lock.txt` and `requirements.dev.lock.txt` with `pip install --require-hashes -r requirements.dispatch.lock.txt -r requirements.dev.lock.txt`.
+- Install `ffmpeg`, `fontconfig` and `fonts-noto-cjk`; verify ffprobe/libass and `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` (`fc-match 'Noto Sans CJK SC'` must select that font). Missing CJK fonts make `test_film_storyboard_integration` defer chapter rendering; do not skip the test or weaken its font check.
+- From the repository root, run the complete offline Python suite with the same loader as CI (one shard, all slow modules):
+  ```sh
+  env -u PLATFORM_TEST_DATABASE_URL .venv/bin/python -m coverage run --data-file coverage-data/.coverage tools/ci_test_shards.py --suite python --shard-count 1 --shard-index 0 --slow-modules null
+  ```
+  This uses temporary SQLite/fake providers. The separate `--suite postgres` CI gate requires an explicitly configured disposable local `sixnine_test` PostgreSQL database; passing the offline suite does not replace it. Run affected formatting, maintainability and module-boundary checks before pushing as well.
+
 ## Experiments
 - Before any GPU/provider/model/quality test, search `docs/EXPERIMENTS.md`; reuse a matching row instead of re-running. Afterwards append one row (date, setup, numbers, verdict, evidence link), failures included.
 
