@@ -29,6 +29,7 @@ SERVICES = ('app', 'db', 'caddy', 'dstack', 'controller')
 MAX_BYTES = 1024 * 1024
 MAX_PENDING = 128
 BACKUP_STATE = Path('/var/lib/inkseq-business-backup')
+APP_BACKUPS = Path('/srv/sixnine/platform-data/business-backups')
 # Daily timer: 16:30 UTC + <=5m jitter + <=95m service + 20m grace.
 # About 26h since the previous scheduled start, not a restore/freshness claim.
 BACKUP_DEADLINE_MINUTE = 18 * 60 + 30
@@ -107,8 +108,15 @@ def read_protected(path, *, missing=False):
 def read_transport_manifest(operation):
     # Transport owns this read-only copy (UID10001), behind a root-only parent.
     # The caller binds these bytes to the original root receipt before use.
+    # Daily retention removes the transport copy and keeps the newest app copy.
     protected_directory(operation)
-    fd = os.open(operation / 'snapshot' / 'manifest.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        fd = os.open(operation / 'snapshot' / 'manifest.json', flags)
+    except FileNotFoundError:
+        ident = read_protected(operation / 'intent.json')['operation_id']
+        require(isinstance(ident, str) and re.fullmatch('[0-9a-f-]{36}', ident), 'alert_backup_intent_invalid')
+        fd = os.open(APP_BACKUPS / ident / 'manifest.json', flags)
     with os.fdopen(fd, 'rb') as stream:
         info = os.fstat(stream.fileno())
         require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
