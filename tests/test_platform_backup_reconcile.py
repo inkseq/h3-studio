@@ -269,6 +269,22 @@ class ReconcileTests(unittest.TestCase):
         self.assertEqual(client.reads, [])
         self.unchanged(client)
 
+    def test_intent_counts_the_optional_snapshot_files_as_not_media(self):
+        target, _, intent, _ = self.copied()
+        extras = [
+            {'name': name, 'size_bytes': 10, 'sha256': 'a' * 64}
+            for name in ('workflow-state.json', 'workos-users.json')
+        ]
+        files = sorted(intent['files'][:-1] + extras, key=lambda v: v['name'])
+        bigger = {
+            **intent,
+            'files': files + intent['files'][-1:],
+            'bytes': intent['bytes'] + 20,
+        }
+        validate_intent(target, bigger)
+        with self.assertRaises(remote.RemoteBackupError):
+            validate_intent(target, {**bigger, 'objects': intent['objects'] + 1})
+
     def test_duplicate_and_nonfinite_json_fail_closed(self):
         for raw in (b'{"operation_id":"one","operation_id":"two"}', b'{"bytes":NaN}'):
             with self.assertRaises(remote.RemoteBackupError):
