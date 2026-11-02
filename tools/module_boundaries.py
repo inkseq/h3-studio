@@ -115,6 +115,8 @@ DOMAINS = (
             "postgres_dispatch",
             "workflow_",
             "domain_turns",
+            "slot_turns",
+            "local_slots",
             "result_collection",
             "execution_",
             "dispatch_telemetry",

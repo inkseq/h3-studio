@@ -7,26 +7,24 @@ tables. Producers enqueue IDs in the SAME transaction as original admission.
 from __future__ import annotations
 
 import asyncio
-from contextlib import contextmanager, nullcontext
-from dataclasses import dataclass
 import hashlib
 import json
-import os
 import re
-from pathlib import Path
-import stat
-import threading
 
 from sqlalchemy import select
 
 from . import workflow_status
-from .repository import Conflict, Scope, identifier, jobs
+from .repository import Conflict, identifier, jobs
 from .domain_turns import DomainTurns
-from .providers.registry import (
-    CPU_RENDER,
-    EVERYFRAME_RENDER,
-    LOCAL_BACKENDS,
-    RUNPOD_ENHANCE,
+from .providers.registry import LOCAL_BACKENDS
+from .local_slots import LocalSlotOwner, LOCAL_SLOT_FAMILIES  # noqa: F401 -- existing import
+from .slot_turns import (
+    Slot as _Slot,  # noqa: F401 -- existing test/import identity
+    SlotContexts,
+    selected_job_turn,
+    run_selected_slot,
+    POLL_SECONDS,
+    TERMINAL as TERMINAL,
 )
 from .workflow_schema import (
     INKSEQ_WORKFLOW_SCHEMA as SCHEMA,  # noqa: F401 -- public workflow-schema compatibility export
@@ -36,8 +34,6 @@ from .workflow_schema import (
 
 QUEUE = "inkseq-generation-v1"
 WORKFLOW = "inkseq.generation.v1"
-POLL_SECONDS = 10
-TERMINAL = frozenset({"succeeded", "failed", "cancelled"})
 ACTIVE = frozenset(
     {
         "queued",
@@ -285,95 +281,16 @@ def configure_producer(repo, *, client=None):
     return repo.generation_transport
 
 
-@dataclass
-class _Slot:
-    spec: object
-    runner: object
-    context: object
-    lock: object
+class DurableSlots(SlotContexts):
+    """Combined in-process facade; native lifecycle stays controller-owned.
 
-
-def _local_spec(backend, worker, pool, recipes, model, configuration):
-    from .control import WorkerSpec
-
-    return WorkerSpec(
-        worker,
-        pool,
-        backend.provider,
-        worker,
-        (),
-        recipes,
-        model,
-        configuration,
-        backend.id,
-    )
-
-
-def _render_specs():
-    from .render_plans import POOL, MODEL, RECIPE, CONFIGURATIONS
-
-    for configuration in sorted(set(CONFIGURATIONS.values())):
-        yield _local_spec(
-            CPU_RENDER, "dbos-" + configuration, POOL, (RECIPE,), MODEL, configuration
-        )
-
-
-def _enhance_specs():
-    from . import enhance_plans as plan
-
-    for index in range(plan.SLOTS):
-        # The first keeps its original name, so its row carries over.
-        worker = "dbos-" + plan.CONFIGURATION + (f"-{index}" if index else "")
-        yield _local_spec(
-            RUNPOD_ENHANCE,
-            worker,
-            plan.POOL,
-            (plan.RECIPE,),
-            plan.MODEL,
-            plan.CONFIGURATION,
-        )
-
-
-def _everyframe_specs():
-    from .providers import hosted_models as plan
-
-    for model in plan.MODELS.values():
-        for index in range(model.concurrency or plan.SLOTS_PER_MODEL):
-            yield _local_spec(
-                EVERYFRAME_RENDER,
-                f"dbos-{model.configuration_id}-{index}",
-                plan.POOL,
-                plan.RECIPES,
-                model.id,
-                model.configuration_id,
-            )
-
-
-# Ordered local capabilities only; native capacity still arrives through ensure.
-# Render is required; optional families retain their own failure event and switch.
-LOCAL_SLOT_FAMILIES = (
-    (CPU_RENDER, _render_specs, None),
-    (RUNPOD_ENHANCE, _enhance_specs, "dbos_enhance_slot_unavailable"),
-    (EVERYFRAME_RENDER, _everyframe_specs, "dbos_everyframe_slot_unavailable"),
-)
-
-
-class DurableSlots:
-    """In-process adapter registry, not a scheduler or a reconciliation service.
-
-    dstack still owns native bindings and lifecycle. DBOS workflows call one
-    bounded existing WorkerRunner turn with a selected original job ID.
+    LocalSlotOwner is reusable without the SDK, but is not yet a separate
+    service/cgroup. All records retain one original dictionary, lock and fence.
     """
 
     def __init__(self, repo, settings, work_dir, *, runner_context=None):
-        self.repo, self.settings = repo, settings
-        self.work_dir = Path(work_dir)
-        self._slots = {}
-        self._lock = threading.RLock()
-        self._fence = None
-        self._runner_context = runner_context
-        self._closing = False
-        self._cpu_operation = threading.Lock()
+        super().__init__(repo, settings, work_dir, runner_context=runner_context)
+        self.local = LocalSlotOwner(self)
 
     @property
     def children(self):
@@ -386,239 +303,24 @@ class DurableSlots:
                 if item.spec.backend not in LOCAL_BACKENDS
             }
 
-    def heartbeat_cpu(self):
-        with self._lock:
-            for slot in self._slots.values():
-                if slot.spec.backend in LOCAL_BACKENDS:
-                    worker = slot.runner.control.get(slot.spec.worker_id)
-                    if worker["expires_at"] > self.repo.clock() and worker[
-                        "state"
-                    ] not in {"unknown", "retired"}:
-                        slot.runner.control.heartbeat(
-                            slot.spec.worker_id, worker["fence"], lease_seconds=3600
-                        )
+    def ensure(self, intent_id, slot):
+        self.open(intent_id, slot)
 
     def add_local_slots(self):
-        """Register enabled local families without changing their failure boundaries."""
-        for backend, specs, unavailable in LOCAL_SLOT_FAMILIES:
-            enabled = (
-                getattr(self.settings, backend.service_switch)
-                if unavailable is None
-                else getattr(self.settings, backend.service_switch, False)
-            )
-            if not enabled:
-                continue
-            from .fleet import SlotConfig
+        self.local.add_slots()
 
-            for spec in specs():
-                try:
-                    self.ensure(spec.worker_id, SlotConfig(spec, enabled=True))
-                except Exception as exc:
-                    if unavailable is None:
-                        raise
-                    # Keep prior registrations and continue the next family.
-                    print(unavailable, "error_type=" + type(exc).__name__, flush=True)
-                    break
-            else:
-                self.heartbeat_cpu()
-
-    @contextmanager
-    def _cpu_fence(self):
-        """Fence all CPU configurations, including a surviving encoder child."""
-        if os.name != "posix":
-            yield True, None
-            return
-        import fcntl
-
-        descriptor = os.open(
-            self.work_dir / "cpu-render-operation.lock",
-            os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW,
-            0o600,
-        )
-        try:
-            info = os.fstat(descriptor)
-            if not (
-                stat.S_ISREG(info.st_mode)
-                and info.st_nlink == 1
-                and info.st_uid == os.geteuid()
-                and not info.st_mode & 0o077
-            ):
-                raise Conflict("dbos_cpu_operation_fence_invalid")
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                yield False, None
-                return
-            yield True, descriptor
-        finally:
-            # Child OFD ownership survives closing this parent FD after a crash.
-            os.close(descriptor)
-
-    def __enter__(self):
-        from .slot_lock import slot_lock
-
-        self.work_dir.mkdir(parents=True, exist_ok=True)
-        self._fence = slot_lock(self.work_dir, "dstack-cpu-supervisor")
-        if not self._fence.__enter__():
-            self._fence.__exit__(None, None, None)
-            self._fence = None
-            raise ValueError("dstack_cpu_supervisor_already_active")
-        return self
-
-    def ensure(self, intent_id, slot):
-        from .fleet import FleetConfig, slot_runner
-        from .postgres_dispatch import record_consumer
-
-        with self._lock:
-            if self._closing or self._fence is None:
-                raise Conflict("dbos_executor_stopping")
-            current = self._slots.get(intent_id)
-            if current is not None and current.spec != slot.spec:
-                raise Conflict("dbos_native_slot_identity_changed")
-            if current is None:
-                config = FleetConfig(
-                    self.work_dir, (slot,), enabled=True, max_children=1
-                )
-                context = (self._runner_context or slot_runner)(
-                    config, slot.spec.worker_id, self.settings, repository=self.repo
-                )
-                runner = context.__enter__()
-                if runner is None:
-                    context.__exit__(None, None, None)
-                    raise Conflict("dbos_slot_disabled")
-                current = _Slot(slot.spec, runner, context, threading.Lock())
-                self._slots[intent_id] = current
-            # The existing controller calls ensure after its fresh native
-            # observation. Idle DBOS slots have no WorkerRunner turn to renew
-            # registration. Keep only an already-live lease/fence; expiry or
-            # UNKNOWN still needs explicit native idle proof in the controller.
-            if slot.spec.backend not in LOCAL_BACKENDS:
-                worker = current.runner.control.get(slot.spec.worker_id)
-                if worker["expires_at"] > self.repo.clock() and worker["state"] not in {
-                    "unknown",
-                    "retired",
-                }:
-                    current.runner.control.heartbeat(
-                        slot.spec.worker_id, worker["fence"]
-                    )
-            # Original incarnation/fence checked by this existing observation.
-            if slot.spec.dispatch_backend == "hatchet-v1":
-                current.runner._consumer_observation = record_consumer(
-                    self.repo,
-                    current.runner.control,
-                    current.runner.backend,
-                    slot.spec.worker_id,
-                )
+    def heartbeat_cpu(self):
+        self.local.heartbeat()
 
     def turn(self, tenant, owner, project, job_id):
-        scope = Scope(tenant, owner, project)
-        job = self.repo.get_job(scope, job_id)
-        if job["status"] in TERMINAL or job["status"] == "recovery_hold":
-            return {"state": job["status"], "done": True}
-        if self._closing:
-            return {
-                "state": "executor_stopping",
-                "done": False,
-                "wait_seconds": POLL_SECONDS,
-            }
-        with self._lock:
-            candidates = list(self._slots.values())
-        # Existing attempts stay with their original worker. New work tries
-        # dedicated capacity first; its original claim gates decide eligibility.
-        candidates.sort(
-            key=lambda slot: (
-                slot.spec.worker_id != job['lease_worker_id']
-                if job.get('lease_worker_id')
-                else slot.spec.provider == 'modal'
-            )
+        return selected_job_turn(
+            self, tenant, owner, project, job_id, run_selected=self._run_selected
         )
-        for slot in candidates:
-            if slot.spec.pool != job["pool"] or not slot.lock.acquire(blocking=False):
-                continue
-            cpu = slot.spec.backend == CPU_RENDER.id
-            acquired_cpu = False
-            try:
-                if cpu:
-                    acquired_cpu = self._cpu_operation.acquire(blocking=False)
-                    if not acquired_cpu:
-                        continue
-                with (
-                    self._cpu_fence() if cpu else nullcontext((True, None)) as (
-                        physical,
-                        descriptor,
-                    )
-                ):
-                    if not physical:
-                        continue  # Acquire no original job lease while CPU is busy.
-                    slot.runner.selected_job_id = job_id
-                    if cpu:
-                        slot.runner.backend._operation_fence_fd = descriptor
-                    try:
-                        result = slot.runner.run_once(
-                            slot.spec.worker_id, slot.spec.pool
-                        )
-                    finally:
-                        if cpu:
-                            slot.runner.backend._operation_fence_fd = None
-                if slot.spec.backend in LOCAL_BACKENDS:
-                    worker = slot.runner.control.get(slot.spec.worker_id)
-                    if worker["expires_at"] > self.repo.clock() and worker[
-                        "state"
-                    ] not in {"unknown", "retired"}:
-                        slot.runner.control.heartbeat(
-                            slot.spec.worker_id, worker["fence"], lease_seconds=3600
-                        )
-                if result.get("job_id"):
-                    if result["job_id"] != job_id:
-                        raise Conflict("dbos_selected_job_mismatch")
-                    break
-            finally:
-                slot.runner.selected_job_id = None
-                if acquired_cpu:
-                    self._cpu_operation.release()
-                slot.lock.release()
-        fresh = self.repo.get_job(scope, job_id)
-        now = self.repo.clock()
-        deadline = max(fresh["not_before"], fresh["lease_expires_at"] or now)
-        return {
-            "state": fresh["status"],
-            "done": fresh["status"] in TERMINAL or fresh["status"] == "recovery_hold",
-            "wait_seconds": max(POLL_SECONDS, min(900, deadline - now)),
-        }
 
-    def stop(self, intent_id):
-        with self._lock:
-            item = self._slots.get(intent_id)
-            if item is None:
-                return
-            if not item.lock.acquire(blocking=False):
-                raise Conflict("dbos_domain_turn_still_active")
-            try:
-                from .postgres_dispatch import withdraw_consumer
-
-                if item.spec.dispatch_backend == "hatchet-v1":
-                    withdraw_consumer(
-                        self.repo,
-                        item.runner.control,
-                        item.runner.backend,
-                        item.spec.worker_id,
-                        getattr(item.runner, "_consumer_observation", None),
-                    )
-                item.context.__exit__(None, None, None)
-                del self._slots[intent_id]
-            finally:
-                item.lock.release()
-
-    def close(self):
-        self._closing = True
-        for key in list(self._slots):
-            self.stop(key)
-        if self._fence is not None:
-            self._fence.__exit__(None, None, None)
-            self._fence = None
-
-    def __exit__(self, *_):
-        self.close()
+    def _run_selected(self, slot, job_id):
+        if slot.spec.backend in LOCAL_BACKENDS:
+            return self.local.run_selected_slot(slot, job_id)
+        return run_selected_slot(slot, job_id)
 
 
 def register_generation_workflow(DBOS, slots, *, domain_turns=None):
