@@ -137,6 +137,47 @@ class BackupLossTests(unittest.TestCase):
                 self.assertEqual(monitor.read_transport_manifest(operation), data)
                 boundary.assert_called_once_with(operation)
 
+    def test_after_retention_the_manifest_comes_from_the_kept_app_copy(self):
+        ident = '37fe6ddf-2482-49ee-a2d1-47e5e4bb4481'
+        with tempfile.TemporaryDirectory() as tmp:
+            operation = Path(tmp) / 'day'
+            operation.mkdir()
+            apps = Path(tmp) / 'apps'
+            (apps / ident).mkdir(parents=True)
+            data = b'{"kept":true}'
+            (apps / ident / 'manifest.json').write_bytes(data)
+            info = SimpleNamespace(
+                st_mode=stat.S_IFREG | 0o400,
+                st_nlink=1,
+                st_uid=10001,
+                st_size=len(data),
+            )
+
+            def read(with_ident=ident):
+                with (
+                    patch.object(monitor, 'protected_directory'),
+                    patch.object(monitor, 'APP_BACKUPS', apps),
+                    patch.object(
+                        monitor,
+                        'read_protected',
+                        return_value={'operation_id': with_ident},
+                    ),
+                    patch.object(
+                        os, 'O_NOFOLLOW', getattr(os, 'O_NOFOLLOW', 0), create=True
+                    ),
+                    patch.object(
+                        os, 'O_NONBLOCK', getattr(os, 'O_NONBLOCK', 0), create=True
+                    ),
+                    patch.object(os, 'fstat', return_value=info),
+                ):
+                    return monitor.read_transport_manifest(operation)
+
+            self.assertEqual(read(), data)
+            with self.assertRaises(ValueError):
+                read('../../elsewhere')
+            with self.assertRaises(FileNotFoundError):
+                read('00000000-0000-4000-8000-000000000000')
+
     def test_expected_only_v3_and_complete_legacy_copy_do_not_raise_loss(self):
         for version, coverage in (
             (3, self.coverage(0)),
