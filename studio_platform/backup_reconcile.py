@@ -116,7 +116,11 @@ def validate_intent(target, intent):
     )
     need(
         type(intent['objects']) is int
-        and intent['objects'] == len(files) - 2
+        # Besides media: the database and manifest, plus these two when the snapshot has them.
+        and intent['objects']
+        == len(files)
+        - 2
+        - sum(v['name'] in ('workflow-state.json', 'workos-users.json') for v in files)
         and type(intent['bytes']) is int
         and intent['bytes'] == sum(v['size_bytes'] for v in files)
         and [v['name'] for v in files[:-1]] == sorted(v['name'] for v in files[:-1]),
