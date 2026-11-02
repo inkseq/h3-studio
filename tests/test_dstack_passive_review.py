@@ -384,6 +384,9 @@ class PassiveReviewTests(LedgerCase):
         for message in (None, 7, "unrelated", "sixnine_vast_attempts_v1:{", "x" * 8193):
             changed = copy.deepcopy(run)
             changed["latest_job_submission"]["termination_reason_message"] = message
+            changed["jobs"][0]["job_submissions"][0] = copy.deepcopy(
+                changed["latest_job_submission"]
+            )
             with self.subTest(message_type=type(message).__name__):
                 self.assertFalse(
                     terminal_review_candidate(changed, binding, self.client.project)
