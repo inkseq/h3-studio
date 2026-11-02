@@ -482,7 +482,10 @@ class DownloadTests(unittest.TestCase):
             # filesystems can otherwise retain the cache's exact stat key.
             os.utime(
                 metadata,
-                ns=(previous_stat.st_atime_ns, previous_stat.st_mtime_ns + 1_000_000_000),
+                ns=(
+                    previous_stat.st_atime_ns,
+                    previous_stat.st_mtime_ns + 1_000_000_000,
+                ),
             )
             changed = catalog.engine_manifest(alias, 'ref')
             sdk = Mock()
