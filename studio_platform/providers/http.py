@@ -15,7 +15,7 @@ class VendorHTTP:
         self.timeout, self.transport = timeout, transport
         self._client = None
 
-    def _session(self):
+    def session(self):
         if self._client is None:
             self._client = httpx.Client(
                 transport=self.transport,
@@ -26,11 +26,11 @@ class VendorHTTP:
         return self._client
 
     def build_request(self, *args, **kwargs):
-        return self._session().build_request(*args, **kwargs)
+        return self.session().build_request(*args, **kwargs)
 
     def send(self, request):
         # Keep Client.send as the VCR replay boundary for hosted acceptance.
-        return self._session().send(request, stream=True)
+        return self.session().send(request, stream=True)
 
     def json(self, request, *, limit, parse_error_body=False, empty_body=False):
         with closing(self.send(request)) as response:

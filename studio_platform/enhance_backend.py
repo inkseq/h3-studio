@@ -148,6 +148,8 @@ class RunPodEnhanceBackend:
     def _call(self, method, path, body=None):
         """(status, JSON dict or None). The key and URLs never reach logs or errors."""
         config = self.config()
+        # Preserve transport setup failures outside response error mapping.
+        self._http.session()
         request = httpx.Request(
             method,
             API + config.endpoint_id + path,

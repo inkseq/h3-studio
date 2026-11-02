@@ -4,6 +4,7 @@ import io
 import json
 import unittest
 from contextlib import redirect_stdout
+from unittest.mock import patch
 
 import httpx
 
@@ -215,6 +216,25 @@ class VendorHTTPContractTests(unittest.TestCase):
             self.assertTrue(stream.closed)
             self.assertEqual(stream.read_chunks, 1)
             self.assertEqual(len(self.requests), 1)
+
+    def test_transport_setup_failure_stays_outside_response_error_mapping(self):
+        for vendor in ("everyframe", "runpod"):
+            if vendor == "everyframe":
+                backend = everyframe.EveryFrameBackend(None, "/unused")
+                backend._config = everyframe.Config("test-key")
+            else:
+                backend = runpod.RunPodEnhanceBackend(None, "/unused")
+                backend._config = runpod.Config("test-key", "endpoint1", 970)
+            with (
+                self.subTest(vendor=vendor),
+                patch(
+                    "httpx._client.HTTPTransport",
+                    side_effect=ValueError("transport-setup"),
+                ),
+                self.assertRaisesRegex(ValueError, "transport-setup"),
+            ):
+                backend._call("GET", "/key")
+            backend.close()
 
 
 if __name__ == "__main__":
