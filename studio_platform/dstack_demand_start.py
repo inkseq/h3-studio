@@ -623,13 +623,18 @@ def ladder_price(service, profile, job_id):
 def start_once(service):
     """At most one original allocation; unknown calls keep their frozen input."""
     from .providers.balances import refresh_in_background
-    from .scheduling.rebind import refresh_balance
+    from .scheduling.rebind import balance_observation, refresh_balance
 
     # A vendor call, so before the capacity-locked transaction in _claim.
     refresh_balance(service.settings, service.repo.clock())
     client = getattr(getattr(service, "capacity", None), "client", None)
     if callable(getattr(client, "backend_api_key", None)):
-        refresh_in_background(service.settings, client, service.repo.clock())
+        refresh_in_background(
+            service.settings,
+            client,
+            service.repo.clock(),
+            everyframe_balance=balance_observation(service.settings),
+        )
     result, claim = _claim(service)
     if claim is None:
         return result

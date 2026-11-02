@@ -13,6 +13,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select, update
 
+from ..providers.balances import BalanceObservation, read_everyframe_balance
 from ..providers.hosted_models import BACKEND, CONFIGURATIONS, MODELS, POOL, chain
 from .decide import (
     ECONOMY_WARMS_MACHINE_AT,
@@ -208,29 +209,43 @@ def refresh_balance(settings, now, *, reader=None):
         return _balance["usd"]
     _balance["read_at"] = now
     try:
-        usd = (reader or _read_balance)(settings)
+        status, amount = (200, reader(settings)) if reader else _read_balance(settings)
     except Exception:
-        usd = None
+        print("hosted_balance_unavailable", flush=True)
+        status, amount = None, None
+    amount = amount if isinstance(amount, (int, float)) else None
+    _balance["observation"] = BalanceObservation(now, status, amount)
+    usd = amount if status == 200 else None
     _balance["usd"] = usd if isinstance(usd, (int, float)) else None
     if _balance["usd"] is not None and _balance["usd"] < HOSTED_BALANCE_WARN_USD:
         print("hosted_balance_low", flush=True)
     return _balance["usd"]
 
 
+def balance_observation(settings):
+    """Immutable copy of the existing cache's read, including a failed attempt."""
+    sample = _balance.get("observation")
+    if (
+        getattr(settings, "everyframe_enabled", False)
+        and sample is not None
+        and sample.read_at == _balance["read_at"]
+    ):
+        return sample
+    return None
+
+
 def _read_balance(settings):
     import httpx
 
-    from ..providers.everyframe import API, FILENAME, load_config
+    from ..providers.everyframe import FILENAME, load_config
 
     config = load_config(Path(settings.data_dir) / "runtime-secrets" / FILENAME)
-    answer = httpx.get(
-        API + "/key",
-        headers={"Authorization": "Bearer " + config.api_key},
+    with httpx.Client(
         timeout=5,
         trust_env=False,
         follow_redirects=False,
-    )
-    return answer.json().get("balanceUsd") if answer.status_code == 200 else None
+    ) as session:
+        return read_everyframe_balance(session, config.api_key)
 
 
 def balance_allows_hosted():

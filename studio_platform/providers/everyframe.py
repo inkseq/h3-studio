@@ -21,9 +21,8 @@ from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import httpx
-
 from .hosted_models import BACKEND, CONFIGURATIONS, PROVIDER, vendor_request
+from .http import VendorHTTP
 from ..inference.protocol import (
     BackendError,
     NotReady,
@@ -100,7 +99,8 @@ class EveryFrameBackend:
         self.store, self.config_file, self.enabled = store, Path(config_file), enabled
         # One local render lock per slot; the vendor's limits are per account.
         self.slot_key = slot_key
-        self._transport, self._client, self._config = transport, None, None
+        self._config = None
+        self._http = VendorHTTP(timeout=60, transport=transport)
         self.cost_resolver = self._cost
 
     def __repr__(self):
@@ -120,25 +120,15 @@ class EveryFrameBackend:
         return self._config
 
     def close(self):
-        if self._client is not None:
-            self._client.close()
-        self._transport, self._client, self._config = None, None, None
+        self._http.close()
+        self._config = None
 
     def _request(self, method, path, *, content=None, content_type=None):
         config = self.config()
-        if self._client is None:
-            # No retry (a lost submit is never resent), no environment proxy or
-            # netrc, and no redirect (the key only ever goes to the API origin).
-            self._client = httpx.Client(
-                transport=self._transport,
-                trust_env=False,
-                follow_redirects=False,
-                timeout=60,
-            )
         headers = {"Authorization": "Bearer " + config.api_key}
         if content_type:
             headers["Content-Type"] = content_type
-        return self._client.build_request(
+        return self._http.build_request(
             method, API + path, headers=headers, content=content
         )
 
@@ -156,17 +146,11 @@ class EveryFrameBackend:
             or ("application/json" if body is not None else None),
         )
         try:
-            with closing(self._client.send(request, stream=True)) as response:
-                content = b""
-                for chunk in response.iter_bytes():
-                    content += chunk
-                    if len(content) > MAX_ANSWER_BYTES:
-                        raise ValueError
-                data = json.loads(content) if content else None
-                if data is not None and type(data) is not dict:
-                    raise ValueError
-                return response.status_code, data
+            return self._http.json(
+                request, limit=MAX_ANSWER_BYTES, parse_error_body=True, empty_body=True
+            )
         except Exception:
+            print("everyframe_response_unavailable", flush=True)
             raise BackendError("everyframe_response_unavailable") from None
 
     def _attach(self, item):
@@ -274,7 +258,7 @@ class EveryFrameBackend:
         request = self._request("GET", url)
         count = 0
         try:
-            with closing(self._client.send(request, stream=True)) as response:
+            with closing(self._http.send(request)) as response:
                 if response.status_code != 200:
                     raise BackendError("everyframe_output_unavailable")
                 with target.open("xb") as handle:
