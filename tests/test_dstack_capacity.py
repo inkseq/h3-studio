@@ -265,6 +265,34 @@ class DstackCapacityTests(unittest.TestCase):
         self.assertEqual(self.client.apply_count, 1)
         self.assertEqual(self.store.events, ["apply_committed"])
 
+    def test_original_request_and_error_exports_preserve_pickle_identity(self):
+        import pickle
+        from studio_platform import dstack_client, dstack_request
+
+        self.assertIs(CapacityRequest, dstack_request.CapacityRequest)
+        self.assertIs(DstackError, dstack_request.DstackError)
+        self.assertIs(DstackClient, dstack_client.DstackClient)
+        self.assertEqual(CapacityRequest.__module__, "studio_platform.dstack_capacity")
+        self.assertEqual(pickle.loads(pickle.dumps(request())), request())
+        error = pickle.loads(pickle.dumps(DstackError("original_code")))
+        self.assertIs(type(error), DstackError)
+        self.assertEqual(str(error), "original_code")
+
+    def test_unconfirmed_terminal_read_logs_operation_without_private_response(self):
+        self.start()
+        before = self.store.load(INTENT)
+        self.client.get = Mock(side_effect=RuntimeError("private supplier credential"))
+        with self.assertLogs(
+            "studio_platform.dstack_capacity", level="WARNING"
+        ) as logs:
+            self.assertIsNone(self.capacity.observe_terminal(INTENT))
+        self.assertEqual(self.store.load(INTENT), before)
+        self.assertEqual(self.client.apply_count, 1)
+        self.assertIn("dstack_capacity_observe_terminal_failed", logs.output[0])
+        self.assertIn("RuntimeError", logs.output[0])
+        self.assertNotIn("private", " ".join(logs.output))
+        self.native.assert_not_called()
+
     def test_terminal_only_refresh_refuses_nonterminal_absent_failed_and_foreign_reads(
         self,
     ):

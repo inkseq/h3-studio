@@ -545,7 +545,16 @@ inventory.json
 !requirements.dispatch.lock.txt
 !studio_platform/hatchet_dispatch.py
 !studio_platform/dstack_capacity.py
+!studio_platform/dstack_request.py
+!studio_platform/dstack_client.py
+!studio_platform/dstack_observations.py
 !studio_platform/dstack_operator.py
+!studio_platform/dstack_operator_contract.py
+!studio_platform/dstack_ledger.py
+!studio_platform/dstack_preview.py
+!studio_platform/dstack_registration.py
+!studio_platform/dstack_commands.py
+!studio_platform/operator_capacity_contract.py
 !studio_platform/dstack_routes.py
 !studio_platform/dstack_workspace.py
 !studio_platform/dstack_workspace_routes.py
