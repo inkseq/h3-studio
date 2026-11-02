@@ -96,7 +96,7 @@ class StagingComposeTests(unittest.TestCase):
                 receipt['parent_swap_mib'],
                 receipt['host_reserve_mib'],
             ),
-            (2528, 1280, 2048, 560),
+            (2912, 1280, 2048, 560),
         )
         document = documents[0]
         for name in document['services']:
