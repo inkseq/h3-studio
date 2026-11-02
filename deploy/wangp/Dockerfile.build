@@ -1,6 +1,6 @@
 # CPU dependency resolver and reproducible runtime base; no model or GPU runs.
 # Pin observed official amd64 Python3.11.14 image, not mutable latest/tag content.
-FROM python@sha256:06bb5357fbe87fed6fd7793c8c525ba09417bb23361b161511bb2993e8f0a7e3
+FROM python@sha256:c6ecb2f3c3dc85a75350f36560e1f49d35d6a9f7ce11fd775bd6834a69a9a0e1
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONDONTWRITEBYTECODE=1
 RUN apt-get update && apt-get install --no-install-recommends -y \
     ffmpeg libgl1 libglib2.0-0 libsndfile1 libportaudio2 cmake ninja-build \
