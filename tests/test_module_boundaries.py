@@ -61,6 +61,10 @@ class ModuleBoundaryTests(unittest.TestCase):
         self.assertEqual(boundaries.domain("modal_host"), "capacity")
         self.assertEqual(boundaries.domain("story_chat"), "creation")
         self.assertEqual(boundaries.domain("repository"), "platform")
+        self.assertEqual(boundaries.domain("repository_budgets"), "billing")
+        self.assertEqual(boundaries.domain("repository_jobs"), "jobs")
+        self.assertEqual(boundaries.domain("repository_capacity"), "capacity")
+        self.assertEqual(boundaries.domain("inference.mock"), "jobs")
 
 
 if __name__ == "__main__":

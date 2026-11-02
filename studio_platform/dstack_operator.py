@@ -14,6 +14,7 @@ import os
 import uuid
 from sqlalchemy import select
 from .dstack_capacity import (
+    live_capacity_usage,
     CapacityRequest,
     DstackCapacity,
     DstackClient,
@@ -22,6 +23,7 @@ from .capacity_policy import window_open
 from .capacity_interface import CapacityService
 from .capacity_memory import configured_ram
 from .operator_capacity import (
+    operator_nodes,
     OperatorError,
     require,
     safe_id,
@@ -65,6 +67,46 @@ from .dstack_commands import DstackCommands
 
 class DstackOperator(DstackPreview, DstackRegistration, DstackCommands):
     """Small owner-scoped application service; mount alongside existing operator API."""
+
+    def _live_capacity_usage(self, connection):
+        # Legacy invoices/intents remain in the ledger, but are not current
+        # dstack capacity. Only exact owned new-path allocations count here.
+        nodes = [
+            dict(node)
+            for node in connection.execute(select(operator_nodes)).mappings()
+            if node["payload"].get("capacity_backend") == BACKEND_MARKER
+        ]
+        return live_capacity_usage(
+            self.capacity.client,
+            nodes,
+            provider_inventory=self.provider_inventory,
+            clock=self.repo.clock,
+            fresh_seconds=self.policy["observation_fresh_seconds"],
+        )
+
+    def _observed_registration_usage(self, nodes):
+        # Retain only this call's exact read in memory. The existing helper
+        # owns immutable-run/identity validation and account absence; its
+        # conservative count of one is not proof of a one-GPU allocation.
+        observed_runs = {}
+        client = self.capacity.client
+
+        class ObservedClient:
+            project, endpoint = client.project, getattr(client, "endpoint", None)
+
+            def get(self, **identity):
+                run = client.get(**identity)
+                observed_runs[(identity.get("run_id"), identity.get("run_name"))] = run
+                return run
+
+        usage = live_capacity_usage(
+            ObservedClient(),
+            nodes,
+            provider_inventory=self.provider_inventory,
+            clock=self.repo.clock,
+            fresh_seconds=self.policy["observation_fresh_seconds"],
+        )
+        return usage, observed_runs
 
     def __init__(
         self,

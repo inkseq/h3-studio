@@ -3,9 +3,6 @@
 from __future__ import annotations
 import copy
 from sqlalchemy import select
-from .dstack_capacity import (
-    live_capacity_usage,
-)
 from .operator_capacity import (
     operator_nodes,
     require,
@@ -25,22 +22,6 @@ from .dstack_operator_contract import (
 
 
 class DstackRegistration:
-    def _live_capacity_usage(self, connection):
-        # Legacy invoices/intents remain in the ledger, but are not current
-        # dstack capacity. Only exact owned new-path allocations count here.
-        nodes = [
-            dict(node)
-            for node in connection.execute(select(operator_nodes)).mappings()
-            if node["payload"].get("capacity_backend") == BACKEND_MARKER
-        ]
-        return live_capacity_usage(
-            self.capacity.client,
-            nodes,
-            provider_inventory=self.provider_inventory,
-            clock=self.repo.clock,
-            fresh_seconds=self.policy["observation_fresh_seconds"],
-        )
-
     def machine_limits(self, connection, *, for_demand=False):
         from .capacity_settings import LEGACY_DEMAND_MAX_MACHINES
 
@@ -182,30 +163,6 @@ class DstackRegistration:
             "dstack_hourly_limit_exceeded",
         )
         return usage
-
-    def _observed_registration_usage(self, nodes):
-        # Retain only this call's exact read in memory. The existing helper
-        # owns immutable-run/identity validation and account absence; its
-        # conservative count of one is not proof of a one-GPU allocation.
-        observed_runs = {}
-        client = self.capacity.client
-
-        class ObservedClient:
-            project, endpoint = client.project, getattr(client, "endpoint", None)
-
-            def get(self, **identity):
-                run = client.get(**identity)
-                observed_runs[(identity.get("run_id"), identity.get("run_name"))] = run
-                return run
-
-        usage = live_capacity_usage(
-            ObservedClient(),
-            nodes,
-            provider_inventory=self.provider_inventory,
-            clock=self.repo.clock,
-            fresh_seconds=self.policy["observation_fresh_seconds"],
-        )
-        return usage, observed_runs
 
     def prelaunch_capacity_usage(self, connection):
         """Use the same global overlay as registration under the capacity lock."""
