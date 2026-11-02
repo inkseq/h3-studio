@@ -18,6 +18,7 @@ import { currentSupportView, endSupportView } from './support-view.js';
 import { accountLabel, readAccess, readAccessFor, rememberedAccess } from './account-access.js';
 import { CreditsChip } from './CreditsUI.jsx';
 import AccountMenu from './AccountMenu.jsx';
+import ReportProblem from './ReportProblem.jsx';
 import InkMark from './InkMark.jsx';
 import { dailyInkMark } from './ink-mark-daily.js';
 
@@ -140,6 +141,7 @@ export default function StudioHeader({
         >
           <Trash2 size={15} />
         </Button>
+        <ReportProblem account={account} />
         {accountMenu || <AccountMenu account={account} items={menuItems} onSignIn={onSignIn} />}
       </header>
     </>

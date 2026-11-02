@@ -13,6 +13,7 @@ import { workbenchCatalogs } from './workbenchCatalogs.js';
 import { assistantCatalogs } from './assistantCatalogs.js';
 import { takesCatalogs } from './takesCatalogs.js';
 import { enhanceCatalogs } from './enhanceCatalogs.js';
+import { reportCatalogs } from './reportCatalogs.js';
 import { inkyCatalogs } from '../inky/inkyCatalogs.js';
 import { adjunctCatalogs } from './adjunctCatalogs.js';
 import { accountDetailCatalogs } from './accountDetailCatalogs.js';
@@ -48,6 +49,7 @@ export const catalogs = {
     ...workbenchCatalogs.en,
     ...takesCatalogs.en,
     ...enhanceCatalogs.en,
+    ...reportCatalogs.en,
     ...inkyCatalogs.en,
     ...assistantCatalogs.en,
     'workspace.closeHistory': 'Close creation history',
@@ -105,6 +107,7 @@ export const catalogs = {
     ...workbenchCatalogs.zh,
     ...takesCatalogs.zh,
     ...enhanceCatalogs.zh,
+    ...reportCatalogs.zh,
     ...inkyCatalogs.zh,
     ...assistantCatalogs.zh,
     'workspace.closeHistory': '关闭创作记录',

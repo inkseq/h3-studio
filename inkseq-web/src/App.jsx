@@ -8,6 +8,7 @@ import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import StudioHeader from './StudioHeader.jsx';
 import AccountMenu from './AccountMenu.jsx';
+import ReportProblem from './ReportProblem.jsx';
 import { Menu, MenuItem } from './ui/Menu.jsx';
 import { Popover } from './ui/Popover.jsx';
 import { LowCreditsDialog } from './CreditsUI.jsx';
@@ -507,6 +508,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
             <Settings2 size={15} />
             <span className="bar-label">{t('story.settings')}</span>
           </Button>
+          <ReportProblem account={c.account} />
           {accountMenu}
         </header>
         {store.getRecoveryRaw?.() && (
