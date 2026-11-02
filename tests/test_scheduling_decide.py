@@ -1,9 +1,11 @@
 """Routing decision table (#931 step 3): today's dstack start rules, pure."""
 
 import unittest
+from pathlib import Path
+import re
 
 from studio_platform.capacity_lookahead import Machine
-from studio_platform.scheduling.decide import Rules, dstack_work
+from studio_platform.scheduling.decide import SCENARIOS, Rules, dstack_work
 
 READY = Machine("modal-a", "ready")
 STARTING = Machine("modal-b", "starting", ready_in_seconds=60)
@@ -69,6 +71,18 @@ CASES = [
 
 
 class DecideTableTests(unittest.TestCase):
+    def test_documented_scenarios_match_the_rule_table(self):
+        document = (
+            Path(__file__).resolve().parents[1] / "docs/SCHEDULING-SCENARIOS.md"
+        ).read_text(encoding="utf-8")
+        rows = re.findall(r"^\| (\d+) \| `([a-z_]+)` \|", document, re.MULTILINE)
+        self.assertEqual(
+            rows, [(str(rule.number), key) for key, rule in SCENARIOS.items()]
+        )
+        self.assertEqual(
+            [rule.number for rule in SCENARIOS.values()], list(range(1, 12))
+        )
+
     def test_table(self):
         for name, queued, covered, rules, machines, expected in CASES:
             with self.subTest(name):

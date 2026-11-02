@@ -84,6 +84,46 @@ class OffloadDecisionTests(unittest.TestCase):
         mixed = [job("a1", created=1), job("b1", created=2, owner="b")]
         self.assertEqual(self.ids(mixed, used={"a": 10}), ["b1"])
 
+    def test_scenario_01_exact_wait_and_grace_boundaries(self):
+        for tier, wait in (
+            ("fast", 30),
+            ("standard", 60),
+            ("refine", 120),
+            ("economy", 0),
+        ):
+            row, profile = job("click", tier=tier)
+            row["execution_plan"] = {}
+            for age in (wait - 1, wait, wait + 1, wait + 29, wait + 30):
+                with self.subTest(tier=tier, age=age):
+                    self.assertEqual(
+                        self.ids([(row, profile)], tiers=(tier,), now=1000 + age),
+                        ["click"] if age >= wait else [],
+                    )
+                    self.assertEqual(
+                        hosted_has_first_claim(row, tier, {tier}, 1000 + age),
+                        age < wait + 30,
+                    )
+
+    def test_scenario_10_full_window_preserves_oldest_first_owner_share(self):
+        queued = [
+            job("new", created=4),
+            job("old", created=1),
+            job("other", created=2, owner="b"),
+        ]
+        for used, expected in (
+            ({"a": 9, "c": 14}, ["old", "other"]),
+            ({"a": 10, "c": 14}, ["other"]),
+            ({"a": 11, "c": 14}, []),
+            ({"c": 26}, []),
+        ):
+            with self.subTest(used=used):
+                self.assertEqual(self.ids(queued, used=used), expected)
+
+    def test_full_window_short_circuits_owner_lookup(self):
+        row, profile = job("not-selected", created=1)
+        del row["owner_id"]
+        self.assertEqual(self.ids([(row, profile)], used={"other": 25}), [])
+
 
 class FirstClaimTests(unittest.TestCase):
     def test_machines_wait_only_while_the_hosted_api_can_still_take_the_job(self):
@@ -211,6 +251,18 @@ class BalanceTests(unittest.TestCase):
         self.assertIsNone(refresh_balance(self.settings, 1000, reader=broken))
         self.assertTrue(rebind_module.balance_allows_hosted())
 
+    def test_exact_balance_reserve_and_unknown_behavior(self):
+        for value, expected in (
+            (0.999, False),
+            (1, True),
+            (1.001, True),
+            (None, True),
+            (float("nan"), False),
+        ):
+            with self.subTest(value=value):
+                rebind_module._balance["usd"] = value
+                self.assertEqual(rebind_module.balance_allows_hosted(), expected)
+
 
 class RebindLedgerTests(LedgerCase):
     def setUp(self):
@@ -307,7 +359,7 @@ class RebindLedgerTests(LedgerCase):
     def economy_service(self):
         return self.service(tiers=("economy",))
 
-    def test_economy_goes_to_vivix_at_once_and_one_at_a_time(self):
+    def test_scenario_04_economy_goes_to_vivix_at_once_and_one_at_a_time(self):
         first = self.queued_job(economy=True, key="e1")
         second = self.queued_job(economy=True, key="e2")
         self.vivix_control()
@@ -369,6 +421,48 @@ class RebindLedgerTests(LedgerCase):
             left = offload(self.economy_service(), connection, [(job, {})], self.now)
         self.assertEqual(len(left), 1)
         self.assertEqual(self.row(created["id"])["pool"], "own")
+
+    def test_scenario_05_real_backlog_boundary_releases_only_the_machine_hold(self):
+        for index in range(39):
+            created = self.queued_job(economy=True, key=f"backlog-{index}")
+        service = self.economy_service()
+        self.vivix_control()
+        row = self.row(created["id"])
+        for count, held in ((39, True), (40, False), (41, False)):
+            if count > 39:
+                self.queued_job(economy=True, key=f"backlog-{count}")
+            with self.subTest(count=count), self.repo.transaction() as connection:
+                self.assertEqual(
+                    rebind_module.economy_backlog(connection, self.scope.tenant_id),
+                    count,
+                )
+                self.assertEqual(
+                    hold_for_hosted(service.settings, connection, row, self.now), held
+                )
+                if not held:
+                    self.assertEqual(
+                        offload(service, connection, [(row, {})], self.now), [(row, {})]
+                    )
+        self.assertEqual(self.row(created["id"])["pool"], "own")
+
+    def test_scenario_06_click_claim_does_not_preempt_running_economy(self):
+        active = self.queued_job(economy=True, key="active")
+        queue = WorkerControl(self.repo).queue
+        first = queue.claim("machine-a", "own")
+        queue.begin_submission(first.lease)
+        queue.record_submitted(first.lease, "original-render")
+        before = self.row(active["id"])
+        self.queued_job(economy=True, key="waiting")
+        self.now += 1
+        click = self.queued_job(key="click")
+        next_claim = queue.claim("machine-b", "own")
+        self.assertEqual(next_claim.job["id"], click["id"])
+        self.assertEqual(self.row(active["id"]), before)
+        with self.repo.transaction() as connection:
+            self.assertFalse(
+                rebind(self.repo, connection, before, "h3-max-turbo", self.now + 1000)
+            )
+        self.assertEqual(self.row(active["id"]), before)
 
     def test_economy_work_does_not_warm_a_machine_for_clicks(self):
         self.queued_job(economy=True, key="e1")
@@ -535,7 +629,7 @@ class RebindLedgerTests(LedgerCase):
                 .values(submission_started_at=self.now - seconds)
             )
 
-    def test_a_render_past_its_deadline_moves_on_and_keeps_its_charge(self):
+    def test_scenario_09_exact_deadline_moves_on_and_keeps_its_charge(self):
         running = lambda tag, task: Outcome(
             "running", task, actual_cost_microusd=38_000
         )
@@ -575,7 +669,7 @@ class RebindLedgerTests(LedgerCase):
             self.submitted_ago(created["id"], TURBO.deadline_s - 1)
             runner.run_once(worker, POOL)
             self.assertNotIn("hosted_tried", self.row(created["id"])["execution_plan"])
-            self.submitted_ago(created["id"], TURBO.deadline_s + 1)
+            self.submitted_ago(created["id"], TURBO.deadline_s)
             runner.run_once(worker, POOL)
         moved = self.row(created["id"])
         self.assertEqual(moved["status"], "queued")
@@ -625,7 +719,71 @@ class RebindLedgerTests(LedgerCase):
                 )
             )
 
-    def test_low_balance_sends_jobs_to_our_machines(self):
+    def test_scenario_02_reservations_four_five_six_release_the_hold(self):
+        waiting = self.queued_job(key="waiting")
+        service = self.service(tiers=("refine",))
+        for index in range(6):
+            created = self.queued_job(key=f"reservation-{index}")
+            with self.repo.transaction() as connection:
+                rebind(
+                    self.repo,
+                    connection,
+                    self.row(created["id"]),
+                    "h3-max-turbo",
+                    self.now,
+                )
+                if index >= 3:
+                    used = used_in_window(
+                        connection, self.scope.tenant_id, self.now, clicks_only=True
+                    )
+                    self.assertEqual(sum(used.values()), index + 1)
+                    self.assertEqual(
+                        hold_for_hosted(
+                            service.settings,
+                            connection,
+                            self.row(waiting["id"]),
+                            self.now,
+                        ),
+                        index < 4,
+                    )
+
+    def test_full_window_does_not_add_a_new_grace_to_economy_or_sustained_clicks(self):
+        for economy, used, window, age, held in (
+            (False, 4, 4, 149, True),
+            (False, 4, 4, 150, False),
+            (False, 5, 5, 0, False),
+            (True, 4, 4, 100_000, True),
+            (True, 0, 0, 0, False),
+            (False, 0, 0, 0, False),
+        ):
+            with self.subTest(economy=economy, used=used, window=window, age=age):
+                created = self.queued_job(
+                    economy=economy, key=f"window-{economy}-{used}-{window}-{age}"
+                )
+                service = self.service(tiers=("economy" if economy else "refine",))
+                path = (
+                    Path(service.settings.data_dir)
+                    / "runtime-secrets/everyframe-routing.json"
+                )
+                value = json.loads(path.read_text())
+                path.write_text(json.dumps({**value, "per_window": window}))
+                with (
+                    mock.patch.object(
+                        rebind_module, "used_in_window", return_value={"other": used}
+                    ),
+                    self.repo.engine.connect() as connection,
+                ):
+                    self.assertEqual(
+                        hold_for_hosted(
+                            service.settings,
+                            connection,
+                            self.row(created["id"]),
+                            self.now + age,
+                        ),
+                        held,
+                    )
+
+    def test_scenario_08_low_balance_sends_jobs_to_our_machines(self):
         created = self.queued_job()
         job = self.row(created["id"])
         service = self.service(tiers=("standard", "fast", "refine"))
