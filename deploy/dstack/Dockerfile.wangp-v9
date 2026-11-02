@@ -3,7 +3,7 @@
 # Upstream requirements are installed except the pinned CUDA stack, which must stay exactly as in v8.
 ARG BASE_IMAGE=public.ecr.aws/z9c3p9w6/sixnine/wangp@sha256:2d09de71382b424175b42d0a76947c628ade6686e5d20fbb646ed0fb7502bde7
 FROM ${BASE_IMAGE}
-ARG WANGP_REVISION=9cb2bcdafa7b41d2a1c30d2571cea4bc104657fb
+ARG WANGP_REVISION=616e60506aff10086bbbde02a3bf4554c572adde
 RUN git -C /opt/workspace-internal/Wan2GP fetch --quiet origin \
     && git -C /opt/workspace-internal/Wan2GP checkout --quiet --force ${WANGP_REVISION} \
     && git -C /opt/workspace-internal/Wan2GP clean -fdq -e '*.pyc' \
