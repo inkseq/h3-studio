@@ -112,6 +112,30 @@ def github_json(path):
         raise ValueError("staging_baseline_unavailable") from None
 
 
+def tested_in_pull_request(root, head, *, read_json=None):
+    """Whether this repository's CI already passed a pull request on this exact tree.
+
+    Branch protection requires an up-to-date branch, so a squash merge has the
+    tree its pull request tested. Any doubt returns False and the tests run.
+    """
+    try:
+        tree = subprocess.check_output(
+            ["git", "rev-parse", head + "^{tree}"], cwd=root, stderr=subprocess.DEVNULL
+        ).decode().strip()
+        runs = (read_json or github_json)(
+            "/repos/" + REPOSITORY + "/actions/runs?event=pull_request&status=success&per_page=50"
+        ).get("workflow_runs")
+        return any(
+            run.get("path") == ".github/workflows/ci.yml"
+            and run.get("conclusion") == "success"
+            and (run.get("head_repository") or {}).get("full_name") == REPOSITORY
+            and (run.get("head_commit") or {}).get("tree_id") == tree
+            for run in runs
+        )
+    except (ValueError, TypeError, AttributeError, OSError, subprocess.SubprocessError):
+        return False
+
+
 def git_ancestor(root, base, head):
     subprocess.run(
         ["git", "merge-base", "--is-ancestor", base, head], cwd=root,
@@ -313,6 +337,9 @@ def dispatch_action(inputs: dict, ref: str) -> str:
     return "prepare-" + kind if prepare else "check"
 
 
+FULL_RETEST_REASONS = frozenset({"diff-unavailable-requires-full", "staging-baseline-unavailable-requires-full"})
+
+
 def plan(event_name: str, event: dict, head: str, ref: str, root: Path) -> dict:
     if not SHA.fullmatch(head or ""):
         raise ValueError("invalid_tested_sha")
@@ -352,6 +379,9 @@ def plan(event_name: str, event: dict, head: str, ref: str, root: Path) -> dict:
             action = 'stage-platform'
         elif result['frontend']:
             action = 'stage-frontend'
+        # The frontend and containers jobs still run: they build what gets published.
+        if result['python'] and result['reason'] not in FULL_RETEST_REASONS and tested_in_pull_request(root, head):
+            result.update(python=False, postgres=False, macos_helper=False, tested_in_pr=True)
     return {**result, "action": action, "tested_sha": head}
 
 
