@@ -12,7 +12,12 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from deploy.platform.inky_credentials import client, import_existing
+from deploy.platform.inky_credentials import (
+    client,
+    import_existing,
+    import_production,
+    install_production,
+)
 from studio_platform.central_registry import load_api
 
 
@@ -26,11 +31,21 @@ class Parser(argparse.ArgumentParser):
 def main():
     parser = Parser(description=__doc__)
     parser.add_argument("--apply-staging", action="store_true")
+    parser.add_argument("--apply-production", action="store_true")
+    parser.add_argument("--install-production", action="store_true")
     args = parser.parse_args()
-    if not args.apply_staging:
+    if args.apply_staging + args.apply_production + args.install_production != 1:
         parser.error("Explicit adoption required")
     logging.disable(logging.CRITICAL)
     try:
+        if args.apply_production or args.install_production:
+            receipt = (
+                import_production(client(), load_api)
+                if args.apply_production
+                else install_production(client())
+            )
+            print(json.dumps({"target": "production", "result": receipt}))
+            return 0
         receipt = import_existing(client(), load_api)
         print(json.dumps({"target": "staging", "parameters": receipt}))
         return 0

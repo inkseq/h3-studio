@@ -131,3 +131,21 @@ class InkyConfigTests(unittest.TestCase):
             ValueError, "Inky credential path must be absolute"
         ):
             Settings(Path("."), inky_config_file=Path("relative"))
+
+
+class ProductionFileTests(unittest.TestCase):
+    def test_the_host_installed_file_turns_inky_on_and_explicit_wins(self):
+        import tempfile
+
+        from studio_platform.settings import inky_file
+
+        with tempfile.TemporaryDirectory() as root:
+            self.assertIsNone(inky_file(None, root))
+            folder = Path(root) / "runtime-secrets"
+            folder.mkdir()
+            self.assertIsNone(inky_file("", root))
+            (folder / "inky.json").write_text("{}", encoding="utf-8")
+            self.assertEqual(inky_file(None, root), folder / "inky.json")
+            self.assertEqual(
+                inky_file("/run/secrets/inky", root), Path("/run/secrets/inky")
+            )

@@ -13,7 +13,6 @@ export default function HostedSignIn({ auth }) {
   return (
     <div className="hosted-sign-in">
       <Button
-        variant="primary"
         className="keep-label hosted-sign-in-main"
         onClick={() => window.location.assign(hostedSignInUrl(here(), 'sign-in'))}
       >

@@ -1,4 +1,8 @@
-"""Staging-only Inky SSM transport. No key creation, rotation or provider calls."""
+"""Inky SSM transport. No key creation, rotation or provider calls.
+
+Staging hydrates per-service parameters into a release secret. Production keeps one
+parameter and installs it into the data volume, as Enhance and EveryFrame do.
+"""
 
 import json
 
@@ -39,6 +43,79 @@ def payload(keys):
     }
     validate(value)
     return value
+
+
+PRODUCTION = "/inkseq/production/inky"
+
+
+def read_production(api):
+    rows = api.get_parameters(Names=[PRODUCTION], WithDecryption=True).get(
+        "Parameters", []
+    )
+    if not rows:
+        return None
+    row = rows[0]
+    if (
+        len(rows) != 1
+        or row.get("Name") != PRODUCTION
+        or row.get("Type") != "SecureString"
+        or type(row.get("Version")) is not int
+    ):
+        raise ValueError("inky_parameter_invalid")
+    validate(json.loads(row["Value"]))
+    return row
+
+
+def import_production(api, loader):
+    """Create or update the parameter from the central profiles; never print it."""
+    keys = {}
+    for service, (profile, origin) in PROFILES.items():
+        cfg = loader(service, profile=profile)
+        configured = cfg.base_url or (origin if service == "openai" else None)
+        if configured != origin:
+            raise ValueError("inky_profile_invalid")
+        keys[service] = cfg.api_key
+    value = json.dumps(payload(keys), separators=(",", ":"), sort_keys=True)
+    row = read_production(api)
+    if row is None or row["Value"] != value:
+        api.put_parameter(
+            Name=PRODUCTION,
+            Value=value,
+            Type="SecureString",
+            KeyId="alias/aws/ssm",
+            Tier="Standard",
+            Overwrite=row is not None,
+        )
+    row = read_production(api)
+    if row is None or row["Value"] != value:
+        raise ValueError("inky_import_readback_mismatch")
+    return {k: row[k] for k in ("Name", "Type", "Version")}
+
+
+def install_production(api, *, data_root="/srv/sixnine/platform-data", app_gid=10001):
+    """Write runtime-secrets/inky.json, root:app 0440 under a root 0750 directory."""
+    import os
+    from pathlib import Path
+
+    row = read_production(api)
+    if row is None:
+        raise ValueError("inky_parameters_missing")
+    directory = Path(data_root) / "runtime-secrets"
+    directory.mkdir(mode=0o750, exist_ok=True)
+    os.chown(directory, 0, app_gid)
+    os.chmod(directory, 0o750)
+    path = directory / "inky.json"
+    raw = row["Value"].encode()
+    if path.exists() and path.read_bytes() == raw:
+        return {"path": str(path), "changed": False, "version": row["Version"]}
+    temporary = directory / ".tmp-inky.json"
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(raw)
+    os.chown(temporary, 0, app_gid)
+    os.chmod(temporary, 0o440)
+    os.replace(temporary, path)
+    return {"path": str(path), "changed": True, "version": row["Version"]}
 
 
 def read(api):
