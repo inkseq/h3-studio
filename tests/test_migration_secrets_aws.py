@@ -14,7 +14,15 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import yaml
+
 from deploy.platform import migration_secrets_aws as target
+
+RDS = {
+    'mode': 'rds',
+    'host': 'inkseq-test.abcdefghijkl.ap-southeast-1.rds.amazonaws.com',
+    'ca_file': '/srv/sixnine/rds/ca.pem',
+}
 
 
 def seed():
@@ -125,6 +133,174 @@ class ManagedSecretTests(unittest.TestCase):
 
     def load(self, api, **options):
         return target.load(api, intent_store=self.store, **options)
+
+    def external(self):
+        value = initialized()
+        value['schema_version'] = 2
+        value['infrastructure'] = {
+            key: value['infrastructure'][key] for key in target.POSTGRES_INFRASTRUCTURE
+        }
+        value['infrastructure']['dstack_database_url'] = (
+            value['infrastructure']['dstack_database_url'].replace(
+                '@db:', '@' + RDS['host'] + ':'
+            )
+            + '?ssl=verify-full'
+        )
+        return value
+
+    def test_external_dstack_dsn_is_exact_and_keeps_existing_credentials(self):
+        value = self.external()
+        api = FakeAPI(value)
+        self.assertEqual(self.load(api, database=RDS), value)
+        mounts = target.outputs(value, database=RDS)
+        self.assertEqual(
+            mounts['dstack_database_url'][0],
+            value['infrastructure']['dstack_database_url'] + '\n',
+        )
+        self.assertFalse(
+            any(
+                'admin_password' in name or name.startswith('hatchet')
+                for name in mounts
+            )
+        )
+        self.assertEqual(api.puts, [])
+        dsn = value['infrastructure']['dstack_database_url']
+        for invalid in (
+            dsn.replace(RDS['host'], 'db'),
+            dsn.replace('verify-full', 'require'),
+            dsn + '&ssl=verify-full',
+            dsn.split('?')[0],
+            dsn.replace(':5432/', ':5433/'),
+            dsn.replace('dstack_control:', 'postgres:'),
+        ):
+            changed = copy.deepcopy(value)
+            changed['infrastructure']['dstack_database_url'] = invalid
+            with (
+                self.subTest(invalid=invalid.split('@')[-1]),
+                self.assertRaises(ValueError),
+            ):
+                target.validate(changed, database=RDS)
+        with self.assertRaises(ValueError):
+            target.validate(value)
+
+    def test_external_endpoint_projection_keeps_initializer_immutable_and_rejects_rotation(
+        self,
+    ):
+        original = initialized()['infrastructure']
+        self.store.value = {
+            'schema_version': 1,
+            'source_version_id': 'original-version',
+            'client_request_token': '00000000-0000-0000-0000-000000000001',
+            'infrastructure': original,
+        }
+        before = copy.deepcopy(self.store.value)
+        value = self.external()
+        api = FakeAPI(value)
+        self.assertEqual(self.load(api, database=RDS), value)
+        self.assertEqual(self.store.value, before)
+        self.assertEqual(api.puts, [])
+        for field in ('dstack_admin_token', 'dstack_database_url'):
+            changed = copy.deepcopy(value)
+            changed['infrastructure'][field] = (
+                'changed_' + 'x' * 40
+                if field == 'dstack_admin_token'
+                else changed['infrastructure'][field].replace('p' * 48, 'q' * 48)
+            )
+            with (
+                self.subTest(field=field),
+                self.assertRaisesRegex(RuntimeError, 'identity_conflict'),
+            ):
+                self.load(FakeAPI(changed), database=RDS)
+        self.assertEqual(self.store.value, before)
+
+    def test_external_database_never_mints_missing_infrastructure(self):
+        api = FakeAPI(seed())
+        with self.assertRaisesRegex(RuntimeError, 'requires_existing_credentials'):
+            self.load(api, database=RDS, initialize=True, bootstrap_checks='unused')
+        self.assertEqual(api.puts, [])
+        self.assertIsNone(self.store.value)
+
+    def test_external_hydration_uses_one_sealed_host_and_existing_transport(self):
+        from unittest.mock import Mock
+
+        sealed = {
+            'name': 'production',
+            'database': {'mode': 'rds', 'host': RDS['host']},
+        }
+        api = Mock()
+        value = self.external()
+        with (
+            patch.object(target.os, 'geteuid', return_value=0),
+            patch.object(target, 'host_lock', contextlib.nullcontext),
+            patch.object(target.deployment_target, 'host', return_value=sealed) as host,
+            patch.object(target, 'client', return_value=api),
+            patch.object(target, 'load', return_value=value) as load,
+            patch.object(target, 'write_outputs') as write,
+            patch.object(target, 'hydration_transport', return_value='postgres-notify'),
+        ):
+            target.hydrate()
+        host.assert_called_once_with()
+        load.assert_called_once_with(
+            api,
+            initialize=False,
+            bootstrap_checks=None,
+            target='production',
+            database=RDS,
+        )
+        write.assert_called_once_with(target.outputs(value, database=RDS))
+
+    def test_dstack_entrypoint_checks_exact_endpoint_and_ca_before_server_start(self):
+        overlay = (
+            Path(__file__).resolve().parents[1] / 'deploy/dstack/platform-overlay.yaml'
+        )
+        script = yaml.safe_load(overlay.read_text())['services']['dstack']['command'][0]
+        script = script.split('# Pinned CLI', 1)[0]
+        original = self.external()['infrastructure']['dstack_database_url']
+        base_env = {
+            'INKSEQ_DATABASE_MODE': 'rds',
+            'INKSEQ_DATABASE_HOST': RDS['host'],
+            'PGSSLROOTCERT': '/etc/ssl/certs/inkseq-rds.pem',
+        }
+
+        class Stream(io.BytesIO):
+            def fileno(self):
+                return 123
+
+        cases = [
+            (original, base_env, True),
+            (original.replace(RDS['host'], 'wrong.example'), base_env, False),
+            (original.replace('verify-full', 'require'), base_env, False),
+            (original, dict(base_env, PGSSLROOTCERT=''), False),
+            (original, dict(base_env, INKSEQ_DATABASE_MODE='unknown'), False),
+            (initialized()['infrastructure']['dstack_database_url'], {}, True),
+        ]
+        for dsn, environment, accepted in cases:
+
+            def read(path, *args, **kwargs):
+                content = 't' * 48 if path.name == 'dstack_api_token' else dsn
+                return Stream(content.encode())
+
+            with (
+                self.subTest(environment=environment, accepted=accepted),
+                patch.dict(os.environ, environment, clear=True),
+                patch.object(Path, 'open', read),
+                patch.object(
+                    os,
+                    'fstat',
+                    return_value=SimpleNamespace(
+                        st_mode=stat.S_IFREG | 0o600, st_nlink=1
+                    ),
+                ),
+            ):
+                if accepted:
+                    exec(script, {})
+                    self.assertEqual(os.environ['DSTACK_DATABASE_URL'], dsn)
+                else:
+                    with self.assertRaisesRegex(
+                        SystemExit, 'dstack_protected_configuration_invalid'
+                    ):
+                        exec(script, {})
+                    self.assertNotIn('DSTACK_DATABASE_URL', os.environ)
 
     def test_postgres_layout_projects_existing_credentials_without_rotation(self):
         value = initialized()

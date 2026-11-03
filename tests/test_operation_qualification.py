@@ -90,6 +90,114 @@ class QualificationTests(Fixture, unittest.TestCase):
     def test_valid_exact_binding(self):
         self.check()
 
+    def rds(self, *, target_host=None):
+        selected = {
+            'mode': 'rds',
+            'host': 'inkseq-stage.abc123.ap-southeast-1.rds.amazonaws.com',
+        }
+        self.binding['database'] = selected
+        self.binding['containers'].pop('db')
+        self.put(
+            'deployment-target.json',
+            {
+                'version': 1,
+                'target': 'staging',
+                'instance_id': self.binding['instance_id'],
+                'database': {**selected, 'host': target_host or selected['host']},
+            },
+        )
+
+    def test_rds_qualification_requires_exact_protected_database_and_four_services(
+        self,
+    ):
+        self.rds()
+        self.check()
+        with patch.object(
+            q, 'runtime', return_value=self.binding['containers']
+        ) as runtime:
+            with (
+                patch.object(q, 'read', side_effect=lambda path: self.raw[path]),
+                patch.object(
+                    q, 'archive_image_ids', return_value={'sha256:' + 'c' * 64}
+                ),
+                patch.object(q, 'directory'),
+            ):
+                q.check(q.validate(self.binding))
+            self.assertEqual(
+                runtime.call_args.kwargs['target']['database'], self.binding['database']
+            )
+
+    def test_database_mode_or_endpoint_cannot_be_omitted_or_rebound(self):
+        self.rds(target_host='inkseq-other.abc123.ap-southeast-1.rds.amazonaws.com')
+        with self.assertRaisesRegex(q.Refused, 'database_changed'):
+            self.check()
+        self.put(
+            'deployment-target.json',
+            {
+                'version': 1,
+                'target': 'staging',
+                'instance_id': self.binding['instance_id'],
+            },
+        )
+        with self.assertRaisesRegex(q.Refused, 'database_changed'):
+            self.check()
+        self.binding.pop('database')
+        with self.assertRaisesRegex(q.Refused, 'runtime_pins_required'):
+            q.validate(self.binding)
+
+    def test_local_binding_cannot_qualify_a_protected_rds_host(self):
+        self.put(
+            'deployment-target.json',
+            {
+                'version': 1,
+                'target': 'staging',
+                'instance_id': self.binding['instance_id'],
+                'database': {
+                    'mode': 'rds',
+                    'host': 'inkseq-stage.abc123.ap-southeast-1.rds.amazonaws.com',
+                },
+            },
+        )
+        with self.assertRaisesRegex(q.Refused, 'database_changed'):
+            self.check()
+
+    def test_rds_managed_secret_selection_remains_bound_by_protected_target_hash(self):
+        self.rds()
+        path = q.ROOT / 'deployment-target.json'
+        target = json.loads(self.raw[path])
+        target['database']['admin_secret_arn'] = (
+            'arn:aws:secretsmanager:ap-southeast-1:829135631045:secret:rds!db-test-123'
+        )
+        self.put('deployment-target.json', target)
+        self.check()
+        self.assertEqual(set(self.binding['database']), {'mode', 'host'})
+        target['database']['admin_secret_arn'] += '-changed'
+        self.raw[path] = json.dumps(target).encode()
+        with self.assertRaisesRegex(q.Refused, 'marker_changed'):
+            self.check()
+
+    def test_rds_binding_rejects_local_db_pin_and_invalid_database_selection(self):
+        original = copy.deepcopy(self.binding)
+        self.rds()
+        self.binding['containers']['db'] = original['containers']['db']
+        with self.assertRaisesRegex(q.Refused, 'runtime_pins_required'):
+            q.validate(self.binding)
+        self.binding['containers'].pop('db')
+        for selected in (
+            {},
+            {'mode': 'local', 'host': 'db'},
+            {'mode': 'rds', 'host': 'unrelated.example'},
+            {
+                'mode': 'rds',
+                'host': 'inkseq-stage.abc123.ap-southeast-1.rds.amazonaws.com',
+                'ca_file': 'other',
+            },
+        ):
+            with self.subTest(selected=selected):
+                self.binding['database'] = selected
+                with self.assertRaisesRegex(q.Refused, 'database_binding_invalid'):
+                    q.validate(self.binding)
+
     def test_incomplete_and_unsafe_pins_refused(self):
         original = copy.deepcopy(self.binding)
         mutations = [
@@ -198,6 +306,27 @@ class QualificationTests(Fixture, unittest.TestCase):
             with self.assertRaisesRegex(q.Refused, 'service_not_unique'):
                 q.runtime()
 
+    def test_rds_runtime_observes_all_required_services_without_local_database(self):
+        self.rds()
+        calls = []
+        observed = self.binding['containers']
+
+        def reply(args, timeout=30):
+            calls.append(args)
+            if args[0] == 'ps':
+                return observed[args[-1].split('=')[-1]]['id'].encode()
+            return json.dumps(
+                next(row for row in observed.values() if row['id'] == args[-1])
+            ).encode()
+
+        target = json.loads(self.raw[q.ROOT / 'deployment-target.json'])
+        with patch.object(q, 'docker', side_effect=reply):
+            self.assertEqual(q.runtime(target=target), observed)
+        self.assertEqual(
+            {args[-1].split('=')[-1] for args in calls if args[0] == 'ps'},
+            set(observed),
+        )
+
 
 @unittest.skipUnless(sys.platform == 'linux', 'real Linux lock and file semantics')
 class LockTests(Fixture, unittest.TestCase):
@@ -239,6 +368,19 @@ class LockTests(Fixture, unittest.TestCase):
                 with self.assertRaisesRegex(q.Refused, 'zero_work_required'):
                     with q.locked_qualification(self.binding):
                         self.fail('write boundary reached')
+
+    def test_rds_database_query_failure_never_reaches_write_boundary(self):
+        self.binding['database'] = {
+            'mode': 'rds',
+            'host': 'inkseq-stage.abc123.ap-southeast-1.rds.amazonaws.com',
+        }
+        self.binding['containers'].pop('db')
+        self.docker.side_effect = q.Refused('qualification_docker_read_failed')
+        with self.assertRaisesRegex(q.Refused, 'docker_read_failed'):
+            with q.locked_qualification(self.binding):
+                self.fail('unobservable database reached write boundary')
+        self.assertEqual(self.docker.call_args.args[0][-1], q.QUIET)
+        self.assertIn('Settings.from_environment().database_url', q.QUIET)
 
     def test_drift_between_reads_cannot_reach_write_boundary(self):
         self.checker.side_effect = [None, q.Refused('qualification_runtime_changed')]

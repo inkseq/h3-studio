@@ -1,7 +1,9 @@
 """Finite monitor tests: no AWS, Docker, provider or business database writes."""
 
 import copy
+from contextlib import nullcontext, redirect_stdout
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -524,6 +526,151 @@ class MonitorTests(unittest.TestCase):
             self.assertFalse(
                 monitor.observe(None, runner=runner, proc=proc)[1]['processes_ok']
             )
+
+    def test_rds_observer_keeps_database_outage_actionable_without_local_db(self):
+        target = {
+            'database': {
+                'mode': 'rds',
+                'host': 'inkseq-stage.abc123.ap-southeast-1.rds.amazonaws.com',
+            }
+        }
+        identities = {
+            name: format(index + 1, '064x')
+            for index, name in enumerate(monitor.SERVICES)
+        }
+        queried = []
+        unavailable = False
+
+        def runner(args, **kwargs):
+            if args[1] == 'ps':
+                name = args[-1].split('=')[-1]
+                queried.append(name)
+                return SimpleNamespace(returncode=0, stdout=identities[name].encode())
+            if args[1] == 'inspect':
+                name = next(
+                    name
+                    for name, identity in identities.items()
+                    if identity == args[-1]
+                )
+                value = {
+                    'project': 'sixnine-platform',
+                    'service': name,
+                    'running': True,
+                    'restarting': False,
+                    'health': 'healthy',
+                }
+            elif args[-1] == monitor.HTTP_PROBE:
+                value = {
+                    'health_ok': not unavailable,
+                    'http_requests': 1,
+                    'http_5xx': 0,
+                }
+            elif args[-1] == 'studio_platform.alert_snapshot':
+                if unavailable:
+                    return SimpleNamespace(returncode=1, stdout=b'')
+                value = {
+                    'version': 1,
+                    'observed_at': 1000,
+                    'complete': True,
+                    'gpus': [],
+                    'jobs': [],
+                    'failures': [],
+                    'test_spend': None,
+                }
+            else:
+                value = {}
+            return SimpleNamespace(returncode=0, stdout=json.dumps(value).encode())
+
+        with (
+            patch.object(
+                monitor,
+                'proc_sample',
+                return_value={'total': 100, 'idle': 90, 'memory_percent': 10},
+            ),
+            patch.object(monitor, 'disk_sample', return_value=10),
+            patch.object(monitor, 'retention_service_failed', return_value=False),
+            patch.object(monitor, 'backup_observation', return_value={}),
+        ):
+            _, host, _ = monitor.observe(None, runner=runner, target=target)
+            self.assertTrue(host['processes_ok'])
+            self.assertTrue(host['health_ok'])
+            self.assertEqual(set(queried), set(monitor.SERVICES) - {'db'})
+            unavailable = True
+            snapshot, host, _ = monitor.observe(None, runner=runner, target=target)
+            self.assertIsNone(snapshot)
+            self.assertTrue(host['processes_ok'])
+            self.assertFalse(host['health_ok'])
+            state = {}
+            for now in (1000, 1060, 1120):
+                result = evaluate(
+                    snapshot, state, environment='staging', now=now, host=host
+                )
+                state = result['state']
+            self.assertIn(
+                'health_down', {notice['code'] for notice in result['notifications']}
+            )
+
+    def test_main_passes_only_protected_host_database_selection_to_observer(self):
+        target = {
+            'name': 'staging',
+            'instance_id': SETTINGS['instance_id'],
+            'database': {
+                'mode': 'rds',
+                'host': 'inkseq-stage.abc123.ap-southeast-1.rds.amazonaws.com',
+            },
+        }
+        with (
+            patch.object(monitor.deployment_target, 'host', return_value=target),
+            patch.object(monitor.os, 'geteuid', return_value=0),
+            patch.object(monitor.sys, 'argv', ['alert_monitor.py']),
+            patch.dict(
+                monitor.sys.modules,
+                {'alert_conditions': SimpleNamespace(evaluate=evaluate)},
+            ),
+            patch.object(monitor, 'read_protected', side_effect=[SETTINGS, None]),
+            patch.object(monitor, 'locked', return_value=nullcontext()),
+            patch.object(monitor, 'observe', return_value=(None, {}, None)) as observe,
+            patch.object(monitor, 'clients', return_value=(self.sns, self.cloud)),
+            patch.object(monitor, 'tick'),
+        ):
+            self.assertEqual(monitor.main(), 0)
+        self.assertEqual(observe.call_args.kwargs['target'], target)
+
+    def test_existing_app_health_probe_queries_database_and_reports_failure(self):
+        from fastapi.testclient import TestClient
+        from studio_platform.api import create_app
+        from studio_platform.settings import Settings
+        from urllib.error import HTTPError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            app = create_app(Settings(Path(temporary), auth_mode='local-test'))
+            with TestClient(app, raise_server_exceptions=False) as client:
+
+                def open_local(url, **kwargs):
+                    response = client.get(url.removeprefix('http://127.0.0.1:8845'))
+                    if response.status_code >= 400:
+                        raise HTTPError(
+                            url, response.status_code, 'synthetic failure', {}, None
+                        )
+                    stream = io.BytesIO(response.content)
+                    stream.status = response.status_code
+                    return stream
+
+                with patch('urllib.request.urlopen', side_effect=open_local):
+                    output = io.StringIO()
+                    with redirect_stdout(output):
+                        exec(monitor.HTTP_PROBE, {})
+                    self.assertTrue(json.loads(output.getvalue())['health_ok'])
+                    with patch.object(
+                        app.state.repository.engine,
+                        'connect',
+                        side_effect=RuntimeError('synthetic database outage'),
+                    ) as connect:
+                        output = io.StringIO()
+                        with redirect_stdout(output):
+                            exec(monitor.HTTP_PROBE, {})
+                        self.assertFalse(json.loads(output.getvalue())['health_ok'])
+                        self.assertGreater(connect.call_count, 0)
 
     def test_fixed_retention_unit_observation_does_not_read_logs_or_treat_unknown_as_recovery(
         self,

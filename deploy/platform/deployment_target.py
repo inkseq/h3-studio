@@ -15,6 +15,8 @@ import stat
 import subprocess
 
 ROOT = Path('/srv/sixnine')
+DATABASE_CA_FILE = '/srv/sixnine/rds/ca.pem'
+DATABASE_CONTAINER_CA = '/etc/ssl/certs/inkseq-rds.pem'
 STANDARD_RESOURCES = 'standard-4g'
 COMPACT_RESOURCES = 'staging-2g-swap2g'
 COMPACT_INSTANCE = 'i-07805df7bd6984bd9'
@@ -61,6 +63,48 @@ def profile(name='production'):
 
 def environment(values):
     return profile(values.get('INKSEQ_DEPLOYMENT_TARGET', 'production'))
+
+
+def database(values):
+    """Nonsecret render values derived from the protected host selection."""
+    mode = values.get('INKSEQ_DATABASE_MODE', 'local')
+    host = values.get('INKSEQ_DATABASE_HOST', 'db')
+    ca = values.get('INKSEQ_DATABASE_CA_FILE')
+    if mode == 'local' and host == 'db' and ca is None:
+        return {'mode': 'local', 'host': 'db', 'ca_file': None}
+    if (mode == 'rds' and isinstance(host, str)
+            and re.fullmatch(r'[a-z0-9][a-z0-9-]{0,62}\.[a-z0-9]+\.ap-southeast-1\.rds\.amazonaws\.com', host)
+            and ca == DATABASE_CA_FILE):
+        return {'mode': 'rds', 'host': host, 'ca_file': ca}
+    raise ValueError('deployment_database_invalid')
+
+
+def database_environment(sealed):
+    selected = sealed.get('database')
+    if selected is None:
+        return {}
+    if (type(selected) is not dict or not {'mode', 'host'} <= set(selected)
+            or set(selected) - {'mode', 'host', 'admin_secret_arn'} or selected['mode'] != 'rds'):
+        raise ValueError('deployment_database_invalid')
+    values = {'INKSEQ_DATABASE_MODE': 'rds', 'INKSEQ_DATABASE_HOST': selected['host'],
+              'INKSEQ_DATABASE_CA_FILE': DATABASE_CA_FILE}
+    database(values)
+    if 'admin_secret_arn' in selected:
+        arn = selected['admin_secret_arn']
+        if not isinstance(arn, str) or not re.fullmatch(
+                r'arn:aws:secretsmanager:ap-southeast-1:[0-9]{12}:secret:rds!db-[A-Za-z0-9-]+', arn):
+            raise ValueError('deployment_database_admin_secret_invalid')
+        values['INKSEQ_DATABASE_ADMIN_SECRET_ARN'] = arn
+    return values
+
+
+def database_compose_args(base, environment, *, migration=False):
+    if database(environment)['mode'] == 'local':
+        return []
+    names = ['database-rds.yaml']
+    if migration:
+        names.append('database-rds-migration.yaml')
+    return [arg for name in names for arg in ('-f', str(Path(base) / name))]
 
 
 def resources(values):
@@ -207,8 +251,8 @@ def host(root=ROOT, *, legacy=False):
         value = json.loads(raw, object_pairs_hook=unique)
     finally:
         os.close(fd)
-    if (type(value) is not dict or set(value) not in ({'version', 'target', 'instance_id'},
-            {'version', 'target', 'instance_id', 'resource_profile'})
+    if (type(value) is not dict or not {'version', 'target', 'instance_id'} <= set(value)
+            or set(value) - {'version', 'target', 'instance_id', 'resource_profile', 'database'}
             or type(value['version']) is not int or value['version'] != 1
             or not isinstance(value['instance_id'], str)
             or not re.fullmatch(r'i-[0-9a-f]{17}', value['instance_id'])):
@@ -217,6 +261,9 @@ def host(root=ROOT, *, legacy=False):
     if 'resource_profile' in value:
         selected['resource_profile'] = value['resource_profile']
         resource_environment(selected)
+    if 'database' in value:
+        selected['database'] = value['database']
+        database_environment(selected)
     return selected
 
 
@@ -274,4 +321,5 @@ def site_environment(root, values):
         'INKSEQ_PUBLIC_ORIGIN_ALIASES': selected['aliases'],
         'INKSEQ_CADDY_PROFILE': selected['caddy'],
         **resource_environment(sealed),
+        **database_environment(sealed),
     }

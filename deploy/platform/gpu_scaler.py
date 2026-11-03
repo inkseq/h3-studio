@@ -324,6 +324,8 @@ def admission_marker(commit, config, admission):
 
 
 def require_new_controller(environment):
+    release.require(release.deployment_target.database(environment)['mode'] == 'local',
+                    'legacy_gpu_scaler_requires_local_database')
     from deploy_approved import require_no_gpu_acceptance
     require_no_gpu_acceptance(release.ROOT)
     previous = release.command(['ps', '--all', '--quiet', '--filter',
@@ -448,6 +450,8 @@ def restore_cpu(directory, environment, config, *, timeout=240, clock=time.monot
 
 
 def launch(directory, environment, config, *, loader_factory=None, popen=subprocess.Popen):
+    release.require(release.deployment_target.database(environment)['mode'] == 'local',
+                    'legacy_gpu_scaler_requires_local_database')
     # Import only the trusted host-installed, dependency-light runtime loader.
     # Container never receives an AWS token/role, SDK, metadata mount or socket.
     from studio_platform.lium_runtime_aws import AwsLiumLoader

@@ -16,6 +16,7 @@ import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
 
+from deploy.platform import deployment_target
 from tools.check_migration_deploy import (
     DSTACK_IMAGE,
     PROBE,
@@ -205,6 +206,169 @@ class MigrationDeployTests(unittest.TestCase):
         mutate(value)
         with self.assertRaisesRegex(ValueError, "^" + code + "$"):
             validate(value)
+
+    def render_rds(self, *, compact=False):
+        environment = fixture_environment()
+        environment.update(
+            INKSEQ_DATABASE_MODE='rds',
+            INKSEQ_DATABASE_HOST='synthetic-db.abc123.ap-southeast-1.rds.amazonaws.com',
+            INKSEQ_DATABASE_CA_FILE='/srv/sixnine/rds/ca.pem',
+        )
+        if compact:
+            environment.update(
+                INKSEQ_DEPLOYMENT_TARGET='staging',
+                INKSEQ_PUBLIC_ORIGIN='https://staging.inkseq.com',
+                INKSEQ_PUBLIC_ORIGIN_ALIASES='',
+                INKSEQ_CADDY_PROFILE='Caddyfile.staging',
+                INKSEQ_RESOURCE_PROFILE=deployment_target.COMPACT_RESOURCES,
+                INKSEQ_CPU_CGROUP_PARENT=deployment_target.COMPACT_PARENT,
+            )
+        document = {}
+
+        def capture(command, **kwargs):
+            result = subprocess.run(command, **kwargs)
+            if result.returncode == 0:
+                document.update(json.loads(result.stdout))
+            return result
+
+        receipt = check(
+            ROOT / 'deploy/platform/compose.yaml',
+            ROOT / 'deploy/dstack/platform-overlay.yaml',
+            environment=environment,
+            runner=capture,
+            host_memory_mib=1984 if compact else 3840,
+        )
+        return document, environment, receipt
+
+    def test_external_database_real_compose_has_only_current_consumers_and_compact_caps(
+        self,
+    ):
+        for compact in (False, True):
+            with self.subTest(compact=compact):
+                document, environment, receipt = self.render_rds(compact=compact)
+                self.assertEqual(
+                    set(document['services']), {'app', 'caddy', 'dstack', 'controller'}
+                )
+                self.assertNotIn('db_admin_password', document['secrets'])
+                self.assertEqual(receipt['service_memory_cap_mib'], 2400)
+                for name in ('app', 'dstack', 'controller'):
+                    self.assertEqual(
+                        document['services'][name]['environment']['PGSSLROOTCERT'],
+                        deployment_target.DATABASE_CONTAINER_CA,
+                    )
+                with self.assertRaisesRegex(ValueError, 'migration_services_missing'):
+                    validate(
+                        document,
+                        target='staging' if compact else 'production',
+                        resource_environment={
+                            key: value
+                            for key, value in environment.items()
+                            if not key.startswith('INKSEQ_DATABASE_')
+                        },
+                    )
+
+    def test_external_database_rejects_split_host_ca_local_secrets_and_legacy_layout(
+        self,
+    ):
+        document, environment, _ = self.render_rds()
+        cases = (
+            (
+                lambda d: d['services'].update(
+                    db=copy.deepcopy(self.document['services']['db'])
+                ),
+                'migration_services_missing',
+            ),
+            (
+                lambda d: d['secrets'].update(
+                    db_admin_password={'file': '/never-opened-fixture'}
+                ),
+                'migration_external_database_admin_secret',
+            ),
+            (
+                lambda d: d['services']['app'].update(depends_on={'db': {}}),
+                'migration_external_database_local_dependency',
+            ),
+            (
+                lambda d: d['services']['dstack']['environment'].update(
+                    INKSEQ_DATABASE_HOST='other.abc123.ap-southeast-1.rds.amazonaws.com'
+                ),
+                'migration_external_database_dstack_host_split',
+            ),
+            (
+                lambda d: d.pop('x-sixnine-dispatch-layout'),
+                'migration_external_database_layout_invalid',
+            ),
+        )
+        for mutate, code in cases:
+            broken = copy.deepcopy(document)
+            mutate(broken)
+            with self.assertRaisesRegex(ValueError, '^' + code + '$'):
+                validate(broken, resource_environment=environment)
+        for name in ('app', 'dstack', 'controller'):
+            for setting in ('environment', 'source', 'read_only', 'bind'):
+                with self.subTest(service=name, setting=setting):
+                    broken = copy.deepcopy(document)
+                    service = broken['services'][name]
+                    if setting == 'environment':
+                        service['environment']['PGSSLROOTCERT'] = '/tmp/untrusted.pem'
+                    else:
+                        mount = next(
+                            item
+                            for item in service['volumes']
+                            if item['target'] == deployment_target.DATABASE_CONTAINER_CA
+                        )
+                        mount[setting] = {
+                            'source': '/tmp/untrusted.pem',
+                            'read_only': False,
+                            'bind': {'create_host_path': True},
+                        }[setting]
+                    with self.assertRaisesRegex(
+                        ValueError, '^migration_external_database_ca_invalid$'
+                    ):
+                        validate(broken, resource_environment=environment)
+
+    def test_external_database_config_and_probe_use_identical_final_overlays(self):
+        document, environment, _ = self.render_rds()
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append(command)
+            return SimpleNamespace(
+                returncode=0,
+                stderr='',
+                stdout=(
+                    json.dumps(document)
+                    if 'config' in command
+                    else 'migration_private_probe_passed\n'
+                ),
+            )
+
+        check(
+            ROOT / 'deploy/platform/compose.yaml',
+            ROOT / 'deploy/dstack/platform-overlay.yaml',
+            environment=environment,
+            runner=runner,
+            probe=True,
+        )
+        self.assertEqual(len(calls), 2)
+        prefix = calls[0][:-3]
+        self.assertEqual(calls[1][:-6], prefix)
+        self.assertEqual(
+            prefix[-4:],
+            [
+                '-f',
+                str(ROOT / 'deploy/platform/database-rds.yaml'),
+                '-f',
+                str(ROOT / 'deploy/platform/database-rds-migration.yaml'),
+            ],
+        )
+        self.assertFalse(
+            any(
+                action in command
+                for command in calls
+                for action in ('up', 'pull', 'stop', 'rm', 'create')
+            )
+        )
 
     def test_current_and_retained_stock_images_are_closed_and_explicit(self):
         from tools.check_migration_deploy import LEGACY_DSTACK_IMAGE

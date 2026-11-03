@@ -17,6 +17,11 @@ import stat
 import subprocess
 import sys
 
+try:
+    import deployment_target
+except ImportError:
+    from deploy.platform import deployment_target
+
 ROOT = Path('/srv/sixnine')
 HELPERS = Path('/opt/inkseq-release-staging-v1')
 INSTANCE = Path('/var/lib/cloud/data/instance-id')
@@ -65,10 +70,27 @@ def file_map(value):
             and all(relative(k) and matches(v, '[0-9a-f]{64}') for k, v in value.items()))
 
 
+def selected_database(target):
+    try:
+        return deployment_target.database(deployment_target.database_environment(target))
+    except (ValueError, TypeError):
+        raise Refused('qualification_database_binding_invalid') from None
+
+
+def services(target):
+    return SERVICES if selected_database(target)['mode'] == 'local' else SERVICES - {'db'}
+
+
 def validate(binding):
-    need(type(binding) is dict and set(binding) == {
+    fields = {
         'version', 'environment', 'instance_id', 'current', 'previous',
-        'helpers', 'files', 'containers', 'absent'}, 'qualification_binding_invalid')
+        'helpers', 'files', 'containers', 'absent'}
+    need(type(binding) is dict and fields <= set(binding)
+         and not set(binding) - fields - {'database'}, 'qualification_binding_invalid')
+    if 'database' in binding:
+        need(type(binding['database']) is dict and set(binding['database']) == {'mode', 'host'},
+             'qualification_database_binding_invalid')
+    required_services = services(binding)
     need(type(binding['version']) is int and binding['version'] == 1
          and binding['environment'] in HOSTS
          and binding['instance_id'] == HOSTS[binding['environment']],
@@ -91,14 +113,14 @@ def validate(binding):
          and len(set(binding['absent'])) == len(binding['absent'])
          and not set(binding['absent']) & set(binding['files']), 'qualification_absence_invalid')
     rows = binding['containers']
-    need(type(rows) is dict and set(rows) == SERVICES, 'qualification_runtime_pins_required')
+    need(type(rows) is dict and set(rows) == required_services, 'qualification_runtime_pins_required')
     for row in rows.values():
         need(type(row) is dict and set(row) == {'id', 'image', 'started', 'running'}
              and matches(row['id'], '[0-9a-f]{64}')
              and matches(row['image'], 'sha256:[0-9a-f]{64}')
              and type(row['started']) is str and bool(row['started'])
              and row['running'] is True, 'qualification_runtime_pin_invalid')
-    need(len({row['id'] for row in rows.values()}) == len(SERVICES),
+    need(len({row['id'] for row in rows.values()}) == len(required_services),
          'qualification_runtime_identity_repeated')
     return binding
 
@@ -149,9 +171,9 @@ def docker(args, timeout=30):
     return process.stdout
 
 
-def runtime():
+def runtime(*, target=None):
     result = {}
-    for service in sorted(SERVICES):
+    for service in sorted(services(target or {})):
         ids = docker(['ps', '-q', '--no-trunc', '--filter',
                       'label=com.docker.compose.project=sixnine-platform', '--filter',
                       'label=com.docker.compose.service=' + service]).decode().split()
@@ -204,6 +226,7 @@ def check(binding):
     target = json.loads(files['deployment-target.json'])
     need(target.get('target') == binding['environment']
          and target.get('instance_id') == binding['instance_id'], 'qualification_target_changed')
+    need(selected_database(target) == selected_database(binding), 'qualification_database_changed')
     for commit in (binding['current'], binding['previous']):
         for manifest, approval in (
             (f'releases/{commit}/release-manifest.json', f'approved-releases/{commit}.sha256'),
@@ -223,7 +246,7 @@ def check(binding):
         directory(path.parent)
         for parent in path.parents:
             directory(parent)
-    need(runtime() == binding['containers'], 'qualification_runtime_changed')
+    need(runtime(target=target) == binding['containers'], 'qualification_runtime_changed')
 
 
 @contextmanager

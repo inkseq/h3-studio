@@ -8,7 +8,7 @@ import secrets
 import stat
 import sys
 import uuid
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlsplit
 
 import boto3
 from botocore.config import Config
@@ -30,22 +30,25 @@ def client():
         config=Config(connect_timeout=5, read_timeout=20, retries={"mode": "standard", "max_attempts": 3}))
 
 
-def value(api, name, initialize=False, *, target='production'):
+def value(api, name, initialize=False, *, target='production', database=None):
     prefix = deployment_target.profile(target)['secret_root']
-    database, accounts = prefix+'/database', prefix+'/bootstrap-accounts'
-    if name not in {database, accounts}:
+    selected = database or deployment_target.database({})
+    database_secret, accounts = prefix+'/database', prefix+'/bootstrap-accounts'
+    if name not in {database_secret, accounts}:
         raise RuntimeError('Secret source differs from the protected deployment target')
     try:
         result = json.loads(api.get_secret_value(SecretId=name)["SecretString"])
     except ClientError as error:
         if error.response["Error"]["Code"] != "ResourceNotFoundException" or not initialize:
             raise RuntimeError("Required managed secret is unavailable") from None
+        if selected['mode'] == 'rds':
+            raise RuntimeError('External database requires existing managed credentials') from None
         # The operator creates the named secret container first. Missing versions
         # may be initialized only before any production database was created.
         api.describe_secret(SecretId=name)
         if Path("/srv/sixnine/postgres/pgdata/PG_VERSION").exists():
             raise RuntimeError("Existing database requires recovery of original secrets")
-        if name == database:
+        if name == database_secret:
             result = {"db_admin_password": secrets.token_urlsafe(48),
                 "app_database_url": "postgresql+psycopg://sixnine_app:"+secrets.token_urlsafe(48)+"@db:5432/sixnine"}
         elif name == accounts:
@@ -54,16 +57,20 @@ def value(api, name, initialize=False, *, target='production'):
             raise RuntimeError("Unknown secret source")
         api.put_secret_value(SecretId=name, ClientRequestToken=str(uuid.uuid4()),
             SecretString=json.dumps(result))
-    expected = {"db_admin_password", "app_database_url"} if name == database else {"superdan", "supervan"}
+    expected = {"db_admin_password", "app_database_url"} if name == database_secret else {"superdan", "supervan"}
     if not isinstance(result, dict) or set(result) != expected or any(
             not isinstance(v, str) or not 32 <= len(v) <= 512 or any(c in v for c in "\n\r\0") for v in result.values()):
         raise RuntimeError("Managed secret structure is invalid")
-    if name == database:
+    if name == database_secret:
         parsed = urlsplit(result['app_database_url'])
-        if (parsed.scheme != 'postgresql+psycopg' or parsed.hostname != 'db'
+        query = parse_qsl(parsed.query, keep_blank_values=True)
+        expected_query = ({'sslmode': 'verify-full', 'sslrootcert': '/etc/ssl/certs/inkseq-rds.pem'}
+                          if selected['mode'] == 'rds' else {})
+        if (parsed.scheme != 'postgresql+psycopg' or parsed.hostname != selected['host']
                 or parsed.port != 5432 or parsed.path != '/sixnine'
                 or parsed.username != 'sixnine_app' or not parsed.password
-                or parsed.query or parsed.fragment):
+                or selected['mode'] == 'local' and parsed.query
+                or len(query) != len(expected_query) or dict(query) != expected_query or parsed.fragment):
             raise RuntimeError('Managed database endpoint is invalid')
     return result
 
@@ -286,9 +293,11 @@ def hydrate(initialize=False):
     with Path('/opt/sixnine-release/secret-hydration.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         api = client()
-        target = deployment_target.host()['name']
+        sealed = deployment_target.host()
+        target = sealed['name']
+        selected = deployment_target.database(deployment_target.database_environment(sealed))
         prefix = deployment_target.profile(target)['secret_root']
-        database = value(api, prefix+'/database', initialize, target=target)
+        database = value(api, prefix+'/database', initialize, target=target, database=selected)
         if initialize:
             value(api, prefix+'/bootstrap-accounts', True, target=target)
         for name, content in database.items():

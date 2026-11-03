@@ -18,6 +18,7 @@ import sys
 import tempfile
 import tarfile
 import time
+from contextlib import contextmanager
 
 from check_config import validate
 try:
@@ -29,6 +30,7 @@ ROOT = Path("/srv/sixnine")
 DOCKER = "/usr/bin/docker"
 FILES = {"image.tar.gz", "compose.yaml", "Caddyfile", "init_database.py", "check_config.py"}
 TARGET_FILES = FILES | {'Caddyfile.staging', 'deployment_target.py'}
+RDS_FILES = TARGET_FILES | {'database-rds.yaml', 'database-rds-migration.yaml'}
 ENV_FIELDS = {"SIXNINE_IMAGE", "SIXNINE_POSTGRES_IMAGE", "SIXNINE_CADDY_IMAGE",
               "SIXNINE_DB_ADMIN_SECRET_FILE", "SIXNINE_APP_DSN_SECRET_FILE"}
 OPTIONAL_ENV_FIELDS = {"INKSEQ_LEGACY_REDIRECT", 'INKSEQ_DEPLOYMENT_TARGET', 'INKSEQ_SENTRY_DSN'}
@@ -75,7 +77,7 @@ def manifest(directory, commit):
             {"commit", "image", "image_id", "files", "contracts"})
             and value["commit"] == commit and value["image"] == "sixnine-platform:"+commit
             and isinstance(value["image_id"], str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_id"])
-            and isinstance(value["files"], dict) and set(value["files"]) in (FILES, TARGET_FILES), "invalid_release_manifest")
+            and isinstance(value["files"], dict) and set(value["files"]) in (FILES, TARGET_FILES, RDS_FILES), "invalid_release_manifest")
     if "contracts" in value:
         validate_contracts(value["contracts"])
     for name, expected in value["files"].items():
@@ -289,8 +291,61 @@ def command(arguments, *, environment, timeout=180, input_data=None):
 
 
 def compose(directory, environment, *arguments, timeout=180):
-    return command(["compose", "--project-directory", str(directory), "-f", str(directory / "compose.yaml"), *arguments],
+    return command(["compose", "--project-directory", str(directory), "-f", str(directory / "compose.yaml"),
+                   *deployment_target.database_compose_args(directory, environment), *arguments],
                    environment=environment, timeout=timeout)
+
+
+@contextmanager
+def database_admin_file(environment):
+    """Resolve the rotating RDS master only inside the host management process."""
+    import boto3
+    from botocore.config import Config
+    arn = environment.get('INKSEQ_DATABASE_ADMIN_SECRET_ARN', '')
+    require(bool(re.fullmatch(r'arn:aws:secretsmanager:ap-southeast-1:[0-9]{12}:secret:rds!db-[A-Za-z0-9-]+', arn)),
+            'database_admin_secret_required')
+    api = boto3.client('secretsmanager', region_name='ap-southeast-1',
+        endpoint_url='https://secretsmanager.ap-southeast-1.amazonaws.com',
+        config=Config(connect_timeout=5, read_timeout=10, retries={'mode': 'standard', 'total_max_attempts': 1}))
+    try:
+        value = json.loads(api.get_secret_value(SecretId=arn)['SecretString'])
+        password = value.get('password')
+        require(value.get('username') == 'inkseq_operator' and isinstance(password, str)
+            and 8 <= len(password) <= 256 and not any(c in password for c in '\r\n\x00'),
+            'database_admin_secret_invalid')
+    except Exception:
+        raise ReleaseError('database_admin_secret_unavailable') from None
+    with tempfile.TemporaryDirectory(prefix='rds-admin-') as folder:
+        path = Path(folder) / 'password'
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o400)
+        with os.fdopen(fd, 'w') as stream:
+            stream.write(password)
+        del password, value
+        yield path
+
+
+def _database_query_command(environment, selected, password, sql, timeout):
+    return command(['run', '--rm', '-i', '--pull', 'never', '--network', 'host',
+        '--user', '0:0', '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges:true',
+        '--pids-limit', '32', '--memory', '128m', '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m',
+        '--mount', f'type=bind,src={password},dst=/run/secrets/rds_admin_password,readonly',
+        '--mount', f'type=bind,src={selected["ca_file"]},dst={deployment_target.DATABASE_CONTAINER_CA},readonly',
+        '--env', 'PGHOST='+selected['host'], '--env', 'PGPORT=5432', '--env', 'PGUSER=inkseq_operator',
+        '--env', 'PGDATABASE=sixnine', '--env', 'PGSSLMODE=verify-full',
+        '--env', 'PGSSLROOTCERT='+deployment_target.DATABASE_CONTAINER_CA,
+        '--env', 'PGCONNECT_TIMEOUT=10', '--env', 'PGOPTIONS=-c statement_timeout=20000 -c lock_timeout=3000',
+        '--entrypoint', 'sh', environment['SIXNINE_POSTGRES_IMAGE'], '-ec',
+        'export PGPASSWORD="$(cat /run/secrets/rds_admin_password)"; exec psql -X -At -v ON_ERROR_STOP=1 -f -'],
+        environment=environment, timeout=timeout, input_data=sql.encode('utf-8'))
+
+
+def database_query(directory, environment, sql, *, timeout=30):
+    """Short-lived administrative client; no credential in argv or Docker Env."""
+    selected = deployment_target.database(environment)
+    require(selected['mode'] == 'rds', 'external_database_required')
+    regular(Path(selected['ca_file']), root_owned=True, maximum=1024**2)
+    with database_admin_file(environment) as password:
+        return _database_query_command(environment, selected, password, sql, timeout)
 
 
 def approved_configuration(directory, environment):
@@ -304,7 +359,8 @@ def approved_configuration(directory, environment):
         require(config["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
                 == environment.get("INKSEQ_LEGACY_REDIRECT", "0"), "domain_redirect_phase_differs_from_site_config")
     require(config["services"]["app"]["image"] == environment["SIXNINE_IMAGE"]
-            and config["services"]["db"]["image"] == environment["SIXNINE_POSTGRES_IMAGE"]
+            and (deployment_target.database(environment)['mode'] == 'rds'
+                 or config["services"]["db"]["image"] == environment["SIXNINE_POSTGRES_IMAGE"])
             and config["services"]["caddy"]["image"] == environment["SIXNINE_CADDY_IMAGE"],
             "release_images_differ_from_trusted_site_config")
     return config
@@ -615,7 +671,8 @@ def application_compose(directory, environment, *arguments, gpu_context=None, ti
     if gpu_context is None or gpu_context["admission"] == "closed":
         return compose(directory, environment, *arguments, timeout=timeout)
     return command(["compose", "--project-directory", str(directory), "-f", str(directory / "compose.yaml"),
-        "-f", str(gpu_context["overlay_path"]), *arguments], environment=environment, timeout=timeout)
+        "-f", str(gpu_context["overlay_path"]), *deployment_target.database_compose_args(directory, environment),
+        *arguments], environment=environment, timeout=timeout)
 
 
 def approved_application_configuration(directory, environment, *, gpu_context=None):
@@ -626,8 +683,10 @@ def approved_application_configuration(directory, environment, *, gpu_context=No
     original = json.loads(application_compose(directory, environment, "config", "--format", "json", gpu_context=gpu_context))
     if gpu_context.get('kind')=='operator':
         import operator_capacity as operator
-        operator.validate_app_rendered(original,directory,version,environment['SIXNINE_IMAGE'],gpu_context['app_overlay'])
-        require(original['services']['db']['image']==environment['SIXNINE_POSTGRES_IMAGE']
+        operator.validate_app_rendered(original,directory,version,environment['SIXNINE_IMAGE'],gpu_context['app_overlay'],
+                                      resource_environment=environment)
+        require((deployment_target.database(environment)['mode'] == 'rds'
+                 or original['services']['db']['image']==environment['SIXNINE_POSTGRES_IMAGE'])
             and original['services']['caddy']['image']==environment['SIXNINE_CADDY_IMAGE'],
             'release_images_differ_from_trusted_site_config')
         return original
@@ -648,9 +707,10 @@ def approved_application_configuration(directory, environment, *, gpu_context=No
     require(app.get("healthcheck", {}).get("test") == expected["healthcheck"]["test"], "gpu_app_health_invalid")
     app["healthcheck"]["test"][3] = "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and not h['generation_enabled'] and not h['render_enabled'] and not h['cloud_creation_enabled'] and h['execution_backend']=='disabled'"
     validate(config, deployment_directory=directory, compose_version=version,
-        target=deployment_target.environment(environment)['name'])
+        target=deployment_target.environment(environment)['name'], resource_environment=environment)
     require(app["image"] == environment["SIXNINE_IMAGE"]
-        and config["services"]["db"]["image"] == environment["SIXNINE_POSTGRES_IMAGE"]
+        and (deployment_target.database(environment)['mode'] == 'rds'
+             or config["services"]["db"]["image"] == environment["SIXNINE_POSTGRES_IMAGE"])
         and config["services"]["caddy"]["image"] == environment["SIXNINE_CADDY_IMAGE"], "release_images_differ_from_trusted_site_config")
     return original
 
@@ -768,7 +828,7 @@ def prepare_bundle(root, commit):
         # Only our fresh, flat temporary directory; never traverse a release,
         # persistent data, incoming upload or a symbolic link for cleanup.
         if staging.exists():
-            for name in TARGET_FILES | {"release-manifest.json"}:
+            for name in RDS_FILES | {"release-manifest.json"}:
                 (staging / name).unlink(missing_ok=True)
             staging.rmdir()
     return target
@@ -913,7 +973,7 @@ def apply_locked(root, commit):
                       "status": "deploying", "updated_at": time.time()})
     try:
         expected = load_approved_image(root, directory, commit, environment)
-        if gpu_context is None:
+        if gpu_context is None and deployment_target.database(environment)['mode'] == 'local':
             compose(directory, environment, "up", "-d", "db")
             compose(directory, environment, "run", "--rm", "db-init")
         retire_frontend_pointer(root)

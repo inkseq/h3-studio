@@ -55,8 +55,9 @@ def bootstrap_locked(root, commit):
              'status': 'prepared_needs_accounts', 'updated_at': time.time()}
     release.write_state(root, state)
     release.load_approved_image(root, directory, commit, environment)
-    release.compose(directory, environment, 'up', '-d', 'db')
-    release.compose(directory, environment, 'run', '--rm', 'db-init')
+    if deployment_target.database(environment)['mode'] == 'local':
+        release.compose(directory, environment, 'up', '-d', 'db')
+        release.compose(directory, environment, 'run', '--rm', 'db-init')
     release.compose(directory, environment, 'run', '--rm', '--no-deps', '-T', 'app',
                     'python', '-m', 'studio_platform.manage', 'init-db')
     status = bootstrap.management_status(directory, environment)
@@ -68,6 +69,7 @@ def bootstrap_locked(root, commit):
         payload = json.dumps({name: credentials[name] for name in sorted(missing)}).encode()
         try:
             release.command(['compose', '--project-directory', str(directory), '-f', str(directory/'compose.yaml'),
+                *deployment_target.database_compose_args(directory, environment),
                 'run', '--rm', '--no-deps', '-T', 'app', 'python', '-c', ACCOUNT_CODE],
                 environment=environment, input_data=payload, timeout=180)
         finally:

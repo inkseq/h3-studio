@@ -119,6 +119,8 @@ def compose(directory, environment, *arguments, timeout=180):
 
 
 def require_new_acceptance(environment):
+    release.require(release.deployment_target.database(environment)['mode'] == 'local',
+                    'legacy_gpu_acceptance_requires_local_database')
     # Compose up may recreate a running service and eventually force-kill it.
     # Even a repeated start after a lost response must reconcile explicitly;
     # this operator must never replace a previous acceptance worker implicitly.

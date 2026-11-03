@@ -29,21 +29,53 @@ def require(condition, message):
         raise ConfigurationError(message)
 
 
+def _validate_mounts(services, expected_mounts, compose_version):
+    for service_name, expected in expected_mounts.items():
+        if service_name not in services:
+            continue
+        mounts = services[service_name].get("volumes", [])
+        require(isinstance(mounts, list), "Mounts must be a rendered list")
+        normalized = []
+        for item in mounts:
+            require(isinstance(item, dict), "Mount must be a rendered object")
+            item = dict(item)
+            if item.get("type") == "bind":
+                options = item.get("bind")
+                # Compose 2.38.2 omits explicit false. Its version must come
+                # from the trusted installed binary, never the release bundle.
+                if compose_version in {"2.38.2", "v2.38.2"} and options == {}:
+                    options = {"create_host_path": False}
+                require(
+                    isinstance(options, dict)
+                    and options.get("create_host_path") is False,
+                    "Bind must explicitly disable host path creation for this Compose version",
+                )
+                item["bind"] = options
+            normalized.append(item)
+        require(
+            normalized == expected,
+            "Mount set/source/options differ from the reviewed trusted deployment",
+        )
+
+
 def validate(config, *, deployment_directory=None, compose_version=None, target='production', resource_environment=None):
     selected = deployment_target.profile(target)
     resources = deployment_target.resources({**(resource_environment or {}), 'INKSEQ_DEPLOYMENT_TARGET': target})
+    database = deployment_target.database(resource_environment or {})
+    external_database = database['mode'] == 'rds'
     require(compose_version is None or isinstance(compose_version, str), "Compose version must be trusted binary output")
     deployment = Path(deployment_directory) if deployment_directory is not None else Path(__file__).resolve().parent
     require(deployment.is_absolute(), "Deployment directory must be an explicit absolute trusted path")
     require(config.get("name") == "sixnine-platform", "Compose project identity differs")
     services = config.get("services", {})
-    require(set(services) == {"app", "db", "db-init", "caddy"}, "Unexpected service set")
+    require(set(services) == ({"app", "caddy"} if external_database else {"app", "db", "db-init", "caddy"}), "Unexpected service set")
     allowed_env = {
         "app": {"SIXNINE_DATA", "SIXNINE_DATABASE_URL_FILE", "SIXNINE_PUBLIC_ORIGIN", "PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES", "SIXNINE_AUTH_MODE", "INKSEQ_BROWSER_SESSION_SECONDS", "INKSEQ_DEPLOYMENT_TARGET", "INKSEQ_SENTRY_DSN",
                 "SIXNINE_GENERATION_ENABLED", "SIXNINE_RENDER_ENABLED", "SIXNINE_EXECUTION_BACKEND", "SIXNINE_CLOUD_CREATION_ENABLED",
                 "SIXNINE_STORAGE_PROVIDER", "SIXNINE_FRONTEND_DIR", "SIXNINE_FRONTEND_RELEASE_DIR", "SIXNINE_TITLE_CONFIG_FILE"},
         "db": {"POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD_FILE", "POSTGRES_INITDB_ARGS",
                "POSTGRES_HOST_AUTH_METHOD", "PGDATA"}, "db-init": set(), "caddy": {"INKSEQ_LEGACY_REDIRECT"}}
+    allowed_env['app'] |= {'PGSSLROOTCERT'} if external_database else set()
     allowed_caps = {"app": set(), "db-init": set(), "caddy": {"NET_BIND_SERVICE"},
                     "db": {"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETGID", "SETUID"}}
     common_fields = {"image", "pull_policy", "restart", "read_only", "cap_drop", "cap_add", "security_opt",
@@ -81,17 +113,22 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
             require(field not in {"POSTGRES_PASSWORD", "PGPASSWORD", "SIXNINE_DATABASE_URL", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"},
                     "A credential value was configured in the container environment")
         require(name == "caddy" or not service.get("ports"), "Only Caddy may publish ports")
-    app, db, init, caddy = (services[name] for name in ("app", "db", "db-init", "caddy"))
-    require(app["image"] == init["image"], "Bootstrap and app must use the same tested image")
+    app, caddy = (services[name] for name in ("app", "caddy"))
+    db, init = services.get('db'), services.get('db-init')
+    if not external_database:
+        require(app["image"] == init["image"], "Bootstrap and app must use the same tested image")
+        require(init.get("user") == "0:0" and db.get("user") is None, "Service user policy differs")
+        require(str(db.get("shm_size")) == str(256*1024**2), "Database shared-memory bound differs")
     require(app.get("user") == "10001:10001", "App must run as its non-root identity")
-    require(init.get("user") == "0:0" and db.get("user") is None and caddy.get("user") is None, "Service user policy differs")
+    require(caddy.get("user") is None, "Service user policy differs")
     require(app.get("cpus") == 2 and app.get("init") is True, "App CPU/process supervision differs")
-    require(str(db.get("shm_size")) == str(256*1024**2), "Database shared-memory bound differs")
     required = {"SIXNINE_GENERATION_ENABLED": "0", "SIXNINE_RENDER_ENABLED": "0", "SIXNINE_EXECUTION_BACKEND": "disabled",
                 "SIXNINE_CLOUD_CREATION_ENABLED": "0", "SIXNINE_AUTH_MODE": "password",
                 "SIXNINE_STORAGE_PROVIDER": "local",
                 "SIXNINE_DATABASE_URL_FILE": "/run/secrets/app_database_url", "SIXNINE_DATA": "/data",
                 "SIXNINE_FRONTEND_DIR": "/app/yingxu-dist"}
+    if external_database:
+        required['PGSSLROOTCERT'] = deployment_target.DATABASE_CONTAINER_CA
     # Accept retained old release bytes or this exact dual-origin successor,
     # never an arbitrary public host, alias list or mixed legacy/new setting.
     if "PUBLIC_ORIGIN" in app.get("environment", {}):
@@ -134,14 +171,14 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
                 "Network driver/external configuration differs")
     require(networks.get("web", {}).get("internal") is True and networks.get("database", {}).get("internal") is True,
             "App/database networks must be private")
-    require(set(app.get("networks", {})) == ({"web", "database", "edge"} if titles else {"web", "database"}),
+    require(set(app.get("networks", {})) == ({"web", "database", "edge"} if titles or external_database else {"web", "database"}),
             "App egress must match the reviewed Google title credential configuration")
-    require(set(db.get("networks", {})) == {"database"} and set(init.get("networks", {})) == {"database"},
-            "DB/bootstrap must only reach the private database network")
+    if not external_database:
+        require(set(db.get("networks", {})) == {"database"} and set(init.get("networks", {})) == {"database"},
+                "DB/bootstrap must only reach the private database network")
     require(set(caddy.get("networks", {})) == {"web", "edge"}, "Proxy network separation differs")
-    require(all(not value for value in app.get("networks", {}).values())
-            and all(not value for value in db.get("networks", {}).values())
-            and all(not value for value in init.get("networks", {}).values()), "Backend network attachments differ")
+    require(all(not value for name, service in services.items() if name != 'caddy'
+                for value in service.get('networks', {}).values()), "Backend network attachments differ")
     require(caddy["networks"] == {"web": {"ipv4_address": "172.29.69.2"}, "edge": {}}, "Proxy attachment options differ")
     require(caddy["networks"]["web"].get("ipv4_address") == "172.29.69.2", "Proxy address differs from trusted identity")
     require(networks["web"].get("ipam", {}).get("config") == [{"subnet": "172.29.69.0/28", "ip_range": "172.29.69.8/29"}],
@@ -153,10 +190,10 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
     require(command == ["python", "-m", "uvicorn", "platform_app:app", "--host", "0.0.0.0", "--port", "8845",
             "--workers", "1", "--no-access-log", "--proxy-headers", "--forwarded-allow-ips", "172.29.69.2"],
             "App process/proxy trust differs; ingress limits require a single Uvicorn worker")
-    require(init.get("command") == ["python", "/bootstrap/init_database.py"] and caddy.get("command") is None,
+    require((external_database or init.get("command") == ["python", "/bootstrap/init_database.py"]) and caddy.get("command") is None,
             "Bootstrap/proxy command differs")
-    require(not init.get("healthcheck") and not caddy.get("healthcheck"), "Unexpected container health command")
-    require(db.get("environment") == {"POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres",
+    require((external_database or not init.get("healthcheck")) and not caddy.get("healthcheck"), "Unexpected container health command")
+    require(external_database or db.get("environment") == {"POSTGRES_USER": "postgres", "POSTGRES_DB": "postgres",
             "POSTGRES_PASSWORD_FILE": "/run/secrets/db_admin_password", "POSTGRES_HOST_AUTH_METHOD": "scram-sha-256",
             "POSTGRES_INITDB_ARGS": "--auth-host=scram-sha-256 --auth-local=peer",
             "PGDATA": "/var/lib/postgresql/data/pgdata"}, "PostgreSQL authentication/data policy differs")
@@ -170,30 +207,36 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
         expected_db_command.extend(["-c", setting])
     # Retain the exact old tuple for reviewed rollback; never admit a partial or
     # operator-selected timeout override. New bundles carry the complete tuple.
-    require(db.get("command") in (expected_db_command, legacy_db_command),
+    require(external_database or db.get("command") in (expected_db_command, legacy_db_command),
             "PostgreSQL security/logging/connection arguments differ")
     def secret_names(service):
         return {item["source"] if isinstance(item, dict) else item for item in service.get("secrets", [])}
-    require(secret_names(app) == ({"app_database_url", "google_titles"} if titles else {"app_database_url"}) and secret_names(db) == {"db_admin_password"}
-            and secret_names(init) == {"db_admin_password", "app_database_url"} and not secret_names(caddy),
+    app_secrets = {"app_database_url", "google_titles"} if titles else {"app_database_url"}
+    require(secret_names(app) == app_secrets and not secret_names(caddy)
+            and (external_database or secret_names(db) == {"db_admin_password"}
+                 and secret_names(init) == {"db_admin_password", "app_database_url"}),
             "Secret access is broader than required")
-    require(set(config.get("secrets", {})) == ({"db_admin_password", "app_database_url", "google_titles"} if titles else {"db_admin_password", "app_database_url"}), "Unexpected secret references")
+    require(set(config.get("secrets", {})) == app_secrets | (set() if external_database else {"db_admin_password"}), "Unexpected secret references")
     for name, item in config.get("secrets", {}).items():
         require(set(item) == {"name", "file"} and item.get("name") == "sixnine-platform_"+name
                 and item.get("file") == "/run/sixnine-secrets/" + name,
                 "Production secret sources must be explicit protected /run files")
-    for service in (app, db, init):
+    for service in services.values():
         for item in service.get("secrets", []):
             require(isinstance(item, dict) and set(item) == {"source", "target"}
                     and item["target"] == "/run/secrets/"+item["source"], "Secret mount target/options differ")
     healthy = {"condition": "service_healthy", "required": True}
-    require(app.get("depends_on") == {"db": healthy, "db-init": {"condition": "service_completed_successfully", "required": True}}
-            and init.get("depends_on") == {"db": healthy} and caddy.get("depends_on") == {"app": healthy}
-            and not db.get("depends_on"), "Service readiness dependency policy differs")
+    require(caddy.get("depends_on") == {"app": healthy}, "Service readiness dependency policy differs")
+    if external_database:
+        require(not app.get('depends_on'), "External database must not depend on a local database service")
+    else:
+        require(app.get("depends_on") == {"db": healthy, "db-init": {"condition": "service_completed_successfully", "required": True}}
+                and init.get("depends_on") == {"db": healthy} and not db.get("depends_on"),
+                "Service readiness dependency policy differs")
     app_health = "import json,urllib.request; h=json.load(urllib.request.urlopen('http://127.0.0.1:8845/healthz',timeout=5)); assert h['auth_ready'] and not h['generation_enabled'] and not h['render_enabled'] and not h['cloud_creation_enabled'] and h['execution_backend']=='disabled'"
     require(app.get("healthcheck") == {"test": ["CMD", "python", "-c", app_health], "interval": "15s", "timeout": "6s",
                                        "retries": 4, "start_period": "30s"}, "App health command/timing differs")
-    require(db.get("healthcheck") == {"test": ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"],
+    require(external_database or db.get("healthcheck") == {"test": ["CMD", "pg_isready", "-U", "postgres", "-d", "postgres"],
                                       "interval": "5s", "timeout": "3s", "retries": 20, "start_period": "30s"},
             "Database health command/timing differs")
     def bind(source, target, *, readonly=False):
@@ -201,34 +244,17 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
         if readonly:
             value["read_only"] = True
         return value
-    for service_name, expected in {
+    expected_mounts = {
         "app": [bind("/srv/sixnine/platform-data", "/data"), bind("/srv/sixnine/upload-spool", "/tmp")]
-               + ([bind("/srv/sixnine/frontend", "/frontend", readonly=True)] if independent_frontend else []),
+               + ([bind("/srv/sixnine/frontend", "/frontend", readonly=True)] if independent_frontend else [])
+               + ([bind(database['ca_file'], deployment_target.DATABASE_CONTAINER_CA, readonly=True)] if external_database else []),
         "db": [bind("/srv/sixnine/postgres", "/var/lib/postgresql/data")],
         "db-init": [bind(deployment / "init_database.py", "/bootstrap/init_database.py", readonly=True)],
         "caddy": [bind(deployment / selected['caddy'], "/etc/caddy/Caddyfile", readonly=True),
                   {"type": "volume", "source": "caddy_data", "target": "/data", "volume": {}},
                   {"type": "volume", "source": "caddy_config", "target": "/config", "volume": {}}],
-    }.items():
-        mounts = services[service_name].get("volumes", [])
-        require(isinstance(mounts, list), "Mounts must be a rendered list")
-        normalized = []
-        for item in mounts:
-            require(isinstance(item, dict), "Mount must be a rendered object")
-            item = dict(item)
-            if item.get("type") == "bind":
-                options = item.get("bind")
-                # Compose 2.38.2 / compose-go 2.7.1 uses bool+omitempty:
-                # explicit false serializes as bind:{}. New Compose uses an
-                # OptOut type where omission can mean TRUE. The version must
-                # come from the trusted installed binary, never the bundle.
-                if compose_version in {"2.38.2", "v2.38.2"} and options == {}:
-                    options = {"create_host_path": False}
-                require(isinstance(options, dict) and options.get("create_host_path") is False,
-                        "Bind must explicitly disable host path creation for this Compose version")
-                item["bind"] = options
-            normalized.append(item)
-        require(normalized == expected, "Mount set/source/options differ from the reviewed trusted deployment")
+    }
+    _validate_mounts(services, expected_mounts, compose_version)
     require(config.get("volumes") == {name: {"name": "sixnine-platform_"+name} for name in ("caddy_data", "caddy_config")},
             "Named volumes must not use external or driver-configured host sources")
     ports = caddy.get("ports", [])
@@ -237,7 +263,8 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
             "Proxy must only publish the reviewed HTTP/HTTPS ports")
     for name, expected in {"app": [], "db": ["/tmp:size=67108864,mode=1777", "/var/run/postgresql:size=16777216,mode=3775"],
                            "db-init": ["/tmp:size=16777216,mode=1777"], "caddy": ["/tmp:size=16777216,mode=1777"]}.items():
-        require(services[name].get("tmpfs", []) == expected, "Temporary filesystem mounts/bounds differ")
+        if name in services:
+            require(services[name].get("tmpfs", []) == expected, "Temporary filesystem mounts/bounds differ")
     if resources['name'] == deployment_target.COMPACT_RESOURCES:
         require(sum(int(service['mem_limit']) for service in services.values())
                 <= (resources['resident_mib']+resources['swap_mib'])*1024**2,

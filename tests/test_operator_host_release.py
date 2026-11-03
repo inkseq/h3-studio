@@ -23,6 +23,11 @@ with patch.dict(sys.modules, {'release': release, 'check_config': validator}):
 
 IMAGE = 'sixnine-platform:' + 'a' * 40
 PROFILE = 'h3-pruned-rank8-int8-quanto-int8-vae-int8-sdpa-p4-lowram-v1'
+RDS_ENV = {
+    'INKSEQ_DATABASE_MODE': 'rds',
+    'INKSEQ_DATABASE_HOST': 'offline.abcdefghijkl.ap-southeast-1.rds.amazonaws.com',
+    'INKSEQ_DATABASE_CA_FILE': '/srv/sixnine/rds/ca.pem',
+}
 
 
 def counts(**changes):
@@ -61,6 +66,46 @@ class HostBoundaryTests(unittest.TestCase):
         self.addCleanup(self.stack.close)
         self.stack.enter_context(patch.object(host, 'ROOT', self.operator))
         self.stack.enter_context(patch.object(release, 'ROOT', self.root))
+
+    def test_external_database_refuses_prepare_before_overlay_or_controller_work(self):
+        with (
+            patch.object(host, 'configuration', return_value=({}, {})),
+            patch.object(
+                host,
+                'approved_current',
+                return_value=('a' * 40, self.root, RDS_ENV, IMAGE),
+            ),
+            patch.object(host, 'no_competing_controller') as controller,
+            patch.object(host, 'atomic') as atomic,
+            self.assertRaisesRegex(release.ReleaseError, 'requires_local_database'),
+        ):
+            host.prepare()
+        controller.assert_not_called()
+        atomic.assert_not_called()
+
+    def test_external_database_refuses_start_before_durable_intent_or_secret_delivery(
+        self,
+    ):
+        launch = Mock()
+        self.lifecycle_patches(None, launch)
+        with (
+            patch.object(
+                host, 'prepared', return_value=({}, prepared(), self.root, RDS_ENV)
+            ),
+            patch.object(host, 'atomic') as atomic,
+            self.assertRaisesRegex(release.ReleaseError, 'requires_local_database'),
+        ):
+            host.start()
+        atomic.assert_not_called()
+        launch.assert_not_called()
+        self.assertFalse((self.operator / 'active.json').exists())
+
+    def test_external_database_refuses_direct_launch_before_secret_delivery(self):
+        loader, popen = Mock(), Mock()
+        with self.assertRaisesRegex(release.ReleaseError, 'requires_local_database'):
+            host.launch(self.root, RDS_ENV, {}, {}, loader_factory=loader, popen=popen)
+        loader.assert_not_called()
+        popen.assert_not_called()
 
     def test_release_fence_rejects_active_malformed_and_unmarked_running(self):
         path = self.operator / 'active.json'
@@ -1531,6 +1576,36 @@ class ComposeBoundaryTests(unittest.TestCase):
                 if raw.returncode:
                     raise AssertionError('Synthetic compose render failed')
                 setattr(cls, attribute, json.loads(raw.stdout))
+            cls.rds_expected = {
+                'services': {'app': host.overlay(IMAGE, PROFILE)['services']['app']}
+            }
+            overlay.write_text(json.dumps(cls.rds_expected))
+            raw = subprocess.run(
+                [
+                    'docker',
+                    'compose',
+                    '--env-file',
+                    str(empty),
+                    '-f',
+                    str(DIRECTORY / 'compose.yaml'),
+                    '-f',
+                    str(overlay),
+                    *release.deployment_target.database_compose_args(
+                        DIRECTORY, RDS_ENV
+                    ),
+                    'config',
+                    '--format',
+                    'json',
+                ],
+                env={**env, **RDS_ENV},
+                capture_output=True,
+                timeout=30,
+            )
+            if raw.returncode:
+                raise AssertionError(
+                    'Synthetic external database compose render failed'
+                )
+            cls.rds_value = json.loads(raw.stdout)
             cls.version = (
                 subprocess.run(
                     ['docker', 'compose', 'version', '--short'],
@@ -1609,6 +1684,33 @@ class ComposeBoundaryTests(unittest.TestCase):
             ),
         ):
             changed = copy.deepcopy(self.targon_value)
+            mutate(changed)
+            with self.assertRaises(
+                (release.ReleaseError, validator.ConfigurationError)
+            ):
+                check(changed)
+
+    def test_external_app_render_uses_database_selection_without_reviving_controller(
+        self,
+    ):
+        def check(value):
+            return host.validate_app_rendered(
+                value,
+                DIRECTORY,
+                self.version,
+                IMAGE,
+                self.rds_expected,
+                resource_environment=RDS_ENV,
+            )
+
+        self.assertTrue(check(self.rds_value))
+        self.assertEqual(set(self.rds_value['services']), {'app', 'caddy'})
+        for mutate in (
+            lambda c: c['services']['app']['environment'].pop('PGSSLROOTCERT'),
+            lambda c: c['services'].update(db=self.value['services']['db']),
+            lambda c: c['services']['app']['volumes'].append(host.bind(host.KEY, True)),
+        ):
+            changed = copy.deepcopy(self.rds_value)
             mutate(changed)
             with self.assertRaises(
                 (release.ReleaseError, validator.ConfigurationError)

@@ -210,9 +210,74 @@ def validate_storage(document, *, target='production'):
         "migration_storage_r2_configuration_invalid")
 
 
-def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, target='production', resource_environment=None):
+def validate_database(document, selected):
+    """Bind external database consumers to the host-selected TLS configuration."""
+    if selected['mode'] == 'local':
+        return
+    services = document['services']
+    require(
+        document.get('x-sixnine-dispatch-layout') == 'postgres-notify-v1',
+        'migration_external_database_layout_invalid',
+    )
+    require(
+        'db_admin_password' not in document.get('secrets', {})
+        and all(
+            'db_admin_password' not in secret_names(service)
+            for service in services.values()
+        ),
+        'migration_external_database_admin_secret',
+    )
+    require(
+        not services['app'].get('depends_on')
+        and all(
+            not {'db', 'db-init'} & set(service.get('depends_on', {}))
+            for service in services.values()
+        ),
+        'migration_external_database_local_dependency',
+    )
+    require(
+        'edge' in services['app'].get('networks', {}),
+        'migration_external_database_egress_missing',
+    )
+    expected_mount = {
+        'type': 'bind',
+        'source': selected['ca_file'],
+        'target': deployment_target.DATABASE_CONTAINER_CA,
+        'read_only': True,
+        'bind': {'create_host_path': False},
+    }
+    for name in ('app', 'dstack', 'controller'):
+        service = services[name]
+        mounts = [
+            mount
+            for mount in service.get('volumes', [])
+            if mount.get('target') == deployment_target.DATABASE_CONTAINER_CA
+        ]
+        require(
+            mounts == [expected_mount]
+            and service.get('environment', {}).get('PGSSLROOTCERT')
+            == deployment_target.DATABASE_CONTAINER_CA,
+            'migration_external_database_ca_invalid',
+        )
+    dstack_env = services['dstack'].get('environment', {})
+    require(
+        dstack_env.get('INKSEQ_DATABASE_MODE') == 'rds'
+        and dstack_env.get('INKSEQ_DATABASE_HOST') == selected['host'],
+        'migration_external_database_dstack_host_split',
+    )
+
+
+def validate(
+    document,
+    *,
+    host_memory_mib=3840,
+    dstack_image=DSTACK_IMAGE,
+    target='production',
+    resource_environment=None,
+):
     identity = deployment_target.profile(target)
     resources = deployment_target.resources({**(resource_environment or {}), 'INKSEQ_DEPLOYMENT_TARGET': target})
+    database = deployment_target.database(resource_environment or {})
     require(type(document) is dict and type(document.get("services")) is dict, "migration_compose_invalid")
     services = document["services"]
     modern = document.get("x-sixnine-dispatch-layout") == "postgres-notify-v1"
@@ -220,7 +285,11 @@ def validate(document, *, host_memory_mib=3840, dstack_image=DSTACK_IMAGE, targe
     shared = ("dstack", "controller") if modern else CPU_SHARED
     business = ("app", "controller") if modern else ("app", "dispatch", "controller")
     expected_services = {"app", "db", "db-init", "caddy", *shared} | (set() if modern else {"hatchet-db"})
+    if database['mode'] == 'rds':
+        require(modern, 'migration_external_database_layout_invalid')
+        expected_services = {'app', 'caddy', 'dstack', 'controller'}
     require(set(services) == expected_services, "migration_services_missing")
+    validate_database(document, database)
     if modern:
         require(not {"hatchet_broker", "hatchet_api_token", "database_password", "administrator_password"} & set(document.get("secrets", {}))
             and not {"hatchet-config", "hatchet-postgres"} & set(document.get("volumes", {})), "migration_retired_broker_mount")
@@ -387,6 +456,7 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
         empty = Path(directory) / "empty.env"
         empty.write_bytes(b"")
         command = ["docker", "compose", "--env-file", str(empty), "-f", str(base), "-f", str(overlay)]
+        command.extend(deployment_target.database_compose_args(Path(base).parent, effective_environment, migration=True))
         result = runner(command+["config", "--format", "json"], env=environment,
             capture_output=True, text=True, timeout=30)
         require(result.returncode == 0, "migration_compose_render_failed")

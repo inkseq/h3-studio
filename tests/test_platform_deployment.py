@@ -71,6 +71,7 @@ class DeploymentPolicyTests(unittest.TestCase):
             SIXNINE_DB_ADMIN_SECRET_FILE="/run/sixnine-secrets/db_admin_password",
             SIXNINE_APP_DSN_SECRET_FILE="/run/sixnine-secrets/app_database_url",
         )
+        cls.environment = env
         result = docker(
             "compose",
             "--env-file",
@@ -123,6 +124,106 @@ class DeploymentPolicyTests(unittest.TestCase):
         self.assertTrue(
             policy.validate(self.rendered, compose_version=self.compose_version)
         )
+
+    def render_rds(self, target='production'):
+        identity = policy.deployment_target.profile(target)
+        environment = dict(
+            self.environment,
+            INKSEQ_DATABASE_MODE='rds',
+            INKSEQ_DATABASE_HOST='synthetic-db.abc123.ap-southeast-1.rds.amazonaws.com',
+            INKSEQ_DATABASE_CA_FILE='/srv/sixnine/rds/ca.pem',
+            INKSEQ_DEPLOYMENT_TARGET=target,
+            INKSEQ_PUBLIC_ORIGIN=identity['origin'],
+            INKSEQ_PUBLIC_ORIGIN_ALIASES=identity['aliases'],
+            INKSEQ_CADDY_PROFILE=identity['caddy'],
+        )
+        result = docker(
+            'compose',
+            '--env-file',
+            str(Path(self.temp.name) / 'empty.env'),
+            '-f',
+            str(DEPLOY / 'compose.yaml'),
+            *policy.deployment_target.database_compose_args(DEPLOY, environment),
+            'config',
+            '--format',
+            'json',
+            env=environment,
+        )
+        return json.loads(result.stdout), environment
+
+    def test_external_database_real_compose_removes_local_database_and_admin_secret(
+        self,
+    ):
+        for target in ('staging', 'production'):
+            with self.subTest(target=target):
+                document, environment = self.render_rds(target)
+                self.assertEqual(set(document['services']), {'app', 'caddy'})
+                self.assertNotIn('db_admin_password', document['secrets'])
+                self.assertFalse(document['services']['app'].get('depends_on'))
+                self.assertTrue(
+                    policy.validate(
+                        document,
+                        compose_version=self.compose_version,
+                        target=target,
+                        resource_environment=environment,
+                    )
+                )
+                with self.assertRaises(policy.ConfigurationError):
+                    policy.validate(
+                        document, compose_version=self.compose_version, target=target
+                    )
+        # The preserved local topology remains the default and is not accepted
+        # as an external deployment merely because its app DSN changed.
+        with self.assertRaises(policy.ConfigurationError):
+            policy.validate(
+                self.rendered,
+                compose_version=self.compose_version,
+                resource_environment=environment,
+            )
+
+    def test_external_database_ca_and_local_authority_cannot_be_silently_changed(self):
+        document, environment = self.render_rds()
+        changes = (
+            lambda d: d['services'].update(
+                db=copy.deepcopy(self.rendered['services']['db'])
+            ),
+            lambda d: d['secrets'].update(
+                db_admin_password=self.rendered['secrets']['db_admin_password']
+            ),
+            lambda d: d['services']['app']['environment'].update(
+                PGSSLROOTCERT='/tmp/untrusted.pem'
+            ),
+            lambda d: d['services']['app'].update(
+                depends_on={'db': {'condition': 'service_healthy', 'required': True}}
+            ),
+        )
+        for mutate in changes:
+            broken = copy.deepcopy(document)
+            mutate(broken)
+            with self.assertRaises(policy.ConfigurationError):
+                policy.validate(
+                    broken,
+                    compose_version=self.compose_version,
+                    resource_environment=environment,
+                )
+        for key, value in (
+            ('source', '/tmp/untrusted.pem'),
+            ('read_only', False),
+            ('bind', {'create_host_path': True}),
+        ):
+            broken = copy.deepcopy(document)
+            mount = next(
+                item
+                for item in broken['services']['app']['volumes']
+                if item['target'] == policy.deployment_target.DATABASE_CONTAINER_CA
+            )
+            mount[key] = value
+            with self.assertRaises(policy.ConfigurationError):
+                policy.validate(
+                    broken,
+                    compose_version=self.compose_version,
+                    resource_environment=environment,
+                )
 
     def test_error_monitoring_is_optional_fixed_destination_and_app_only(self):
         for value in (None, "", policy.SENTRY_DSN):

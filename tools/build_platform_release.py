@@ -13,7 +13,7 @@ import sys
 import tarfile
 import tempfile
 
-FILES = ("compose.yaml", "Caddyfile", "Caddyfile.staging", "deployment_target.py", "init_database.py", "check_config.py")
+FILES = ("compose.yaml", "database-rds.yaml", "database-rds-migration.yaml", "Caddyfile", "Caddyfile.staging", "deployment_target.py", "init_database.py", "check_config.py")
 # Closed stock tuples: current build and the exact retained rollback only.
 DSTACK_STOCK = {'0.22.3': ('009e2916e335d4c9e02d961bc68f704951f5db20', 'dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8', '731ee908299af3f4592b3bfd1542e8f00fa59bb3fc24506a9f32d73a5fc274ba'), '0.22.5': ('e59a6caa6d3d76f8b8c3430b7e8eeb7271138065', 'dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4', 'b12e1157da5a13102899132e41c4a7950b3a2dfad4a0a5b52960e1cd86078c5e')}
 DSTACK_SHARED_SOURCE_HASHES = {'dstack/_internal/core/backends/vastai/api_client.py': '9a8a68d3bd00b995901af7a66b58511ff4451be8122135e6f7b1a534d4e3c685', 'dstack/_internal/core/backends/vastai/compute.py': '3d6466c87ad37ce3125d54feadff54287f82131425e80bbc57ccf0bec8acdea9', 'gpuhunt/providers/vastai.py': 'f3cefc3a20f6f05d2cce911cd8e61ff980c6af2a42ed16e4a8f290bc0e5f76db', 'dstack/_internal/server/background/pipeline_tasks/jobs_submitted.py': 'a68386172ebdf5fe28bd08f61e18ecdfd6a4a1310e9782c8147ce3a96e8eeaac', 'dstack/_internal/server/background/scheduled_tasks/offers_catalog.py': '158bc7bee1a5cadc4d7a1efa2512701edda39707ae5dda33b8cd71bcd342d092'}
