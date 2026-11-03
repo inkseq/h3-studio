@@ -552,7 +552,10 @@ def hydrate(*, initialize=False, bootstrap_checks=None):
         target = sealed['name']
         database = deployment_target.database(deployment_target.database_environment(sealed))
         payload = load(client(), initialize=initialize, bootstrap_checks=bootstrap_checks, target=target, database=database)
-        write_outputs(outputs(payload, target=target, transport=hydration_transport(), database=database))
+        # RDS admits only notify artifacts; their paths document still uses v1.
+        # Keep local transport selection and existing managed payloads unchanged.
+        transport = 'postgres-notify' if database['mode'] == 'rds' else hydration_transport()
+        write_outputs(outputs(payload, target=target, transport=transport, database=database))
 
 
 def hydration_transport():

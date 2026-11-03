@@ -220,34 +220,55 @@ class ManagedSecretTests(unittest.TestCase):
         self.assertEqual(api.puts, [])
         self.assertIsNone(self.store.value)
 
-    def test_external_hydration_uses_one_sealed_host_and_existing_transport(self):
-        from unittest.mock import Mock
-
-        sealed = {
-            'name': 'production',
-            'database': {'mode': 'rds', 'host': RDS['host']},
-        }
-        api = Mock()
-        value = self.external()
-        with (
-            patch.object(target.os, 'geteuid', return_value=0),
-            patch.object(target, 'host_lock', contextlib.nullcontext),
-            patch.object(target.deployment_target, 'host', return_value=sealed) as host,
-            patch.object(target, 'client', return_value=api),
-            patch.object(target, 'load', return_value=value) as load,
-            patch.object(target, 'write_outputs') as write,
-            patch.object(target, 'hydration_transport', return_value='postgres-notify'),
+    def test_hydration_preserves_v1_paths_and_selects_notify_only_for_rds(self):
+        paths = {'version': 1, 'environment': {}, 'host_memory_mib': 1911}
+        external_v1 = initialized()
+        external_v1['infrastructure']['dstack_database_url'] = self.external()[
+            'infrastructure'
+        ]['dstack_database_url']
+        for database, value in (
+            (target.deployment_target.database({}), initialized()),
+            (RDS, external_v1),
+            (RDS, self.external()),
         ):
-            target.hydrate()
-        host.assert_called_once_with()
-        load.assert_called_once_with(
-            api,
-            initialize=False,
-            bootstrap_checks=None,
-            target='production',
-            database=RDS,
-        )
-        write.assert_called_once_with(target.outputs(value, database=RDS))
+            sealed = {'name': 'production'}
+            if database['mode'] == 'rds':
+                sealed['database'] = {'mode': 'rds', 'host': RDS['host']}
+            api = FakeAPI(value)
+            with (
+                self.subTest(mode=database['mode'], schema=value['schema_version']),
+                patch.object(target.os, 'geteuid', return_value=0),
+                patch.object(target, 'host_lock', contextlib.nullcontext),
+                patch.object(
+                    target.deployment_target, 'host', return_value=sealed
+                ) as host,
+                patch.object(target, '_protected_json', return_value=paths),
+                patch.object(target, 'ProtectedIntent', return_value=self.store),
+                patch.object(target, 'client', return_value=api),
+                patch.object(target, 'load', wraps=target.load) as load,
+                patch.object(target, 'write_outputs') as write,
+            ):
+                target.hydrate()
+                host.assert_called_once_with()
+                load.assert_called_once_with(
+                    api,
+                    initialize=False,
+                    bootstrap_checks=None,
+                    target='production',
+                    database=database,
+                )
+                transport = (
+                    'postgres-notify' if database['mode'] == 'rds' else 'hatchet'
+                )
+                write.assert_called_once_with(
+                    target.outputs(value, transport=transport, database=database)
+                )
+                self.assertEqual(api.puts, [])
+                self.assertEqual(api.value, value)
+                self.assertIsNone(self.store.value)
+                self.assertEqual(
+                    paths, {'version': 1, 'environment': {}, 'host_memory_mib': 1911}
+                )
 
     def test_dstack_entrypoint_checks_exact_endpoint_and_ca_before_server_start(self):
         overlay = (
