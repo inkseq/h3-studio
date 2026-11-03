@@ -888,3 +888,15 @@ sm120 GPU. Attention resolves per device: sage2 on cc 12.x, sdpa elsewhere;
 Modal stays L40S/sdpa.
 - 2026-11-02: Run the complete affected tests locally before every push; CI is the record, not how problems get found.
 - 2026-11-02: A new take becomes the shot's chosen take on the server, and its clip sound follows; an enhanced copy replaces its source while that source is chosen. A trimmed or segmented shot keeps its take.
+
+### 2026-11-03 — #982 repair, refactor promotion and RDS cutover
+
+Owner directs these in order: repair the terminal-allocated reconciliation path
+in #982, verify staging, then promote the latest main artifact carrying the
+repair and refactor. No Wednesday acceptance wait applies; full creator
+acceptance is deferred until the remaining functionality is complete. Keep
+provider writes out of the reconciliation fix and preserve unsettled billing.
+After promotion, adopt the already-approved RDS configuration in #988, staging
+first and production second, preserving the old data and rollback path.
+Check the scheduled backup and retention result; #1010 cleanup is not authorized.
+No pricing, production charging-switch, unrelated frontend or voice changes.

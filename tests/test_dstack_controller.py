@@ -1132,6 +1132,100 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.assertEqual(len(inventory_calls), original_calls + 2)
         self.assertEqual(len(self.client.applied), 1)
 
+    def test_terminal_allocated_start_journals_identity_before_removal_proof(self):
+        from test_dstack_capacity import no_capacity_run
+        from studio_platform.dstack_demand_start import _ended_with_proof
+
+        self.config["profiles"][0]["backend"] = "lium"
+        original_plan = self.client.plan
+
+        def lium_plan(spec):
+            result = original_plan(spec)
+            result["job_plans"][0]["offers"][0]["backend"] = "lium"
+            return result
+
+        self.client.plan = lium_plan
+        self.client.configured_backends = lambda: frozenset({"lium"})
+        self.service = fixture.DstackOperator(
+            self.repo, self.settings, self.capacity, self.config
+        )
+        node_id = self.start()["node_id"]
+        binding = self.store.load(node_id)
+        run = no_capacity_run(self.client.runs[binding["run_name"]])
+        identity = "c4444444-4444-4444-8444-444444444444"
+        for submission in (
+            run["latest_job_submission"],
+            run["jobs"][0]["job_submissions"][0],
+        ):
+            submission["termination_reason"] = "waiting_instance_limit_exceeded"
+            submission["job_provisioning_data"] = {
+                "backend": "lium",
+                "instance_id": identity,
+            }
+        self.client.runs[binding["run_name"]] = run
+        # The pre-fix terminal row has neither identity nor removal evidence.
+        self.store.record(
+            node_id,
+            {
+                "run_id": run["id"],
+                "state": "stopped",
+                "dstack_status": "failed",
+                "ready": False,
+                "billing_state": "unsettled",
+                "reason_code": "dstack_run_terminal_billing_pending",
+                "observed_at": self.now,
+            },
+        )
+        controller = self.controller()
+        self.client.provider_inventory = Mock(
+            side_effect=lambda backend: dict(
+                backend=backend,
+                complete=True,
+                observed_at=self.now,
+                instance_ids=[],
+            )
+        )
+
+        def rows():
+            with self.repo.engine.connect() as connection:
+                node = dict(connection.execute(select(operator_nodes)).mappings().one())
+                intent = dict(
+                    connection.execute(select(instance_intents)).mappings().one()
+                )
+                return node, intent
+
+        node, intent = rows()
+        self.assertEqual(
+            (node["desired_state"], intent["state"]), ("running", "destroying")
+        )
+        self.assertIsNone(intent["provider_instance_id"])
+        self.now += 60
+        controller._refresh_pending_removal(node, intent)
+        node, intent = rows()
+        first = node["payload"]["dstack"]
+        self.assertEqual(first["provider_instance_id"], identity)
+        self.assertEqual(intent["provider_instance_id"], identity)
+        self.assertEqual(intent["state"], "destroying")
+        self.assertNotIn("provider_removal_proof", first)
+        self.assertFalse(_ended_with_proof(node))
+        self.client.provider_inventory.assert_not_called()
+        self.now += 60
+        controller._refresh_pending_removal(node, intent)
+        node, intent = rows()
+        settled = node["payload"]["dstack"]
+        self.assertTrue(settled["provider_removal_proof"]["absent"])
+        self.assertEqual(settled["billing_state"], "unsettled")
+        self.assertEqual(intent["state"], "destroyed")
+        self.assertTrue(_ended_with_proof(node))
+        self.client.provider_inventory.assert_called_once_with("lium")
+        with self.repo.engine.connect() as connection:
+            reservation = (
+                connection.execute(select(budget_reservations)).mappings().one()
+            )
+            self.assertEqual(reservation["state"], "invoice_pending")
+            self.assertIsNone(reservation["actual_cost_microusd"])
+        self.assertEqual((len(self.client.applied), len(self.client.stopped)), (1, 0))
+
     def test_manual_stop_cancels_cold_download_without_waiting_for_ready(self):
         node = self.start()["node_id"]
         self.capacity.readiness = None
