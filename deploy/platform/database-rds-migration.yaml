@@ -1,0 +1,20 @@
+# Only the current PostgreSQL-notify worker layout; appended after database-rds.
+services:
+  dstack:
+    environment:
+      PGSSLROOTCERT: /etc/ssl/certs/inkseq-rds.pem
+    volumes:
+      - type: bind
+        source: ${INKSEQ_DATABASE_CA_FILE:?Protected RDS CA bundle required}
+        target: /etc/ssl/certs/inkseq-rds.pem
+        read_only: true
+        bind: {create_host_path: false}
+  controller:
+    environment:
+      PGSSLROOTCERT: /etc/ssl/certs/inkseq-rds.pem
+    volumes:
+      - type: bind
+        source: ${INKSEQ_DATABASE_CA_FILE:?Protected RDS CA bundle required}
+        target: /etc/ssl/certs/inkseq-rds.pem
+        read_only: true
+        bind: {create_host_path: false}

@@ -386,6 +386,8 @@ WantedBy=multi-user.target
 def prepare():
     runtime,files = configuration()
     commit,directory,environment,image_id = approved_current()
+    release.require(release.deployment_target.database(environment)['mode'] == 'local',
+                    'legacy_operator_capacity_requires_local_database')
     no_competing_controller(environment)
     marker = ROOT/'active.json'
     if marker.exists() or marker.is_symlink():
@@ -454,7 +456,7 @@ def app_overlay(*, admission):
     return {'services':{'app':app}}
 
 
-def validate_app_rendered(value,directory,version,image,expected):
+def validate_app_rendered(value,directory,version,image,expected, *, resource_environment=None):
     """Validate only the app overlay; no controller service is rendered or changed."""
     config=copy.deepcopy(value)
     app=config.get('services',{}).get('app',{})
@@ -473,7 +475,9 @@ def validate_app_rendered(value,directory,version,image,expected):
         wanted.get('healthcheck',{'test':['CMD','python','-c',CPU_HEALTH]})['test'],
         'operator_app_identity_invalid')
     app['healthcheck']['test']=['CMD','python','-c',CPU_HEALTH]
-    return validate_base(config,deployment_directory=directory,compose_version=version)
+    return validate_base(config,deployment_directory=directory,compose_version=version,
+        target=release.deployment_target.environment(resource_environment or {})['name'],
+        resource_environment=resource_environment)
 
 
 def pin_for(value):
@@ -523,6 +527,8 @@ def receipt(pin, *, fresh=False):
 
 
 def launch(directory,environment,runtime,pin, *, loader_factory=None,targon_loader_factory=None,popen=subprocess.Popen):
+    release.require(release.deployment_target.database(environment)['mode'] == 'local',
+                    'legacy_operator_capacity_requires_local_database')
     from studio_platform.lium_runtime_aws import AwsLiumLoader
     references=credential_references(runtime)
     loaders=[]
@@ -604,6 +610,8 @@ def start(*, clock=time.monotonic,sleep=time.sleep):
         with (release.ROOT/'release.lock').open('a') as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             runtime,value,directory,environment = prepared()
+            release.require(release.deployment_target.database(environment)['mode'] == 'local',
+                            'legacy_operator_capacity_requires_local_database')
             release.require(approved_current()[0]==value['commit'],'operator_start_release_changed')
             no_competing_controller(environment)
             # No replay after any launch intent, including failed/unknown delivery.

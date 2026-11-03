@@ -39,7 +39,9 @@ def set_password(directory, environment, user):
     release.require(user in {"superdan", "supervan"} and sys.stdin.isatty() and sys.stdout.isatty(),
                     "interactive_operator_terminal_required")
     arguments = [release.DOCKER, "--host", "unix:///var/run/docker.sock", "compose", "--project-directory", str(directory),
-                 "-f", str(directory / "compose.yaml"), "run", "--rm", "--no-deps", "app", "python", "-m",
+                 "-f", str(directory / "compose.yaml"),
+                 *release.deployment_target.database_compose_args(directory, environment),
+                 "run", "--rm", "--no-deps", "app", "python", "-m",
                  "studio_platform.manage", "set-password", "--user", user]
     try:
         # The reviewed manage command hides password input, suppresses driver
@@ -69,8 +71,9 @@ def bootstrap_locked(root, commit):
              "status": "prepared_needs_accounts", "updated_at": time.time()}
     release.write_state(root, state)
     release.load_approved_image(root, directory, commit, environment)
-    release.compose(directory, environment, "up", "-d", "db")
-    release.compose(directory, environment, "run", "--rm", "db-init")
+    if release.deployment_target.database(environment)['mode'] == 'local':
+        release.compose(directory, environment, "up", "-d", "db")
+        release.compose(directory, environment, "run", "--rm", "db-init")
     release.compose(directory, environment, "run", "--rm", "--no-deps", "-T", "app",
                     "python", "-m", "studio_platform.manage", "init-db")
     status = management_status(directory, environment)

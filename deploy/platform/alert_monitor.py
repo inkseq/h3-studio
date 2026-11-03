@@ -20,6 +20,11 @@ import sys
 import tempfile
 import time
 
+try:
+    import deployment_target
+except ImportError:
+    from deploy.platform import deployment_target
+
 REGION = 'ap-southeast-1'
 ACCOUNT = '829135631045'
 NAMESPACE = 'Inkseq/OperatorAlerts'
@@ -205,9 +210,11 @@ def docker(arguments, *, runner=subprocess.run):
     return result.stdout.decode('utf-8')
 
 
-def containers(*, runner=subprocess.run):
+def containers(*, runner=subprocess.run, target=None):
+    selected = deployment_target.database(deployment_target.database_environment(target or {}))
+    services = tuple(service for service in SERVICES if service != 'db' or selected['mode'] == 'local')
     values = {}
-    for service in SERVICES:
+    for service in services:
         names = docker(['ps', '--all', '--quiet', '--filter', 'label=com.docker.compose.project=sixnine-platform',
             '--filter', 'label=com.docker.compose.service=' + service], runner=runner).split()
         require(len(names) <= 1 and all(re.fullmatch(r'[0-9a-f]{12,64}', name) for name in names),
@@ -381,7 +388,7 @@ def backup_observation(*, now, runner=subprocess.run):
         'business_backup_unobservable': missing is None, 'business_backup_loss': observed['loss']}
 
 
-def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_window_seconds=300):
+def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_window_seconds=300, target=None):
     sample = proc_sample(proc=proc)
     cpu = None
     if previous_cpu is not None:
@@ -399,7 +406,7 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_
     snapshot = None
     app = None
     try:
-        found = containers(runner=runner)
+        found = containers(runner=runner, target=target)
         host['processes_ok'] = all(value is not None and value['ok'] for value in found.values())
         app = found['app']
         if app is None:
@@ -555,16 +562,16 @@ def tick(settings, state, snapshot, host, cpu, *, evaluator, sns, cloudwatch, sa
 def main():
     try:
         require(os.name == 'posix' and os.geteuid() == 0 and len(sys.argv) == 1, 'alert_fixed_host_invocation_required')
-        import deployment_target
         from alert_conditions import evaluate
-        settings = config(read_protected(CONFIG), deployment_target.host())
+        target = deployment_target.host()
+        settings = config(read_protected(CONFIG), target)
         with locked(STATE.with_suffix('.lock')):
             state = read_protected(STATE, missing=True)
             if state is None:
                 state = initial_state(settings['environment'])
             validate_state(state, settings['environment'])
             snapshot, host, cpu = observe(state['cpu'],
-                payment_window_seconds=settings['thresholds'].get('payment_window_seconds', 300))
+                payment_window_seconds=settings['thresholds'].get('payment_window_seconds', 300), target=target)
             sns, cloudwatch = clients()
             tick(settings, state, snapshot, host, cpu, evaluator=evaluate, sns=sns, cloudwatch=cloudwatch,
                  save=lambda value: atomic(STATE, value), now=time.time())

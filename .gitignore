@@ -268,6 +268,9 @@ inventory.json
 !tools/stress_platform.py
 !deploy/platform/
 !deploy/platform/compose.yaml
+!deploy/platform/database-rds.yaml
+!deploy/platform/database-rds-migration.yaml
+!tests/test_external_database.py
 !deploy/platform/Caddyfile
 !deploy/platform/init_database.py
 !deploy/platform/check_config.py

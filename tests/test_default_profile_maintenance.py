@@ -22,6 +22,7 @@ NEW = 'h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7'
 class DefaultProfileMaintenance(unittest.TestCase):
     def setUp(self):
         fixture.StoryboardMaintenance.setUp(self)
+        self.real_db_query = maintenance._default_db_query
         self.real_cleanup = maintenance._default_db_cleanup
         self.real_connected = maintenance._default_db_connected
         self.db_query = self.stack.enter_context(
@@ -277,6 +278,35 @@ class DefaultProfileMaintenance(unittest.TestCase):
             sql = command.call_args.args[-1]
             self.assertIn('BEGIN READ ONLY;', sql)
             self.assertIn("NOT IN ('succeeded','failed','cancelled')", sql)
+
+    def test_rds_queries_use_host_client_and_keep_idle_refusal(self):
+        context = maintenance._storyboard_context(self.root, COMMIT, self.config)
+        with (
+            patch.object(
+                maintenance.deployment_target, 'database', return_value={'mode': 'rds'}
+            ),
+            patch.object(release, 'database_query', create=True) as query,
+            patch.object(maintenance, 'compose') as compose,
+        ):
+            for raw in (b'BEGIN\n1\nCOMMIT\n', b'BEGIN\n\nCOMMIT\n', b'0\n'):
+                query.return_value = raw
+                with self.assertRaisesRegex(release.ReleaseError, 'jobs_not_idle'):
+                    self.real_idle(context)
+            query.return_value = b'BEGIN\n0\nCOMMIT\n'
+            self.real_idle(context)
+            self.assertEqual(query.call_args.args[:2], (context[0], context[2]))
+            self.assertIn('BEGIN READ ONLY;', query.call_args.args[2])
+            self.assertIn(
+                "NOT IN ('succeeded','failed','cancelled')", query.call_args.args[2]
+            )
+            self.assertEqual(query.call_args.kwargs, {'timeout': 30})
+            query.return_value = b'{"bounded": true, "terminated": 2}\n'
+            sql = 'SELECT existing_bounded_cleanup_result;'
+            self.assertEqual(
+                self.real_db_query(context, sql), {'bounded': True, 'terminated': 2}
+            )
+            query.assert_called_with(context[0], context[2], sql, timeout=30)
+            compose.assert_not_called()
 
     def test_partial_stop_with_unconfirmed_jobs_never_force_recreates_app(self):
         self.idle.side_effect = [

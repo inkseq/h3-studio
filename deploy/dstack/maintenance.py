@@ -124,6 +124,11 @@ RETAINED_DSTACK_HELPER_PAIRS = {
     '06e38846ffd03b8729df1e3d64f27dea4228c401': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
     '8b7a746c88dfb90bbfd01841044cd97ce3b3df58': ('0519fa5db6b7a4ad822fbf34e021e9028cec05a4dbb9da490935ae4e900dd366', '6f869921a57697f3e337ba80ac3e7fec1e22f76b8b096561285830cee7d19b4a'),
 }
+# Current and previous production bytes before #988; local-mode rollback only.
+RETAINED_DSTACK_HELPER_PAIRS.update({
+    '4bfe4d04b3a3702e4623dc1fa9c9f9b50b453c27': ('66aee8e0d35fd2fd92a156da8e037c3668e48d23af6a774fd5ff5632d5072b4d', '0a65590df8c07ecf233ba13d78b24354479bb857fcfe573ffc48fa7df046eea1'),
+    'ff027f33079cfff153cb78cf5c23c92739c428ba': ('66aee8e0d35fd2fd92a156da8e037c3668e48d23af6a774fd5ff5632d5072b4d', '0a65590df8c07ecf233ba13d78b24354479bb857fcfe573ffc48fa7df046eea1'),
+})
 LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 # Closed stock tuples: current build and the exact retained rollback only.
 DSTACK_STOCK = {'0.22.3': ('009e2916e335d4c9e02d961bc68f704951f5db20', 'dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8', '731ee908299af3f4592b3bfd1542e8f00fa59bb3fc24506a9f32d73a5fc274ba'), '0.22.5': ('e59a6caa6d3d76f8b8c3430b7e8eeb7271138065', 'dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4', 'b12e1157da5a13102899132e41c4a7950b3a2dfad4a0a5b52960e1cd86078c5e')}
@@ -711,7 +716,8 @@ def dstack_image(directory, migration, environment, *, load=False):
 
 def compose(base, migration_directory, environment, *arguments, timeout=180):
     return release.command(["compose", "--env-file", "/dev/null", "--project-directory", str(base),
-        "-f", str(base / "compose.yaml"), "-f", str(migration_directory / "overlay.yaml"), *arguments],
+        "-f", str(base / "compose.yaml"), "-f", str(migration_directory / "overlay.yaml"),
+        *deployment_target.database_compose_args(base, environment, migration=True), *arguments],
         environment=environment, timeout=timeout)
 
 
@@ -728,7 +734,9 @@ def verify_services(base, directory, environment, app, dispatch):
     if server is not None:
         expected["dstack"] = server
     values = {}
-    for name in ("app", *shared, *(("hatchet-db",) if not modern else ()), *(("db", "caddy") if compact else ())):
+    local_database = deployment_target.database(environment)["mode"] == "local"
+    for name in ("app", *shared, *(("hatchet-db",) if not modern else ()),
+            *(("db",) if compact and local_database else ()), *(("caddy",) if compact else ())):
         identity = compose(base, directory, environment, "ps", "--all", "--quiet", name, timeout=20).decode().strip()
         release.require(re.fullmatch(r"[0-9a-f]{12,64}", identity), "migration_cpu_service_not_unique")
         inspected = json.loads(release.command(["inspect", identity], environment=environment, timeout=20))
@@ -858,6 +866,8 @@ def apply_locked(root, commit):
     directory, migration = prepare(root, commit, base)
     checker = installed_checker(directory / "artifact")
     env = release.deployment_environment(root / "site.env", commit)
+    release.require(deployment_target.database(env)["mode"] == "local" or notify_layout(migration),
+                    "migration_rds_requires_notify_layout")
     state = json.loads((root / "release-state.json").read_text())
     release.require(state.get("pending") in (None, commit), "another_release_requires_reconciliation")
     release.require(state.get("dependencies") == release.pinned_dependencies(env),
@@ -890,8 +900,9 @@ def apply_locked(root, commit):
         if notify_layout(migration):
             stop_superseded_cpu(env)
         compose(base, directory, env, "stop", *shared_services(migration), timeout=240)
-        compose(base, directory, env, "up", "-d", "db", *(("hatchet-db",) if not notify_layout(migration) else ()), timeout=240)
-        compose(base, directory, env, "run", "--rm", "db-init", timeout=120)
+        if deployment_target.database(env)["mode"] == "local":
+            compose(base, directory, env, "up", "-d", "db", *(("hatchet-db",) if not notify_layout(migration) else ()), timeout=240)
+            compose(base, directory, env, "run", "--rm", "db-init", timeout=120)
         release.retire_frontend_pointer(root)
         compose(base, directory, env, "up", "-d", "--no-deps", "--force-recreate", "app", *shared_services(migration), timeout=300)
         release.wait_ready(base, env)
@@ -960,7 +971,8 @@ def storyboard_receipt(root, *, filename=STORYBOARD_RECEIPT, purpose="storyboard
         and all(type(value[key]) is dict and set(value[key]) == {"paths", "active"}
             and all(type(digest) is str and release.DIGEST.fullmatch(digest) for digest in value[key].values())
             for key in ("before", "after")) and type(value["runtime_before"]) is dict
-        and set(value["runtime_before"]) in (set(STORYBOARD_SERVICES), {"app", "dstack", "controller", "db"}), "migration_storyboard_receipt_invalid")
+        and set(value["runtime_before"]) in (set(STORYBOARD_SERVICES), {"app", "dstack", "controller", "db"},
+            {"app", "dstack", "controller"}), "migration_storyboard_receipt_invalid")
     for item in value["runtime_before"].values():
         release.require(type(item) is dict and set(item) == {"image_id", "environment_sha256", "mounts_sha256"}
             and type(item["image_id"]) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", item["image_id"])
@@ -1011,6 +1023,8 @@ def _storyboard_context(root, commit, config):
     release.require(overlay.read_text() == expected_overlay, "migration_derived_overlay_changed")
     checker = installed_checker(directory / "artifact")
     environment = release.deployment_environment(root / "site.env", commit)
+    release.require(deployment_target.database(environment)["mode"] == "local" or notify_layout(migration),
+                    "migration_rds_requires_notify_layout")
     release.require(state.get("dependencies") == release.pinned_dependencies(environment),
         "dependency_change_requires_separate_maintenance")
     app = {**app, "archive_image_ids": release.validate_image_archive(base / "image.tar.gz", app)}
@@ -1031,7 +1045,8 @@ def _storyboard_runtime(base, directory, environment, *, flag=STORYBOARD_FLAG):
     """Nonsecret signatures; compare unchanged runtime settings and persistent mounts."""
     result = {}
     migration = directory_manifest(directory)
-    for name in (("app", *shared_services(migration), "db") if notify_layout(migration) else STORYBOARD_SERVICES):
+    database_services = ("db",) if deployment_target.database(environment)["mode"] == "local" else ()
+    for name in (("app", *shared_services(migration), *database_services) if notify_layout(migration) else STORYBOARD_SERVICES):
         identity = compose(base, directory, environment, "ps", "--all", "--quiet", name, timeout=20).decode().strip()
         release.require(re.fullmatch(r"[0-9a-f]{12,64}", identity), "migration_cpu_service_not_unique")
         values = json.loads(release.command(["inspect", identity], environment=environment, timeout=20))
@@ -1230,9 +1245,13 @@ def storyboard_maintenance(root, commit, *, owners=None, paths_sha256=None, acti
 
 def _default_idle(context):
     # Counts every nonterminal state, including queued/creation_unknown work.
-    output = compose(*context[:3], "exec", "-T", "--user", "postgres", "db",
-        "psql", "-X", "-U", "postgres", "-d", "sixnine", "-At", "-v", "ON_ERROR_STOP=1",
-        "-c", "BEGIN READ ONLY; SELECT count(*) FROM platform_jobs WHERE status NOT IN ('succeeded','failed','cancelled'); COMMIT;", timeout=30)
+    sql = "BEGIN READ ONLY; SELECT count(*) FROM platform_jobs WHERE status NOT IN ('succeeded','failed','cancelled'); COMMIT;"
+    if deployment_target.database(context[2])["mode"] == "rds":
+        output = release.database_query(context[0], context[2], sql, timeout=30)
+    else:
+        output = compose(*context[:3], "exec", "-T", "--user", "postgres", "db",
+            "psql", "-X", "-U", "postgres", "-d", "sixnine", "-At", "-v", "ON_ERROR_STOP=1",
+            "-c", sql, timeout=30)
     release.require(output.decode().splitlines() == ["BEGIN", "0", "COMMIT"],
                     "migration_default_profile_jobs_not_idle")
 
@@ -1271,10 +1290,13 @@ print(json.dumps({'profiles_sha256':before,'modes':['FL','REF']}))
 
 
 def _default_db_query(context, sql):
-    raw = compose(*context[:3], "exec", "-T", "--user", "postgres", "db",
-        "env", "PGOPTIONS=-c statement_timeout=20000 -c lock_timeout=3000",
-        "psql", "-X", "-U", "postgres", "-d", "sixnine", "-At", "-v", "ON_ERROR_STOP=1",
-        "-c", sql, timeout=30)
+    if deployment_target.database(context[2])["mode"] == "rds":
+        raw = release.database_query(context[0], context[2], sql, timeout=30)
+    else:
+        raw = compose(*context[:3], "exec", "-T", "--user", "postgres", "db",
+            "env", "PGOPTIONS=-c statement_timeout=20000 -c lock_timeout=3000",
+            "psql", "-X", "-U", "postgres", "-d", "sixnine", "-At", "-v", "ON_ERROR_STOP=1",
+            "-c", sql, timeout=30)
     return json.loads(raw)
 
 

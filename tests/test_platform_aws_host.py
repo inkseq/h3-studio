@@ -21,9 +21,90 @@ fetcher = importlib.import_module('fetch_release_s3')
 aws_bootstrap = importlib.import_module('aws_bootstrap')
 release = fetcher.release
 COMMIT = 'a' * 40
+RDS = {
+    'mode': 'rds',
+    'host': 'inkseq-test.abcdefghijkl.ap-southeast-1.rds.amazonaws.com',
+    'ca_file': '/srv/sixnine/rds/ca.pem',
+}
+RDS_DSN = (
+    'postgresql+psycopg://sixnine_app:'
+    + 'p' * 48
+    + '@'
+    + RDS['host']
+    + ':5432/sixnine?sslmode=verify-full&sslrootcert=/etc/ssl/certs/inkseq-rds.pem'
+)
 
 
 class SecretTests(unittest.TestCase):
+    def test_external_database_requires_exact_sealed_endpoint_and_tls(self):
+        api = mock.Mock()
+        payload = {'db_admin_password': 'a' * 48, 'app_database_url': RDS_DSN}
+        api.get_secret_value.return_value = {'SecretString': json.dumps(payload)}
+        self.assertEqual(
+            secrets_aws.value(api, secrets_aws.DATABASE, database=RDS), payload
+        )
+        api.put_secret_value.assert_not_called()
+        for invalid in (
+            RDS_DSN.replace(
+                RDS['host'], 'another.abcdefghijkl.ap-southeast-1.rds.amazonaws.com'
+            ),
+            RDS_DSN.replace('verify-full', 'require'),
+            RDS_DSN.replace('/etc/ssl/certs/inkseq-rds.pem', '/tmp/ca.pem'),
+            RDS_DSN + '&sslmode=verify-full',
+            RDS_DSN.replace('sixnine_app:', 'postgres:'),
+            RDS_DSN.replace(':5432/', ':5433/'),
+            RDS_DSN.split('?')[0],
+        ):
+            with (
+                self.subTest(invalid=invalid.split('@')[-1]),
+                self.assertRaises(RuntimeError),
+            ):
+                api.get_secret_value.return_value = {
+                    'SecretString': json.dumps(dict(payload, app_database_url=invalid))
+                }
+                secrets_aws.value(api, secrets_aws.DATABASE, database=RDS)
+        api.get_secret_value.return_value = {'SecretString': json.dumps(payload)}
+        with self.assertRaises(RuntimeError):
+            secrets_aws.value(api, secrets_aws.DATABASE)
+        api.put_secret_value.assert_not_called()
+
+    def test_missing_external_database_never_initializes_replacement_credentials(self):
+        api = mock.Mock()
+        api.get_secret_value.side_effect = ClientError(
+            {'Error': {'Code': 'ResourceNotFoundException'}}, 'GetSecretValue'
+        )
+        with self.assertRaisesRegex(RuntimeError, 'existing managed credentials'):
+            secrets_aws.value(api, secrets_aws.DATABASE, True, database=RDS)
+        api.put_secret_value.assert_not_called()
+        api.describe_secret.assert_not_called()
+
+    def test_hydration_selects_database_from_one_protected_host_read(self):
+        sealed = {
+            'name': 'production',
+            'database': {'mode': 'rds', 'host': RDS['host']},
+        }
+        with (
+            mock.patch.object(secrets_aws.os, 'geteuid', return_value=0),
+            mock.patch.object(Path, 'open', mock.mock_open()),
+            mock.patch('fcntl.flock'),
+            mock.patch.object(
+                secrets_aws.deployment_target, 'host', return_value=sealed
+            ) as host,
+            mock.patch.object(secrets_aws, 'client') as client,
+            mock.patch.object(secrets_aws, 'value', return_value={}) as value,
+            mock.patch.object(secrets_aws, 'hydrate_titles'),
+            mock.patch.object(secrets_aws, 'workos_requested', return_value=False),
+        ):
+            secrets_aws.hydrate()
+        host.assert_called_once_with()
+        value.assert_called_once_with(
+            client.return_value,
+            secrets_aws.DATABASE,
+            False,
+            target='production',
+            database=RDS,
+        )
+
     def test_existing_managed_values_do_not_write_or_reveal(self):
         api = mock.Mock()
         payload = {

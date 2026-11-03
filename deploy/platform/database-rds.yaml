@@ -1,0 +1,18 @@
+# Applied LAST, only for a protected host explicitly selecting external RDS.
+services:
+  db: !reset null
+  db-init: !reset null
+  app:
+    depends_on: !reset []
+    environment:
+      PGSSLROOTCERT: /etc/ssl/certs/inkseq-rds.pem
+    networks:
+      edge: {}
+    volumes:
+      - type: bind
+        source: ${INKSEQ_DATABASE_CA_FILE:?Protected RDS CA bundle required}
+        target: /etc/ssl/certs/inkseq-rds.pem
+        read_only: true
+        bind: {create_host_path: false}
+secrets:
+  db_admin_password: !reset null

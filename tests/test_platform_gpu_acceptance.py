@@ -30,6 +30,11 @@ with patch.dict(sys.modules, {'check_config': validator}):
     release = load('acceptance_test_release', 'release.py')
 with patch.dict(sys.modules, {'check_config': validator, 'release': release}):
     acceptance = load('acceptance_test_overlay', 'gpu_acceptance.py')
+with patch.dict(
+    sys.modules,
+    {'check_config': validator, 'release': release, 'gpu_acceptance': acceptance},
+):
+    scaler = load('acceptance_test_scaler', 'gpu_scaler.py')
 
 EXPECTED = {
     'handoff_id': 'synthetic-handoff',
@@ -37,6 +42,11 @@ EXPECTED = {
     'hard_deadline': 2000000000,
 }
 CONTAINER = 'a' * 64
+RDS_ENV = {
+    'INKSEQ_DATABASE_MODE': 'rds',
+    'INKSEQ_DATABASE_HOST': 'offline.abcdefghijkl.ap-southeast-1.rds.amazonaws.com',
+    'INKSEQ_DATABASE_CA_FILE': '/srv/sixnine/rds/ca.pem',
+}
 
 
 def fixture_diagnostics(config, version):
@@ -263,6 +273,27 @@ class ComposeOverlayTests(unittest.TestCase):
 
 
 class DrainTests(unittest.TestCase):
+    def test_external_database_refuses_legacy_starts_before_host_or_secret_work(self):
+        from unittest.mock import Mock
+
+        for check in (acceptance.require_new_acceptance, scaler.require_new_controller):
+            with (
+                self.subTest(check=check.__name__),
+                patch.object(release, 'command') as command,
+            ):
+                with self.assertRaisesRegex(
+                    release.ReleaseError, 'requires_local_database'
+                ):
+                    check(RDS_ENV)
+                command.assert_not_called()
+        loader, popen = Mock(), Mock()
+        with self.assertRaisesRegex(release.ReleaseError, 'requires_local_database'):
+            scaler.launch(
+                Path('/synthetic'), RDS_ENV, {}, loader_factory=loader, popen=popen
+            )
+        loader.assert_not_called()
+        popen.assert_not_called()
+
     def test_start_shares_scaler_and_acceptance_barrier(self):
         # The shared guard's real two-marker/two-service behavior is exercised
         # in test_platform_aws_deploy. This binds the legacy start to it too.

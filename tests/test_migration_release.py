@@ -940,10 +940,23 @@ class MigrationArtifacts(unittest.TestCase):
             'f6c1972b904d6e0a4b9acccc405efb0d706c239e',
             '0c1dfeceb015f34f2593783953ef00f5aea00468',
             'ff30d5aa9ceafc8693cf8a64fae92a8f8e35624a',
+            '4bfe4d04b3a3702e4623dc1fa9c9f9b50b453c27',
+            'ff027f33079cfff153cb78cf5c23c92739c428ba',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
         )
+        for commit in (
+            '4bfe4d04b3a3702e4623dc1fa9c9f9b50b453c27',
+            'ff027f33079cfff153cb78cf5c23c92739c428ba',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '66aee8e0d35fd2fd92a156da8e037c3668e48d23af6a774fd5ff5632d5072b4d',
+                    '0a65590df8c07ecf233ba13d78b24354479bb857fcfe573ffc48fa7df046eea1',
+                ),
+            )
         old_pair = (
             'd0d8eeff6a9d1d52d6357806382b17f7c3a6f0158776e7d4941ca1d30543c8eb',
             'cfb43bbee56a159f9fe17cd8f48bdc6557e36ae0afa40d553e34a1cd8c56ab1b',
@@ -1286,6 +1299,39 @@ class MigrationGuardAndDeployment(unittest.TestCase):
             )
         )
 
+    def test_rds_compose_override_is_last_after_the_migration_overlay(self):
+        extra = [
+            '-f',
+            str(self.root / 'database-rds.yaml'),
+            '-f',
+            str(self.root / 'database-rds-migration.yaml'),
+        ]
+        with (
+            patch.object(
+                maintenance.deployment_target,
+                'database_compose_args',
+                return_value=extra,
+            ) as selector,
+            patch.object(
+                release, 'command', return_value=b'original-output'
+            ) as command,
+        ):
+            result = maintenance.compose(
+                self.root,
+                self.root / 'migration',
+                {},
+                'config',
+                '--format',
+                'json',
+                timeout=25,
+            )
+        selector.assert_called_once_with(self.root, {}, migration=True)
+        self.assertEqual(
+            command.call_args.args[0][-7:], [*extra, 'config', '--format', 'json']
+        )
+        self.assertEqual(result, b'original-output')
+        self.assertEqual(command.call_args.kwargs, {'environment': {}, 'timeout': 25})
+
     def test_future_ordinary_apply_routes_through_installed_helper(self):
         fake = Mock()
         with (
@@ -1574,6 +1620,50 @@ class MigrationGuardAndDeployment(unittest.TestCase):
             )
             self.assertFalse(any("down" in args or "-v" in args for args, _ in calls))
             self.assertEqual(writes[-1]["status"], "app_ready")
+            calls.clear()
+            before_writes = len(writes)
+            with (
+                patch.object(
+                    maintenance.deployment_target,
+                    'database',
+                    return_value={'mode': 'rds'},
+                ),
+                patch.object(release, 'load_approved_image') as load_image,
+                self.assertRaisesRegex(
+                    release.ReleaseError, 'rds_requires_notify_layout'
+                ),
+            ):
+                maintenance.apply_locked(self.root, COMMIT)
+            load_image.assert_not_called()
+            self.assertEqual(calls, [])
+            self.assertEqual(len(writes), before_writes)
+            with (
+                patch.object(
+                    maintenance.deployment_target,
+                    'database',
+                    return_value={'mode': 'rds'},
+                ),
+                patch.object(maintenance, 'notify_layout', return_value=True),
+                patch.object(maintenance, 'stop_superseded_cpu'),
+            ):
+                maintenance.apply_locked(self.root, COMMIT)
+            self.assertEqual(
+                [args for args, _ in calls],
+                [
+                    ('stop', 'dstack', 'controller'),
+                    (
+                        'up',
+                        '-d',
+                        '--no-deps',
+                        '--force-recreate',
+                        'app',
+                        'dstack',
+                        'controller',
+                    ),
+                    ('up', '-d', '--no-deps', 'caddy'),
+                ],
+            )
+            self.assertEqual(writes[-1]['status'], 'app_ready')
             verified.side_effect = release.ReleaseError("synthetic namespace failure")
             stack.enter_context(
                 patch.object(maintenance.time, "monotonic", side_effect=[0, 181])
@@ -1630,6 +1720,95 @@ class MigrationGuardAndDeployment(unittest.TestCase):
             self.assertRaisesRegex(release.ReleaseError, "shared_namespace_stale"),
         ):
             maintenance.verify_services(self.root, self.root, {}, expected, expected)
+
+    def test_compact_rds_runtime_needs_workers_and_proxy_but_no_local_database(self):
+        names = ('app', 'dstack', 'controller', 'caddy')
+        ids = {name: str(index) * 64 for index, name in enumerate(names, 1)}
+        app_image, dispatch_image = 'sha256:' + 'a' * 64, 'sha256:' + 'b' * 64
+        parent = 'inkseq-cpu.slice'
+        values = {
+            ids[name]: {
+                'Id': ids[name],
+                'Name': '/container-' + name,
+                'Config': {
+                    'Labels': {
+                        'com.docker.compose.project': 'sixnine-platform',
+                        'com.docker.compose.service': name,
+                    }
+                },
+                'Image': app_image if name == 'app' else dispatch_image,
+                'State': {
+                    'Running': True,
+                    'Restarting': False,
+                    'Pid': 9999,
+                    'Health': {'Status': 'healthy'},
+                },
+                'HostConfig': {
+                    'NetworkMode': 'container:' + ids['app'],
+                    'CgroupParent': parent,
+                },
+            }
+            for name in names
+        }
+        membership = (
+            '0::/'
+            + str(
+                maintenance.deployment_target.COMPACT_CGROUP.relative_to(
+                    '/sys/fs/cgroup'
+                )
+            )
+            + '/container.scope\n'
+        )
+
+        def inspect(args, **kwargs):
+            return json.dumps(
+                [values[args[1]] if args[0] == 'inspect' else {'Id': dispatch_image}]
+            ).encode()
+
+        with (
+            patch.object(
+                maintenance,
+                'directory_manifest',
+                return_value={'version': 2, 'layout': 'postgres-notify-v1'},
+            ),
+            patch.object(
+                maintenance.deployment_target, 'database', return_value={'mode': 'rds'}
+            ),
+            patch.object(
+                maintenance.deployment_target,
+                'resources',
+                return_value={
+                    'name': maintenance.deployment_target.COMPACT_RESOURCES,
+                    'cgroup_parent': parent,
+                },
+            ),
+            patch.object(
+                maintenance,
+                'compose',
+                side_effect=lambda b, d, e, *a, **k: ids[a[-1]].encode(),
+            ) as compose,
+            patch.object(release, 'command', side_effect=inspect),
+            patch.object(Path, 'read_text', return_value=membership),
+        ):
+            maintenance.verify_services(
+                self.root,
+                self.root,
+                {},
+                {'archive_image_ids': (app_image,)},
+                {'archive_image_ids': (dispatch_image,)},
+            )
+            self.assertEqual([c.args[-1] for c in compose.call_args_list], list(names))
+            values[ids['controller']]['HostConfig']['NetworkMode'] = (
+                'container:' + '9' * 64
+            )
+            with self.assertRaisesRegex(release.ReleaseError, 'shared_namespace_stale'):
+                maintenance.verify_services(
+                    self.root,
+                    self.root,
+                    {},
+                    {'archive_image_ids': (app_image,)},
+                    {'archive_image_ids': (dispatch_image,)},
+                )
 
     def test_readiness_checks_actual_original_broker_volume_and_pinned_images(self):
         names = ("app", *maintenance.SHARED, "hatchet-db")
@@ -2102,6 +2281,66 @@ class StoryboardMaintenance(unittest.TestCase):
                 maintenance._storyboard_runtime(
                     self.root, self.root, {maintenance.STORYBOARD_FLAG: "superdan"}
                 )
+
+    def test_rds_runtime_and_receipt_keep_exact_modern_service_set(self):
+        names = ('app', 'dstack', 'controller')
+        identifiers = {name: str(index) * 64 for index, name in enumerate(names, 1)}
+        values = {
+            identifiers[name]: {
+                'Image': 'sha256:' + '1' * 64,
+                'State': {'Running': True},
+                'Mounts': [],
+                'Config': {
+                    'Labels': {
+                        'com.docker.compose.project': 'sixnine-platform',
+                        'com.docker.compose.service': name,
+                    },
+                    'Env': [maintenance.STORYBOARD_FLAG + '=superdan']
+                    if name == 'app'
+                    else [],
+                },
+            }
+            for name in names
+        }
+        with (
+            patch.object(
+                maintenance.deployment_target, 'database', return_value={'mode': 'rds'}
+            ),
+            patch.object(
+                maintenance,
+                'directory_manifest',
+                return_value={'version': 2, 'layout': 'postgres-notify-v1'},
+            ),
+            patch.object(
+                maintenance,
+                'compose',
+                side_effect=lambda b, d, e, *a, **k: identifiers[a[-1]].encode(),
+            ) as compose,
+            patch.object(
+                release,
+                'command',
+                side_effect=lambda args, **k: json.dumps([values[args[1]]]).encode(),
+            ),
+        ):
+            runtime = self.original_runtime(
+                self.root, self.root, {maintenance.STORYBOARD_FLAG: 'superdan'}
+            )
+        self.assertEqual(set(runtime), set(names))
+        self.assertEqual([c.args[-1] for c in compose.call_args_list], list(names))
+        self.runtime_mock.return_value = runtime
+        self.update()
+        receipt = self.receipt()
+        self.assertEqual(set(receipt['runtime_before']), set(names))
+        for changed in (
+            {name: row for name, row in runtime.items() if name != 'controller'},
+            {**runtime, 'unrelated': runtime['app']},
+        ):
+            receipt['runtime_before'] = changed
+            (self.root / 'migration' / maintenance.STORYBOARD_RECEIPT).write_text(
+                json.dumps(receipt)
+            )
+            with self.assertRaisesRegex(release.ReleaseError, 'receipt_invalid'):
+                self.receipt()
 
     def test_public_maintenance_wrapper_holds_existing_nonblocking_release_lock(self):
         locked = Mock()

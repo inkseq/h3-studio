@@ -63,7 +63,7 @@ def _opaque(value, minimum=32, maximum=4096):
         and all(33 <= ord(c) <= 126 for c in value))
 
 
-def validate(payload, *, allow_uninitialized=False, target='production'):
+def validate(payload, *, allow_uninitialized=False, target='production', database=None):
     """Closed schema, exact endpoints and existing safe Cloud exporter contract."""
     if (type(payload) is not dict or not {"schema_version", "providers", "grafana_cloud"} <= set(payload)
             or set(payload) - {"schema_version", "providers", "grafana_cloud", "grafana_stage_query", "r2_storage", "infrastructure", "hatchet_api_token"}
@@ -126,7 +126,7 @@ def validate(payload, *, allow_uninitialized=False, target='production'):
             raise ValueError("migration_infrastructure_recovery_required")
         return
     infrastructure = payload["infrastructure"]
-    _validate_infrastructure(infrastructure, schema_version=payload["schema_version"])
+    _validate_infrastructure(infrastructure, schema_version=payload["schema_version"], database=database)
     if "hatchet_api_token" in payload:
         token = payload["hatchet_api_token"]
         if not _opaque(token, 32, 8192) or not re.fullmatch(r"[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+", token):
@@ -183,7 +183,8 @@ def _validate_r2_storage(value, *, target='production'):
         raise ValueError("migration_r2_storage_configuration_invalid")
 
 
-def _validate_infrastructure(infrastructure, *, schema_version=1):
+def _validate_infrastructure(infrastructure, *, schema_version=1, database=None):
+    selected = database or deployment_target.database({})
     fields = POSTGRES_INFRASTRUCTURE if schema_version == 2 else INFRASTRUCTURE
     if type(infrastructure) is not dict or set(infrastructure) != fields:
         raise ValueError("migration_infrastructure_recovery_required")
@@ -194,9 +195,9 @@ def _validate_infrastructure(infrastructure, *, schema_version=1):
             raise ValueError("migration_infrastructure_invalid")
     parsed = urlsplit(infrastructure["dstack_database_url"])
     if ((parsed.scheme, parsed.hostname, parsed.port, parsed.username, parsed.path)
-            != ("postgresql+asyncpg", "db", 5432, "dstack_control", "/sixnine_dstack")
+            != ("postgresql+asyncpg", selected['host'], 5432, "dstack_control", "/sixnine_dstack")
             or not parsed.password or not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", parsed.password)
-            or parsed.query or parsed.fragment):
+            or parsed.query != ('ssl=verify-full' if selected['mode'] == 'rds' else '') or parsed.fragment):
         raise ValueError("migration_infrastructure_database_invalid")
 
 
@@ -386,20 +387,29 @@ def _reconcile_intent(api, record, current, current_version, *, target='producti
     return persisted
 
 
-def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bootstrap, intent_store=None, target='production'):
+def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bootstrap, intent_store=None, target='production', database=None):
     store = intent_store if intent_store is not None else ProtectedIntent()
     intent = store.read()
     payload, version = _managed(api, target=target)
-    validate(payload, allow_uninitialized=initialize or intent is not None, target=target)
+    validate(payload, allow_uninitialized=initialize or intent is not None, target=target, database=database)
     if "infrastructure" in payload:
         if intent is not None:
             _validate_intent(intent)
             original = intent["infrastructure"]
             if payload["schema_version"] == 2:
                 original = {key: original[key] for key in POSTGRES_INFRASTRUCTURE}
+            if database and database['mode'] == 'rds':
+                # The immutable initializer still records the original local
+                # endpoint. A host-approved move preserves every credential.
+                parsed = urlsplit(original['dstack_database_url'])
+                dsn = parsed._replace(netloc=f'{parsed.username}:{parsed.password}@{database["host"]}:5432',
+                                      query='ssl=verify-full').geturl()
+                original = dict(original, dstack_database_url=dsn)
             if payload["infrastructure"] != original:
                 raise RuntimeError("migration_initialization_identity_conflict")
         return payload
+    if database and database['mode'] == 'rds':
+        raise RuntimeError('migration_external_database_requires_existing_credentials')
     if intent is not None:
         # Recovery never depends on a refreshed absence approval and never
         # generates a second credential set, even across host/process restarts.
@@ -425,13 +435,15 @@ def load(api, *, initialize=False, bootstrap_checks=None, checker=check_fresh_bo
     return _reconcile_intent(api, intent, current, current_version, target=target)
 
 
-def outputs(payload, *, target='production', transport=None):
+def outputs(payload, *, target='production', transport=None, database=None):
     """Return mount bytes/UID/GID/mode, never expose this through CLI output."""
-    validate(payload, target=target)
+    validate(payload, target=target, database=database)
     if transport is None:
         transport = "postgres-notify" if payload["schema_version"] == 2 else "hatchet"
     if transport not in {"hatchet", "postgres-notify"} or transport == "hatchet" and payload["schema_version"] != 1:
         raise ValueError("migration_secret_transport_invalid")
+    if database and database['mode'] == 'rds' and transport != 'postgres-notify':
+        raise ValueError('migration_external_database_requires_postgres_transport')
     infrastructure = payload["infrastructure"]
     # JSON is YAML-compatible and avoids another host parser dependency. The
     # pinned server's WARNING log level remains in the reviewed Compose overlay.
@@ -536,9 +548,11 @@ def hydrate(*, initialize=False, bootstrap_checks=None):
     if os.name != "posix" or os.geteuid() != 0:
         raise RuntimeError("migration_host_root_required")
     with host_lock():
-        target = deployment_target.host()['name']
-        payload = load(client(), initialize=initialize, bootstrap_checks=bootstrap_checks, target=target)
-        write_outputs(outputs(payload, target=target, transport=hydration_transport()))
+        sealed = deployment_target.host()
+        target = sealed['name']
+        database = deployment_target.database(deployment_target.database_environment(sealed))
+        payload = load(client(), initialize=initialize, bootstrap_checks=bootstrap_checks, target=target, database=database)
+        write_outputs(outputs(payload, target=target, transport=hydration_transport(), database=database))
 
 
 def hydration_transport():

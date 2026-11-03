@@ -14,7 +14,8 @@ from botocore.exceptions import ClientError
 
 BUCKET = "sixnine-platform-releases-829135631045-ap-southeast-1"
 REGION = "ap-southeast-1"
-FILES = ("image.tar.gz", "compose.yaml", "Caddyfile", "Caddyfile.staging", "deployment_target.py", "init_database.py", "check_config.py", "release-manifest.json")
+TARGET_FILES = ("image.tar.gz", "compose.yaml", "Caddyfile", "Caddyfile.staging", "deployment_target.py", "init_database.py", "check_config.py", "release-manifest.json")
+FILES = (*TARGET_FILES, "database-rds.yaml", "database-rds-migration.yaml")
 
 
 def checksum(path):
@@ -30,9 +31,9 @@ def publish(commit, directory):
         raise ValueError("An exact commit is required")
     directory = Path(directory)
     manifest = json.loads((directory / "release-manifest.json").read_text(encoding="utf-8"))
-    legacy = set(FILES) - {'Caddyfile.staging', 'deployment_target.py'}
+    legacy = set(TARGET_FILES) - {'Caddyfile.staging', 'deployment_target.py'}
     files = set(manifest['files']) | {'release-manifest.json'}
-    if manifest["commit"] != commit or files not in (set(FILES), legacy):
+    if manifest["commit"] != commit or files not in (set(FILES), set(TARGET_FILES), legacy):
         raise ValueError("Invalid release manifest")
     hashes = {}
     for name in sorted(files):

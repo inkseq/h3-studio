@@ -31,6 +31,10 @@
 !studio_platform/providers/*.py
 !deploy/
 deploy/*
+!deploy/platform/
+deploy/platform/*
+!deploy/platform/database-rds.yaml
+!deploy/platform/database-rds-migration.yaml
 !deploy/tls/
 deploy/tls/*
 !deploy/tls/check_trust.py

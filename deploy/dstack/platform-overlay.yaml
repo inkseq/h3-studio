@@ -85,7 +85,6 @@ services:
     stop_grace_period: 60s
     depends_on:
       app: {condition: service_started}
-      db: {condition: service_healthy}
     # Official image installs its dstack executable using uv tool; preserve
     # image PATH. Override the entrypoint only to hydrate protected files.
     entrypoint: [python, -c]
@@ -105,9 +104,17 @@ services:
         try:
             token=read('/run/secrets/dstack_api_token')
             dsn=read('/run/secrets/dstack_database_url'); parsed=urlsplit(dsn)
+            mode=os.environ.get('INKSEQ_DATABASE_MODE','local')
+            host=os.environ.get('INKSEQ_DATABASE_HOST','db')
+            if mode not in {'local','rds'} or (mode=='local' and host!='db'):
+                raise ValueError()
             if len(token)<32 or any(c.isspace() for c in token) or parsed.scheme!='postgresql+asyncpg':
                 raise ValueError()
-            if (parsed.hostname,parsed.username,parsed.path)!=('db','dstack_control','/sixnine_dstack') or not parsed.password:
+            if (parsed.hostname,parsed.port,parsed.username,parsed.path)!=(host,5432,'dstack_control','/sixnine_dstack') or not parsed.password:
+                raise ValueError()
+            if parsed.fragment or parsed.query!=('ssl=verify-full' if mode=='rds' else ''):
+                raise ValueError()
+            if mode=='rds' and os.environ.get('PGSSLROOTCERT')!='/etc/ssl/certs/inkseq-rds.pem':
                 raise ValueError()
             os.environ['DSTACK_SERVER_ADMIN_TOKEN']=token
             os.environ['DSTACK_DATABASE_URL']=dsn
@@ -121,6 +128,8 @@ services:
         update_marker.touch()
         os.execvp('dstack',['dstack','server','--host','127.0.0.1','--port','3000','--log-level','WARNING','--no'])
     environment:
+      INKSEQ_DATABASE_MODE: ${INKSEQ_DATABASE_MODE:-local}
+      INKSEQ_DATABASE_HOST: ${INKSEQ_DATABASE_HOST:-db}
       DSTACK_SERVER_HOST: 127.0.0.1
       DSTACK_SERVER_PORT: "3000"
       DSTACK_SERVER_URL: http://127.0.0.1:3000
