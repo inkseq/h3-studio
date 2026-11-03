@@ -224,10 +224,14 @@ class MigrationDeployTests(unittest.TestCase):
                 INKSEQ_CPU_CGROUP_PARENT=deployment_target.COMPACT_PARENT,
             )
         document = {}
+        compose_version = None
 
         def capture(command, **kwargs):
+            nonlocal compose_version
             result = subprocess.run(command, **kwargs)
-            if result.returncode == 0:
+            if command == ['docker', 'compose', 'version', '--short']:
+                compose_version = result.stdout.strip()
+            elif result.returncode == 0:
                 document.update(json.loads(result.stdout))
             return result
 
@@ -238,14 +242,14 @@ class MigrationDeployTests(unittest.TestCase):
             runner=capture,
             host_memory_mib=1984 if compact else 3840,
         )
-        return document, environment, receipt
+        return document, environment, receipt, compose_version
 
     def test_external_database_real_compose_has_only_current_consumers_and_compact_caps(
         self,
     ):
         for compact in (False, True):
             with self.subTest(compact=compact):
-                document, environment, receipt = self.render_rds(compact=compact)
+                document, environment, receipt, _ = self.render_rds(compact=compact)
                 self.assertEqual(
                     set(document['services']), {'app', 'caddy', 'dstack', 'controller'}
                 )
@@ -270,7 +274,7 @@ class MigrationDeployTests(unittest.TestCase):
     def test_external_database_rejects_split_host_ca_local_secrets_and_legacy_layout(
         self,
     ):
-        document, environment, _ = self.render_rds()
+        document, environment, _, compose_version = self.render_rds()
         cases = (
             (
                 lambda d: d['services'].update(
@@ -303,7 +307,11 @@ class MigrationDeployTests(unittest.TestCase):
             broken = copy.deepcopy(document)
             mutate(broken)
             with self.assertRaisesRegex(ValueError, '^' + code + '$'):
-                validate(broken, resource_environment=environment)
+                validate(
+                    broken,
+                    resource_environment=environment,
+                    compose_version=compose_version,
+                )
         for name in ('app', 'dstack', 'controller'):
             for setting in ('environment', 'source', 'read_only', 'bind'):
                 with self.subTest(service=name, setting=setting):
@@ -325,14 +333,20 @@ class MigrationDeployTests(unittest.TestCase):
                     with self.assertRaisesRegex(
                         ValueError, '^migration_external_database_ca_invalid$'
                     ):
-                        validate(broken, resource_environment=environment)
+                        validate(
+                            broken,
+                            resource_environment=environment,
+                            compose_version=compose_version,
+                        )
 
     def test_external_database_config_and_probe_use_identical_final_overlays(self):
-        document, environment, _ = self.render_rds()
+        document, environment, _, compose_version = self.render_rds()
         calls = []
 
         def runner(command, **kwargs):
             calls.append(command)
+            if command == ['docker', 'compose', 'version', '--short']:
+                return SimpleNamespace(returncode=0, stdout=compose_version + '\n')
             return SimpleNamespace(
                 returncode=0,
                 stderr='',
@@ -343,16 +357,20 @@ class MigrationDeployTests(unittest.TestCase):
                 ),
             )
 
-        check(
-            ROOT / 'deploy/platform/compose.yaml',
-            ROOT / 'deploy/dstack/platform-overlay.yaml',
-            environment=environment,
-            runner=runner,
-            probe=True,
-        )
-        self.assertEqual(len(calls), 2)
-        prefix = calls[0][:-3]
-        self.assertEqual(calls[1][:-6], prefix)
+        with patch('tools.check_migration_deploy.local_inputs') as inputs:
+            check(
+                ROOT / 'deploy/platform/compose.yaml',
+                ROOT / 'deploy/dstack/platform-overlay.yaml',
+                environment=environment,
+                runner=runner,
+                check_inputs=True,
+                probe=True,
+            )
+        inputs.assert_called_once_with(document, compose_version=compose_version)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0], ['docker', 'compose', 'version', '--short'])
+        prefix = calls[1][:-3]
+        self.assertEqual(calls[2][:-6], prefix)
         self.assertEqual(
             prefix[-4:],
             [
@@ -369,6 +387,120 @@ class MigrationDeployTests(unittest.TestCase):
                 for action in ('up', 'pull', 'stop', 'rm', 'create')
             )
         )
+
+    def test_external_database_bind_omission_requires_trusted_legacy_version(self):
+        document, environment, _, _ = self.render_rds()
+        for service in document['services'].values():
+            for mount in service.get('volumes', []):
+                if mount['type'] == 'bind':
+                    mount['bind'] = {'create_host_path': False}
+        validate(document, resource_environment=environment, compose_version='5.6.1')
+        legacy = copy.deepcopy(document)
+        for service in legacy['services'].values():
+            for mount in service.get('volumes', []):
+                if mount['type'] == 'bind':
+                    mount['bind'] = {}
+        before = copy.deepcopy(legacy)
+        for version in ('2.38.2', 'v2.38.2'):
+            validate(legacy, resource_environment=environment, compose_version=version)
+        self.assertEqual(legacy, before)
+        for version in (None, '', '2.38.1', '2.39.0', '5.6.1'):
+            with (
+                self.subTest(version=version),
+                self.assertRaisesRegex(
+                    ValueError, '^migration_external_database_ca_invalid$'
+                ),
+            ):
+                validate(
+                    legacy, resource_environment=environment, compose_version=version
+                )
+        for name in ('app', 'dstack', 'controller'):
+            for options in (
+                None,
+                {'create_host_path': True},
+                {'create_host_path': 0},
+                {'create_host_path': 'false'},
+                {'create_host_path': False, 'propagation': 'shared'},
+            ):
+                broken = copy.deepcopy(document)
+                mount = next(
+                    item
+                    for item in broken['services'][name]['volumes']
+                    if item['target'] == deployment_target.DATABASE_CONTAINER_CA
+                )
+                mount['bind'] = options
+                with (
+                    self.subTest(service=name, options=options),
+                    self.assertRaisesRegex(
+                        ValueError, '^migration_external_database_ca_invalid$'
+                    ),
+                ):
+                    validate(
+                        broken,
+                        resource_environment=environment,
+                        compose_version='2.38.2',
+                    )
+                mount.pop('bind')
+                with self.assertRaisesRegex(
+                    ValueError, '^migration_external_database_ca_invalid$'
+                ):
+                    validate(
+                        broken,
+                        resource_environment=environment,
+                        compose_version='2.38.2',
+                    )
+
+    def test_local_inputs_uses_same_strict_bind_normalization(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'public-ca.pem'
+            source.write_text('synthetic public certificate')
+            mount = {'type': 'bind', 'source': str(source), 'bind': {}}
+            document = {'services': {'app': {'environment': {}, 'volumes': [mount]}}}
+            for version in ('2.38.2', 'v2.38.2'):
+                local_inputs(document, compose_version=version)
+            for version in (None, '2.38.1', '5.6.1'):
+                with self.assertRaisesRegex(
+                    ValueError, '^migration_implicit_bind_creation$'
+                ):
+                    local_inputs(document, compose_version=version)
+            for options in (
+                None,
+                {'create_host_path': True},
+                {'create_host_path': 0},
+                {'create_host_path': 'false'},
+                {'create_host_path': False, 'propagation': 'shared'},
+            ):
+                mount['bind'] = options
+                with self.assertRaisesRegex(
+                    ValueError, '^migration_implicit_bind_creation$'
+                ):
+                    local_inputs(document, compose_version='2.38.2')
+            mount['bind'] = {'create_host_path': False}
+            local_inputs(document, compose_version='5.6.1')
+
+    def test_external_database_version_failure_stops_before_render_or_probe(self):
+        _, environment, _, _ = self.render_rds()
+        for result in (
+            SimpleNamespace(returncode=1, stdout='untrusted version'),
+            SimpleNamespace(returncode=0, stdout='\n'),
+        ):
+            calls = []
+
+            def runner(command, **kwargs):
+                calls.append(command)
+                return result
+
+            with self.assertRaisesRegex(
+                ValueError, '^migration_compose_version_failed$'
+            ):
+                check(
+                    ROOT / 'deploy/platform/compose.yaml',
+                    ROOT / 'deploy/dstack/platform-overlay.yaml',
+                    environment=environment,
+                    runner=runner,
+                    probe=True,
+                )
+            self.assertEqual(calls, [['docker', 'compose', 'version', '--short']])
 
     def test_current_and_retained_stock_images_are_closed_and_explicit(self):
         from tools.check_migration_deploy import LEGACY_DSTACK_IMAGE

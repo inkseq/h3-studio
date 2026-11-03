@@ -40,17 +40,14 @@ def _validate_mounts(services, expected_mounts, compose_version):
             require(isinstance(item, dict), "Mount must be a rendered object")
             item = dict(item)
             if item.get("type") == "bind":
-                options = item.get("bind")
-                # Compose 2.38.2 omits explicit false. Its version must come
-                # from the trusted installed binary, never the release bundle.
-                if compose_version in {"2.38.2", "v2.38.2"} and options == {}:
-                    options = {"create_host_path": False}
-                require(
-                    isinstance(options, dict)
-                    and options.get("create_host_path") is False,
-                    "Bind must explicitly disable host path creation for this Compose version",
-                )
-                item["bind"] = options
+                try:
+                    item["bind"] = deployment_target.normalize_bind_options(
+                        item.get("bind"), compose_version
+                    )
+                except ValueError:
+                    raise ConfigurationError(
+                        "Bind must explicitly disable host path creation for this Compose version"
+                    ) from None
             normalized.append(item)
         require(
             normalized == expected,

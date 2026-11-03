@@ -210,7 +210,7 @@ def validate_storage(document, *, target='production'):
         "migration_storage_r2_configuration_invalid")
 
 
-def validate_database(document, selected):
+def validate_database(document, selected, compose_version):
     """Bind external database consumers to the host-selected TLS configuration."""
     if selected['mode'] == 'local':
         return
@@ -249,10 +249,17 @@ def validate_database(document, selected):
     for name in ('app', 'dstack', 'controller'):
         service = services[name]
         mounts = [
-            mount
+            dict(mount)
             for mount in service.get('volumes', [])
             if mount.get('target') == deployment_target.DATABASE_CONTAINER_CA
         ]
+        for mount in mounts:
+            try:
+                mount['bind'] = deployment_target.normalize_bind_options(
+                    mount.get('bind'), compose_version
+                )
+            except ValueError:
+                raise ValueError('migration_external_database_ca_invalid') from None
         require(
             mounts == [expected_mount]
             and service.get('environment', {}).get('PGSSLROOTCERT')
@@ -274,6 +281,7 @@ def validate(
     dstack_image=DSTACK_IMAGE,
     target='production',
     resource_environment=None,
+    compose_version=None,
 ):
     identity = deployment_target.profile(target)
     resources = deployment_target.resources({**(resource_environment or {}), 'INKSEQ_DEPLOYMENT_TARGET': target})
@@ -289,7 +297,7 @@ def validate(
         require(modern, 'migration_external_database_layout_invalid')
         expected_services = {'app', 'caddy', 'dstack', 'controller'}
     require(set(services) == expected_services, "migration_services_missing")
-    validate_database(document, database)
+    validate_database(document, database, compose_version)
     if modern:
         require(not {"hatchet_broker", "hatchet_api_token", "database_password", "administrator_password"} & set(document.get("secrets", {}))
             and not {"hatchet-config", "hatchet-postgres"} & set(document.get("volumes", {})), "migration_retired_broker_mount")
@@ -428,7 +436,7 @@ def validate(
         "namespace": "app", "gpu_operations": 0}
 
 
-def local_inputs(document):
+def local_inputs(document, *, compose_version=None):
     """Metadata only; never read/provider-log secret contents."""
     for secret in document.get("secrets", {}).values():
         path = Path(secret.get("file", ""))
@@ -445,12 +453,39 @@ def local_inputs(document):
             if volume.get("type") == "bind":
                 path = Path(volume["source"])
                 require(path.is_absolute() and path.exists() and not path.is_symlink(), "migration_bind_missing")
-                require(volume.get("bind", {}).get("create_host_path") is False, "migration_implicit_bind_creation")
+                try:
+                    deployment_target.normalize_bind_options(volume.get('bind'), compose_version)
+                except ValueError:
+                    raise ValueError('migration_implicit_bind_creation') from None
 
 
-def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory_mib=3840,
-          check_inputs=False, probe=False):
+def check(
+    base,
+    overlay,
+    *,
+    environment=None,
+    runner=subprocess.run,
+    host_memory_mib=3840,
+    check_inputs=False,
+    probe=False,
+):
     effective_environment = environment if environment is not None else os.environ
+    compose_version = None
+    if deployment_target.database(effective_environment)['mode'] == 'rds':
+        version = runner(
+            ['docker', 'compose', 'version', '--short'],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        require(
+            version.returncode == 0
+            and isinstance(version.stdout, str)
+            and bool(version.stdout.strip()),
+            'migration_compose_version_failed',
+        )
+        compose_version = version.stdout.strip()
     # An explicit empty env file suppresses automatic project .env discovery.
     with tempfile.TemporaryDirectory(prefix="sixnine-compose-check-") as directory:
         empty = Path(directory) / "empty.env"
@@ -466,13 +501,14 @@ def check(base, overlay, *, environment=None, runner=subprocess.run, host_memory
             raise ValueError("migration_compose_render_invalid") from None
         receipt = validate(document, host_memory_mib=host_memory_mib,
             dstack_image=effective_environment.get("SIXNINE_DSTACK_SERVER_IMAGE", DSTACK_IMAGE),
-            target=deployment_target.environment(effective_environment)['name'], resource_environment=effective_environment)
+            target=deployment_target.environment(effective_environment)['name'], resource_environment=effective_environment,
+            compose_version=compose_version)
         if "PUBLIC_ORIGIN" in document["services"]["app"]["environment"]:
             require(document["services"]["caddy"]["environment"]["INKSEQ_LEGACY_REDIRECT"]
                 == effective_environment.get("INKSEQ_LEGACY_REDIRECT", "0"),
                 "migration_domain_redirect_phase_unbound")
         if check_inputs:
-            local_inputs(document)
+            local_inputs(document, compose_version=compose_version)
             if deployment_target.resources(effective_environment)['name'] == deployment_target.COMPACT_RESOURCES:
                 sealed = deployment_target.host()
                 require(deployment_target.resource_environment(sealed) == {

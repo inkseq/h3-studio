@@ -107,6 +107,19 @@ def database_compose_args(base, environment, *, migration=False):
     return [arg for name in names for arg in ('-f', str(Path(base) / name))]
 
 
+def normalize_bind_options(options, compose_version=None):
+    """Interpret the one known renderer omission using trusted binary output."""
+    if compose_version in ('2.38.2', 'v2.38.2') and options == {}:
+        options = {'create_host_path': False}
+    if (
+        not isinstance(options, dict)
+        or set(options) != {'create_host_path'}
+        or options['create_host_path'] is not False
+    ):
+        raise ValueError('compose_bind_options_invalid')
+    return dict(options)
+
+
 def resources(values):
     """Closed resource choice; swap is separate from the physical RAM floor."""
     selected = environment(values)
