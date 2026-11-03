@@ -39,7 +39,7 @@ from .worker_boot import (
 )
 from .capacity_memory import vast_ram_floor as vast_ram_floor
 from .capacity_interface import CapacityTransport as CapacityTransport
-from .providers.registry import RUNPOD as RUNPOD, VASTAI as VASTAI
+from .providers.registry import LIUM as LIUM, RUNPOD as RUNPOD, VASTAI as VASTAI
 from .dstack_inventory import (
     CLOUDRIFT_INSTANCES_URL as CLOUDRIFT_INSTANCES_URL,
     KEY_HEADER_URLS as KEY_HEADER_URLS,
@@ -82,6 +82,7 @@ from .dstack_observations import (
     terminal_no_allocation_shape as terminal_no_allocation_shape,
     _terminal_no_allocation_shape as _terminal_no_allocation_shape,
     terminal_no_allocation as terminal_no_allocation,
+    terminal_allocated_identity as terminal_allocated_identity,
     live_capacity_usage as live_capacity_usage,
     idle_action as idle_action,
 )
@@ -393,6 +394,7 @@ class DstackCapacity:
             try:
                 inventory = self.client.provider_inventory(binding["backend"])
                 ids = inventory.get("instance_ids")
+                aliases = inventory.get("aliases", {})
                 at = self.clock()
                 if (
                     inventory.get("backend") == binding["backend"]
@@ -401,7 +403,20 @@ class DstackCapacity:
                     and len(ids) <= 4096
                     and all(isinstance(i, str) and IDENTIFIER.fullmatch(i) for i in ids)
                     and len(set(ids)) == len(ids)
+                    and isinstance(aliases, dict)
+                    and all(value in ids for value in aliases.values())
+                    # Lium may first journal a pod name instead of its UUID.
+                    # Missing names in a nonempty list cannot disprove that name.
+                    and (
+                        binding["backend"] != LIUM.id
+                        or re.fullmatch(
+                            r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
+                            identity,
+                        )
+                        or set(aliases.values()) == set(ids)
+                    )
                     and identity not in ids
+                    and identity not in aliases
                     and type(inventory.get("observed_at")) in (int, float)
                     and math.isfinite(inventory["observed_at"])
                     and 0 <= at - inventory["observed_at"] <= 30
@@ -499,48 +514,7 @@ class DstackCapacity:
                     "qualified_start_failure": True,
                 }
         if status in TERMINAL:
-            value.update(
-                state="stopped", reason_code="dstack_run_terminal_billing_pending"
-            )
-            message = submission.get("termination_reason_message")
-            if (
-                binding.get("backend") == RUNPOD.id
-                and isinstance(message, str)
-                and message.startswith("sixnine_runpod_outcome_v1:")
-            ):
-                # The original create may have allocated. A terminal native job
-                # is not provider absence, a free slot, or permission to reapply.
-                value.update(
-                    state="creation_unknown",
-                    reason_code="dstack_allocation_requires_reconciliation",
-                )
-                return value
-            if isinstance(message, str) and message.startswith(
-                "sixnine_vast_attempts_v1:"
-            ):
-                from .dstack_allocation_proof import from_terminal_run
-
-                if from_terminal_run(run, binding) is None:
-                    value.update(
-                        state="creation_unknown",
-                        reason_code="dstack_allocation_requires_reconciliation",
-                    )
-                    return value
-            if terminal_no_allocation(run, binding):
-                value["reason_code"] = "dstack_no_capacity_billing_pending"
-                from .dstack_allocation_proof import account_absence, from_terminal_run
-
-                proof = from_terminal_run(run, binding) or account_absence(
-                    self.client, run, binding
-                )
-                if proof is not None:
-                    value["no_allocation_proof"] = proof
-                    value.update(
-                        billing_state="no_charge_confirmed",
-                        reason_code="dstack_never_allocated",
-                    )
-            value["preparation"]["phase"] = "stopped"
-            return value
+            return self._terminal_observation(run, binding, value, submission)
         if status in {"terminating", "stopping"}:
             value.update(state="stopping", reason_code="dstack_stop_pending")
             value["preparation"]["phase"] = "stopping"
@@ -693,6 +667,52 @@ class DstackCapacity:
                 preparation["reason_code"] = model["reason_code"]
                 value["reason_code"] = model["reason_code"]
         value["preparation"] = {**preparation, "image": image}
+        return value
+
+    def _terminal_observation(self, run, binding, value, submission):
+        value.update(state="stopped", reason_code="dstack_run_terminal_billing_pending")
+        message = submission.get("termination_reason_message")
+        if (
+            binding.get("backend") == RUNPOD.id
+            and isinstance(message, str)
+            and message.startswith("sixnine_runpod_outcome_v1:")
+        ):
+            # The original create may have allocated. A terminal native job
+            # is not provider absence, a free slot, or permission to reapply.
+            value.update(
+                state="creation_unknown",
+                reason_code="dstack_allocation_requires_reconciliation",
+            )
+            return value
+        if isinstance(message, str) and message.startswith("sixnine_vast_attempts_v1:"):
+            from .dstack_allocation_proof import from_terminal_run
+
+            if from_terminal_run(run, binding) is None:
+                value.update(
+                    state="creation_unknown",
+                    reason_code="dstack_allocation_requires_reconciliation",
+                )
+                return value
+        if terminal_no_allocation(run, binding):
+            value["reason_code"] = "dstack_no_capacity_billing_pending"
+            from .dstack_allocation_proof import account_absence, from_terminal_run
+
+            proof = from_terminal_run(run, binding) or account_absence(
+                self.client, run, binding
+            )
+            if proof is not None:
+                value["no_allocation_proof"] = proof
+                value.update(
+                    billing_state="no_charge_confirmed",
+                    reason_code="dstack_never_allocated",
+                )
+        elif not binding.get("provider_instance_id"):
+            identity = terminal_allocated_identity(run, binding["backend"])
+            if identity is not None:
+                # Persist identity before a later observation can attach
+                # removal proof against the original ledger intent.
+                value["provider_instance_id"] = identity
+        value["preparation"]["phase"] = "stopped"
         return value
 
     def _host_observation(self, provisioning, binding, now):

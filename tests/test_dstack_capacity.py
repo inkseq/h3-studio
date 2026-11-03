@@ -486,6 +486,171 @@ class DstackCapacityTests(unittest.TestCase):
         self.native.assert_not_called()
         self.assertEqual(self.client.apply_count, 1)
 
+    def allocated_terminal(self, identity="b4444444-4444-4444-8444-444444444444"):
+        self.capacity.start(request(backend="lium"), PUB)
+        self.client.run = no_capacity_run(self.client.run)
+        submission = self.client.run["jobs"][0]["job_submissions"][0]
+        submission.update(
+            termination_reason="waiting_instance_limit_exceeded",
+            job_provisioning_data={"backend": "lium", "instance_id": identity},
+        )
+        self.client.run["latest_job_submission"] = copy.deepcopy(submission)
+        # Existing stopped rows never retained the allocated identity (#982).
+        self.store.record(
+            INTENT,
+            dict(
+                state="stopped",
+                dstack_status="failed",
+                reason_code="dstack_run_terminal_billing_pending",
+                observed_at=self.now,
+                billing_state="unsettled",
+            ),
+        )
+        return identity
+
+    def allocated_second_look(self, checked=None):
+        binding = self.store.load(INTENT)
+        return self.second_look(
+            {
+                "intent_id": INTENT,
+                "desired_state": "running",
+                "payload": {"dstack": binding},
+            },
+            {
+                "provider_instance_id": binding.get("provider_instance_id"),
+                "state": "destroying",
+            },
+            now=self.now,
+            checked=checked,
+        )
+
+    def test_terminal_allocation_journals_identity_before_confirming_absence(self):
+        identity = self.allocated_terminal()
+        self.client.provider_inventory = Mock(
+            side_effect=lambda backend: dict(
+                backend=backend,
+                complete=True,
+                observed_at=self.now,
+                instance_ids=[],
+            )
+        )
+        self.now += 60
+        checked = self.allocated_second_look()
+        first = self.store.load(INTENT)
+        self.assertEqual(first.get("provider_instance_id"), identity)
+        self.assertNotIn("provider_removal_proof", first)
+        self.client.provider_inventory.assert_not_called()
+        self.now += 59
+        self.allocated_second_look(checked)
+        self.client.provider_inventory.assert_not_called()
+        self.now += 1
+        self.allocated_second_look(checked)
+        final = self.store.load(INTENT)
+        self.assertEqual(
+            final["provider_removal_proof"]["provider_instance_id"], identity
+        )
+        self.assertTrue(final["provider_removal_proof"]["absent"])
+        self.assertEqual(final["billing_state"], "unsettled")
+        self.assertNotIn("no_allocation_proof", final)
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+        self.native.assert_not_called()
+
+    def test_terminal_allocation_keeps_present_or_unconfirmed_instances_blocking(self):
+        identity = self.allocated_terminal()
+        self.now += 60
+        checked = self.allocated_second_look()
+        self.assertEqual(self.store.load(INTENT).get("provider_instance_id"), identity)
+        for change in (
+            {"instance_ids": [identity]},
+            {"complete": False},
+            {"backend": "cloudrift"},
+            {"observed_at": 1.0},
+            {"aliases": {identity: "live-pod"}, "instance_ids": ["live-pod"]},
+            {"aliases": {identity: "unlisted-pod"}},
+            {"aliases": None},
+        ):
+            with self.subTest(change=change):
+                self.now += 60
+                self.client.provider_inventory = Mock(
+                    return_value={
+                        "backend": "lium",
+                        "complete": True,
+                        "observed_at": self.now,
+                        "instance_ids": [],
+                        **change,
+                    }
+                )
+                self.allocated_second_look(checked)
+                final = self.store.load(INTENT)
+                self.assertNotIn("provider_removal_proof", final)
+                self.assertEqual(final["billing_state"], "unsettled")
+        self.now += 60
+        self.client.provider_inventory = Mock(side_effect=DstackError("unavailable"))
+        self.allocated_second_look(checked)
+        self.assertNotIn("provider_removal_proof", self.store.load(INTENT))
+        self.assertEqual(self.store.load(INTENT)["billing_state"], "unsettled")
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+        self.native.assert_not_called()
+
+    def test_terminal_allocated_identity_requires_one_unambiguous_allocation(self):
+        from studio_platform.dstack_observations import terminal_allocated_identity
+
+        identity = self.allocated_terminal()
+        run = copy.deepcopy(self.client.run)
+        submission = run["jobs"][0]["job_submissions"][0]
+        run["jobs"][0]["job_submissions"].append(copy.deepcopy(submission))
+        self.assertEqual(terminal_allocated_identity(run, "lium"), identity)
+        for provisioning in (
+            {"backend": "lium", "instance_id": "different-pod"},
+            {"backend": "cloudrift", "instance_id": identity},
+            {"backend": "lium", "instance_id": "bad/id"},
+            {"backend": "lium"},
+            "malformed",
+        ):
+            with self.subTest(provisioning=provisioning):
+                changed = copy.deepcopy(run)
+                changed["jobs"][0]["job_submissions"][1]["job_provisioning_data"] = (
+                    provisioning
+                )
+                self.assertIsNone(terminal_allocated_identity(changed, "lium"))
+        empty = no_capacity_run(run)
+        self.assertIsNone(terminal_allocated_identity(empty, "lium"))
+        changed = copy.deepcopy(run)
+        changed["jobs"].append(copy.deepcopy(changed["jobs"][0]))
+        self.assertIsNone(terminal_allocated_identity(changed, "lium"))
+
+        changed = copy.deepcopy(run)
+        changed["latest_job_submission"]["job_provisioning_data"]["instance_id"] = (
+            "different-pod"
+        )
+        self.assertIsNone(terminal_allocated_identity(changed, "lium"))
+
+    def test_terminal_lium_name_needs_complete_alias_coverage_for_absence(self):
+        self.allocated_terminal("original-pod-name")
+        self.now += 60
+        checked = self.allocated_second_look()
+        self.now += 60
+        inventory = {
+            "backend": "lium",
+            "complete": True,
+            "observed_at": self.now,
+            "instance_ids": ["c5555555-5555-4555-8555-555555555555"],
+            "aliases": {},
+        }
+        self.client.provider_inventory = Mock(return_value=inventory)
+        self.allocated_second_look(checked)
+        self.assertNotIn("provider_removal_proof", self.store.load(INTENT))
+        # Every remaining pod has a name and none is the original identity.
+        self.now += 60
+        inventory.update(
+            observed_at=self.now,
+            aliases={"another-pod": inventory["instance_ids"][0]},
+        )
+        self.allocated_second_look(checked)
+        self.assertTrue(self.store.load(INTENT)["provider_removal_proof"]["absent"])
+        self.assertEqual(self.store.load(INTENT)["billing_state"], "unsettled")
+        self.assertEqual((self.client.apply_count, self.client.stop_count), (1, 0))
+
     def test_stock_no_capacity_without_instance_names_stays_pending(self):
         self.capacity.start(request(backend="cloudrift"), PUB)
         self.client.run = no_capacity_run(self.client.run)

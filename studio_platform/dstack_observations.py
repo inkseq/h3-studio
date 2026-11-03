@@ -219,6 +219,36 @@ def terminal_no_allocation(run, binding):
     return qualify(run, binding, shape_check=terminal_no_allocation_shape)
 
 
+def terminal_allocated_identity(run, backend):
+    """One original allocation from a terminal singleton; not absence or billing."""
+    if not isinstance(run, dict) or run.get("status") not in TERMINAL:
+        return None
+    jobs = run.get("jobs")
+    if not isinstance(jobs, list) or len(jobs) != 1 or not isinstance(jobs[0], dict):
+        return None
+    submissions = jobs[0].get("job_submissions")
+    if not isinstance(submissions, list) or not submissions:
+        return None
+    # Also refuse conflicting evidence in the top-level projection of the
+    # latest submission; it must not hide a second allocation.
+    latest = run.get("latest_job_submission")
+    records = submissions + ([latest] if latest is not None else [])
+    identities = set()
+    for submission in records:
+        if not isinstance(submission, dict):
+            return None
+        provisioning = submission.get("job_provisioning_data")
+        if provisioning is None:
+            continue
+        if not isinstance(provisioning, dict) or provisioning.get("backend") != backend:
+            return None
+        identity = provisioning.get("instance_id")
+        if not isinstance(identity, str) or not IDENTIFIER.fullmatch(identity):
+            return None
+        identities.add(identity)
+    return next(iter(identities)) if len(identities) == 1 else None
+
+
 def live_capacity_usage(
     client, nodes, *, provider_inventory=None, clock=time.time, fresh_seconds=30
 ):

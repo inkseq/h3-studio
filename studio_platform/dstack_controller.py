@@ -1090,7 +1090,22 @@ class DstackController:
             and not intent.get("provider_instance_id")
             and intent.get("state") != "destroyed"
         )
-        if not awaiting_absence and (
+        ended_after_allocation = (
+            binding.get("reason_code") == "dstack_run_terminal_billing_pending"
+            and binding.get("state") == "stopped"
+            and binding.get("dstack_status")
+            in {"done", "failed", "terminated", "aborted"}
+            and binding.get("run_id")
+            and not binding.get("provider_removal_proof")
+            and intent.get("state") != "destroyed"
+            and binding.get("provider_instance_id")
+            == intent.get("provider_instance_id")
+            and (
+                node["desired_state"] != "stopped"
+                or not intent.get("provider_instance_id")
+            )
+        )
+        if not (awaiting_absence or ended_after_allocation) and (
             node["desired_state"] != "stopped"
             or binding.get("state") != "stopped"
             or binding.get("dstack_status")
@@ -1105,7 +1120,9 @@ class DstackController:
         last = self._removal_checked_at.get(
             node["intent_id"], binding.get("observed_at")
         )
-        wait = ABSENCE_CHECK_SECONDS if awaiting_absence else 30
+        wait = (
+            ABSENCE_CHECK_SECONDS if awaiting_absence or ended_after_allocation else 30
+        )
         if (
             type(last) not in (int, float)
             or not math.isfinite(last)
