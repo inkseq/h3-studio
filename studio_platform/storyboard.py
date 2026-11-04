@@ -22,6 +22,26 @@ SHOT_FIELDS = {
     "continuePrevious",
     "extraRefs",
     "previousFrame",
+    "look",
+    "camera",
+}
+# A shot's look and camera move (#1043): closed lists; absent or empty is Auto, which adds nothing.
+LOOKS = {
+    "film": "Live-action cinema, natural skin, shallow depth of field, soft film grain.",
+    "anime": "Hand-drawn Japanese-style animation, clean line art, flat colours.",
+    "watercolor": "Watercolour painting, soft washes, visible paper texture.",
+    "noir": "Black and white, hard shadows, high contrast, moody.",
+    "soft3d": "Polished 3D animated film, soft rounded forms, warm light.",
+    "storybook": "Hand-painted storybook illustration, warm gouache, gentle colours.",
+}
+CAMERAS = {
+    "static": "The camera stays still.",
+    "push": "The camera slowly pushes in.",
+    "pull": "The camera slowly pulls back.",
+    "pan": "The camera slowly pans across the scene.",
+    "track": "The camera follows the subject.",
+    "handheld": "Gentle handheld camera.",
+    "orbit": "The camera slowly circles the subject.",
 }
 
 
@@ -123,6 +143,8 @@ def contract():
                     "propIds": ids,
                     "firstFrameId": {"type": "string", "maxLength": 160},
                     "lastFrameId": {"type": "string", "maxLength": 160},
+                    "look": {"enum": ["", *LOOKS]},
+                    "camera": {"enum": ["", *CAMERAS]},
                     "continuePrevious": {"type": "boolean", "default": False},
                     "extraRefs": {
                         "type": "array",
@@ -332,6 +354,8 @@ def validate(project, lookup):
             or not isinstance(value.get("quality", "draft"), str)
             or value.get("quality", "draft") not in {"draft", "final"}
             or type(value.get("continuePrevious", False)) is not bool
+            or not (value.get("look", "") == "" or value.get("look") in LOOKS)
+            or not (value.get("camera", "") == "" or value.get("camera") in CAMERAS)
         ):
             raise ValueError("分镜生成版本、模式或档次无效")
         for key in ("firstFrameId", "lastFrameId"):
@@ -499,6 +523,8 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
     style = project.get("journey", {}).get("storyboard", {}).get("style", "")
     if style.strip():
         parts.append({"kind": "style", "label": "全片风格", "text": style.strip()})
+    if value.get("look") in LOOKS:
+        parts.append({"kind": "look", "label": "画面", "text": LOOKS[value["look"]]})
     scene = lookup.get(shot.get("parentId"), {})
     place = value.get("place")
     if (
@@ -568,6 +594,10 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         parts.append({"kind": "action", "label": "动作", "text": action.strip()})
     else:
         issues.append("还没写这一镜的动作描述")
+    if value.get("camera") in CAMERAS:
+        parts.append(
+            {"kind": "camera", "label": "运镜", "text": CAMERAS[value["camera"]]}
+        )
     prompt = "\n".join(part["text"] for part in parts)
     if len(prompt) > 12000:
         issues.append("组装后的提示词超过12000字符，请缩短档案或动作描述")

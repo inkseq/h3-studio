@@ -1,5 +1,8 @@
 import { WorkbenchBulk } from './StoryboardWorkbench.jsx';
 import { Button } from './ui/Button.jsx';
+import { Segmented } from './ui/Segmented.jsx';
+import { STAGES, stageFrom, withStage } from './story-stage.js';
+import { CARD_SIZES, readCardSize, rememberCardSize } from './shot-mention.js';
 import { FloatingMessage } from './floating-notice.js';
 import './v2/story-view.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
@@ -321,8 +324,52 @@ function FilmEditorButton({ chapterId }) {
   );
 }
 
+// Story, library and edit as steps of one project (h3-studio#995). Switching only changes what shows.
+function StageNav({ stage, stages, onChange }) {
+  const { t } = useI18n();
+  return (
+    <nav className="sb-stages" aria-label={t('stage.title')}>
+      <Segmented
+        tabs
+        label={t('stage.title')}
+        options={stages.map((value) => ({ value, label: t('stage.' + value) }))}
+        value={stage}
+        onChange={onChange}
+      />
+    </nav>
+  );
+}
+
+function StoryFilmEditor({ chapterId, onClose }) {
+  const { t } = useI18n();
+  const { dispatch } = useStoryboardUI();
+  return (
+    <React.Suspense fallback={<p role="status">{t('settings.loading')}</p>}>
+      <FilmEditor
+        chapterId={chapterId}
+        onClose={onClose}
+        onUploadAudio={(files) => dispatch({ type: 'uploadFiles', files })}
+      />
+    </React.Suspense>
+  );
+}
+
 function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmControl }) {
   const { t } = useI18n();
+  const [stage, setStageValue] = useState(() => stageFrom(globalThis.location?.search));
+  const setStage = (value) => {
+    setStageValue(value);
+    globalThis.history?.replaceState(
+      globalThis.history.state,
+      '',
+      withStage(globalThis.location.href, value),
+    );
+  };
+  const [cardSize, setCardSize] = useState(() => readCardSize(globalThis.localStorage));
+  const chooseCardSize = (value) => {
+    setCardSize(value);
+    rememberCardSize(globalThis.localStorage, value);
+  };
   const { state, dispatch } = useStoryboardUI(),
     trash = useTrash();
   const gone = trash?.hidden || EMPTY_SET,
@@ -508,7 +555,12 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       if (first) chapterStarts.add(first.id);
     }
   // #232 (#6): dragged to its narrowest, the library is the same icon rail as collapsed.
-  const railed = libraryCollapsed || library.size <= 150,
+  // A story of several chapters edits each from its own header, so it has no single edit step.
+  const editable = !multi && !!state.project.chapterId && !state.placeholder,
+    stages = editable ? STAGES : STAGES.filter((value) => value !== 'edit'),
+    shownStage = stages.includes(stage) ? stage : 'storyboard',
+    wholeLibrary = shownStage === 'library';
+  const railed = !wholeLibrary && (libraryCollapsed || library.size <= 150),
     toggleLibrary = () => {
       if (!railed) return setLibraryCollapsed(true);
       setLibraryCollapsed(false);
@@ -520,20 +572,29 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         'layout A' +
         (state.placeholder ? ' story-placeholder' : '') +
         (railed ? ' library-collapsed' : '') +
+        (wholeLibrary ? ' stage-library' : '') +
         (theater ? ' theater' : '')
       }
       data-testid="storyboard-layout-a"
       style={{
         // Theater (#232 #4): the player and its timeline take the whole window width.
-        gridTemplateColumns: theater
-          ? 'minmax(0,1fr)'
-          : railed
-            ? '52px minmax(0,1fr)'
-            : `${library.size}px 8px minmax(0,1fr)`,
+        gridTemplateColumns:
+          theater || wholeLibrary
+            ? 'minmax(0,1fr)'
+            : railed
+              ? '52px minmax(0,1fr)'
+              : `${library.size}px 8px minmax(0,1fr)`,
         '--libw': (railed ? 52 : library.size) + 'px',
       }}
     >
-      {!railed && (
+      <StageNav stage={shownStage} stages={stages} onChange={setStage} />
+      {shownStage === 'edit' && (
+        <StoryFilmEditor
+          chapterId={state.project.chapterId}
+          onClose={() => setStage('storyboard')}
+        />
+      )}
+      {!railed && !wholeLibrary && (
         <Button
           className="sb-library-scrim"
           aria-label={t('storyboard.detail15')}
@@ -546,7 +607,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         collapsed={railed}
         onToggle={toggleLibrary}
       />
-      {!railed && <StoryboardSplitter panel={library} label={t('storyboard.copy17')} />}
+      {!railed && !wholeLibrary && (
+        <StoryboardSplitter panel={library} label={t('storyboard.copy17')} />
+      )}
       <div
         className={'col' + (selected && !expanded ? ' with-drawer' : '')}
         ref={column}
@@ -598,8 +661,17 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               </small>
             </div>
             <div className="row tight chapter-actions" data-icon-only={headCompact || undefined}>
+              <Segmented
+                className="card-size"
+                label={t('shotCard.size')}
+                options={CARD_SIZES.map((value) => ({
+                  value,
+                  label: t('shotCard.size.' + value),
+                }))}
+                value={cardSize}
+                onChange={chooseCardSize}
+              />
               <InkyForStory />
-              {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && !state.placeholder && (
                 <Button
                   disabled={state.busy || !!state.workbenchPending}
@@ -693,7 +765,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             items={state.shots.map((shot) => 'shot:' + shot.id)}
             strategy={rectSortingStrategy}
           >
-            <div className="sb-scene-groups">
+            <div className="sb-scene-groups" data-card-size={cardSize}>
               {state.placeholder ? (
                 <div className="story-opening-shots">
                   {[0, 1, 2, 3, 4, 5].map((i) => (

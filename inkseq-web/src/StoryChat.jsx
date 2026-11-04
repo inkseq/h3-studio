@@ -41,6 +41,9 @@ import {
 import { createPreviewChat } from './story-chat-preview.js';
 import { createLiveChat } from './story-chat-client.js';
 import { ACCEPT } from './story-chat-attach.js';
+
+const MAX_MESSAGE_CHARS = 4000,
+  MAX_SCRIPT_CHARS = 20000;
 import { AttachedFiles, PendingFiles, useAttachments } from './StoryChatAttachments.jsx';
 import { createCloudClient } from './cloud-client.js';
 import { agentLinkSearch } from './agent-navigation.js';
@@ -559,7 +562,12 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   };
   const [fresh, setFresh] = useState([]);
   const [notice, setNotice] = useState('');
-  const attachments = useAttachments({ live, maxChars: 4000, setText, onNotice: setNotice });
+  const attachments = useAttachments({
+    live,
+    maxChars: MAX_SCRIPT_CHARS,
+    setText,
+    onNotice: setNotice,
+  });
   const files = attachments.files;
   const chat = useRef(null);
   const thread = useRef(null);
@@ -679,7 +687,13 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   const send = (value = text) => {
     const message = value.trim();
     if ((!message && !files.length) || state.busy || unavailable) return;
-    chat.current.send({ text: message, attachments: files }, emit);
+    if (message.length > MAX_SCRIPT_CHARS) {
+      setNotice(t('storyChat.textCut', { max: MAX_SCRIPT_CHARS }));
+      return;
+    }
+    // A long message is a script: it gets its own limit, and shots to check before anything is made.
+    const script = message.length > MAX_MESSAGE_CHARS;
+    chat.current.send({ text: message, attachments: files, script }, emit);
     track('story_chat_message', { live, attachments: files.length });
     setText('');
     attachments.clear();
@@ -715,7 +729,11 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   const open = state.cards.find((card) => card.id === openId);
   const profiles = state.cards.filter((card) => card.kind !== 'shot');
   const done = progress(state);
-  const starters = ['storyChat.starter1', 'storyChat.starter2', 'storyChat.starter3'];
+  const starters = [
+    { key: 'storyChat.starter1', picture: 'alien' },
+    { key: 'storyChat.starter2', picture: 'coffee' },
+    { key: 'storyChat.starter3', picture: 'fox' },
+  ];
 
   return (
     <div className="home sc-shell">
@@ -844,10 +862,23 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
               <div className="sc-welcome">
                 <h1>{t('storyChat.welcome')}</h1>
                 <p>{t('storyChat.welcomeHelp')}</p>
+                <p className="muted">{t('storyChat.scriptHelp')}</p>
                 <div className="sc-starters">
-                  {starters.map((key) => (
-                    <Button key={key} variant="option" onClick={() => send(t(key))}>
-                      {t(key)}
+                  {starters.map(({ key, picture }) => (
+                    <Button
+                      key={key}
+                      variant="option"
+                      className="sc-starter"
+                      onClick={() => send(t(key))}
+                    >
+                      <img
+                        src={'/v1/story-chats/starter-pictures/' + picture}
+                        alt=""
+                        width="320"
+                        height="180"
+                        loading="lazy"
+                      />
+                      <span>{t(key)}</span>
                     </Button>
                   ))}
                 </div>

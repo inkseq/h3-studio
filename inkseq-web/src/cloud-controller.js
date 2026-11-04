@@ -1884,6 +1884,38 @@ export function createCloudController({
     if (!Array.isArray(value?.items)) throw Error('inky.unavailable');
     return value;
   }
+  // Judges shots that have no advice yet, after the answer; the read above stays a pure read.
+  async function refreshInky() {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request('/v1/inky/refresh' + inkyQuery(ctx), { method: 'POST' });
+    guard(ctx);
+    return value;
+  }
+  // Voice names and samples only. Off answers `enabled: false`, and the picker stays hidden.
+  async function readVoices() {
+    requireCloud();
+    return api.request('/v1/voices');
+  }
+  // A line in a catalog voice becomes an audio file on the story; it arrives like a remote change.
+  async function speakLine(body) {
+    requireCloud();
+    const ctx = context();
+    const clip = await api.request(`/v1/projects/${encodeURIComponent(ctx.projectId)}/speech`, {
+      method: 'POST',
+      body,
+      timeoutMs: 90000,
+    });
+    guard(ctx);
+    const record = checkedProjectRecord(await api.project(ctx.projectId));
+    guard(ctx);
+    if (
+      record.version > current().workspace.serverVersion &&
+      !store.rebaseCloud(record.project, { account: ctx.account, version: record.version })
+    )
+      emit({ remoteUpdate: { id: record.id, version: record.version } });
+    return clip;
+  }
   async function readShotReadiness() {
     requireCloud();
     const ctx = context();
@@ -2112,6 +2144,9 @@ export function createCloudController({
     readTakeReview: (shotId, artifactId) => readTakeReview(shotId, artifactId),
     readTakeReviewSummaries: (shotId) => readTakeReviewSummaries(shotId),
     readInkySuggestions: () => readInkySuggestions(),
+    refreshInky: () => refreshInky(),
+    readVoices: () => readVoices(),
+    speakLine: (body) => speakLine(body),
     readShotReadiness: () => readShotReadiness(),
     ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
     saveTakeReview: (shotId, artifactId, body, key) =>

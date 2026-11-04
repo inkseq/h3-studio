@@ -236,7 +236,7 @@ export function createLiveChat({
         load(await api.request(path + '/open', { method: 'POST', body: { language } }), emit);
       }
     },
-    async send({ text, attachments = [] }, emit) {
+    async send({ text, attachments = [], script = false }, emit) {
       const id = turnId();
       emit({ type: 'user.message', id: id + '-u', text, attachments });
       emit({ type: 'turn.started' });
@@ -246,7 +246,11 @@ export function createLiveChat({
         const note = attachmentNote(added, labels.t);
         const value = await api.request(`/v1/story-chats/${encodeURIComponent(ident)}/turns`, {
           method: 'POST',
-          body: { turn_id: id, text: [text, note].filter(Boolean).join('\n\n') },
+          body: {
+            turn_id: id,
+            text: [text, note].filter(Boolean).join('\n\n'),
+            ...(script ? { script: true } : {}),
+          },
           // A model turn can take 10–30 s; never give up before the server does.
           timeoutMs: 120000,
         });

@@ -151,6 +151,27 @@ class InkyStore:
             visible.sort(key=lambda v: (v["shot_id"], KINDS.index(v["kind"])))
             return {"items": visible[:3]}
 
+    def pending(self, principal, project_id):
+        """Shots with something to judge and no evaluation yet. Never calls a provider."""
+        with self.repo.transaction() as conn:
+            current = sources(self.project(conn, principal, project_id, write=True))
+            settings = self.row(conn, principal, project_id, SETTINGS, "settings")
+            if settings and settings["payload"].get("muted"):
+                return 0
+            claimed = set(
+                conn.execute(
+                    select(documents.c.document_id).where(
+                        *self.where(principal, project_id, CLAIM)
+                    )
+                ).scalars()
+            )
+        return sum(
+            1
+            for source in current.values()
+            if source["source_id"] not in claimed
+            and (source["context"]["shot_action"].strip() or source.get("upload"))
+        )
+
     def claim(self, principal, project_id, shot_id):
         """Reserve exactly one evaluation per current source; never retry unknown."""
         with self.repo.transaction() as conn:

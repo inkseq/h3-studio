@@ -1,4 +1,5 @@
 /* Pure edits of the existing document. Cloud IO and execution stay in the controller. */
+import { validCamera, validLook } from './shot-look.js';
 import { children, ancestors } from './store.js';
 import { detachDeletedReferences } from './entity-references.js';
 import {
@@ -115,6 +116,8 @@ function validShotScalars(patch) {
   ])
     if (owns(patch, key) && !text(patch[key], max)) return false;
   if (owns(patch, 'mode') && !['FL', 'REF'].includes(patch.mode)) return false;
+  if (owns(patch, 'look') && !validLook(patch.look)) return false;
+  if (owns(patch, 'camera') && !validCamera(patch.camera)) return false;
   if (owns(patch, 'quality') && !['draft', 'final'].includes(patch.quality)) return false;
   if (
     owns(patch, 'duration') &&
@@ -185,6 +188,8 @@ function validShotPatch(project, patch) {
       'place',
       'props',
       'continuePrev',
+      'look',
+      'camera',
       'quality',
       'seedLock',
       'aspect',
@@ -228,7 +233,9 @@ function patchShot(project, shot, patch) {
   if (
     !shot.data.storyboard &&
     shot.data.h3?.explicitReferences &&
-    Object.keys(patch).some((key) => ['cast', 'place', 'props', 'continuePrev'].includes(key))
+    Object.keys(patch).some((key) =>
+      ['cast', 'place', 'props', 'continuePrev', 'look', 'camera'].includes(key),
+    )
   )
     return false;
   const clean = { ...patch };
@@ -237,7 +244,7 @@ function patchShot(project, shot, patch) {
     !shot.data.storyboard &&
     !shot.data.h3?.explicitReferences &&
     Object.keys(clean).some((key) =>
-      ['mode', 'cast', 'place', 'props', 'continuePrev'].includes(key),
+      ['mode', 'cast', 'place', 'props', 'continuePrev', 'look', 'camera'].includes(key),
     )
   )
     materializeLegacyContext(project, shot, clean);
@@ -277,8 +284,11 @@ function projectAction(project, action) {
 const badTitle = (value) => value !== undefined && (!text(value, 160) || !value.trim());
 function addAction(project, action, { chapterId, view }) {
   if (badTitle(action.title) || badTitle(action.sceneTitle)) return false;
-  const requested = action.sceneId === undefined ? null : find(project, action.sceneId);
-  if (action.sceneId !== undefined && requested?.type !== 'scene') return false;
+  const after = action.after === undefined ? null : find(project, action.after);
+  if (action.after !== undefined && after?.type !== 'shot') return false;
+  const sceneId = after ? after.parentId : action.sceneId;
+  const requested = sceneId === undefined ? null : find(project, sceneId);
+  if (sceneId !== undefined && requested?.type !== 'scene') return false;
   // A shot added to a specific scene belongs to that scene's chapter (all chapters share one page).
   const existing =
     (requested && find(project, requested.parentId)) ||
@@ -315,7 +325,24 @@ function addAction(project, action, { chapterId, view }) {
       extraRefs: [],
     },
   });
+  if (after) placeAfter(project, added, after);
   return { id: added.id };
+}
+function placeAfter(project, added, after) {
+  const siblings = children(project, after.parentId).filter(
+    (entity) => entity.type === 'shot' && entity.id !== added.id,
+  );
+  siblings.splice(siblings.indexOf(after) + 1, 0, added);
+  siblings.forEach((entity, index) => {
+    if (entity.order !== index) {
+      entity.order = index;
+      mark(entity);
+    }
+  });
+  // Previous-shot identity changes for whatever now follows the new shot.
+  storyShots(project)
+    .filter((entity) => entity.data.storyboard?.continuePrevious)
+    .forEach(mark);
 }
 function removeAction(project, action, { shot }) {
   if (shot?.type !== 'shot') return false;
@@ -529,13 +556,15 @@ function dismissInboxAction(project, action, _ctx) {
 }
 // A profile patch only sets fields this kind of profile has, and names real assets.
 function validProfilePatch(project, profile, patch) {
-  if (!fields(patch, ['name', 'desc', 'def', 'voice', 'ambient'])) return false;
+  if (!fields(patch, ['name', 'desc', 'def', 'voice', 'voiceId', 'ambient'])) return false;
   if (
     (owns(patch, 'name') && !text(patch.name, 160)) ||
     (owns(patch, 'desc') && !text(patch.desc, 24000))
   )
     return false;
   if (owns(patch, 'def') && (!variant(profile, patch.def) || profile.type === 'prop')) return false;
+  if (owns(patch, 'voiceId') && (profile.type !== 'character' || !text(patch.voiceId, 40)))
+    return false;
   const voice = list(profile.data.voices).find((value) => value.assetId === patch.voice);
   if (owns(patch, 'voice') && (profile.type !== 'character' || (patch.voice && !voice)))
     return false;
@@ -557,6 +586,7 @@ function profileAction(project, action, { profile }) {
     profile.data[profile.type === 'character' ? 'defaultLookId' : 'defaultVersionId'] = patch.def;
   }
   if (owns(patch, 'voice')) profile.data.mainVoiceId = voice?.id || '';
+  if (owns(patch, 'voiceId')) profile.data.voiceId = patch.voiceId;
   if (owns(patch, 'ambient'))
     profile.data.ambient = patch.ambient
       ? {

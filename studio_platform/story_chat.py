@@ -19,6 +19,13 @@ from datetime import datetime, timezone
 
 MODEL = "gemini-3.8-flash"
 MAX_TEXT_CHARS = 4000
+# A pasted or dropped script (#1042): about 20 pages. Longer ones are refused, never cut.
+MAX_SCRIPT_CHARS = 20000
+SCRIPT_NOTE = (
+    "This message is the person's own script. Turn it into characters, places, props and "
+    "shots that follow it faithfully, in order, keeping its dialogue. Then ask them to "
+    "check the shots. Do not offer to generate anything yet.\n\n"
+)
 MAX_TURNS = 200
 HISTORY_MESSAGES = 24
 HISTORY_CHARS = 1500
