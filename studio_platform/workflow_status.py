@@ -19,6 +19,7 @@ COLUMNS = frozenset(
         "application_version",
         "name",
         "created_at",
+        "updated_at",
     }
 )
 OPEN = ("ENQUEUED", "PENDING", "DELAYED")
@@ -76,3 +77,20 @@ def latest_status(connection, base, application, version, name):
         ),
         _params(base, application, name, version=version),
     ).scalar()
+
+
+def ended_before(connection, application, name, before_ms):
+    """Finished workflows of one kind, last touched before the cutoff."""
+    return (
+        connection.execute(
+            text(
+                "SELECT workflow_uuid FROM inkseq_workflows.workflow_status "
+                "WHERE application_name=:application AND name=:name "
+                "AND status IN ('SUCCESS','ERROR','CANCELLED') "
+                "AND updated_at<:before ORDER BY updated_at,workflow_uuid"
+            ),
+            {"application": application, "name": name, "before": before_ms},
+        )
+        .scalars()
+        .all()
+    )

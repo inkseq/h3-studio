@@ -1381,9 +1381,14 @@ def main(argv=None):
 
         stop_list = Manifest(repo, work_dir)
 
+        from .workflow_retention import Sweeper
+
+        history = Sweeper(repo)
+
         def heartbeat(active):
             progress.beat(active)
             stop_list.beat()
+            history.sweep_if_due()
 
         try:
             if threading.current_thread() is threading.main_thread():
