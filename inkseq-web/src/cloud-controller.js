@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { asPreviewed } from './preview-as-user.js';
 import { providerLogoutUrl } from './account-access.js';
 import { videoCacheIdentity, clearVideoCache } from './video-cache-client.js';
@@ -154,7 +155,7 @@ export function createCloudController({
       ctx.projectId !== current().project.id ||
       ctx.account !== state.account
     )
-      throw Error('账户或项目已经切换；迟到的响应没有写入当前作品。');
+      throw Error(words('账户或项目已经切换；迟到的响应没有写入当前作品。'));
   };
   const requireCloud = () => {
     if (
@@ -162,10 +163,10 @@ export function createCloudController({
       current().workspace.mode !== 'cloud' ||
       current().workspace.account !== state.account
     )
-      throw Error('请先登录并打开一个云项目。');
+      throw Error(words('请先登录并打开一个云项目。'));
   };
   const intent = (kind, scope) => {
-    if (!storage) throw Error('浏览器无法保存提交标识；为避免重复提交，请先恢复存储。');
+    if (!storage) throw Error(words('浏览器无法保存提交标识；为避免重复提交，请先恢复存储。'));
     const key = `yingxu-cloud-intent-v1:${state.account}:${kind}:${scope}`;
     let value = storage.getItem(key);
     if (!value) {
@@ -179,22 +180,22 @@ export function createCloudController({
     try {
       return JSON.parse(storage?.getItem(pendingKey()) || '{}');
     } catch {
-      throw Error('未确认任务的记录无法读取。请保留浏览器数据并先核对服务任务。');
+      throw Error(words('未确认任务的记录无法读取。请保留浏览器数据并先核对服务任务。'));
     }
   };
   const writePending = (value) => {
-    if (!storage) throw Error('无法保留提交记录，未提交任务。');
+    if (!storage) throw Error(words('无法保留提交记录，未提交任务。'));
     storage.setItem(pendingKey(), JSON.stringify(value));
   };
   const readBatchPending = () => {
     try {
       return JSON.parse(storage?.getItem(pendingKey() + ':batch') || 'null');
     } catch {
-      throw Error('未确认批次记录无法读取，请先核对云端任务。');
+      throw Error(words('未确认批次记录无法读取，请先核对云端任务。'));
     }
   };
   const writeBatchPending = (value) => {
-    if (!storage) throw Error('无法保留批次标识，未提交。');
+    if (!storage) throw Error(words('无法保留批次标识，未提交。'));
     storage.setItem(pendingKey() + ':batch', JSON.stringify(value));
     emit({ batchPending: value });
   };
@@ -202,11 +203,11 @@ export function createCloudController({
     try {
       return JSON.parse(storage?.getItem(pendingKey() + ':render') || '{}');
     } catch {
-      throw Error('未确认粗剪记录无法读取，请保留浏览器数据并核对任务。');
+      throw Error(words('未确认粗剪记录无法读取，请保留浏览器数据并核对任务。'));
     }
   };
   const writeRenderPending = (value) => {
-    if (!storage) throw Error('无法保存粗剪提交标识，未提交。');
+    if (!storage) throw Error(words('无法保存粗剪提交标识，未提交。'));
     storage.setItem(pendingKey() + ':render', JSON.stringify(value));
     emit({ renderPending: value });
   };
@@ -229,7 +230,7 @@ export function createCloudController({
       read: state.account
         ? async (fileId) => {
             const match = /^cloud_(asset|artifact)_([A-Za-z0-9_-]+)$/.exec(fileId);
-            if (!match) throw Error('云素材标识无效。');
+            if (!match) throw Error(words('云素材标识无效。'));
             const ctx = context(),
               blob = await api.download(`/v1/${match[1]}s/${match[2]}/content`);
             guard(ctx);
@@ -310,10 +311,9 @@ export function createCloudController({
     installMedia();
   }
   function expire() {
+    const previous = state.account;
     replaceIdentity(null);
-    emit({
-      error: '云登录已失效或身份已改变。原本机作品已恢复，云草稿仍按原账户保留，请重新核对登录。',
-    });
+    emit({ error: translateForAccount(previous, 'cloud.sessionEnded') });
   }
   async function recheckSession({ loadLists = false, refreshCapabilities = false } = {}) {
     if (sessionCheck) return sessionCheck;
@@ -323,7 +323,7 @@ export function createCloudController({
         const accountRecord = await api.me(),
           me = identity(accountRecord);
         if (observedEpoch !== epoch) return;
-        if (typeof me !== 'string' || !me) throw Error('服务没有返回可核对的账户身份。');
+        if (typeof me !== 'string' || !me) throw Error(words('服务没有返回可核对的账户身份。'));
         const changed =
           state.account !== me ||
           (current().workspace.mode === 'cloud' && current().workspace.account !== me);
@@ -382,7 +382,7 @@ export function createCloudController({
   let chain = Promise.resolve(),
     queued = 0;
   async function action(fn, { projectId, blocking = false, exclusive = blocking } = {}) {
-    if (exclusive && queued) throw Error('上一项云操作还在处理中。');
+    if (exclusive && queued) throw Error(words('上一项云操作还在处理中。'));
     // With nothing running the operation starts right away (same tick), as before.
     const previous = queued ? chain : null;
     queued += 1;
@@ -422,7 +422,7 @@ export function createCloudController({
   const accountContext = () => ({ epoch, account: state.account });
   const guardAccount = (ctx) => {
     if (!ctx.account || ctx.epoch !== epoch || ctx.account !== state.account)
-      throw Object.assign(Error('账户已经改变，旧账户列表没有写入。'), { quiet: true });
+      throw Object.assign(Error(words('账户已经改变，旧账户列表没有写入。')), { quiet: true });
   };
   async function reloadProjects({ replace = false } = {}) {
     const ctx = accountContext(),
@@ -530,7 +530,7 @@ export function createCloudController({
       asset.status !== 'ready' ||
       !['image', 'video', 'audio'].includes(asset.kind)
     )
-      throw Error('素材尚未就绪或属于其他项目，未加入素材库。');
+      throw Error(words('素材尚未就绪或属于其他项目，未加入素材库。'));
     if (current().project.entities.some((e) => e.data.cloudAssetId === asset.id)) return;
     if (asset.content_url) safeCloudPath(asset.content_url);
     const id = store.addEntity(asset.kind, null, {
@@ -557,7 +557,7 @@ export function createCloudController({
     const me = state.account,
       ctx = accountContext(),
       request = ++projectOpenRequest;
-    if (!me) throw Error('先登录云工作室。');
+    if (!me) throw Error(words('先登录云工作室。'));
     emit({
       projectOpen: { projectId: id, account: me, status: 'loading' },
       draftOffer: null,
@@ -606,7 +606,7 @@ export function createCloudController({
         draftOffer: { record, draft },
         conflict: { id, remote: record, draft },
       });
-      const error = Error('本机云草稿基于较旧版本。请下载草稿或保存副本；未覆盖云端。');
+      const error = Error(words('本机云草稿基于较旧版本。请下载草稿或保存副本；未覆盖云端。'));
       error.code = 'storyOpen.versionConflict';
       throw error;
     }
@@ -693,7 +693,7 @@ export function createCloudController({
       if (error.status === 409) {
         emit({ conflict: { id: project.id, draft: project, baseVersion: version } });
         throw Error(
-          '另一处已更新这个项目。当前草稿已保留；请保存为云副本或下载后比较，未覆盖远端。',
+          words('另一处已更新这个项目。当前草稿已保留；请保存为云副本或下载后比较，未覆盖远端。'),
           { cause: error },
         );
       }
@@ -711,7 +711,7 @@ export function createCloudController({
     );
     guard(ctx);
     if (!asset?.asset_id || (asset.status && asset.status !== 'ready'))
-      throw Error('素材尚未处理完成，未当作可生成的输入。');
+      throw Error(words('素材尚未处理完成，未当作可生成的输入。'));
     if (asset.content_url) safeCloudPath(asset.content_url);
     return {
       type: asset.kind || type,
@@ -733,7 +733,7 @@ export function createCloudController({
     const p = current().project,
       asset = p.entities.find((e) => e.id === id);
     if (!asset || !['image', 'video', 'audio'].includes(asset.type))
-      throw Error('参考素材不存在。');
+      throw Error(words('参考素材不存在。'));
     if (asset.data.cloudAssetId) return asset.data.cloudAssetId;
     const ctx = context(),
       oldFile = asset.data.fileId,
@@ -748,7 +748,7 @@ export function createCloudController({
     const result = await upload(file, asset.type, id + ':' + oldFile);
     guard(ctx);
     const latest = current().project.entities.find((e) => e.id === id);
-    if (latest?.data.fileId !== oldFile) throw Error('上传时原素材已更换，请重新预检。');
+    if (latest?.data.fileId !== oldFile) throw Error(words('上传时原素材已更换，请重新预检。'));
     if (
       !store.editProject(
         (project) => {
@@ -787,7 +787,7 @@ export function createCloudController({
       )
     )
       throw Error(
-        '原任务恢复后待核对，请等待管理员核对执行与费用；可以继续编辑作品，不能重新提交。',
+        words('原任务恢复后待核对，请等待管理员核对执行与费用；可以继续编辑作品，不能重新提交。'),
       );
   }
   async function extractFrame(artifactId, selection) {
@@ -804,7 +804,7 @@ export function createCloudController({
       asset.kind !== 'image' ||
       asset.selection?.artifact_id !== artifactId
     )
-      throw Error('截帧收据尚未确认；未加入档案或替代原参考。');
+      throw Error(words('截帧收据尚未确认；未加入档案或替代原参考。'));
     const existing = current().project.entities.find((e) => e.data.cloudAssetId === asset.asset_id);
     if (existing) return existing.id;
     const id = store.addEntity('image', null, {
@@ -831,7 +831,7 @@ export function createCloudController({
     assertNotHeld('shot_id', shotId);
     const ctx = context();
     if (readPending()[shotId] || readBatchPending()?.shotIds.includes(shotId))
-      throw Error('原提交尚未核对，请先刷新原记录。');
+      throw Error(words('原提交尚未核对，请先刷新原记录。'));
     const plans = { ...state.plans };
     delete plans[shotId];
     emit({ plans, preflightErrors: { ...state.preflightErrors, [shotId]: null } });
@@ -839,9 +839,9 @@ export function createCloudController({
       await reloadCapabilities();
       guard(ctx);
       let shot = current().project.entities.find((e) => e.id === shotId);
-      if (!shot) throw Error('镜头不存在。');
+      if (!shot) throw Error(words('镜头不存在。'));
       const b = shot.data.storyboard;
-      if (!b) throw Error('请先保存分镜配置。');
+      if (!b) throw Error(words('请先保存分镜配置。'));
       const selected = storyboardProfile(
         state.capabilities,
         b.quality,
@@ -855,11 +855,11 @@ export function createCloudController({
           ? selected.model_id !== 'MiniMax-H3-Base-INT8'
           : selected.model_id !== 'MiniMax-H3-Pruned-Rank8-INT8')
       )
-        throw Error('所选模型与草稿/精修配置不一致或尚不可用；未使用另一模型替代。');
+        throw Error(words('所选模型与草稿/精修配置不一致或尚不可用；未使用另一模型替代。'));
       if (
         state.jobs.some((j) => j.client_ref?.shot_id === shotId && activeJobStatuses.has(j.status))
       )
-        throw Error('这一镜已有任务排队或执行，请查看原任务。');
+        throw Error(words('这一镜已有任务排队或执行，请查看原任务。'));
       if (
         b.continuePrevious &&
         (b.mode === 'fl' ||
@@ -875,7 +875,7 @@ export function createCloudController({
           previous = shots[shots.findIndex((s) => s.id === shotId) - 1],
           chosen = current().project.entities.find((e) => e.id === previous?.data.selectedAssetId);
         if (!previous || !chosen?.data.cloudArtifactId || chosen.type !== 'video')
-          throw Error('请先选定上一镜的真实成片；不会使用未选定候选。');
+          throw Error(words('请先选定上一镜的真实成片；不会使用未选定候选。'));
         if (
           b.previousFrame?.selectedAssetId !== chosen.id ||
           !current().project.entities.some((e) => e.id === b.previousFrame?.frameAssetId)
@@ -884,7 +884,7 @@ export function createCloudController({
           guard(ctx);
           const latest = current().project.entities.find((e) => e.id === previous.id);
           if (latest?.data.selectedAssetId !== chosen.id)
-            throw Error('截帧期间上一镜的选择已改变，请重新预检。');
+            throw Error(words('截帧期间上一镜的选择已改变，请重新预检。'));
           store.updateEntity(shotId, {
             data: {
               storyboard: {
@@ -938,16 +938,17 @@ export function createCloudController({
           source.client_ref?.shot_id !== shotId ||
           !source.effective_request
         )
-          throw Error('原选定成片的请求尚未确认，不能用当前编辑草稿代替。');
+          throw Error(words('原选定成片的请求尚未确认，不能用当前编辑草稿代替。'));
         const chosen = snapshot.entities.find((e) => e.id === shotId)?.data.selectedAssetId,
           candidate = snapshot.entities.find((e) => e.id === chosen);
         if (!candidate || candidate.data.sourceJobId !== sourceJobId || candidate.type !== 'video')
-          throw Error('精修必须使用当前选定成片的原请求；选择已改变，请重新预检。');
+          throw Error(words('精修必须使用当前选定成片的原请求；选择已改变，请重新预检。'));
         const request = source.effective_request;
         recipeId = source.recipe_id;
         const recipe = state.capabilities.recipes.find((r) => r.id === recipeId),
           support = selected.generation_support?.[request.mode];
-        if (!support || b.mode !== request.mode) throw Error('精修模型或模式与原选定请求不一致。');
+        if (!support || b.mode !== request.mode)
+          throw Error(words('精修模型或模式与原选定请求不一致。'));
         const controls = Object.fromEntries(
           Object.keys(support.controls || recipe?.controls || {})
             .filter((k) => Object.hasOwn(request, k) && !['guides', 'video_audio'].includes(k))
@@ -995,7 +996,7 @@ export function createCloudController({
           throw Error(preview.issues?.join(' ') || '草稿版本已经改变，请重新预检。');
         recipeId = preview.draft.recipe_id;
         if (preview.draft.deployment_profile_id !== selected.id)
-          throw Error('服务端模型档案与界面所选不一致，未提交。');
+          throw Error(words('服务端模型档案与界面所选不一致，未提交。'));
         plan = await api.savedPlan(
           ctx.projectId,
           shotId,
@@ -1008,14 +1009,14 @@ export function createCloudController({
         guard(ctx);
       }
       if (localHash !== (await digest(shotSnapshot(current().project, shotId))))
-        throw Error('预检期间镜头或档案已改变，旧计划未当作可提交计划。');
+        throw Error(words('预检期间镜头或档案已改变，旧计划未当作可提交计划。'));
       if (!plan.plan_id || !['ready', 'blocked'].includes(plan.status))
-        throw Error('生成计划响应无效。');
+        throw Error(words('生成计划响应无效。'));
       if (
         plan.effective_request?.model !== selected.model_id ||
         plan.effective_request?.mode !== b.mode
       )
-        throw Error('实际预检模型或模式与所选配置不一致，未提交。');
+        throw Error(words('实际预检模型或模式与所选配置不一致，未提交。'));
       emit({
         plans: {
           ...state.plans,
@@ -1044,7 +1045,9 @@ export function createCloudController({
     requireCloud();
     assertNotHeld('shot_id', shotId);
     if (readPending()[shotId] || readBatchPending()?.shotIds.includes(shotId))
-      throw Error('这个镜头有未确认的提交。先刷新任务或用原标识核对提交，不能创建新计划绕过。');
+      throw Error(
+        words('这个镜头有未确认的提交。先刷新任务或用原标识核对提交，不能创建新计划绕过。'),
+      );
     const ctx = context();
     emit({ preflightErrors: { ...state.preflightErrors, [shotId]: null } });
     const currentHash = await digest(shotSnapshot(current().project, shotId));
@@ -1057,15 +1060,15 @@ export function createCloudController({
           activeJobStatuses.has(job.status),
       )
     )
-      throw Error('这个镜头的相同版本已在队列中，请查看进度或先取消原任务。');
+      throw Error(words('这个镜头的相同版本已在队列中，请查看进度或先取消原任务。'));
     await reloadCapabilities();
     guard(ctx);
     if (current().project.entities.find((e) => e.id === shotId)?.data.storyboard)
       return prepareStoryboard(shotId);
     let shot = current().project.entities.find((e) => e.id === shotId);
-    if (!shot) throw Error('镜头不存在。');
+    if (!shot) throw Error(words('镜头不存在。'));
     const recipe = selectedProfileRecipe(state.capabilities, shot.data.h3);
-    if (!recipe) throw Error('此生成配方已不可用，请刷新并重新选择。');
+    if (!recipe) throw Error(words('此生成配方已不可用，请刷新并重新选择。'));
     const runtime = executionPresetControls(recipe),
       saved = shot.data.h3?.controls || {};
     if (Object.entries(runtime).some(([field, value]) => saved[field] !== value)) {
@@ -1074,7 +1077,7 @@ export function createCloudController({
           data: { h3: { ...shot.data.h3, controls: { ...saved, ...runtime } } },
         })
       )
-        throw Error('自动匹配云端设置未保存，请重新预检。');
+        throw Error(words('自动匹配云端设置未保存，请重新预检。'));
     }
 
     const matchedHash = await digest(shotSnapshot(current().project, shotId));
@@ -1087,7 +1090,7 @@ export function createCloudController({
           activeJobStatuses.has(job.status),
       )
     )
-      throw Error('这个镜头的相同版本已在队列中，请查看进度或先取消原任务。');
+      throw Error(words('这个镜头的相同版本已在队列中，请查看进度或先取消原任务。'));
     let refs = referenceSpecs(current().project, shotId, { mode: recipe.mode });
     if (refs.issues.length) throw Error(refs.issues.join(' '));
     for (const id of new Set([
@@ -1115,7 +1118,7 @@ export function createCloudController({
         );
         guard(ctx);
         if (!derivative.asset_id || derivative.status !== 'ready')
-          throw Error('选段仍在处理中，请稍后重新预检；未使用整个原文件替代。');
+          throw Error(words('选段仍在处理中，请稍后重新预检；未使用整个原文件替代。'));
         assetMap[ref.key] = derivative.asset_id;
       }
     }
@@ -1132,7 +1135,7 @@ export function createCloudController({
         range.start < 0 ||
         range.end <= range.start
       )
-        throw Error('时间锚点的原文件已改变或选段无效，请重设锚点。');
+        throw Error(words('时间锚点的原文件已改变或选段无效，请重设锚点。'));
       const derivative = await api.derivative(
         entity.data.cloudAssetId,
         range,
@@ -1143,7 +1146,7 @@ export function createCloudController({
       );
       guard(ctx);
       if (!derivative.asset_id || derivative.status !== 'ready')
-        throw Error('锚点选段尚未就绪，没有使用完整原文件替代。');
+        throw Error(words('锚点选段尚未就绪，没有使用完整原文件替代。'));
       assetMap['guide:' + index] = derivative.asset_id;
     }
     await save();
@@ -1159,7 +1162,7 @@ export function createCloudController({
     const plan = await api.plan(payload, intent('plan', snapshot.id + ':' + shotId + ':' + hash));
     guard(ctx);
     if (!plan.plan_id || !['ready', 'blocked'].includes(plan.status))
-      throw Error('服务返回了无效的生成计划。');
+      throw Error(words('服务返回了无效的生成计划。'));
     emit({
       plans: {
         ...state.plans,
@@ -1188,17 +1191,19 @@ export function createCloudController({
     guard(ctx);
     assertNotHeld('shot_id', shotId);
     const plan = state.plans[shotId];
-    if (!plan || plan.status !== 'ready') throw Error('请先完成这个镜头的预检，并解决阻塞项。');
-    if (!state.capabilities?.execution_enabled) throw Error('当前服务未启用生成；未提交任务。');
+    if (!plan || plan.status !== 'ready')
+      throw Error(words('请先完成这个镜头的预检，并解决阻塞项。'));
+    if (!state.capabilities?.execution_enabled)
+      throw Error(words('当前服务未启用生成；未提交任务。'));
     if (plan.sourceHash !== (await digest(shotSnapshot(current().project, shotId))))
-      throw Error('镜头或参考已改变，请重新预检。');
+      throw Error(words('镜头或参考已改变，请重新预检。'));
     if (
       plan.expires_at &&
       (typeof plan.expires_at === 'number'
         ? plan.expires_at * 1000
         : Date.parse(plan.expires_at)) <= Date.now()
     )
-      throw Error('计划已过期，请重新预检。');
+      throw Error(words('计划已过期，请重新预检。'));
     return plan;
   }
   async function mergeJobs(jobs, ctx) {
@@ -1328,7 +1333,7 @@ export function createCloudController({
   }
   async function loadMoreJobs() {
     requireCloud();
-    if (polling) throw Error('任务正在刷新，请稍后加载更早记录。');
+    if (polling) throw Error(words('任务正在刷新，请稍后加载更早记录。'));
     polling = true;
     try {
       const ctx = context(),
@@ -1377,7 +1382,7 @@ export function createCloudController({
     requireCloud();
     assertNotHeld('shot_id', shotId);
     if (readBatchPending()?.shotIds.includes(shotId))
-      throw Error('此镜头属于待核对批次，请先恢复原批次。');
+      throw Error(words('此镜头属于待核对批次，请先恢复原批次。'));
     const ctx = context(),
       existing = readPending()[shotId],
       plan = existing?.plan || (await validPlan(shotId));
@@ -1425,15 +1430,15 @@ export function createCloudController({
       assertNotHeld('shot_id', id);
     const ctx = context();
     let pending = readBatchPending();
-    if (pending && !recover) throw Error('已有未确认的批次，请先恢复原批次。');
+    if (pending && !recover) throw Error(words('已有未确认的批次，请先恢复原批次。'));
     if (!pending) {
       const plans = [];
       for (const id of shotIds) {
-        if (readPending()[id]) throw Error('有镜头正在核对提交，不能重复加入批次。');
+        if (readPending()[id]) throw Error(words('有镜头正在核对提交，不能重复加入批次。'));
         plans.push(await validPlan(id));
       }
       guard(ctx);
-      if (!plans.length) throw Error('先选择需要生成的镜头。');
+      if (!plans.length) throw Error(words('先选择需要生成的镜头。'));
       const availability = await reloadAvailability({ fresh: true });
       guard(ctx);
       for (const plan of plans)
@@ -1464,22 +1469,24 @@ export function createCloudController({
     assertNotHeld('chapter_id', chapterId);
     const ctx = context();
     if (readRenderPending()[chapterId])
-      throw Error('本章有未确认的粗剪提交，先恢复原任务，不能创建新计划绕过。');
+      throw Error(words('本章有未确认的粗剪提交，先恢复原任务，不能创建新计划绕过。'));
     if (
       roughCutJobs(state.jobs, ctx.projectId, chapterId).some((j) =>
         activeJobStatuses.has(j.status),
       )
     )
-      throw Error('本章已有粗剪正在排队或执行，请查看原任务。');
+      throw Error(words('本章已有粗剪正在排队或执行，请查看原任务。'));
     if (!state.capabilities?.chapter_render?.implemented)
-      throw Error('当前服务尚未提供章节粗剪，未提交任务。');
+      throw Error(words('当前服务尚未提供章节粗剪，未提交任务。'));
     const before = roughCutSnapshot(current().project, chapterId, options);
     if (options.burn_subtitles) {
       if (!(
         state.capabilities.chapter_render.subtitles === true &&
         state.capabilities.chapter_render.render_contract_version >= 3
       ))
-        throw Error('当前服务不支持已确认字幕烧录。请刷新能力或升级服务；没有静默导出无字幕版本。');
+        throw Error(
+          words('当前服务不支持已确认字幕烧录。请刷新能力或升级服务；没有静默导出无字幕版本。'),
+        );
       const subtitles = burnCaptionStatus(current().project, chapterId);
       if (subtitles.issues.length) throw Error(subtitles.issues.join(' '));
     }
@@ -1491,18 +1498,22 @@ export function createCloudController({
       )
     )
       throw Error(
-        '当前服务尚不支持已保存的剪辑选段。请升级服务，或明确恢复从视频开头取片；未静默忽略入点。',
+        words(
+          '当前服务尚不支持已保存的剪辑选段。请升级服务，或明确恢复从视频开头取片；未静默忽略入点。',
+        ),
       );
     if (
       before.tracks.some((track) => track.generatedFrom) &&
       state.capabilities.chapter_render.generated_audio !== true
     )
       throw Error(
-        '当前服务尚不支持同次生成声音绑定，未忽略绑定按普通音轨导出。请升级服务，或明确静音／解除关联后再预检。',
+        words(
+          '当前服务尚不支持同次生成声音绑定，未忽略绑定按普通音轨导出。请升级服务，或明确静音／解除关联后再预检。',
+        ),
       );
     const invalidSound = before.tracks.find((track) => track.generatedIssue);
     if (invalidSound) throw Error(invalidSound.generatedIssue);
-    if (!before.chapterId) throw Error('请先选择一个章节。');
+    if (!before.chapterId) throw Error(words('请先选择一个章节。'));
     const ids = new Set(
       [...before.shots.map((s) => s.source?.id), ...before.tracks.map((t) => t.source?.id)].filter(
         Boolean,
@@ -1519,7 +1530,7 @@ export function createCloudController({
     guard(ctx);
     const sourceSnapshot = stableJSON(roughCutSnapshot(saved.project, chapterId, options));
     if (sourceSnapshot !== stableJSON(roughCutSnapshot(current().project, chapterId, options)))
-      throw Error('保存期间时间线又有修改，请重新预检。');
+      throw Error(words('保存期间时间线又有修改，请重新预检。'));
     if (options.burn_subtitles) {
       const subtitles = burnCaptionStatus(current().project, chapterId);
       if (subtitles.issues.length)
@@ -1538,13 +1549,15 @@ export function createCloudController({
       plan.client_ref?.project_id !== ctx.projectId ||
       plan.client_ref?.chapter_id !== chapterId
     )
-      throw Error('粗剪计划响应无效，没有当作可执行计划。');
+      throw Error(words('粗剪计划响应无效，没有当作可执行计划。'));
     if (
       plan.status === 'ready' &&
       options.burn_subtitles &&
       plan.timeline?.subtitles?.burned !== true
     )
-      throw Error('服务未确认字幕将烧入本次成片，未接受这个可执行计划。请刷新服务能力后重新预检。');
+      throw Error(
+        words('服务未确认字幕将烧入本次成片，未接受这个可执行计划。请刷新服务能力后重新预检。'),
+      );
     emit({
       renderPlans: {
         ...state.renderPlans,
@@ -1564,21 +1577,21 @@ export function createCloudController({
       existing = readRenderPending()[chapterId],
       plan = existing?.plan || state.renderPlans[chapterId];
     if (!existing) {
-      if (!plan || plan.status !== 'ready') throw Error('请先完成本章粗剪预检。');
+      if (!plan || plan.status !== 'ready') throw Error(words('请先完成本章粗剪预检。'));
       if (!state.capabilities?.chapter_render?.enabled)
-        throw Error('服务尚未启用章节粗剪，未提交任务。');
+        throw Error(words('服务尚未启用章节粗剪，未提交任务。'));
       if (
         plan.sourceSnapshot !==
         stableJSON(roughCutSnapshot(current().project, chapterId, plan.options))
       )
-        throw Error('章节时间线或素材已改变，请重新预检。');
+        throw Error(words('章节时间线或素材已改变，请重新预检。'));
       if (
         plan.expires_at &&
         (typeof plan.expires_at === 'number'
           ? plan.expires_at * 1000
           : Date.parse(plan.expires_at)) <= Date.now()
       )
-        throw Error('粗剪计划已过期，请重新预检。');
+        throw Error(words('粗剪计划已过期，请重新预检。'));
     }
     const key = existing?.key || intent('render-submit', ctx.projectId + ':' + plan.plan_id);
     writeRenderPending({
@@ -1670,12 +1683,37 @@ export function createCloudController({
         )
       )
         throw Error('workbench.existingJob');
+    }
+    if (current().workspace.dirty) {
+      await save();
+      guard(ctx);
+    }
+    // Drafts are reads, so ask for several at once (#1030). One read at the current
+    // project version stays valid; only an upload or frame saved below needs a new one.
+    const drafts = new Map(),
+      unread = [...shotIds];
+    await Promise.all(
+      Array.from({ length: Math.min(6, unread.length) }, async () => {
+        while (unread.length) {
+          const shotId = unread.shift();
+          drafts.set(shotId, await api.generationDraft(ctx.projectId, shotId));
+        }
+      }),
+    );
+    guard(ctx);
+    const currentDraft = async (shotId) => {
+      if (drafts.get(shotId).project_version !== current().workspace.serverVersion) {
+        drafts.set(shotId, await api.generationDraft(ctx.projectId, shotId));
+        guard(ctx);
+      }
+      return drafts.get(shotId);
+    };
+    for (const shotId of shotIds) {
       if (current().workspace.dirty) {
         await save();
         guard(ctx);
       }
-      let preview = await api.generationDraft(ctx.projectId, shotId);
-      guard(ctx);
+      const preview = await currentDraft(shotId);
       const recipe = state.capabilities?.recipes?.find(
         (row) => row.id === preview.draft?.recipe_id,
       );
@@ -1783,9 +1821,8 @@ export function createCloudController({
         await save();
         guard(ctx);
       }
-      preview = await api.generationDraft(ctx.projectId, shotId);
-      guard(ctx);
-      if (preview.project_version !== current().workspace.serverVersion || preview.issues?.length)
+      const saved = await currentDraft(shotId);
+      if (saved.project_version !== current().workspace.serverVersion || saved.issues?.length)
         throw Object.assign(Error('workbench.inputsInvalid'), { shotId });
     }
   }
@@ -2111,9 +2148,9 @@ export function createCloudController({
         async () => {
           const observedEpoch = epoch,
             result = await api.login(username, password);
-          if (observedEpoch !== epoch) throw Error('登录期间会话已经改变，请重新核对。');
+          if (observedEpoch !== epoch) throw Error(words('登录期间会话已经改变，请重新核对。'));
           const me = identity(result);
-          if (typeof me !== 'string') throw Error('登录响应缺少账户身份。');
+          if (typeof me !== 'string') throw Error(words('登录响应缺少账户身份。'));
           replaceIdentity(me);
           announceSession();
           await reloadProjects();
@@ -2204,7 +2241,7 @@ export function createCloudController({
           const ctx = accountContext(),
             offer = state.resumeOffer;
           if (!offer || current().workspace.mode !== 'local')
-            throw Error('请重新核对当前账户与上次作品。');
+            throw Error(words('请重新核对当前账户与上次作品。'));
           try {
             const done = await open(offer.projectId);
             emit({ resumeError: '' });
@@ -2241,7 +2278,7 @@ export function createCloudController({
     create: (title, { copy = false } = {}) =>
       action(
         async () => {
-          if (!state.account) throw Error('先登录云工作室。');
+          if (!state.account) throw Error(words('先登录云工作室。'));
           const ctx = accountContext(),
             project = copy ? copyForCloud(store.exportProject()) : blankCloudProject(title);
           if (copy && title) project.title = title;
@@ -2258,7 +2295,7 @@ export function createCloudController({
     createQuick: (title) =>
       action(
         async () => {
-          if (!state.account) throw Error('先登录云工作室。');
+          if (!state.account) throw Error(words('先登录云工作室。'));
           const ctx = accountContext(),
             project = freestyleProject(title || '快速创作 · ' + new Date().toLocaleDateString());
           const record = checkedProjectRecord(
@@ -2344,7 +2381,7 @@ export function createCloudController({
           job = await api.job(id);
         guard(ctx);
         if (job.id !== id || job.client_ref?.project_id !== ctx.projectId)
-          throw Error('任务不属于当前项目。');
+          throw Error(words('任务不属于当前项目。'));
         return job;
       }),
     submit: (shotId) => action(() => submit(shotId), { exclusive: true }),

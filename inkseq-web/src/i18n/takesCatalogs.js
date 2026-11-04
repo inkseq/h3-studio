@@ -45,6 +45,7 @@ export const takesCatalogs = {
     'takes.copiesMax': 'Max takes each time',
     'takes.foldCount': 'Fold after',
     'takes.save': 'Save',
+    'takes.saving': 'Saving…',
     'takes.saved': 'Saved.',
     'takes.cancel': 'Cancel',
     'takes.preferencesHelp':
@@ -118,6 +119,7 @@ export const takesCatalogs = {
     'takes.copiesMax': '每次最多生成几条',
     'takes.foldCount': '超过几条后折叠',
     'takes.save': '保存',
+    'takes.saving': '正在保存…',
     'takes.saved': '已保存。',
     'takes.cancel': '取消',
     'takes.preferencesHelp': '默认每次最多 4 条，超过 8 条折叠。改了不影响已有的结果。',

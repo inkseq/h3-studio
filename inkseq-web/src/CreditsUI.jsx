@@ -73,16 +73,33 @@ export function CreditUsageBar({ credits, balance }) {
 
 // null while loading or unavailable (signed out, or the backend has no credits yet).
 export function useCredits(account) {
+  return useCreditsRead(account).credits;
+}
+
+// `read` tells "still loading" from "unavailable", so a chip can hold its place only while loading.
+function useCreditsRead(account) {
   const api = useClient(account);
-  const [credits, setCredits] = useState(null);
+  const [credits, setCredits] = useState(null),
+    [read, setRead] = useState(false),
+    [failed, setFailed] = useState(false);
   useEffect(() => {
     if (!account && !mocked()) return undefined;
     let live = true;
     const read = () =>
       api
         .request('/v1/credits')
-        .then((body) => live && setCredits(creditSummary(body)))
-        .catch(() => live && setCredits(null));
+        .then((body) => {
+          if (!live) return;
+          setCredits(creditSummary(body));
+          setFailed(false);
+        })
+        .catch((problem) => {
+          if (!live) return;
+          setCredits(null);
+          // 404: this backend has no credits. Anything else is a read that failed (#1019).
+          setFailed(problem?.status !== 404);
+        })
+        .finally(() => live && setRead(true));
     read();
     const onFocus = () => document.visibilityState === 'visible' && read();
     window.addEventListener(CREDITS_CHANGED, read);
@@ -93,7 +110,7 @@ export function useCredits(account) {
       document.removeEventListener('visibilitychange', onFocus);
     };
   }, [api, account]);
-  return credits;
+  return { credits, read, failed };
 }
 
 // Adds the anonymous funnel id when analytics is on (h3-studio#725); older servers ignore it.
@@ -102,10 +119,30 @@ function withAnalytics(body) {
   return analytics ? { ...body, analytics } : body;
 }
 
-export function CreditsChip({ account }) {
+export function CreditsChip({ account, frame = account }) {
   const { t, locale } = useI18n();
-  const credits = useCredits(account);
-  if (!credits) return null;
+  const { credits, read, failed } = useCreditsRead(account);
+  if (!credits && failed)
+    return (
+      <Button
+        className="credits-chip keep-label"
+        title={t('credits.readFailed')}
+        aria-label={t('credits.readFailed')}
+        onClick={() => navigateApp('/settings?tab=credits')}
+      >
+        <Coins size={14} aria-hidden="true" />
+        <b>—</b>
+        <span className="credits-word">{t('credits.word')}</span>
+      </Button>
+    );
+  if (!credits)
+    return frame && !read ? (
+      <Button className="credits-chip keep-label" disabled aria-hidden="true" tabIndex={-1}>
+        <Coins size={14} />
+        <b>&nbsp;</b>
+        <span className="credits-word">{t('credits.word')}</span>
+      </Button>
+    ) : null;
   const low = credits.available < 100;
   return (
     <Button
@@ -166,7 +203,9 @@ export function CreditsPanel({ account, active }) {
     [paid, setPaid] = useState(''),
     [receipts, setReceipts] = useState([]),
     [openReceipt, setOpenReceipt] = useState(null),
-    [error, setError] = useState('');
+    [error, setError] = useState(''),
+    [reads, setReads] = useState({}),
+    [attempt, setAttempt] = useState(0);
   // A double click must not open a second Stripe session before React re-renders,
   // and a retry of the same pack reuses its session (one key per pack per visit).
   const opening = useRef(false),
@@ -175,16 +214,25 @@ export function CreditsPanel({ account, active }) {
   useEffect(() => {
     if (!active) return undefined;
     let live = true;
-    const settle = (promise, apply) => promise.then((body) => live && apply(body)).catch(() => {});
-    settle(api.request('/v1/credits'), (body) => setCredits(creditSummary(body)));
-    settle(api.request('/v1/billing/packs'), (body) => setPacks(packList(body)));
-    settle(api.request('/v1/credits/prices'), (body) => setRates(priceRates(body)));
-    settle(api.request('/v1/credits/entries'), (body) => setLog(entryList(body)));
-    settle(api.request('/v1/billing/payments'), (body) => setReceipts(receiptList(body)));
+    // Unread, failed and truly empty are three states, and only the last says "none" (#1019).
+    const settle = (name, path, apply) =>
+      api.request(path).then(
+        (body) => {
+          if (!live) return;
+          apply(body);
+          setReads((now) => ({ ...now, [name]: 'done' }));
+        },
+        () => live && setReads((now) => ({ ...now, [name]: 'failed' })),
+      );
+    settle('credits', '/v1/credits', (body) => setCredits(creditSummary(body)));
+    settle('packs', '/v1/billing/packs', (body) => setPacks(packList(body)));
+    settle('rates', '/v1/credits/prices', (body) => setRates(priceRates(body)));
+    settle('log', '/v1/credits/entries', (body) => setLog(entryList(body)));
+    settle('receipts', '/v1/billing/payments', (body) => setReceipts(receiptList(body)));
     return () => {
       live = false;
     };
-  }, [api, active]);
+  }, [api, active, attempt]);
 
   // Back from Stripe: ?paid=<session>. Credits arrive by webhook, so poll briefly.
   const waitForPaid = useEffectEvent((isLive, params) => {
@@ -265,20 +313,36 @@ export function CreditsPanel({ account, active }) {
       )}
       {paid === 'slow' && <p role="status">{t('credits.paidSlow')}</p>}
       {error && <p role="alert">{error}</p>}
+      {Object.values(reads).includes('failed') && (
+        <p role="alert">
+          {t('credits.readFailed')}{' '}
+          <Button
+            size="sm"
+            onClick={() => {
+              setReads({});
+              setAttempt((value) => value + 1);
+            }}
+          >
+            {t('credits.retry')}
+          </Button>
+        </p>
+      )}
       <div className="credits-hero card-box">
         <div>
           <small className="muted">{t('credits.balance')}</small>
           <div className="credits-big">
             <Coins size={22} aria-hidden="true" />
-            {credits ? n(credits.available) : '—'}
+            {credits ? n(credits.available) : reads.credits ? '—' : '\u00a0'}
             <span>{t('credits.word')}</span>
           </div>
           <BalanceNote credits={credits} standard={standard} n={n} />
         </div>
         <div className="credits-today">
           <small className="muted">{t('credits.today')}</small>
-          <b>{credits ? n(credits.todayUsed) : '—'}</b>
-          {credits?.dailyLimit > 0 ? (
+          <b>{credits ? n(credits.todayUsed) : reads.credits ? '—' : '\u00a0'}</b>
+          {!credits ? (
+            <small className="muted">&nbsp;</small>
+          ) : credits.dailyLimit > 0 ? (
             <>
               <i className="bar">
                 <b style={{ width: pct + '%' }} />
@@ -293,6 +357,7 @@ export function CreditsPanel({ account, active }) {
         </div>
       </div>
 
+      {!reads.packs && <i className="ui-wait credits-wait-packs" />}
       {packs.length > 0 && (
         <div className="card-box">
           <h4>{t('credits.topUp')}</h4>
@@ -336,6 +401,7 @@ export function CreditsPanel({ account, active }) {
         </div>
       )}
 
+      {!reads.rates && <i className="ui-wait credits-wait-rates" />}
       {rates.length > 0 && (
         <div className="card-box">
           <h4>{t('credits.pricesTitle')}</h4>
@@ -379,8 +445,12 @@ export function CreditsPanel({ account, active }) {
               );
             })}
           </div>
+        ) : !reads.log ? (
+          <i className="ui-wait credits-wait-log" />
         ) : (
-          <p className="muted">{t('credits.noHistory')}</p>
+          <p className="muted">
+            {t(reads.log === 'failed' ? 'credits.historyFailed' : 'credits.noHistory')}
+          </p>
         )}
         {log.next && (
           <Button variant="ghost" size="sm" onClick={() => void more()}>

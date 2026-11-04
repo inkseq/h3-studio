@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { ArrowRight } from 'lucide-react';
@@ -40,12 +40,30 @@ export default function Landing() {
     window.addEventListener('pageshow', back);
     return () => window.removeEventListener('pageshow', back);
   }, []);
-  const start = (hint = 'sign-up') => {
-    if (!hostedSignInEnabled(c.auth)) return setLogin(true);
-    if (opening) return;
+  const open = (hint) => {
+    if (!hostedSignInEnabled(c.auth)) {
+      setOpening(false);
+      return setLogin(true);
+    }
     setOpening(true);
     window.location.assign(hostedSignInUrl('/quick-chat', hint));
   };
+  // The page draws before the sign-in options are read: a press that early waits for them.
+  const pressed = useRef(null);
+  const start = (hint = 'sign-up') => {
+    if (opening) return;
+    if (c.auth || c.sessionReady) return open(hint);
+    pressed.current = hint;
+    setOpening(true);
+  };
+  const openPressed = useEffectEvent(() => {
+    const hint = pressed.current;
+    pressed.current = null;
+    if (hint) open(hint);
+  });
+  useEffect(() => {
+    if (c.auth || c.sessionReady) openPressed();
+  }, [c.auth, c.sessionReady]);
   // A sign-in that did not finish comes back here with ?signin_error=<code>.
   const code = useMemo(
     () => new URLSearchParams(window.location.search).get('signin_error') || '',

@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 export const cutFps = 24;
 const epsilon = 1e-7;
 export const videoBinding = (asset) => ({
@@ -169,10 +170,11 @@ export function applyVideoRange(
     asset = project.entities.find((e) => e.id === shot?.data.selectedAssetId);
   const shape = rangeShapeIssue(range);
   if (shape) throw Error(shape);
-  if (!boundVideoRange(range, asset)) throw Error('采用的视频已经改变，未保存旧来源选段。');
+  if (!boundVideoRange(range, asset)) throw Error(words('采用的视频已经改变，未保存旧来源选段。'));
   const aligned = alignVideoRange(range.start, range.end);
-  if (!aligned || aligned.frames < 1) throw Error('对齐24fps后选段不足一帧。');
-  if (useRangeDuration && aligned.duration > 3600) throw Error('一个镜头最长3600秒，请拆分镜头。');
+  if (!aligned || aligned.frames < 1) throw Error(words('对齐24fps后选段不足一帧。'));
+  if (useRangeDuration && aligned.duration > 3600)
+    throw Error(words('一个镜头最长3600秒，请拆分镜头。'));
   if ('playback_rate' in range) useRangeDuration = true;
   const seconds =
     'playback_rate' in range

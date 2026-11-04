@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import InkLoader from './InkLoader.jsx';
+import StudioHeader from './StudioHeader.jsx';
 import { navigateApp } from './app-navigation.js';
 import { useCloud } from './CloudStudio.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -16,9 +17,17 @@ export default function QuickCreateEntry({ account, story }) {
   useEffect(() => {
     if (sessionReady && !account) navigateApp('/', { replace: true });
   }, [sessionReady, account]);
-  if (!account) return <InkLoader label={t('loading.quickCreate')} />;
+  const frame = (
+    <div className="home">
+      <StudioHeader account={account} active="quick" />
+      <main className="home-main">
+        <InkLoader label={t('loading.quickCreate')} />
+      </main>
+    </div>
+  );
+  if (!account) return frame;
   return (
-    <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
+    <React.Suspense fallback={frame}>
       {/* One stable instance: the address gains the story id after the first message and
           must not remount the chat mid-reply. */}
       <StoryChat

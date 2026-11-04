@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { translate } from './i18n/locale.js';
 import { validateProject } from './store.js';
 
@@ -27,9 +28,9 @@ export function readLocalStoryLibrary(storage) {
 
 export function archiveLocalStory(store, storage = globalThis.localStorage) {
   if (store.getState().workspace.mode !== 'local')
-    throw Error('请先返回本机作品，再操作本机故事列表。');
+    throw Error(words('请先返回本机作品，再操作本机故事列表。'));
   const saved = readLocalStoryLibrary(storage);
-  if (saved.error) throw Error('本机故事列表无法读取，请先下载列表原始数据和当前作品备份。');
+  if (saved.error) throw Error(words('本机故事列表无法读取，请先下载列表原始数据和当前作品备份。'));
   const project = store.exportProject();
   storage.setItem(
     LOCAL_STORIES_KEY,
@@ -40,21 +41,21 @@ export function archiveLocalStory(store, storage = globalThis.localStorage) {
 // Preserve the current local work before any replacement; never copy cloud
 // project bodies into the browser's shared local-project library.
 export function openLocalStory(id, { store, cloud, storage = globalThis.localStorage }) {
-  if (cloud.getState().busy) throw Error('上一项云操作还在处理中，请稍后切换故事。');
+  if (cloud.getState().busy) throw Error(words('上一项云操作还在处理中，请稍后切换故事。'));
   const original = store.getLocalProjectSummary();
   let target;
   if (id !== original?.id) {
     const saved = readLocalStoryLibrary(storage);
-    if (saved.error) throw Error('本机故事列表无法读取，请先下载备份。');
+    if (saved.error) throw Error(words('本机故事列表无法读取，请先下载备份。'));
     target = saved.projects.find((p) => p.id === id);
-    if (!target) throw Error('这个本机故事已不在列表中，请刷新故事列表。');
+    if (!target) throw Error(words('这个本机故事已不在列表中，请刷新故事列表。'));
     const checked = validateProject(target);
     if (!checked.ok) throw Error(checked.error);
     target = checked.project;
   }
   if (store.getState().workspace.mode === 'cloud') cloud.leave();
   if (store.getState().workspace.mode !== 'local')
-    throw Error('原本机作品暂时无法恢复，请先备份当前作品。');
+    throw Error(words('原本机作品暂时无法恢复，请先备份当前作品。'));
   if (target) {
     archiveLocalStory(store, storage);
     if (store.replaceProject(target) === false) throw Error(store.getState().notice);
@@ -67,11 +68,11 @@ export function openLocalStory(id, { store, cloud, storage = globalThis.localSto
 
 export function createLocalStory(title, { store, cloud, storage = globalThis.localStorage }) {
   const name = title.trim();
-  if (!name) throw Error('请填写故事名称。');
-  if (cloud.getState().busy) throw Error('上一项云操作还在处理中，请稍后新建故事。');
+  if (!name) throw Error(words('请填写故事名称。'));
+  if (cloud.getState().busy) throw Error(words('上一项云操作还在处理中，请稍后新建故事。'));
   if (store.getState().workspace.mode === 'cloud') cloud.leave();
   if (store.getState().workspace.mode !== 'local')
-    throw Error('原本机作品暂时无法恢复，请先备份当前作品。');
+    throw Error(words('原本机作品暂时无法恢复，请先备份当前作品。'));
   archiveLocalStory(store, storage);
   if (store.newProject(name) === false) throw Error(store.getState().notice);
   store.setSection('journey');

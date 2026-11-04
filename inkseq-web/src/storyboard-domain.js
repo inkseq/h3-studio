@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { ENHANCE_RECIPE } from './enhance-take.js';
 import { shotSegments } from './shot-segments.js';
 import { translate } from './i18n/locale.js';
@@ -919,7 +920,7 @@ function patchStoryboardBlockShot(project, shot, id, patch) {
 
 export function patchStoryboardShot(project, id, patch) {
   const shot = find(project, id);
-  if (!shot) throw Error('镜头不存在。');
+  if (!shot) throw Error(words('镜头不存在。'));
   if (staysLegacy(shot, patch)) patchLegacyShot(project, shot, id, patch);
   else shot.data.storyboard = patchStoryboardBlockShot(project, shot, id, patch);
   patchCreatorControls(shot, patch);

@@ -18,6 +18,25 @@ function remember(record) {
   }
 }
 
+// The account this browser last had. It only draws the page while the sign-in read is out,
+// so a signed-in person never sees "sign in" first (#1031). The server still decides.
+const LAST_ACCOUNT = 'inkseq.lastAccount';
+export function lastAccount() {
+  try {
+    return localStorage.getItem(LAST_ACCOUNT) || null;
+  } catch {
+    return null;
+  }
+}
+export function rememberAccount(account) {
+  try {
+    if (account) localStorage.setItem(LAST_ACCOUNT, account);
+    else localStorage.removeItem(LAST_ACCOUNT);
+  } catch {
+    // Storage blocked: pages wait for the live read.
+  }
+}
+
 /** The last access read for this account in this browser, or null. */
 export function rememberedAccess(account) {
   if (!account) return null;

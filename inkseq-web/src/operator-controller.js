@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { createOperatorClient } from './operator-client.js';
 
 const uid = () => crypto.randomUUID();
@@ -33,10 +34,10 @@ export function createOperatorController({
   };
   function guard(account, version) {
     if (state.account !== account || epoch !== version)
-      throw Error('登录账户已改变，原账户响应未展示。');
+      throw Error(words('登录账户已改变，原账户响应未展示。'));
   }
   function pending(value) {
-    if (!state.account || !storage) throw Error('浏览器无法保留操作标识，未发出管理操作。');
+    if (!state.account || !storage) throw Error(words('浏览器无法保留操作标识，未发出管理操作。'));
     if (value) storage.setItem(keyFor(state.account, pendingNamespace), JSON.stringify(value));
     else storage.removeItem(keyFor(state.account, pendingNamespace));
     emit({ pending: value });
@@ -50,7 +51,7 @@ export function createOperatorController({
     try {
       const [snapshot, catalog] = await Promise.all([client.state(), client.catalog()]);
       guard(account, current);
-      if (snapshot.operator?.account !== account) throw Error('管理身份与登录账户不一致。');
+      if (snapshot.operator?.account !== account) throw Error(words('管理身份与登录账户不一致。'));
       emit({ snapshot, catalog, denied: false, unavailable: false, error: '' });
       return snapshot;
     } catch (error) {
@@ -70,7 +71,7 @@ export function createOperatorController({
     }
   }
   async function act(fn) {
-    if (state.busy) throw Error('原操作仍在处理中。');
+    if (state.busy) throw Error(words('原操作仍在处理中。'));
     const account = state.account,
       current = epoch;
     emit({ busy: true, error: '' });
@@ -111,7 +112,7 @@ export function createOperatorController({
   }
   function command(method, args, body) {
     return act(async () => {
-      if (state.pending) throw Error('有原管理操作待核对，请先核对原操作。');
+      if (state.pending) throw Error(words('有原管理操作待核对，请先核对原操作。'));
       const operation = {
         account: state.account,
         method,
@@ -182,7 +183,7 @@ export function createOperatorController({
           !Number.isFinite(receipt.requested_at) ||
           !['lium', 'targon'].every((provider) => receipt.providers?.includes(provider))
         )
-          throw Error('供应商库存刷新尚未确认，请稍后重新查询。');
+          throw Error(words('供应商库存刷新尚未确认，请稍后重新查询。'));
         const deadline = now() + 60000;
         let last = null;
         for (let read = 0; read < 31; read++) {
@@ -191,7 +192,7 @@ export function createOperatorController({
           guard(account, current);
           if (signal?.aborted || scan !== scanEpoch) return result;
           if (result.model_id !== selection.model_id || result.mode !== selection.mode)
-            throw Error('库存响应与当前模型或模式不一致，请重新查询。');
+            throw Error(words('库存响应与当前模型或模式不一致，请重新查询。'));
           if (
             !['lium', 'targon'].every((provider) =>
               result.providers?.some(
@@ -204,7 +205,7 @@ export function createOperatorController({
               ),
             )
           )
-            throw Error('供应商库存刷新尚未返回本轮记录，请重新查询。');
+            throw Error(words('供应商库存刷新尚未返回本轮记录，请重新查询。'));
           last = result;
           onUpdate(result);
           if (
@@ -247,7 +248,7 @@ export function createOperatorController({
     extend: (preview) => command('extend', [preview.node_id], { preview_id: preview.preview_id }),
     updatePolicy: (body) =>
       act(async () => {
-        if (state.pending) throw Error('请先核对原管理操作。');
+        if (state.pending) throw Error(words('请先核对原管理操作。'));
         const result = await client.updatePolicy(body);
         await refresh();
         return result;
@@ -263,7 +264,7 @@ export function createOperatorController({
           !Array.isArray(op.args) ||
           typeof op.key !== 'string'
         )
-          throw Error('原操作记录无法核对，请保留记录并联系管理员。');
+          throw Error(words('原操作记录无法核对，请保留记录并联系管理员。'));
         return send(op);
       }),
     destroy() {

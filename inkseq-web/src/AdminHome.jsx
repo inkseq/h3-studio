@@ -647,11 +647,19 @@ function Limits({ api, active, account }) {
   const [settings, setSettings] = useState(null);
   const load = async () => setSettings(await api.request(SETTINGS_PATH));
   const loadEvent = useEffectEvent((...args) => load(...args));
+  const [failed, setFailed] = useState(false);
   useEffect(() => {
-    if (active) void loadEvent().catch(() => setSettings(null));
+    if (active)
+      void loadEvent()
+        .then(() => setFailed(false))
+        .catch(() => {
+          setSettings(null);
+          setFailed(true);
+        });
   }, [api, active]);
   const { t } = useI18n();
-  if (!settings) return <Spinner />;
+  if (failed) return <Note tone="warn">{t('adminHome.loadFailed')}</Note>;
+  if (!settings) return <i className="ui-wait ui-wait-block" />;
   return (
     <>
       {settings.capacity_policy ? (

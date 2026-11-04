@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { translate } from './i18n/locale.js';
 export const HISTORY_ACTIONS = {
   trash: '移到回收站',
@@ -9,7 +10,7 @@ const integer = (value) => Number.isSafeInteger(value) && value >= 0;
 const identifier = (value) => typeof value === 'string' && value.length > 0 && value.length <= 200;
 const states = new Set(['active', 'trashed', 'purging', 'purged']);
 const fail = () => {
-  throw Error('回收站收据不完整或与原选择不一致，请核对原操作。');
+  throw Error(words('回收站收据不完整或与原选择不一致，请核对原操作。'));
 };
 export function historyReason(code, locale = 'zh') {
   return (
@@ -60,7 +61,7 @@ export function historySelection(rows, ids, view) {
     new Set(ids).size !== ids.length ||
     selected.some((row) => !historySelectable(row, view))
   )
-    throw Error('请选择当前可操作的创作；任务未结束或删除中的记录不能选择。');
+    throw Error(words('请选择当前可操作的创作；任务未结束或删除中的记录不能选择。'));
   return selected.map(({ id, version }) => ({ id, expected_version: version }));
 }
 function totals(value, keys) {

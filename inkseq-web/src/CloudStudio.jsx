@@ -1,3 +1,4 @@
+import { lastAccount } from './account-access.js';
 import { TrashMenu } from './UniversalTrash.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
@@ -17,6 +18,11 @@ import GenerationFailure from './GenerationFailure.jsx';
 import { ServiceStatus } from './ServiceStatus.jsx';
 
 export const useCloud = () => useSyncExternalStore(cloud.subscribe, cloud.getState, cloud.getState);
+// Who to draw the page frame for: the account, or while the sign-in read is out, the last one.
+export function useFrameAccount(account) {
+  const { sessionReady } = useCloud();
+  return account || (sessionReady ? null : lastAccount());
+}
 const run = (promise) => promise.catch(() => {});
 export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
   const { t } = useI18n();

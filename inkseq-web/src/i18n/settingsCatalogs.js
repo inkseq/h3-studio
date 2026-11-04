@@ -20,6 +20,8 @@ export const settingsCatalogs = {
     'menu.previewAsUser': 'View as a regular user',
     'menu.previewExit': 'Back to admin view',
     'menu.previewing': "You're seeing the site as a regular user. Your account is still an admin.",
+    'cloud.sessionEnded':
+      'You were signed out. Sign in again to carry on; your stories are saved to your account.',
     'cloud.unreachable': "Can't reach the cloud right now. Your work on this device is safe.",
     'cloud.sessionUnchecked': "Couldn't confirm your sign-in: {reason}",
     'skin.title': 'Appearance',
@@ -100,6 +102,7 @@ export const settingsCatalogs = {
     'menu.previewAsUser': '以普通用户视角查看',
     'menu.previewExit': '回到管理员视角',
     'menu.previewing': '你正在用普通用户的视角看网站，账号本身还是管理员。',
+    'cloud.sessionEnded': '登录已过期。重新登录后可以继续，故事都保存在你的账户里。',
     'cloud.unreachable': '暂时连不上云端，本机作品不受影响，请稍后再试。',
     'cloud.sessionUnchecked': '暂时确认不了登录状态：{reason}',
     'skin.title': '外观',

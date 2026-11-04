@@ -112,7 +112,8 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
     balance = useCredits(c.account)?.available,
     takes = (receipt.items || []).some((item) => item.index > 0),
     short = creditShortfall(cost.credits, balance),
-    closed = !!receipt.closed_preflight;
+    closed = !!receipt.closed_preflight,
+    checking = !!receipt.checking;
   // A closed (refused) preflight never generates; leaving the dialog clears it so the
   // next try is not blocked by "the previous operation is not confirmed".
   const dismiss = async () => {
@@ -135,7 +136,11 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
       wide
       className="sb-confirm"
     >
-      <CreditUsageBar credits={cost.credits} balance={balance} />
+      {checking && !Number.isFinite(balance) ? (
+        <i className="ui-wait sb-confirm-usage sb-confirm-wait" />
+      ) : (
+        <CreditUsageBar credits={cost.credits} balance={balance} />
+      )}
       <p className="sb-confirm-note">{t('workbench.timing')}</p>
       {(receipt.items || []).map((item, i) => (
         <section key={item.plan_id || i}>
@@ -149,21 +154,25 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
                 })}
             {takes && ' · ' + t('workbench.take', { number: item.index + 1 })}
           </h3>
-          <TakeRecipe
-            take={{ seed: item.seed, recipe: planRecipe(item.plan, c.capabilities) }}
-            state={{
-              capabilities: c.capabilities,
-              materials: s.project.entities
-                .filter((e) => e.data.cloudAssetId)
-                .map((e) => ({ asset_id: e.data.cloudAssetId, asset: { file_name: e.title } })),
-            }}
-          />
+          {checking ? (
+            <i className="ui-wait sb-confirm-wait-recipe" />
+          ) : (
+            <TakeRecipe
+              take={{ seed: item.seed, recipe: planRecipe(item.plan, c.capabilities) }}
+              state={{
+                capabilities: c.capabilities,
+                materials: s.project.entities
+                  .filter((e) => e.data.cloudAssetId)
+                  .map((e) => ({ asset_id: e.data.cloudAssetId, asset: { file_name: e.title } })),
+              }}
+            />
+          )}
         </section>
       ))}
-      {!same && <p role="alert">{t('workbench.changed')}</p>}
+      {!checking && !same && <p role="alert">{t('workbench.changed')}</p>}
       {/* The server refuses when no machine can take the work (none running and auto-start
           off or out of budget). Say so plainly instead of a silently greyed-out button. */}
-      {same && !receipt.ready && (
+      {!checking && same && !receipt.ready && (
         <p role="alert">
           {t(
             closed
@@ -182,7 +191,8 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
         {!closed && (
           <Button
             variant="primary"
-            disabled={busy || !same || !receipt.ready || short}
+            className="sb-confirm-start"
+            disabled={checking || busy || !same || !receipt.ready || short}
             onClick={async () => {
               setBusy(true);
               try {
@@ -200,7 +210,7 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
               }
             }}
           >
-            {t('workbench.submit')}
+            {t(checking ? 'workbench.checking' : 'workbench.submit')}
           </Button>
         )}
       </DialogActions>
@@ -216,6 +226,7 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     [busy, setBusy] = useState(false),
     [lastAdded, setLastAdded] = useState(null),
     serial = useRef(false);
+  const checkRun = useRef(null);
   const [workbenchReceipt, setWorkbenchReceipt] = useState(null),
     [workbenchPreferences, setWorkbenchPreferences] = useState(null);
   useEffect(() => {
@@ -416,6 +427,10 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
             deployment_profile_id: action.profileId,
           });
       }
+      // An edit left unconfirmed by a failed answer replays with its own key first, so one
+      // bad response does not block every later choice until the page reloads (#1032).
+      if (['actions', 'preferences', 'copies'].includes(cloud.workbenchPending()?.kind))
+        await dispatch({ type: 'workbenchRecover' });
       await cloud.workbenchCommand('actions', {
         actions,
         ...(action.expectedVersion === undefined
@@ -445,20 +460,42 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       return { ok: true, count: actions.length };
     }
     if (action.type === 'workbenchGenerate') {
-      const context = captureWorkspace(store);
-      let result;
+      // The dialog opens on the press and "Start" waits for the check (#1030). A second
+      // press while it checks does nothing; after Cancel it waits for the dropped check.
+      const earlier = checkRun.current;
+      if (earlier && !earlier.dropped) return { ok: true };
+      const context = captureWorkspace(store),
+        shotIds = [...new Set(action.ids)],
+        run = { dropped: false };
+      run.done = new Promise((resolve) => (run.settle = resolve));
+      checkRun.current = run;
+      setWorkbenchReceipt({
+        checking: true,
+        items: shotIds.flatMap((shot_id) =>
+          Array.from({ length: action.copies }, (_, index) => ({ shot_id, index })),
+        ),
+      });
       try {
-        result = await cloud.workbenchCommand('preflight', {
-          shot_ids: [...new Set(action.ids)],
+        await earlier?.done;
+        if (run.dropped) return { ok: true };
+        const result = await cloud.workbenchCommand('preflight', {
+          shot_ids: shotIds,
           copies: action.copies,
           capabilities_version: c.capabilities?.capabilities_version,
         });
+        assertWorkspace(store, context);
+        if (!run.dropped) setWorkbenchReceipt(result);
+        // Cancel came first: a closed check must still be cleared or the next try is blocked.
+        else if (result.closed_preflight) await cloud.workbenchAbandonClosed(result.id);
+        return { ok: true };
       } catch (problem) {
+        if (run.dropped) return { ok: false };
+        setWorkbenchReceipt(null);
         throw shotRefusal(problem, currentView(), at, locale);
+      } finally {
+        run.settle();
+        if (checkRun.current === run) checkRun.current = null;
       }
-      assertWorkspace(store, context);
-      setWorkbenchReceipt(result);
-      return { ok: true };
     }
     if (action.type === 'workbenchRecover') {
       const context = captureWorkspace(store),
@@ -722,7 +759,10 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
               shot.title || at('workbench.shotN', { number: i + 1 }),
             ]),
           )}
-          onClose={() => setWorkbenchReceipt(null)}
+          onClose={() => {
+            if (checkRun.current) checkRun.current.dropped = true;
+            setWorkbenchReceipt(null);
+          }}
         />
       )}
     </>

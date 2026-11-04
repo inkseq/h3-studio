@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { translate } from './i18n/locale.js';
 import { reconcileGeneratedTracks } from './generated-sound-model.js';
 import { rangeShapeIssue } from './video-cut-model.js';
@@ -415,7 +416,7 @@ export function migrateLegacy(old) {
     !Array.isArray(old.characters) ||
     !Array.isArray(old.locations)
   )
-    throw Error('旧项目结构不完整，原始数据已保留。');
+    throw Error(words('旧项目结构不完整，原始数据已保留。'));
   const p = blank(String(old.title || '导入的短剧')),
     entityIds = new Set(),
     map = new Map();

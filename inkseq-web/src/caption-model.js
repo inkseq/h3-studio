@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { chapterShots } from './delivery-model.js';
 import { chapterTiming } from './media-timing.js';
 import { stableJSON } from './cloud-model.js';
@@ -152,13 +153,14 @@ export function burnCaptionStatus(project, chapterId) {
 }
 export function srtTime(seconds) {
   const ms = Math.round(seconds * 1000);
-  if (!Number.isSafeInteger(ms) || ms < 0 || ms >= 360000000) throw Error('SRT时间应小于100小时。');
+  if (!Number.isSafeInteger(ms) || ms < 0 || ms >= 360000000)
+    throw Error(words('SRT时间应小于100小时。'));
   return `${String(Math.floor(ms / 3600000)).padStart(2, '0')}:${String(Math.floor(ms / 60000) % 60).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')},${String(ms % 1000).padStart(3, '0')}`;
 }
 export function exportSrt(project, chapterId) {
   const status = captionStatus(project, chapterId);
   if (status.issues.length) throw Error(status.issues.join(' '));
-  if (!status.confirmed) throw Error('请先核对并确认这一版字幕文字和时间。');
+  if (!status.confirmed) throw Error(words('请先核对并确认这一版字幕文字和时间。'));
   return orderedCues(status.track.cues)
     .map(
       (cue, index) =>

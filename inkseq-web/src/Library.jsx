@@ -96,7 +96,7 @@ export function LibraryMedia({ row, api, detail = false }) {
     />
   );
 }
-export default function Library({ account, active = true }) {
+export default function Library({ checking = false, account, active = true }) {
   const { t } = useI18n(),
     trash = useTrash(),
     identity = useRef(account);
@@ -476,7 +476,15 @@ export default function Library({ account, active = true }) {
     [openKey],
   );
   if (!account)
-    return <LibraryView account={account} filters={filters} setFilters={setFilters} next={null} />;
+    return (
+      <LibraryView
+        account={account}
+        checking={checking}
+        filters={filters}
+        setFilters={setFilters}
+        next={null}
+      />
+    );
   const feedback = (
     <>
       {error && (

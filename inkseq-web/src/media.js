@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { validateProject, store as defaultStore } from './store.js';
 import { captureWorkspace, assertWorkspace } from './workspace-context.js';
 
@@ -65,7 +66,7 @@ export async function putFile(id, file) {
 }
 export async function getFile(id) {
   if (isCloudFileId(id)) {
-    if (!cloudMediaReader) throw Error('请登录云工作室后读取此素材。');
+    if (!cloudMediaReader) throw Error(words('请登录云工作室后读取此素材。'));
     return cloudMediaReader(id);
   }
   const db = await database();
@@ -86,7 +87,7 @@ export async function getStoredFileIds() {
     };
     tx.oncomplete = () => resolve(ids);
     req.onerror = () => reject(req.error);
-    tx.onabort = () => reject(tx.error || Error('素材存储读取已中止。'));
+    tx.onabort = () => reject(tx.error || Error(words('素材存储读取已中止。')));
   });
 }
 // Audit keys only: returning to a project must not decode or copy every large Blob.
@@ -126,7 +127,9 @@ export async function uploadFile(
     type = mimeKinds[file.type];
   if (!type)
     throw Error(
-      '请选择 PNG / JPG / WebP / GIF 图片、MP4 / WebM / MOV 视频或 MP3 / WAV / M4A / OGG 音频。',
+      words(
+        '请选择 PNG / JPG / WebP / GIF 图片、MP4 / WebM / MOV 视频或 MP3 / WAV / M4A / OGG 音频。',
+      ),
     );
   if (expected && type !== expected)
     throw Error(
@@ -135,9 +138,9 @@ export async function uploadFile(
   const maxBytes = uploader && cloudMaxBytes ? cloudMaxBytes : bundleLimits.file;
   if (file.size > maxBytes)
     throw Error('每个素材最多 ' + Math.floor(maxBytes / MB) + ' MB，请先压缩或截取需要的片段。');
-  if (!file.size) throw Error('文件为空，请换一个文件。');
+  if (!file.size) throw Error(words('文件为空，请换一个文件。'));
   if (context.mode === 'cloud' && !uploader)
-    throw Error('云上传尚未就绪，请重新核对登录后重试；未把文件改存到本机。');
+    throw Error(words('云上传尚未就绪，请重新核对登录后重试；未把文件改存到本机。'));
   let result;
   if (uploader) result = await uploader(file, type);
   else {
@@ -180,7 +183,7 @@ function markMissing(entity) {
 function manifestText(project) {
   const text = JSON.stringify(project, null, 2);
   if (utf8.encode(text).length > bundleLimits.manifest)
-    throw Error('项目结构超过 8 MB，请拆分项目后再备份；当前项目未改变。');
+    throw Error(words('项目结构超过 8 MB，请拆分项目后再备份；当前项目未改变。'));
   return text;
 }
 
@@ -195,17 +198,19 @@ export async function exportBundle(input, { readFile = getFile } = {}) {
       continue;
     }
     const id = e.data.fileId;
-    if (!validFileId(id)) throw Error('素材标识不合法，请重新上传这份素材。');
+    if (!validFileId(id)) throw Error(words('素材标识不合法，请重新上传这份素材。'));
     if (!media.has(id)) {
       const blob = await readFile(id);
       media.set(id, blob || null);
       if (blob) {
         if (blob.size > bundleLimits.file)
-          throw Error('备份包含超过 30 MB 的素材，请先压缩或替换这份素材。');
+          throw Error(words('备份包含超过 30 MB 的素材，请先压缩或替换这份素材。'));
         total += blob.size;
         if (total > bundleLimits.media)
           throw Error(
-            '完整备份的不同素材合计超过 120 MB，无法生成可恢复的备份。请将项目拆分，或压缩并替换较大素材后重试；没有素材被删除。',
+            words(
+              '完整备份的不同素材合计超过 120 MB，无法生成可恢复的备份。请将项目拆分，或压缩并替换较大素材后重试；没有素材被删除。',
+            ),
           );
       }
     }
@@ -225,7 +230,7 @@ export async function exportBundle(input, { readFile = getFile } = {}) {
   );
   const bytes = await zip.generateAsync({ type: 'uint8array', compression: 'STORE' });
   if (bytes.byteLength > bundleLimits.archive)
-    throw Error('备份超过 150 MB，无法在本原型恢复。请拆分项目后重试；当前项目未改变。');
+    throw Error(words('备份超过 150 MB，无法在本原型恢复。请拆分项目后重试；当前项目未改变。'));
   return { blob: new Blob([bytes], { type: 'application/zip' }), missing };
 }
 
@@ -287,18 +292,19 @@ function boundedEntry(entry, limit, label) {
 
 export async function readBundle(file) {
   if (file.size > bundleLimits.archive)
-    throw Error('备份超过 150 MB，请在原项目中拆分或压缩素材后重新备份。');
+    throw Error(words('备份超过 150 MB，请在原项目中拆分或压缩素材后重新备份。'));
   let project, zip;
   if (file.name.toLowerCase().endsWith('.json')) {
-    if (file.size > bundleLimits.manifest) throw Error('项目结构超过 8 MB，无法导入，请拆分项目。');
+    if (file.size > bundleLimits.manifest)
+      throw Error(words('项目结构超过 8 MB，无法导入，请拆分项目。'));
     project = JSON.parse(await file.text());
   } else {
     const { default: JSZip } = await import('jszip');
     zip = await JSZip.loadAsync(await file.arrayBuffer());
     if (Object.keys(zip.files).length > bundleLimits.entries)
-      throw Error('备份包含过多文件，请使用本工作室导出的备份。');
+      throw Error(words('备份包含过多文件，请使用本工作室导出的备份。'));
     const manifest = zip.file('project.json');
-    if (!manifest) throw Error('备份中没有 project.json。');
+    if (!manifest) throw Error(words('备份中没有 project.json。'));
     const bytes = await boundedEntry(manifest, bundleLimits.manifest, '项目结构');
     project = JSON.parse(new TextDecoder().decode(bytes));
   }
@@ -313,13 +319,13 @@ export async function readBundle(file) {
       continue;
     }
     const sourceId = e.data.fileId;
-    if (!validFileId(sourceId)) throw Error('素材标识不合法。');
+    if (!validFileId(sourceId)) throw Error(words('素材标识不合法。'));
     if (!restored.has(sourceId)) {
       const entry = zip?.file('media/' + sourceId);
       if (!entry) restored.set(sourceId, null);
       else {
         const remaining = bundleLimits.media - total;
-        if (remaining <= 0) throw Error('不同素材合计超过 120 MB，请拆分项目后重新备份。');
+        if (remaining <= 0) throw Error(words('不同素材合计超过 120 MB，请拆分项目后重新备份。'));
         const bytes = await boundedEntry(
           entry,
           Math.min(bundleLimits.file, remaining),

@@ -25,7 +25,6 @@ export default function QuickChatPreferences({ controller, value, onSaved, busy 
       step="1"
       max="2147483647"
       value={value}
-      disabled={busy}
       onChange={(e) => onChange(e.target.value)}
     />
   );
@@ -35,8 +34,8 @@ export default function QuickChatPreferences({ controller, value, onSaved, busy 
         title={t('takes.preferences')}
         help={t('takes.preferencesHelp')}
         actions={
-          <Button variant="primary" type="submit" disabled={busy}>
-            {t('takes.save')}
+          <Button variant="primary" type="submit" className="takes-save" disabled={busy}>
+            {t(busy ? 'takes.saving' : 'takes.save')}
           </Button>
         }
       >

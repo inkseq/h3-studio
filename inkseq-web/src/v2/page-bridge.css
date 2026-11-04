@@ -191,11 +191,21 @@ dialog::backdrop {
   left: calc(var(--libw, 260px) + 8px);
   width: auto !important;
 }
+/* Floats under the sticky head: selecting a shot must not push the box just pressed (#1033). */
 .workbench-bulk {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 5;
   display: flex;
   gap: 6px;
   align-items: center;
   flex-wrap: wrap;
+  padding: 6px 8px;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
 }
 .workbench-bulk label {
   display: flex;

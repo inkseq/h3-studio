@@ -6,6 +6,7 @@ import { isActiveTrashItem } from './trash-commands.js';
 import { RenameDialog, useTrash } from './UniversalTrash.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
 import React, { useEffect, useEffectEvent, useRef, useState } from 'react';
+import { useOptimisticChoice } from './optimistic-choice.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { StoryboardVideo, StoryboardAssetImage } from './StoryboardMedia.jsx';
@@ -173,7 +174,8 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
     [comparing, setComparing] = useState(false),
     [loading, setLoading] = useState(false),
     [error, setError] = useState('');
-  const generation = useRef(0);
+  const generation = useRef(0),
+    loadRun = useRef(null);
   const scope = state.contextId + ':' + shot.id;
   // Takes change only when this shot gains/loses a take or its chosen take changes. Other saves
   // (trim, quality, aspect, text) don't touch the list, so they don't read it again (owner
@@ -186,7 +188,10 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
     enabled: !!adapter.readTakeReviewSummaries,
   });
   const reviewOf = (id) => reviews.data?.find((row) => row.artifact_id === id);
-  async function load(more = false) {
+  function load(more = false) {
+    return (loadRun.current = loadNow(more));
+  }
+  async function loadNow(more) {
     const n = ++generation.current;
     setLoading(true);
     setError('');
@@ -242,7 +247,22 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
   useEffect(() => {
     if (!wide) setComparing(false);
   }, [wide]);
-  const versions = (data?.versions || []).filter(isActiveTrashItem),
+  const loaded = (data?.versions || []).filter(isActiveTrashItem);
+  // The chosen mark moves on the press; a refusal puts it back with the error message (#1032).
+  const [chosenId, chooseNow] = useOptimisticChoice(
+    loaded.find((row) => row.selected)?.id ?? null,
+    (id) => {
+      const select = { op: 'storyboard.select', artifact_id: id, shot_id: shot.id };
+      return action(
+        shot.segments?.length && id !== shot.chosen
+          ? [segmentsAction(shot.id, []), select]
+          : select,
+      );
+    },
+  );
+  const versions = loaded.map((row) =>
+      !!row.selected === (row.id === chosenId) ? row : { ...row, selected: row.id === chosenId },
+    ),
     list = onlyStar ? versions.filter((row) => row.starred) : versions,
     media = (row) =>
       shot.versions.find((v) => v.artifactId === row.id || v.id === row.entity_id) || {
@@ -256,7 +276,9 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
         ? { type: 'workbenchAction', actions: op }
         : { type: 'workbenchAction', action: op },
     );
-    if (n === generation.current && result?.ok !== false) load();
+    // The new take may already be re-reading itself; wait for that read, so the mark never
+    // falls back to the old take in between.
+    if (result?.ok !== false) await (n === generation.current ? load() : loadRun.current);
   }
   // Kept parts belong to the chosen take (#512): another take clears them, after a confirm,
   // in the same story edit as the choice.
@@ -265,9 +287,8 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
   const locked = isLocked(state);
   useOnlyTakeChosen(versions, data, locked, (row) => choose(row));
   function choose(row) {
-    const select = { op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id };
     if (shot.segments?.length && row.id !== shot.chosen) setConfirmTake(row);
-    else action(select);
+    else chooseNow(row.id);
   }
   return (
     <section
@@ -279,12 +300,7 @@ export function WorkbenchTakes({ shot, wide = false, onPreview, previewId }) {
         shot={shot}
         row={confirmTake}
         onClose={() => setConfirmTake(null)}
-        onConfirm={(row) =>
-          action([
-            segmentsAction(shot.id, []),
-            { op: 'storyboard.select', artifact_id: row.id, shot_id: shot.id },
-          ])
-        }
+        onConfirm={(row) => chooseNow(row.id)}
       />
       <div className="takes-head">
         <b>{t('takes.title')}</b>

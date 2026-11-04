@@ -51,7 +51,12 @@ export const clientCatalogs = {
     'client.termsRequired':
       'Please accept the updated terms first. The terms window has opened; tick the box and accept, then try again.',
     'client.login': 'Sign in to the cloud studio again.',
-    'client.status': 'The service did not complete the request ({status}).',
+    'client.status': 'That did not go through. Please try again.',
+    'errors.project_not_found': 'This story no longer exists, or belongs to another account.',
+    'errors.project_in_trash': 'This story is in the trash. Restore it to keep working.',
+    'errors.rendition_not_ready': 'This video is still being prepared. Try again in a moment.',
+    'errors.feedback_rate_limit': 'Too many reports just now. Please try again in a few minutes.',
+    'errors.authentication_required': 'Please sign in again.',
     'client.unavailable':
       'Can’t reach the cloud right now. Your work is safe; try again in a moment.',
     'client.uploadTimeout':
@@ -128,7 +133,12 @@ export const clientCatalogs = {
     'client.termsRequired':
       '请先同意更新后的服务条款。条款窗口已打开，勾选并点「同意」后再试一次。',
     'client.login': '请重新登录云工作室。',
-    'client.status': '服务暂未完成请求（{status}）。',
+    'client.status': '这一步没有完成，请再试一次。',
+    'errors.project_not_found': '这个故事已不存在，或属于其他账户。',
+    'errors.project_in_trash': '这个故事在回收站里，恢复后才能继续。',
+    'errors.rendition_not_ready': '这个视频还在准备，请稍后再试。',
+    'errors.feedback_rate_limit': '刚才提交得太多了，请过几分钟再试。',
+    'errors.authentication_required': '请重新登录。',
     'client.unavailable': '暂时连不上云端，作品不受影响，请稍后再试。',
     'client.uploadTimeout':
       '上传等待超时。请先到“素材状态与存储用量”核对是否已收到文件，再决定恢复；未自动重新上传。',

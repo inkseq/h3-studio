@@ -48,6 +48,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
+import { useOptimisticChoice } from './optimistic-choice.js';
 import { store } from './store.js';
 import { cutFps, videoCut } from './video-cut-model.js';
 import { trimClip } from './film-edit-model.js';
@@ -1845,6 +1846,9 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   useEffect(() => {
     editorRef.current?.querySelectorAll('textarea').forEach((node) => growTextarea(node));
   });
+  const [shownQuality, chooseQuality] = useOptimisticChoice(shot?.quality, (quality) =>
+    dispatch({ type: 'update', id: shotId, patch: { quality } }),
+  );
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
   const info = expand(shot, db, locale);
@@ -2435,8 +2439,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           <div className="row quality-row">
             <Segmented
               options={['draft', 'final'].map((q) => ({ value: q, label: QUALITY_LABEL[q] }))}
-              value={shot.quality}
-              onChange={(quality) => upd({ quality })}
+              value={shownQuality}
+              onChange={chooseQuality}
             />
             <HelpTip text={tr('storyboard.help.quality')} />
             <small className="muted">

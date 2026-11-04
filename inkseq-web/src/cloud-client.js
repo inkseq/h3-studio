@@ -5,6 +5,7 @@ import { CREDITS_CHANGED, INSUFFICIENT_CREDITS, insufficientCredits } from './cr
 import { MAINTENANCE_CHANGED, formatEnd, maintenanceRefusal } from './maintenance-notice.js';
 import { TERMS_REQUIRED, termsRequired } from './terms-gate.js';
 // The credits chip and the not-enough-credits prompt listen for these (h3-studio#306).
+export const SESSION_REFUSED = 'inkseq:session-refused';
 function announce(type, detail) {
   if (typeof globalThis.dispatchEvent === 'function' && typeof CustomEvent === 'function')
     globalThis.dispatchEvent(new CustomEvent(type, { detail }));
@@ -17,6 +18,19 @@ function uiLocale(account) {
   }
 }
 const ui = (key, account, values) => translate(uiLocale(account), key, values);
+// Server text people can read: a code only through its catalog words, prose only in the
+// person's language. Anything else falls back to the words for the status (#1017).
+function serverWords(text, account) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+  if (/^[\w.:-]+$/.test(text)) {
+    try {
+      return ui('errors.' + text, account);
+    } catch {
+      return null;
+    }
+  }
+  return /[\u4e00-\u9fff]/.test(text) === (uiLocale(account) === 'zh') ? text : null;
+}
 function defaultSpendingConfirmation(detail, account) {
   return (
     typeof globalThis.confirm === 'function' &&
@@ -168,19 +182,17 @@ function refusalMessage(status, detail, expectedAccount, maintenance) {
               'client.' + detail.code.replace(/_(\w)/g, (_, c) => c.toUpperCase()),
               expectedAccount,
             )
-          : typeof detail?.detail === 'string'
-            ? detail.detail
-            : typeof detail?.message === 'string'
-              ? detail.message
-              : status === 409
-                ? ui('client.versionChanged', expectedAccount)
-                : status === 404
-                  ? ui('client.notFound', expectedAccount)
-                  : status === 401
-                    ? ui('client.login', expectedAccount)
-                    : status >= 500
-                      ? ui('client.unavailable', expectedAccount)
-                      : ui('client.status', expectedAccount, { status });
+          : serverWords(detail?.detail, expectedAccount) ||
+            serverWords(detail?.message, expectedAccount) ||
+            (status === 409
+              ? ui('client.versionChanged', expectedAccount)
+              : status === 404
+                ? ui('client.notFound', expectedAccount)
+                : status === 401
+                  ? ui('client.login', expectedAccount)
+                  : status >= 500
+                    ? ui('client.unavailable', expectedAccount)
+                    : ui('client.status', expectedAccount));
   const budgetKey = [
     'user_daily_limit_reached',
     'connection_daily_limit_reached',
@@ -243,7 +255,8 @@ function requestDuration(
 
 export function createCloudClient({
   fetcher = (...args) => fetch(...args),
-  onUnauthorized = () => {},
+  // The shared session owner passes its own. Any other client reports it so the app rechecks.
+  onUnauthorized = () => announce(SESSION_REFUSED),
   timeoutMs = 30000,
   uploadTimeoutMs = 900000,
   downloadTimeoutMs = 300000,

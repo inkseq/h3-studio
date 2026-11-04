@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import { Button } from './ui/Button.jsx';
-import { Spinner } from './ui/Field.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import {
@@ -254,7 +253,13 @@ function Balances({ balances }) {
 export default function AllSettings({ api, active }) {
   const { t } = useI18n();
   const data = useInventory(api, active);
-  if (!data) return <Spinner />;
+  if (!data)
+    return (
+      <div className="all-settings">
+        <p className="muted">{t('allSettings.intro')}</p>
+        <i className="ui-wait ui-wait-block" />
+      </div>
+    );
   return (
     <div className="all-settings">
       <p className="muted">{t('allSettings.intro')}</p>

@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { effectiveLook } from './character-model.js';
 import { shotLocationIds } from './location-model.js';
 const text = (value) => String(value ?? '').trim();
@@ -7,7 +8,7 @@ export function storyboardPrompt(
   { includeScene = false, includeCharacters = true, includeLocations = true } = {},
 ) {
   const shot = project.entities.find((e) => e.id === shotId && e.type === 'shot');
-  if (!shot) throw Error('镜头已不存在。');
+  if (!shot) throw Error(words('镜头已不存在。'));
   const scene = project.entities.find((e) => e.id === shot.parentId),
     parts = [],
     add = (label, value) => {

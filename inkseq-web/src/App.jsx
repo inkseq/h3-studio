@@ -7,6 +7,8 @@ import InkLoader from './InkLoader.jsx';
 import { cloudSystemMessage } from './cloud-model.js';
 import { exportSrt } from './caption-model.js';
 import StudioHeader from './StudioHeader.jsx';
+import { lastAccount, rememberAccount } from './account-access.js';
+import { SESSION_REFUSED } from './cloud-client.js';
 import AccountMenu from './AccountMenu.jsx';
 import ReportProblem from './ReportProblem.jsx';
 import { Menu, MenuItem } from './ui/Menu.jsx';
@@ -36,6 +38,7 @@ import {
   Clapperboard,
   Settings2,
   Bot,
+  LayoutGrid,
 } from 'lucide-react';
 const ChapterRoughCut = React.lazy(() => import('./ChapterRoughCut.jsx'));
 const Freestyle = React.lazy(() => import('./Freestyle.jsx'));
@@ -1196,6 +1199,17 @@ function AppContent() {
     c = useCloud(),
     account = c.account;
   useEffect(() => installPersistenceGuard(store), []);
+  // Pages with their own client report a refused session; the shared check signs out once.
+  useEffect(() => {
+    const recheck = () => {
+      if (cloud.getState().account) void cloud.recheckSession();
+    };
+    window.addEventListener(SESSION_REFUSED, recheck);
+    return () => window.removeEventListener(SESSION_REFUSED, recheck);
+  }, []);
+  useEffect(() => {
+    if (account || c.sessionReady) rememberAccount(account);
+  }, [account, c.sessionReady]);
   const workspace = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     workspaceKey = [
       workspace.workspace.mode,
@@ -1268,7 +1282,28 @@ function AppContent() {
   const routes = {
     '/': ({ location: page }) => {
       // Creating needs an account: signed-out visitors see the landing page.
-      if (!account) return c.sessionReady ? <Landing /> : <InkLoader label={t('app.name')} />;
+      // The landing page is public, so it never waits for the sign-in read (#1031).
+      if (!account)
+        return c.sessionReady || !lastAccount() ? (
+          <Landing />
+        ) : (
+          <div className="home">
+            <StudioHeader active="works" />
+            <main className="home-main works-page">
+              <header className="home-head">
+                <h1 className="page-title">
+                  <LayoutGrid size={22} />
+                  {t('v2.myStories')}
+                </h1>
+              </header>
+              <div className="story-grid">
+                {[0, 1, 2, 3].map((i) => (
+                  <i key={i} className="ui-wait story-card" />
+                ))}
+              </div>
+            </main>
+          </div>
+        );
       const destination = readAgentLink(page.search),
         here =
           destination &&
@@ -1299,7 +1334,12 @@ function AppContent() {
       );
     },
     '/library': ({ active }) => (
-      <Library key={account || 'signed-out'} account={account} active={active} />
+      <Library
+        key={account || 'signed-out'}
+        account={account}
+        active={active}
+        checking={!c.sessionReady}
+      />
     ),
     '/trash': ({ active }) => <UniversalTrash active={active} />,
     '/pricing': () => <PricingPage account={account} />,

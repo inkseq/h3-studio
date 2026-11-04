@@ -1,4 +1,5 @@
 import StudioHeader from './StudioHeader.jsx';
+import { useCloud } from './CloudStudio.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { Button } from './ui/Button.jsx';
@@ -349,6 +350,7 @@ export function TrashButton({ target, onTrashSettled, label, disabled = false })
 }
 export default function UniversalTrash() {
   const ctx = useTrash(),
+    { sessionReady } = useCloud(),
     { t, locale } = useI18n(),
     pageActive = usePageActive(),
     location = useAppLocation(),
@@ -504,7 +506,9 @@ export default function UniversalTrash() {
           )}
         </div>
         <p className="muted">{t('trash.retention')}</p>
-        {!ctx?.account ? (
+        {!ctx?.account && !sessionReady ? (
+          <i className="ui-wait ui-wait-block" />
+        ) : !ctx?.account ? (
           <div className="ui-empty">
             <span>
               <Trash2 size={22} />

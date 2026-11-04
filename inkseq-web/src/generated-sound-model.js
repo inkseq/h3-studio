@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { videoCut } from './video-cut-model.js';
 
 const find = (project, id) => project.entities.find((e) => e.id === id);
@@ -137,13 +138,13 @@ export function upsertGeneratedSound(project, shotId) {
   const option = generatedAudioOption(project, shotId),
     chapterId = chapterForShot(project, shotId);
   if (option.issue) throw Error(option.issue);
-  if (!chapterId) throw Error('镜头所属章节不存在。');
+  if (!chapterId) throw Error(words('镜头所属章节不存在。'));
   project.journey ||= {};
   project.journey.soundTracks ||= {};
   const tracks = project.journey.soundTracks[chapterId] || [];
   const existing = tracks.find((t) => t.shotId === shotId && t.generatedFrom);
   if (!existing && tracks.length >= 32)
-    throw Error('本章已达32条音轨上限，请先整理或移除不需要的音轨。');
+    throw Error(words('本章已达32条音轨上限，请先整理或移除不需要的音轨。'));
   const track = {
     id: existing?.id || 'sound-' + crypto.randomUUID(),
     assetId: option.audio.id,
