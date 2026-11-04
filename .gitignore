@@ -746,6 +746,8 @@ inventory.json
 !tests/test_story_chat_advice.py
 !studio_platform/story_chat_images.py
 !studio_platform/story_chat_settings.py
+!studio_platform/starter_pictures/
+!studio_platform/starter_pictures/*.webp
 !studio_platform/story_chat_undo.py
 !tests/test_story_chat_images.py
 !tests/test_story_chat_image_credits.py

@@ -5,7 +5,10 @@ from __future__ import annotations
 import time
 import uuid
 
+from pathlib import Path
+
 from fastapi import HTTPException, Request
+from fastapi.responses import FileResponse
 
 from .google_chat import ChatError, GoogleChatClient
 from . import llm_tracing, story_chat_advice, story_chat_undo
@@ -50,6 +53,9 @@ def configured_client(settings):
     if config is None:
         return None
     return GoogleChatClient(loader=lambda: config, timeout=timeout)
+
+
+STARTER_PICTURES = {"alien", "coffee", "fox"}
 
 
 def _fail(code, status, **detail):
@@ -218,6 +224,17 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             "max_text_chars": MAX_TEXT_CHARS,
             "max_turns": MAX_TURNS,
         }
+
+    @app.get("/v1/story-chats/starter-pictures/{name}")
+    def starter_picture(name: str):
+        # A closed list, so a request never names a path. Our own pictures, drawn once.
+        if name not in STARTER_PICTURES:
+            _fail("story_chat_starter_missing", 404)
+        return FileResponse(
+            Path(__file__).parent / "starter_pictures" / f"{name}.webp",
+            media_type="image/webp",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
 
     @app.get("/v1/story-chats")
     def list_story_chats(request: Request, limit: int = 50):
