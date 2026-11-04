@@ -5,7 +5,10 @@ from __future__ import annotations
 import time
 import uuid
 
+from pathlib import Path
+
 from fastapi import HTTPException, Request
+from fastapi.responses import FileResponse
 
 from .google_chat import ChatError, GoogleChatClient
 from . import llm_tracing, story_chat_advice, story_chat_undo
@@ -13,7 +16,9 @@ from .repository import Conflict
 from .story_chat import (
     INSTRUCTION,
     LANGUAGES,
+    MAX_SCRIPT_CHARS,
     MAX_TEXT_CHARS,
+    SCRIPT_NOTE,
     MAX_TURNS,
     MODEL,
     TURN_ID,
@@ -50,6 +55,19 @@ def configured_client(settings):
     if config is None:
         return None
     return GoogleChatClient(loader=lambda: config, timeout=timeout)
+
+
+STARTER_PICTURES = {
+    "alien",
+    "coffee",
+    "fox",
+    "look-film",
+    "look-anime",
+    "look-watercolor",
+    "look-noir",
+    "look-soft3d",
+    "look-storybook",
+}
 
 
 def _fail(code, status, **detail):
@@ -216,8 +234,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             else None,
             "model": MODEL,
             "max_text_chars": MAX_TEXT_CHARS,
+            "max_script_chars": MAX_SCRIPT_CHARS,
             "max_turns": MAX_TURNS,
         }
+
+    @app.get("/v1/story-chats/starter-pictures/{name}")
+    def starter_picture(name: str):
+        # A closed list, so a request never names a path. Our own pictures, drawn once.
+        if name not in STARTER_PICTURES:
+            _fail("story_chat_starter_missing", 404)
+        return FileResponse(
+            Path(__file__).parent / "starter_pictures" / f"{name}.webp",
+            media_type="image/webp",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
 
     @app.get("/v1/story-chats")
     def list_story_chats(request: Request, limit: int = 50):
@@ -390,13 +420,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
     @app.post("/v1/story-chats/{project_id}/turns")
     def story_chat_turn(project_id: str, request: Request, body: dict):
         principal = principal_of(request, "write")
-        if not isinstance(body, dict) or set(body) != {"turn_id", "text"}:
+        if (
+            not isinstance(body, dict)
+            or not {"turn_id", "text"} <= set(body)
+            or set(body) - {"turn_id", "text", "script"}
+            or body.get("script", True) is not True
+        ):
             _fail("story_chat_invalid", 422, field="body")
         turn_id, text = body["turn_id"], body["text"]
+        is_script = "script" in body
+        most = MAX_SCRIPT_CHARS if is_script else MAX_TEXT_CHARS
         if not isinstance(turn_id, str) or not TURN_ID.fullmatch(turn_id):
             _fail("story_chat_invalid", 422, field="turn_id")
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
-            _fail("story_chat_invalid", 422, field="text", max=MAX_TEXT_CHARS)
+        if not isinstance(text, str) or not text.strip() or len(text) > most:
+            _fail("story_chat_invalid", 422, field="text", max=most)
         text = text.strip()
 
         def answer(row, messages):
@@ -439,9 +476,14 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             try:
                 result = model_client().generate(
                     MODEL,
-                    prompt_messages(row["payload"], chat, text),
+                    prompt_messages(
+                        row["payload"],
+                        chat,
+                        SCRIPT_NOTE + text if is_script else text,
+                    ),
                     story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
-                    max_tokens=4096,
+                    # A whole script can come back as dozens of shots.
+                    max_tokens=16384 if is_script else 4096,
                     json_mode=True,
                 )
                 plan = _parse(result["text"])

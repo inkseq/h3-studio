@@ -3539,3 +3539,107 @@ h4,
     display: none;
   }
 }
+
+/* Prompt, next-shot button and size on the storyboard card (#1040). */
+.sb-scene-groups[data-card-size='s'] .wall {
+  grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+}
+.sb-scene-groups[data-card-size='s'] .card-prompt {
+  display: none;
+}
+.sb-scene-groups[data-card-size='l'] .wall {
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+.card-prompt {
+  cursor: text;
+  touch-action: auto;
+}
+.card-prompt-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 56px;
+  padding: 4px 6px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  resize: none;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.card-add {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  opacity: 0;
+}
+.card:hover .card-add,
+.card:focus-within .card-add {
+  opacity: 1;
+}
+@media (hover: none) {
+  .card-add {
+    opacity: 1;
+  }
+}
+.card-mention {
+  position: fixed;
+  z-index: 60;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 18%);
+}
+.card-mention-item {
+  justify-content: flex-start;
+  width: 100%;
+}
+.card-mention-item.active {
+  background: var(--line);
+}
+@media (max-width: 720px) {
+  .card-size {
+    display: none;
+  }
+}
+
+/* Look and camera for a shot (#1043): closed until opened, so the editor stays short. */
+.shot-look > summary {
+  cursor: pointer;
+}
+.shot-look-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.shot-look-pick {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  height: auto;
+  padding: 4px;
+}
+.shot-look-pick img,
+.shot-look-auto {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--line);
+  border-radius: 4px;
+}
+.shot-look-cameras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}

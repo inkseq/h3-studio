@@ -1511,3 +1511,12 @@ body.sb-resizing-y video {
   position: absolute;
   inset: -12px;
 }
+
+/* After a finished take (#1045): buttons wrap and keep their size. */
+.take-next {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}

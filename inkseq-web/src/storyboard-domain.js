@@ -94,6 +94,7 @@ function storyboardProfiles(project) {
         desc: e.description,
         def: e.data.defaultLookId || e.data.defaultVersionId || variants[0]?.id || '',
         voice: list(e.data.voices).find((v) => v.id === e.data.mainVoiceId)?.assetId || '',
+        voiceId: typeof e.data.voiceId === 'string' ? e.data.voiceId : '',
         voices: list(e.data.voices).map((v) => ({ asset: v.assetId, start: v.clipStart || 0 })),
         ambient: e.data.ambient?.assetId || '',
         ambientStart: e.data.ambient?.clipStart ?? 0,
@@ -227,6 +228,8 @@ function shotView(project, s, { jobs, assets }) {
     place: shotPlace(s, b, scene),
     props: b.propIds || [],
     continuePrev: !!b.continuePrevious,
+    look: b.look || '',
+    camera: b.camera || '',
     previousFrame: b.previousFrame?.frameAssetId,
     quality: b.quality ?? s.data.qualityIntent ?? 'draft',
     seedLock: !!s.data.h3?.controls?.seed,
@@ -796,7 +799,7 @@ function patchCreatorControls(shot, patch) {
   shot.data.h3 = { ...shot.data.h3, controls };
 }
 // A legacy shot (no storyboard block) stays legacy unless the patch needs storyboard fields.
-const STORYBOARD_ONLY = ['cast', 'place', 'props', 'continuePrev'];
+const STORYBOARD_ONLY = ['cast', 'place', 'props', 'continuePrev', 'look', 'camera'];
 const staysLegacy = (shot, patch) =>
   !shot.data.storyboard &&
   !Object.keys(patch).some((key) => STORYBOARD_ONLY.includes(key)) &&
@@ -874,6 +877,8 @@ const STORYBOARD_FIELDS = {
   end: 'lastFrameId',
   continuePrev: 'continuePrevious',
   props: 'propIds',
+  look: 'look',
+  camera: 'camera',
 };
 
 // The storyboard block, cast and extra references for a storyboard shot.
