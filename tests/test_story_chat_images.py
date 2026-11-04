@@ -167,12 +167,14 @@ class StoryChatImageTests(unittest.TestCase):
         self.assertEqual([a for _, a in self.images.calls], ["16:9", "1:1"])
 
     def test_starter_pictures_are_a_closed_list(self):
-        for name in ("alien", "coffee", "fox"):
+        names = ("alien", "coffee", "fox", "look-film", "look-anime", "look-watercolor")
+        for name in (*names, "look-noir", "look-soft3d", "look-storybook"):
             reply = self.client.get("/v1/story-chats/starter-pictures/" + name)
             self.assertEqual(reply.status_code, 200, name)
             self.assertEqual(reply.headers["content-type"], "image/webp")
         missing = self.client.get("/v1/story-chats/starter-pictures/other")
         self.assertEqual(missing.status_code, 404)
+
     def test_a_script_turn_has_its_own_limit_and_note(self):
         project = self.story["project_id"]
         path = f"/v1/story-chats/{project}/turns"

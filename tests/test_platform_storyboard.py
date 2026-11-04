@@ -199,6 +199,32 @@ class StoryboardPureTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_project(value)
 
+    def test_look_and_camera_reach_the_prompt_and_auto_adds_nothing(self):
+        shot = next(e for e in self.project["entities"] if e["id"] == "shot-one")
+        shot["data"]["storyboard"].update(look="noir", camera="push")
+        draft, issues = read_draft(self.project, "shot-one", capabilities=cap())
+        self.assertEqual(issues, [])
+        self.assertEqual(
+            [part["kind"] for part in draft["storyboard"]["prompt_parts"]],
+            ["style", "look", "place", "cast", "prop", "action", "camera"],
+        )
+        self.assertIn("Black and white", draft["prompt"])
+        self.assertIn("slowly pushes in", draft["prompt"])
+        validate_project(self.project)
+        shot["data"]["storyboard"].update(look="", camera="")
+        draft, issues = read_draft(self.project, "shot-one", capabilities=cap())
+        self.assertEqual(
+            [part["kind"] for part in draft["storyboard"]["prompt_parts"]],
+            ["style", "place", "cast", "prop", "action"],
+        )
+        validate_project(self.project)
+        for field in ("look", "camera"):
+            broken = copy.deepcopy(self.project)
+            target = next(e for e in broken["entities"] if e["id"] == "shot-one")
+            target["data"]["storyboard"][field] = "other"
+            with self.assertRaises(ValueError):
+                validate_project(broken)
+
     def test_default_override_prompt_order_priority_and_dynamic_limits(self):
         before = copy.deepcopy(self.project)
         draft, issues = read_draft(self.project, "shot-one", capabilities=cap())

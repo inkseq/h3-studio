@@ -57,7 +57,17 @@ def configured_client(settings):
     return GoogleChatClient(loader=lambda: config, timeout=timeout)
 
 
-STARTER_PICTURES = {"alien", "coffee", "fox"}
+STARTER_PICTURES = {
+    "alien",
+    "coffee",
+    "fox",
+    "look-film",
+    "look-anime",
+    "look-watercolor",
+    "look-noir",
+    "look-soft3d",
+    "look-storybook",
+}
 
 
 def _fail(code, status, **detail):
