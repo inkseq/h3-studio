@@ -93,6 +93,24 @@ class DeploymentPolicyTests(unittest.TestCase):
         if hasattr(cls, "temp"):
             cls.temp.cleanup()
 
+    def test_image_namespace_compatibility_keeps_project_and_commit_rules(self):
+        for namespace in ('sixnine', 'inkseq'):
+            value = copy.deepcopy(self.rendered)
+            for name in ('app', 'db-init'):
+                value['services'][name]['image'] = namespace + '-platform:' + 'a' * 40
+            self.assertTrue(
+                policy.validate(value, compose_version=self.compose_version)
+            )
+            value['services']['app']['image'] = namespace + '-platform:latest'
+            with self.assertRaisesRegex(
+                ValueError, 'Images must be reviewed immutable references'
+            ):
+                policy.validate(value, compose_version=self.compose_version)
+        value = copy.deepcopy(self.rendered)
+        value['name'] = 'inkseq-platform'
+        with self.assertRaisesRegex(ValueError, 'Compose project identity differs'):
+            policy.validate(value, compose_version=self.compose_version)
+
     def test_tcp_liveness_settings_are_exact_without_idle_session_eviction(self):
         command = self.rendered["services"]["db"]["command"]
         self.assertNotIn("idle_session_timeout", " ".join(command))

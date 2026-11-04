@@ -306,14 +306,18 @@ class ConfigurationTests(unittest.TestCase):
         revision = 'a' * 40
         with tempfile.TemporaryDirectory() as folder:
             image = Path(folder) / 'controller-image'
-            image.write_text('sixnine-platform:' + revision + '\n', encoding='ascii')
             with patch('studio_platform.telemetry._CONTROLLER_IMAGE_FILE', image):
-                for origin, environment in (
-                    ('https://inkseq.com', 'production'),
-                    ('https://staging.inkseq.com', 'staging'),
+                for origin, environment, namespace in (
+                    ('https://inkseq.com', 'production', 'sixnine'),
+                    ('https://staging.inkseq.com', 'staging', 'sixnine'),
+                    ('https://inkseq.com', 'production', 'inkseq'),
+                    ('https://staging.inkseq.com', 'staging', 'inkseq'),
                 ):
+                    image.write_text(
+                        namespace + '-platform:' + revision + '\n', encoding='ascii'
+                    )
                     with (
-                        self.subTest(environment=environment),
+                        self.subTest(environment=environment, namespace=namespace),
                         patch.dict(os.environ, {'PUBLIC_ORIGIN': origin}, clear=True),
                     ):
                         observed = controller_resource_config(original)
@@ -330,6 +334,11 @@ class ConfigurationTests(unittest.TestCase):
             image = Path(folder) / 'controller-image'
             for reference, env in (
                 ('sixnine-platform:latest', {'PUBLIC_ORIGIN': 'https://inkseq.com'}),
+                ('inkseq-platform:latest', {'PUBLIC_ORIGIN': 'https://inkseq.com'}),
+                (
+                    'inkseq-dispatch:' + 'b' * 40,
+                    {'PUBLIC_ORIGIN': 'https://inkseq.com'},
+                ),
                 (
                     'sixnine-platform:' + 'b' * 40,
                     {'PUBLIC_ORIGIN': 'https://unexpected.example'},

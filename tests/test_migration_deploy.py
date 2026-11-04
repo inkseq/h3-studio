@@ -800,11 +800,14 @@ class MigrationDeployTests(unittest.TestCase):
 
     def test_derivative_requires_the_explicit_immutable_artifact_binding(self):
         value = copy.deepcopy(self.document)
-        reference = "sixnine-dstack:" + "b" * 40 + "@sha256:" + "c" * 64
-        value["services"]["dstack"]["image"] = reference
-        validate(value, dstack_image=reference)
-        with self.assertRaisesRegex(ValueError, "infrastructure_image_changed"):
-            validate(value)
+        for namespace in ('sixnine', 'inkseq'):
+            reference = namespace + "-dstack:" + "b" * 40 + "@sha256:" + "c" * 64
+            value["services"]["dstack"]["image"] = reference
+            validate(value, dstack_image=reference)
+            with self.assertRaisesRegex(ValueError, "infrastructure_image_changed"):
+                validate(value)
+        with self.assertRaisesRegex(ValueError, "dstack_image_binding_invalid"):
+            validate(value, dstack_image="inkseq-dstack:latest@sha256:" + "c" * 64)
         with self.assertRaisesRegex(ValueError, "dstack_image_binding_invalid"):
             validate(value, dstack_image="some-other-image@sha256:" + "c" * 64)
 

@@ -325,7 +325,7 @@ def validate(
             and all(not {"PUBLIC_ORIGIN", "PUBLIC_ORIGIN_ALIASES"} & set(services[name].get("environment", {}))
                 for name in business if name != "app"), "migration_public_origin_split")
         require(not services["caddy"].get("environment"), "migration_domain_redirect_phase_invalid")
-    require(dstack_image in {DSTACK_IMAGE, LEGACY_DSTACK_IMAGE} or re.fullmatch(r"sixnine-dstack:[0-9a-f]{40}@sha256:[0-9a-f]{64}", dstack_image),
+    require(dstack_image in {DSTACK_IMAGE, LEGACY_DSTACK_IMAGE} or re.fullmatch(r"(?:sixnine|inkseq)-dstack:[0-9a-f]{40}@sha256:[0-9a-f]{64}", dstack_image),
             "migration_dstack_image_binding_invalid")
     require(services["dstack"]["image"] == dstack_image and (modern or services["hatchet"]["image"] == HATCHET_IMAGE),
             "migration_infrastructure_image_changed")

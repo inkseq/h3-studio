@@ -66,7 +66,8 @@ def checksum(path):
     return result.hexdigest()
 
 
-def manifest(directory, commit):
+def manifest_metadata(directory, commit):
+    """Read bounded release identity; archive verification stays at deployment/load."""
     require(bool(SHA.fullmatch(commit)), "invalid_commit")
     regular(directory / "release-manifest.json", maximum=16384)
     try:
@@ -75,13 +76,19 @@ def manifest(directory, commit):
         raise ReleaseError("invalid_release_manifest") from None
     require(isinstance(value, dict) and set(value) in ({"commit", "image", "image_id", "files"},
             {"commit", "image", "image_id", "files", "contracts"})
-            and value["commit"] == commit and value["image"] == "sixnine-platform:"+commit
+            and value["commit"] == commit and value["image"] in ("sixnine-platform:"+commit, "inkseq-platform:"+commit)
             and isinstance(value["image_id"], str) and re.fullmatch(r"sha256:[0-9a-f]{64}", value["image_id"])
             and isinstance(value["files"], dict) and set(value["files"]) in (FILES, TARGET_FILES, RDS_FILES), "invalid_release_manifest")
     if "contracts" in value:
         validate_contracts(value["contracts"])
     for name, expected in value["files"].items():
         require(isinstance(expected, str) and bool(DIGEST.fullmatch(expected)), "invalid_release_checksum")
+    return value
+
+
+def manifest(directory, commit):
+    value = manifest_metadata(directory, commit)
+    for name, expected in value["files"].items():
         regular(directory / name, maximum=2*1024**3 if name == "image.tar.gz" else 1024**2)
         require(checksum(directory / name) == expected, "release_checksum_mismatch")
     return value
@@ -275,7 +282,9 @@ def deployment_environment(path, commit):
         require(bool(re.fullmatch(r"[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", values[key])), "unapproved_dependency_image")
     for key, name in (("SIXNINE_DB_ADMIN_SECRET_FILE", "db_admin_password"), ("SIXNINE_APP_DSN_SECRET_FILE", "app_database_url")):
         require(values[key] == "/run/sixnine-secrets/"+name, "unexpected_runtime_secret_path")
-    values["SIXNINE_IMAGE"] = "sixnine-platform:"+commit
+    # Retained releases keep their original approved namespace, including rollback.
+    # Never synthesize a legacy tag when the selected artifact is missing/invalid.
+    values["SIXNINE_IMAGE"] = manifest_metadata(path.parent / "releases" / commit, commit)["image"]
     # No shell expansion/dotenv inheritance and no cloud credentials in children.
     return {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LANG": "C.UTF-8",
             "DOCKER_CONFIG": "/opt/sixnine-release/docker-config", **values}

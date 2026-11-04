@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
 import tempfile
 import tarfile
 import unittest
@@ -125,6 +126,45 @@ class ReleaseTests(unittest.TestCase):
                 release.manifest(self.incoming, COMMIT)
             self.value['contracts'][key] = old
 
+    def test_image_namespaces_keep_exact_commit_and_archive_binding(self):
+        for namespace in ('sixnine', 'inkseq'):
+            with self.subTest(namespace=namespace):
+                self.value['image'] = namespace + '-platform:' + COMMIT
+                archive = self.archive()
+                (self.incoming / 'image.tar.gz').write_bytes(archive.read_bytes())
+                self.value['files']['image.tar.gz'] = release.checksum(archive)
+                self.manifest()
+                expected = release.manifest(self.incoming, COMMIT)
+                self.assertEqual(
+                    release.validate_image_archive(archive, expected),
+                    (self.value['image_id'],),
+                )
+                other = 'inkseq' if namespace == 'sixnine' else 'sixnine'
+                with self.assertRaisesRegex(
+                    release.ReleaseError, 'image_archive_identity_mismatch'
+                ):
+                    release.validate_image_archive(
+                        archive, {**expected, 'image': other + '-platform:' + COMMIT}
+                    )
+        for reference in (
+            'other-platform:' + COMMIT,
+            'inkseq-dispatch:' + COMMIT,
+            'inkseq-platform:' + 'b' * 40,
+            'inkseq-platform:latest',
+            'inkseq-platform:' + COMMIT + '\n',
+            None,
+            [],
+        ):
+            self.value['image'] = reference
+            self.manifest()
+            with (
+                self.subTest(reference=reference),
+                self.assertRaisesRegex(
+                    release.ReleaseError, 'invalid_release_manifest'
+                ),
+            ):
+                release.manifest(self.incoming, COMMIT)
+
     def test_tamper_rejected_before_publishing_release(self):
         (self.incoming / "compose.yaml").write_text("TAMPERED", encoding="utf-8")
         with self.assertRaises(release.ReleaseError):
@@ -212,7 +252,63 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(release.ReleaseError):
             release.manifest(self.incoming, COMMIT)
 
+    def test_environment_uses_retained_manifest_for_new_release_and_legacy_rollback(
+        self,
+    ):
+        site = self.root / 'site.env'
+        site.write_text(
+            '\n'.join(
+                (
+                    'SIXNINE_IMAGE=ignored-site-tag',
+                    'SIXNINE_POSTGRES_IMAGE=postgres@sha256:' + '1' * 64,
+                    'SIXNINE_CADDY_IMAGE=caddy@sha256:' + '2' * 64,
+                    'SIXNINE_DB_ADMIN_SECRET_FILE=/run/sixnine-secrets/db_admin_password',
+                    'SIXNINE_APP_DSN_SECRET_FILE=/run/sixnine-secrets/app_database_url',
+                )
+            ),
+            encoding='utf-8',
+        )
+        current = 'c' * 40
+        references = {
+            COMMIT: 'sixnine-platform:' + COMMIT,
+            current: 'inkseq-platform:' + current,
+        }
+        for commit, reference in references.items():
+            directory = self.root / 'releases' / commit
+            shutil.copytree(self.incoming, directory)
+            (directory / 'release-manifest.json').write_text(
+                json.dumps({**self.value, 'commit': commit, 'image': reference}),
+                encoding='utf-8',
+            )
+        with patch.object(release, 'regular'):
+            for commit in (COMMIT, current, COMMIT):
+                with self.subTest(commit=commit):
+                    self.assertEqual(
+                        release.deployment_environment(site, commit)['SIXNINE_IMAGE'],
+                        references[commit],
+                    )
+            # An incoming artifact cannot silently substitute for a missing retained release.
+            (self.root / 'releases' / COMMIT / 'release-manifest.json').unlink()
+            with self.assertRaises(FileNotFoundError):
+                release.deployment_environment(site, COMMIT)
+            (self.root / 'releases' / current / 'compose.yaml').write_text('tampered')
+            with self.assertRaisesRegex(
+                release.ReleaseError, 'release_checksum_mismatch'
+            ):
+                release.manifest(self.root / 'releases' / current, current)
+            # Capacity/scaler readers need only bounded metadata, including when
+            # an archive was pruned. Deployment/load still verify every file.
+            (self.root / 'releases' / current / 'image.tar.gz').unlink()
+            with patch.object(
+                release, 'checksum', side_effect=AssertionError('No archive reads')
+            ):
+                self.assertEqual(
+                    release.deployment_environment(site, current)['SIXNINE_IMAGE'],
+                    references[current],
+                )
+
     def test_nonsecret_site_config_never_inherits_environment(self):
+        shutil.copytree(self.incoming, self.root / 'releases' / COMMIT)
         site = self.root / "site.env"
         site.write_text(
             "\n".join(
@@ -476,11 +572,15 @@ class ReleaseTests(unittest.TestCase):
         return filename, {config['digest'], main['digest'], ref['digest']}
 
     def test_classic_and_containerd_ids_resolve_same_single_config(self):
-        for containerd in (False, True):
-            filename, identities = self.oci_archive(containerd=containerd)
-            self.assertEqual(
-                set(release.validate_image_archive(filename, self.value)), identities
-            )
+        for namespace in ('sixnine', 'inkseq'):
+            self.value['image'] = namespace + '-platform:' + COMMIT
+            for containerd in (False, True):
+                with self.subTest(namespace=namespace, containerd=containerd):
+                    filename, identities = self.oci_archive(containerd=containerd)
+                    self.assertEqual(
+                        set(release.validate_image_archive(filename, self.value)),
+                        identities,
+                    )
 
     def test_oci_identity_cannot_be_replaced_by_arbitrary_digest(self):
         filename, _ = self.oci_archive()

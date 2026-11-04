@@ -232,6 +232,84 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "source_set_changed"):
             maintenance.verify_sources(target, value["source_index_sha256"])
 
+    def test_inkseq_images_keep_archive_platform_and_provenance_bindings(self):
+        for kind, filename in (
+            ('dispatch', 'dispatch-image.tar.gz'),
+            ('dstack', 'dstack-server-image.tar.gz'),
+        ):
+            reference = 'inkseq-' + kind + ':' + COMMIT
+            self.value[kind]['image'] = reference
+            archive_path = self.artifact / filename
+            with self.assertRaisesRegex(
+                release.ReleaseError, 'image_archive_identity_mismatch'
+            ):
+                release.validate_image_archive(
+                    archive_path, {'commit': COMMIT, **self.value[kind]}
+                )
+            with tarfile.open(archive_path, 'r:gz') as archive:
+                entries = [
+                    (item.name, archive.extractfile(item).read()) for item in archive
+                ]
+            output = io.BytesIO()
+            with tarfile.open(fileobj=output, mode='w:gz') as archive:
+                for name, raw in entries:
+                    if name == 'manifest.json':
+                        records = json.loads(raw)
+                        records[0]['RepoTags'] = [reference]
+                        raw = json.dumps(records).encode()
+                    entry = tarfile.TarInfo(name)
+                    entry.size = len(raw)
+                    archive.addfile(entry, io.BytesIO(raw))
+            archive_path.write_bytes(output.getvalue())
+            self.value['files'][filename] = release.checksum(archive_path)
+        path = self.artifact / maintenance.MANIFEST
+        path.write_text(json.dumps(self.value), encoding='utf-8')
+        value = maintenance.manifest(
+            self.artifact,
+            COMMIT,
+            platform_manifest_sha256=release.checksum(
+                self.platform / 'release-manifest.json'
+            ),
+        )
+        for kind, filename in (
+            ('dispatch', 'dispatch-image.tar.gz'),
+            ('dstack', 'dstack-server-image.tar.gz'),
+        ):
+            self.assertEqual(
+                release.validate_image_archive(
+                    self.artifact / filename, {'commit': COMMIT, **value[kind]}
+                ),
+                (self.image_id,),
+            )
+            for reference in (
+                'inkseq-' + kind + ':' + 'b' * 40,
+                'inkseq-' + kind + ':latest',
+                'other-' + kind + ':' + COMMIT,
+            ):
+                invalid = copy.deepcopy(value)
+                invalid[kind]['image'] = reference
+                path.write_text(json.dumps(invalid), encoding='utf-8')
+                with (
+                    self.subTest(kind=kind, reference=reference),
+                    self.assertRaisesRegex(
+                        release.ReleaseError, 'migration_' + kind + '_binding_invalid'
+                    ),
+                ):
+                    maintenance.manifest(self.artifact, COMMIT)
+        path.write_text(json.dumps(value), encoding='utf-8')
+        with self.assertRaisesRegex(
+            release.ReleaseError, 'migration_platform_binding_changed'
+        ):
+            maintenance.manifest(
+                self.artifact, COMMIT, platform_manifest_sha256='0' * 64
+            )
+        value['dstack']['provenance_sha256'] = '0' * 64
+        path.write_text(json.dumps(value), encoding='utf-8')
+        with self.assertRaisesRegex(
+            release.ReleaseError, 'migration_dstack_binding_invalid'
+        ):
+            maintenance.manifest(self.artifact, COMMIT)
+
     def test_native_source_commit_map_is_optional_bounded_and_covers_exact_packages(
         self,
     ):
@@ -942,6 +1020,9 @@ class MigrationArtifacts(unittest.TestCase):
             'ff30d5aa9ceafc8693cf8a64fae92a8f8e35624a',
             '4bfe4d04b3a3702e4623dc1fa9c9f9b50b453c27',
             'ff027f33079cfff153cb78cf5c23c92739c428ba',
+            '2c19a2215541ee68b8349f73b2b156a2be1edc56',
+            '5246dc43b232d1fcfa8f39c36eb3e4a07f06cdc7',
+            'beec2d64c3d13662994258d5f50146aed2a29b38',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
@@ -955,6 +1036,18 @@ class MigrationArtifacts(unittest.TestCase):
                 (
                     '66aee8e0d35fd2fd92a156da8e037c3668e48d23af6a774fd5ff5632d5072b4d',
                     '0a65590df8c07ecf233ba13d78b24354479bb857fcfe573ffc48fa7df046eea1',
+                ),
+            )
+        for commit in (
+            '2c19a2215541ee68b8349f73b2b156a2be1edc56',
+            '5246dc43b232d1fcfa8f39c36eb3e4a07f06cdc7',
+            'beec2d64c3d13662994258d5f50146aed2a29b38',
+        ):
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172',
+                    '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9',
                 ),
             )
         old_pair = (
@@ -1143,6 +1236,7 @@ class MigrationArtifacts(unittest.TestCase):
         sentry_current = '5676bd46e8b31dac36fb5b9758de4763114b84ca'
         sentry_previous = '59d2ebefba0e98d677907c30b65144ac47681762'
         sentry_entry = 'f7b1db096099d0b3ad09736a95afffa57f9626c7'
+        rename_candidate = '2c19a2215541ee68b8349f73b2b156a2be1edc56'
         for commit, pair in (
             ('f' * 40, pairs[original]),
             ('f' * 40, pairs[current]),
@@ -1159,6 +1253,9 @@ class MigrationArtifacts(unittest.TestCase):
             (sentry_current, pairs[staging]),
             (sentry_previous, pairs[production]),
             (sentry_entry, pairs[staging]),
+            ('f' * 40, pairs[rename_candidate]),
+            (rename_candidate[:12], pairs[rename_candidate]),
+            (rename_candidate, pairs[production]),
         ):
             (self.artifact / maintenance.MANIFEST).write_text(
                 json.dumps({'commit': commit, 'dstack': {}})

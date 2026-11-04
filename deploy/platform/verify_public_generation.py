@@ -281,7 +281,8 @@ def docker_decode(path, kind):
     manifest_path = directory/'release-manifest.json'
     release.regular(manifest_path, root_owned=True, maximum=16384)
     manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
-    assert manifest['commit'] == commit and manifest['image'] == 'sixnine-platform:'+commit
+    assert manifest['commit'] == commit and manifest['image'] in (
+        'sixnine-platform:'+commit, 'inkseq-platform:'+commit)
     assert re.fullmatch(r'sha256:[0-9a-f]{64}', manifest['image_id'])
     archive = directory/'image.tar.gz'
     release.regular(archive, root_owned=True, maximum=2*1024**3)

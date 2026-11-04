@@ -592,6 +592,9 @@ class RetentionTests(unittest.TestCase):
             (['sixnine-dispatch@' + image['Id']], ['sixnine-platform:' + self.old]),
             (['sixnine-platform@' + image['Id']], ['sixnine-platform:' + 'e' * 40]),
             (['sixnine-platform@' + image['Id']], ['sixnine-dispatch:' + self.old]),
+            # Reader compatibility does not authorize pruning the new namespace.
+            (['inkseq-platform@' + image['Id']], ['inkseq-platform:' + self.old]),
+            ([], ['sixnine-platform:' + self.old, 'inkseq-platform:' + self.old]),
         ):
             with self.subTest(digests=digests, tags=tags):
                 image['RepoDigests'], image['RepoTags'] = digests, tags
