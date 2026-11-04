@@ -357,8 +357,14 @@ function useStoryLibrary(state) {
     }
   }
   async function openStory(story, onSelect) {
+    const active = state.workspace.mode === story.mode && state.project.id === story.project.id;
+    // Go straight into the story and let it fill in (owner, 2026-11-04). The story's link
+    // opens it and reports any failure, so there is nothing to wait for here.
+    if (story.mode === 'cloud' && !active && onSelect) {
+      onSelect({ projectId: story.project.id });
+      return true;
+    }
     return act(t('legacy.visible1'), async () => {
-      const active = state.workspace.mode === story.mode && state.project.id === story.project.id;
       const done = active
         ? true
         : story.mode === 'cloud'

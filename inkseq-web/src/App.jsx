@@ -541,7 +541,10 @@ function SeriesApp({ sidebarView, onSidebarView }) {
             />
           )}
         {sidebarView === 'story' && (
-          <StoryOpenNotice onOpened={() => onSidebarView('story', { selected: true })} />
+          <StoryOpenNotice
+            quietLoading
+            onOpened={() => onSidebarView('story', { selected: true })}
+          />
         )}
         <StoryboardConnected
           key={c.account + ':' + p.id + ':' + state.workspaceEpoch}
@@ -1194,6 +1197,34 @@ const storyPageFromUrl = (search = window.location.search) =>
   readAgentLink(search) || new URLSearchParams(search).get('view') === 'workspace'
     ? 'story'
     : 'library';
+// The story's page, before the story has arrived: its bar, its title and reserved space. A
+// failed open or a draft choice still comes up here through the notice.
+function StoryOpeningFrame({ projectId, title, onBack }) {
+  const { t } = useI18n();
+  return (
+    <div className="workspace v2-story-view" aria-busy="true">
+      <header className="wbar">
+        <Button variant="ghost" className="back story-home-back" onClick={onBack}>
+          <ChevronLeft size={16} />
+          {t('v2.works')}
+        </Button>
+      </header>
+      <div className="story-frame">
+        <i className="ui-wait story-frame-side" />
+        <main className="story-frame-main">
+          <h1 className="page-title">{title || '\u00a0'}</h1>
+          <div className="story-frame-shots">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <i key={i} className="ui-wait" />
+            ))}
+          </div>
+        </main>
+      </div>
+      <StoryOpenNotice projectId={projectId} waiting quietLoading onClose={onBack} />
+    </div>
+  );
+}
+
 function AppContent() {
   const { t } = useI18n(),
     c = useCloud(),
@@ -1286,6 +1317,11 @@ function AppContent() {
       if (!account)
         return c.sessionReady || !lastAccount() ? (
           <Landing />
+        ) : readAgentLink(page.search) ? (
+          <StoryOpeningFrame
+            projectId={readAgentLink(page.search).projectId}
+            onBack={() => changePage('library')}
+          />
         ) : (
           <div className="home">
             <StudioHeader active="works" />
@@ -1312,19 +1348,11 @@ function AppContent() {
           workspace.workspace.account === account &&
           workspace.project.id === destination.projectId;
       return destination && !here ? (
-        <div className="home story-open-destination">
-          <StudioHeader account={account} active="works" />
-          <main>
-            <Button variant="ghost" onClick={() => changePage('library')}>
-              {t('storyOpen.back')}
-            </Button>
-            <StoryOpenNotice
-              projectId={destination.projectId}
-              waiting
-              onClose={() => changePage('library')}
-            />
-          </main>
-        </div>
+        <StoryOpeningFrame
+          projectId={destination.projectId}
+          title={c.projects.find((row) => row.id === destination.projectId)?.title}
+          onBack={() => changePage('library')}
+        />
       ) : (
         <SeriesApp
           key={workspaceKey}
