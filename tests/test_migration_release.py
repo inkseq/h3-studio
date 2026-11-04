@@ -1027,6 +1027,7 @@ class MigrationArtifacts(unittest.TestCase):
             '9e14499986c421b7b8866491a53dac55c98a54ad',
             'b59c96674d41b523b6213ac9b17ee962065bfa48',
             'f9377740174c4e3c1abf11f846182ea8e2d22bea',
+            'cd57ae8c4f65166089bbe157323402cfffc2b5f5',
         }
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
@@ -1050,6 +1051,7 @@ class MigrationArtifacts(unittest.TestCase):
             '9e14499986c421b7b8866491a53dac55c98a54ad',
             'b59c96674d41b523b6213ac9b17ee962065bfa48',
             'f9377740174c4e3c1abf11f846182ea8e2d22bea',
+            'cd57ae8c4f65166089bbe157323402cfffc2b5f5',
         ):
             self.assertEqual(
                 maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
