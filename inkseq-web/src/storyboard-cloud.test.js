@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore } from './store.js';
 import { createCloudController } from './cloud-controller.js';
-import { createCloudClient, CloudError } from './cloud-client.js';
+import { createCloudClient, CloudError, SESSION_REFUSED } from './cloud-client.js';
 import { shotSnapshot, digest, stableJSON } from './cloud-model.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
 
@@ -1032,6 +1032,32 @@ test('aggregate preflight accepts an API-made shot that has no storyboard yet', 
     h.controller.destroy();
   }
 });
+test('preflight reads one draft per shot when nothing is saved in between', async () => {
+  const h = await harness();
+  try {
+    await h.controller.open(h.remote.get(h.store.getState().project.id).id);
+    h.api.request = async (path, options) => ({
+      request_hash: await digest(options.body),
+      id: 'one-read-preflight',
+      project_id: h.store.getState().project.id,
+      project_version: options.body.expected_version,
+      status: 'completed',
+      ready: true,
+      items: [
+        { shot_id: h.shot, index: 0, seed: '1', plan_id: 'plan-0', plan: { status: 'ready' } },
+      ],
+    });
+    h.calls.length = 0;
+    await h.controller.workbenchCommand('preflight', {
+      shot_ids: [h.shot],
+      copies: 1,
+      capabilities_version: 'story-v1',
+    });
+    assert.equal(h.calls.filter((call) => call[0] === 'draft').length, 1);
+  } finally {
+    h.controller.destroy();
+  }
+});
 test('aggregate preflight late response cannot open or clear another workspace operation', async () => {
   const h = await harness();
   try {
@@ -1254,5 +1280,44 @@ test('restored no-profile draft remains exact while an explicit unavailable prof
     );
   } finally {
     h.controller.destroy();
+  }
+});
+
+test('refusals show words people can read, never codes or another language', async () => {
+  const refused = async (body, status = 422) => {
+    const client = createCloudClient({
+      fetcher: async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'Content-Type': 'application/json', 'X-Authenticated-Account': 'superdan' },
+        }),
+    });
+    client.setAccount('superdan');
+    return client.generationDraft('project', 'shot').catch((error) => error.message);
+  };
+  assert.match(await refused({ detail: 'project_in_trash' }), /in the trash/);
+  assert.match(await refused({ detail: 'some_internal_code' }), /did not go through/);
+  assert.doesNotMatch(await refused({ detail: 'some_internal_code' }), /some_internal_code|422/);
+  assert.match(await refused({ detail: '素材尚未就绪' }), /did not go through/);
+  assert.equal(await refused({ detail: 'Pick a shorter clip.' }), 'Pick a shorter clip.');
+  assert.match(await refused({ detail: 'some_internal_code' }, 503), /Can't reach|right now/i);
+});
+
+test('a client without its own session owner reports a refused session', async () => {
+  const seen = [];
+  globalThis.dispatchEvent = (event) => seen.push(event.type);
+  try {
+    const client = createCloudClient({
+      fetcher: async () =>
+        new Response('{"detail":"authentication_required"}', {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    client.setAccount('superdan');
+    await assert.rejects(client.generationDraft('project', 'shot'), /sign in again/i);
+    assert.deepEqual(seen, [SESSION_REFUSED]);
+  } finally {
+    delete globalThis.dispatchEvent;
   }
 });

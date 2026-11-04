@@ -16,6 +16,7 @@ import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { currentSupportView, endSupportView } from './support-view.js';
 import { accountLabel, readAccess, readAccessFor, rememberedAccess } from './account-access.js';
+import { useFrameAccount } from './CloudStudio.jsx';
 import { CreditsChip } from './CreditsUI.jsx';
 import AccountMenu from './AccountMenu.jsx';
 import ReportProblem from './ReportProblem.jsx';
@@ -70,9 +71,10 @@ export default function StudioHeader({
   menuItems,
   onSignIn,
 }) {
-  const { t } = useI18n();
+  const { t } = useI18n(),
+    frame = useFrameAccount(account);
   // GPUs only for accounts the backend lets view capacity (#304); regular users never run machines.
-  const [access, setAccess] = useState(() => rememberedAccess(account));
+  const [access, setAccess] = useState(() => rememberedAccess(frame));
   useEffect(() => {
     let live = true;
     readAccess().then((value) => live && setAccess(value));
@@ -119,7 +121,7 @@ export default function StudioHeader({
         </div>
       )}
       <header className="hbar">
-        <a className="logo" href={account ? '/quick-chat' : '/'}>
+        <a className="logo" href={frame ? '/quick-chat' : '/'}>
           <InkMark size={26} variant={dailyInkMark()} />
           <span>{t('app.name')}</span>
         </a>
@@ -130,7 +132,7 @@ export default function StudioHeader({
           onNavigate={navigateApp}
         />
         <div className="spacer" />
-        <CreditsChip account={account} />
+        <CreditsChip account={account} frame={frame} />
         <ThemeToggle />
         <LanguageSwitcher />
         <Button
@@ -141,8 +143,8 @@ export default function StudioHeader({
         >
           <Trash2 size={15} />
         </Button>
-        <ReportProblem account={account} />
-        {accountMenu || <AccountMenu account={account} items={menuItems} onSignIn={onSignIn} />}
+        <ReportProblem account={frame} />
+        {accountMenu || <AccountMenu account={frame} items={menuItems} onSignIn={onSignIn} />}
       </header>
     </>
   );

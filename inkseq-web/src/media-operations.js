@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { translate } from './i18n/locale.js';
 import { validateLink } from './store.js';
 import { resolveCanvasPositions } from './canvas-layout.js';
@@ -31,7 +32,8 @@ export async function uploadLookImage({ store, characterId, lookId, slot, file, 
   const context = captureWorkspace(store),
     character = find(store, characterId),
     look = character?.data.looks?.find((l) => l.id === lookId);
-  if (!look || !Object.hasOwn(gallerySlots, slot)) throw Error('造型已删除，请重新选择后上传。');
+  if (!look || !Object.hasOwn(gallerySlots, slot))
+    throw Error(words('造型已删除，请重新选择后上传。'));
   const previous = look.gallery?.[slot] || '',
     result = await guardedUpload(
       store,
@@ -45,9 +47,9 @@ export async function uploadLookImage({ store, characterId, lookId, slot, file, 
     );
   const owner = find(store, characterId),
     current = owner?.data.looks?.find((l) => l.id === lookId);
-  if (!current) throw Error('造型已删除，请重新选择后上传。');
+  if (!current) throw Error(words('造型已删除，请重新选择后上传。'));
   if ((current.gallery?.[slot] || '') !== previous)
-    throw Error('上传期间这张造型参考已另选；保留你的新选择，没有覆盖。');
+    throw Error(words('上传期间这张造型参考已另选；保留你的新选择，没有覆盖。'));
   const imageId = `image-${crypto.randomUUID()}`;
   requireCommit(
     store,
@@ -214,7 +216,7 @@ export async function uploadLibraryFiles({ store, files, upload }) {
 export async function uploadLocationImage({ store, locationId, file, upload }) {
   const context = captureWorkspace(store),
     location = find(store, locationId);
-  if (location?.type !== 'location') throw Error('这个地点已经不存在，请重新选择。');
+  if (location?.type !== 'location') throw Error(words('这个地点已经不存在，请重新选择。'));
   const result = await guardedUpload(
     store,
     context,
@@ -262,7 +264,7 @@ export async function uploadLocationImage({ store, locationId, file, upload }) {
 export async function uploadCharacterMainImage({ store, characterId, file, upload }) {
   const character = find(store, characterId),
     look = character?.data.looks?.[0];
-  if (character?.type !== 'character') throw Error('这个角色已经不存在，请重新选择。');
+  if (character?.type !== 'character') throw Error(words('这个角色已经不存在，请重新选择。'));
   if (look)
     return uploadLookImage({ store, characterId, lookId: look.id, slot: 'front', file, upload });
   const context = captureWorkspace(store),
@@ -317,7 +319,7 @@ export async function uploadCharacterMainImage({ store, characterId, file, uploa
 
 export async function createEntityWithMedia({ store, kind, title, file, upload }) {
   if (!['image', 'video', 'audio', 'character', 'location'].includes(kind))
-    throw Error('这种内容不支持直接上传文件。');
+    throw Error(words('这种内容不支持直接上传文件。'));
   const context = captureWorkspace(store),
     result = await upload(file, ['character', 'location'].includes(kind) ? 'image' : kind);
   assertWorkspace(store, context);

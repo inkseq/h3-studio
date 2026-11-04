@@ -25,6 +25,32 @@
   background: var(--bad-soft);
 }
 
+/* Reserved space while data loads; the page sets its size so nothing moves on arrival. */
+.ui-wait {
+  display: block;
+  border-radius: var(--r-lg);
+  background: var(--surface-3);
+  animation: ui-wait 1.2s ease-in-out infinite alternate;
+}
+@keyframes ui-wait {
+  to {
+    opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-wait {
+    animation: none;
+  }
+}
+.takes-save {
+  min-width: 96px;
+}
+.ui-wait-block {
+  min-height: 220px;
+}
+.story-grid > .ui-wait {
+  min-height: 312px;
+}
 .ui-empty {
   display: flex;
   flex-direction: column;

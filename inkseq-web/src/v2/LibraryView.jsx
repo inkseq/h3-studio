@@ -86,6 +86,7 @@ function useSideWidth() {
 
 export default function LibraryView({
   account,
+  checking = false,
   filters = { type: 'file' },
   setFilters,
   projects = [],
@@ -178,15 +179,19 @@ export default function LibraryView({
             <Files size={20} />
             {t('library.title')}
           </h1>
-          <div className="ui-empty">
-            <span>
-              <UserRound size={24} />
-            </span>
-            <b>{t('library.signIn')}</b>
-            <a className="library-sign-in" href="/quick-chat">
-              {t('story.copy14')}
-            </a>
-          </div>
+          {!checking ? (
+            <div className="ui-empty">
+              <span>
+                <UserRound size={24} />
+              </span>
+              <b>{t('library.signIn')}</b>
+              <a className="library-sign-in" href="/quick-chat">
+                {t('story.copy14')}
+              </a>
+            </div>
+          ) : (
+            <i className="ui-wait ui-wait-block" />
+          )}
         </main>
       </div>
     );

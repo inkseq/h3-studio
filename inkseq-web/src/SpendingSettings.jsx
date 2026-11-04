@@ -13,6 +13,7 @@ import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'rea
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
+import { useCloud, useFrameAccount } from './CloudStudio.jsx';
 import AccountPassword from './AccountPassword.jsx';
 import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
@@ -87,7 +88,8 @@ export default function SpendingSettings({ account }) {
   // Credits appear once the backend serves /v1/credits (#306).
   const credits = useCredits(account),
     access = useAccess(account),
-    who = useAccountLabel(account);
+    { sessionReady } = useCloud(),
+    who = useAccountLabel(useFrameAccount(account));
   // Regular users never see dollars: in credit mode the USD budget tab is admin-only.
   const creditMode = user?.unit === 'credits';
   const loaded = !!user && admin !== null && access !== null;
@@ -375,7 +377,9 @@ export default function SpendingSettings({ account }) {
             section !== 'defaults' &&
             section !== 'assistants' &&
             section !== 'credits' && (
-              <p role="status">{busy ? t('settings.loading') : t('settings.login')}</p>
+              <p role="status">
+                {busy || !sessionReady ? t('settings.loading') : t('settings.login')}
+              </p>
             )}
           {user && draft && (
             <form

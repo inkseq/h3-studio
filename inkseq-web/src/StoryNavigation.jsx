@@ -743,6 +743,7 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           ? (edited(a) ?? Infinity) - (edited(b) ?? Infinity)
           : (edited(b) || 0) - (edited(a) || 0),
     );
+  const listLoading = !!c.account && !c.projectsLoaded;
   return (
     <section
       className={'home-main works-page' + (pending ? ' is-opening' : '')}
@@ -831,6 +832,31 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
           <Plus size={16} />
           <span>{t('account.copy2')}</span>
         </Button>
+        {selecting && (
+          <div className="works-select-bar" role="toolbar" aria-label={t('trash.selectStory')}>
+            <b>{t('trash.selectedCount', { count: picked.size })}</b>
+            <Button
+              variant="link"
+              onClick={() =>
+                setPicked(new Set(visible.filter(pickable).map((story) => story.project.id)))
+              }
+            >
+              {t('trash.selectAll')}
+            </Button>
+            <span className="spacer" />
+            <Button variant="ghost" onClick={() => setPicked(new Set())}>
+              {t('library.cancel')}
+            </Button>
+            <Button
+              variant="danger"
+              disabled={trash?.busy || !!trash?.pending}
+              onClick={() => void trashPicked()}
+            >
+              <Trash2 size={14} aria-hidden="true" />
+              {t('trash.moveSelected', { count: picked.size })}
+            </Button>
+          </div>
+        )}
       </header>
       {creating && (
         <Dialog
@@ -887,33 +913,8 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
         </p>
       )}
       <StoryOpenNotice onOpened={onSelect} quietLoading />
-      {selecting && (
-        <div className="works-select-bar" role="toolbar" aria-label={t('trash.selectStory')}>
-          <b>{t('trash.selectedCount', { count: picked.size })}</b>
-          <Button
-            variant="link"
-            onClick={() =>
-              setPicked(new Set(visible.filter(pickable).map((story) => story.project.id)))
-            }
-          >
-            {t('trash.selectAll')}
-          </Button>
-          <span className="spacer" />
-          <Button variant="ghost" onClick={() => setPicked(new Set())}>
-            {t('library.cancel')}
-          </Button>
-          <Button
-            variant="danger"
-            disabled={trash?.busy || !!trash?.pending}
-            onClick={() => void trashPicked()}
-          >
-            <Trash2 size={14} aria-hidden="true" />
-            {t('trash.moveSelected', { count: picked.size })}
-          </Button>
-        </div>
-      )}
       <div className={'story-grid' + (selecting ? ' selecting' : '')}>
-        {visible.slice(0, visibleLimit).map((story) => (
+        {(listLoading ? [] : visible.slice(0, visibleLimit)).map((story) => (
           <StoryLibraryCard
             key={
               (story.mode === 'cloud' ? c.account : 'local') +
@@ -934,24 +935,29 @@ export function StoryLibraryHome({ state, onOpenCloud, onOpenLocal, onSelect }) 
             }
           />
         ))}
-        <Button
-          className="story-card new"
-          data-ui-surface="card"
-          disabled={working}
-          onClick={begin}
-        >
-          <Plus size={40} strokeWidth={1.5} />
-          <b>{t('account.copy2')}</b>
-          <small>{t('v2.newStoryHint')}</small>
-        </Button>
+        {/* The list is still being read: hold the cards' places, and do not say it is empty. */}
+        {listLoading ? (
+          [0, 1, 2, 3].map((i) => <i key={i} className="ui-wait story-card" />)
+        ) : (
+          <Button
+            className="story-card new"
+            data-ui-surface="card"
+            disabled={working}
+            onClick={begin}
+          >
+            <Plus size={40} strokeWidth={1.5} />
+            <b>{t('account.copy2')}</b>
+            <small>{t('v2.newStoryHint')}</small>
+          </Button>
+        )}
       </div>
-      <footer className="home-foot">
+      <footer className="home-foot" hidden={listLoading}>
         <a href="/trash">
           <Trash2 size={14} />
           {t('trash.title')}
         </a>
       </footer>
-      {!visible.length && (
+      {!visible.length && !listLoading && (
         <EmptyState
           className="story-library-empty"
           icon={<BookOpen size={22} />}

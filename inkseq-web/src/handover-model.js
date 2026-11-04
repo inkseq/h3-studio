@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { generatedTrackState } from './generated-sound-model.js';
 import { videoCut } from './video-cut-model.js';
 import { chapterShots, entityPath } from './delivery-model.js';
@@ -46,7 +47,7 @@ const mediaRecord = (asset) =>
     : null;
 export function chapterHandover(project, chapterId, { cloud = true } = {}) {
   const chapter = project.entities.find((e) => e.id === chapterId && e.type === 'chapter');
-  if (!chapter) throw Error('先选择要交接的章节。');
+  if (!chapter) throw Error(words('先选择要交接的章节。'));
   const timeline = chapterTiming(chapterShots(project, chapterId)),
     assets = new Map(),
     find = (id) => project.entities.find((e) => e.id === id),

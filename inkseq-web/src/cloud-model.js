@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { ENHANCE_RECIPE } from './enhance-take.js';
 import { formatMoneyMicros } from './money.js';
 import { translate } from './i18n/locale.js';
@@ -763,8 +764,8 @@ export function buildPlanPayload(
   { recipe, capabilitiesVersion, assetMap = {}, sourceHash } = {},
 ) {
   const shot = project.entities.find((e) => e.id === shotId);
-  if (!shot) throw Error('镜头已被删除。');
-  if (!recipe) throw Error('先选择有明确能力说明的配方。');
+  if (!shot) throw Error(words('镜头已被删除。'));
+  if (!recipe) throw Error(words('先选择有明确能力说明的配方。'));
   const { references, issues } = referenceSpecs(project, shotId, { mode: recipe.mode }),
     controls = controlsForRecipe(recipe, shot.data.h3?.controls, shot.data.seconds);
   issues.push(...validateControlValues(recipe, controls));

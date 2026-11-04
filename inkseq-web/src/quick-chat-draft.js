@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 // Browser-only composer state. Generation receipts and uploaded originals
 // remain server-owned; an edit identity protects newer text, including ABA.
 export const draftKey = (account, id) =>
@@ -50,7 +51,7 @@ export function saveDraft(
 export function draftSnapshot(storage, account, id) {
   const previous = readDraftRecord(storage, account, id);
   if (!previous.edit_id && !saveDraft(account, id, previous.text, { storage }))
-    throw Error('无法保存输入草稿，尚未发送。');
+    throw Error(words('无法保存输入草稿，尚未发送。'));
   const value = readDraftRecord(storage, account, id);
   return { edit_id: value.edit_id };
 }

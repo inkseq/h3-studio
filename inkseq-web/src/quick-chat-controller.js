@@ -1,3 +1,4 @@
+import { words } from './i18n/error-words.js';
 import { asPreviewed } from './preview-as-user.js';
 import { createQuickChatClient } from './quick-chat-client.js';
 import { stableJSON, digest } from './cloud-model.js';
@@ -42,7 +43,7 @@ export async function saveMaterialSelection(controller, { original, next, propos
       live.session?.id !== sid ||
       (version && live.session.version !== expectedVersion)
     )
-      throw Error('创作已被更新或目标已改变。请核对最新材料后再调整，原素材保留。');
+      throw Error(words('创作已被更新或目标已改变。请核对最新材料后再调整，原素材保留。'));
     return live;
   }
   const live = checked();
@@ -128,7 +129,7 @@ export function createQuickChatController({
       (ctx.readGeneration !== undefined && ctx.readGeneration !== readGeneration) ||
       (session && (ctx.sessionEpoch !== sessionEpoch || ctx.sessionId !== state.session?.id))
     )
-      throw Error('工作账户、会话或内容已经改变；旧响应没有加入当前创作。');
+      throw Error(words('工作账户、会话或内容已经改变；旧响应没有加入当前创作。'));
   }
   async function refreshAvailability({ fresh = false } = {}) {
     if (!state.account) return null;
@@ -140,7 +141,7 @@ export function createQuickChatController({
       try {
         const value = await Promise.resolve().then(() => client.generationAvailability());
         guard(ctx, { session: false });
-        if (sequence !== availabilitySequence) throw Error('执行状态已被更新，请重新核对。');
+        if (sequence !== availabilitySequence) throw Error(words('执行状态已被更新，请重新核对。'));
         emit({ availability: value });
         return value;
       } catch (error) {
@@ -158,7 +159,7 @@ export function createQuickChatController({
   }
   async function checkGeneration(revision) {
     const ctx = context();
-    if (state.pending) throw Error('有原操作结果待核对，请先恢复原操作，不要重复提交。');
+    if (state.pending) throw Error(words('有原操作结果待核对，请先恢复原操作，不要重复提交。'));
     const snapshot = await refreshAvailability({ fresh: true });
     guard(ctx);
     return requireModeAvailable(snapshot, state.capabilities, revision);
@@ -187,7 +188,7 @@ export function createQuickChatController({
   }
   function writePending(value) {
     if (!state.account || !storage)
-      throw Error('无法保存原操作标识，未提交。请启用浏览器存储后重试。');
+      throw Error(words('无法保存原操作标识，未提交。请启用浏览器存储后重试。'));
     if (value) storage.setItem(pendingName(state.account), JSON.stringify(value));
     else storage.removeItem(pendingName(state.account));
     emit({ pending: value });
@@ -197,7 +198,7 @@ export function createQuickChatController({
     emit({ historyPreview: null, ...patch });
   }
   async function list({ more = false, view = 'active' } = {}) {
-    if (!['active', 'trash'].includes(view)) throw Error('创作列表类型不正确。');
+    if (!['active', 'trash'].includes(view)) throw Error(words('创作列表类型不正确。'));
     invalidateHistory();
     const ctx = context(),
       sequence = ++listSequence[view],
@@ -209,7 +210,7 @@ export function createQuickChatController({
     });
     guard(ctx, { session: false });
     if (sequence !== listSequence[view] || hideTests !== (view === 'active' && state.hideTests))
-      throw Error('筛选已改变，旧列表未加入。');
+      throw Error(words('筛选已改变，旧列表未加入。'));
     const rows = more
       ? merge(view === 'active' ? state.sessions : state.trashSessions, data.sessions || [])
       : data.sessions || [];
@@ -293,7 +294,7 @@ export function createQuickChatController({
     ) {
       guard(ctx, { session: false });
       if (stableJSON(state.pending) !== stableJSON(operation))
-        throw Error('原操作已变化，请核对原记录。');
+        throw Error(words('原操作已变化，请核对原记录。'));
       writePending(null);
       invalidateHistory();
     }
@@ -308,7 +309,7 @@ export function createQuickChatController({
       operation.body.confirmed !== true ||
       !Array.isArray(operation.items)
     )
-      throw Error('原清理操作无法核对，请返回原账户。');
+      throw Error(words('原清理操作无法核对，请返回原账户。'));
     // A known pending action is observed, never posted again. An unknown
     // response reuses precisely the persisted confirmation and key.
     let value;
@@ -337,7 +338,7 @@ export function createQuickChatController({
           (session.archive_pending !== true && session.trash_state !== 'trashed'))) ||
       (body.review_hold === true && session.review_hold !== true)
     )
-      throw Error('归档或测试标记收据不完整，保留原操作供核对。');
+      throw Error(words('归档或测试标记收据不完整，保留原操作供核对。'));
     return session;
   }
   async function recoverMetadata(operation) {
@@ -355,7 +356,7 @@ export function createQuickChatController({
             (key) => !['expected_version', 'title', 'is_test'].includes(key),
           )))
     )
-      throw Error('原标记目标不完整，请核对原操作。');
+      throw Error(words('原标记目标不完整，请核对原操作。'));
     const value = await client.patchSession(...operation.args, operation.body, operation.key);
     guard(ctx, { session: false });
     const session = checkMetadata(value, id, operation.body);
@@ -733,11 +734,11 @@ export function createQuickChatController({
     guard(ctx);
     const session = record(sessionData, 'session');
     if (Number.isInteger(state.session?.version) && session.version < state.session.version)
-      throw Error('旧版本读取已丢弃，请刷新最新内容。');
-    if (session.id !== id) throw Error('会话响应不匹配。');
+      throw Error(words('旧版本读取已丢弃，请刷新最新内容。'));
+    if (session.id !== id) throw Error(words('会话响应不匹配。'));
     if (session.trash_state && session.trash_state !== 'active') {
       closeArchivedSession([session]);
-      throw Error('这条创作已在回收站或删除处理中，请先核对或恢复原记录。');
+      throw Error(words('这条创作已在回收站或删除处理中，请先核对或恢复原记录。'));
     }
     const { timelineData, events } = await readForward(id, firstPage, initial, ctx);
     const sessions = mergedSessions(session);
@@ -867,7 +868,7 @@ export function createQuickChatController({
     }
   }
   async function act(fn, { success } = {}) {
-    if (state.busy) throw Error('原操作仍在处理中，请等待。');
+    if (state.busy) throw Error(words('原操作仍在处理中，请等待。'));
     const ctx = context();
     emit({ busy: true, error: '', notice: '' });
     try {
@@ -972,7 +973,7 @@ export function createQuickChatController({
     body,
     { sessionId = state.session?.id, draft, validate, metadataTarget } = {},
   ) {
-    if (state.pending) throw Error('有原操作结果待核对，请先恢复原操作，不要重复提交。');
+    if (state.pending) throw Error(words('有原操作结果待核对，请先恢复原操作，不要重复提交。'));
     readGeneration++;
     const ctx = context(),
       operation = {
@@ -1077,7 +1078,7 @@ export function createQuickChatController({
     list: (options) => act(() => list(options)),
     historyView: (view) =>
       act(async () => {
-        if (!['active', 'trash'].includes(view)) throw Error('列表类型不正确。');
+        if (!['active', 'trash'].includes(view)) throw Error(words('列表类型不正确。'));
         invalidateHistory({ historyView: view, historySelection: [], historyReceipt: null });
         if (view === 'trash') await list({ view });
       }),
@@ -1087,7 +1088,7 @@ export function createQuickChatController({
         await list();
       }),
     selectHistory: (ids) => {
-      if (state.busy) throw Error('请等待原操作完成。');
+      if (state.busy) throw Error(words('请等待原操作完成。'));
       const rows = state.historyView === 'active' ? state.sessions : state.trashSessions;
       if (ids.length) historySelection(rows, ids, state.historyView);
       invalidateHistory({ historySelection: [...ids] });
@@ -1095,13 +1096,13 @@ export function createQuickChatController({
     dismissHistoryPreview: () => invalidateHistory(),
     previewHistory: (action) =>
       act(async () => {
-        if (state.pending) throw Error('请先核对原操作，未建立新的清理确认。');
+        if (state.pending) throw Error(words('请先核对原操作，未建立新的清理确认。'));
         const view = action === 'trash' ? 'active' : 'trash';
         if (
           view !== state.historyView ||
           !['trash', 'restore', 'purge', 'empty_trash'].includes(action)
         )
-          throw Error('请在对应列表重新选择。');
+          throw Error(words('请在对应列表重新选择。'));
         const sessions =
             action === 'empty_trash'
               ? []
@@ -1116,7 +1117,7 @@ export function createQuickChatController({
           sequence = historyEpoch,
           value = await client.previewHistory(body);
         guard(ctx, { session: false });
-        if (sequence !== historyEpoch) throw Error('账户、筛选或选择已改变，请重新预览。');
+        if (sequence !== historyEpoch) throw Error(words('账户、筛选或选择已改变，请重新预览。'));
         const preview = checkedHistoryPreview(value, body);
         emit({
           historyPreview: { ...preview, request: body, account: state.account, epoch: sequence },
@@ -1125,7 +1126,7 @@ export function createQuickChatController({
       }),
     confirmHistory: () =>
       act(async () => {
-        if (state.pending) throw Error('请先核对原操作，不要再次确认。');
+        if (state.pending) throw Error(words('请先核对原操作，不要再次确认。'));
         const preview = state.historyPreview;
         if (
           !preview ||
@@ -1135,7 +1136,7 @@ export function createQuickChatController({
           !preview.items.length ||
           preview.items.some((item) => !item.eligible)
         )
-          throw Error('预览已失效或含不可操作的记录，请重新核对。');
+          throw Error(words('预览已失效或含不可操作的记录，请重新核对。'));
         if (preview.action !== 'empty_trash') {
           const selected = historySelection(
             state.historyView === 'active' ? state.sessions : state.trashSessions,
@@ -1143,7 +1144,7 @@ export function createQuickChatController({
             state.historyView,
           );
           if (stableJSON(selected) !== stableJSON(preview.request.sessions))
-            throw Error('所选记录已更新，请重新预览。');
+            throw Error(words('所选记录已更新，请重新预览。'));
         }
         const ctx = context(),
           operation = {
@@ -1322,7 +1323,7 @@ export function createQuickChatController({
     upload: (file, assetId = uuid()) =>
       act(
         async () => {
-          if (state.pending) throw Error('先核对原操作。');
+          if (state.pending) throw Error(words('先核对原操作。'));
           readGeneration++;
           const ctx = context(),
             key = 'quick-upload-' + assetId;
@@ -1379,7 +1380,7 @@ export function createQuickChatController({
       act(
         async () => {
           if (createCard && assistant_mode !== 'none')
-            throw Error('直接出卡只用于原输入模式，不替代助手回复。');
+            throw Error(words('直接出卡只用于原输入模式，不替代助手回复。'));
           const result = await command(
             'turn',
             [state.session.id],
@@ -1593,8 +1594,8 @@ export function createQuickChatController({
         async () => {
           const operation = state.pending;
           if (!operation || operation.corrupt)
-            throw Error('原操作记录无法读取，请管理员核对，不要重新创建任务。');
-          if (operation.account !== state.account) throw Error('请登录原操作账户。');
+            throw Error(words('原操作记录无法读取，请管理员核对，不要重新创建任务。'));
+          if (operation.account !== state.account) throw Error(words('请登录原操作账户。'));
           if (operation.method === 'actionHistory') return recoverHistory(operation);
           if (
             operation.method === 'patchSession' &&
@@ -1602,7 +1603,7 @@ export function createQuickChatController({
           )
             return recoverMetadata(operation);
           if (operation.sessionId && operation.sessionId !== state.session?.id)
-            throw Error('请先打开原操作会话。');
+            throw Error(words('请先打开原操作会话。'));
           readGeneration++;
           const ctx = context();
           if (operation.method === 'starTake') return annotateTake(operation, ctx);
@@ -1622,7 +1623,9 @@ export function createQuickChatController({
             );
             guard(ctx);
             if (!(catalog.assets || []).length)
-              throw Error('原上传收据暂未查到，保持原标识；未自动重新上传。请管理员核对后恢复。');
+              throw Error(
+                words('原上传收据暂未查到，保持原标识；未自动重新上传。请管理员核对后恢复。'),
+              );
             writePending(null);
             await loadResources(operation.sessionId);
             return catalog;

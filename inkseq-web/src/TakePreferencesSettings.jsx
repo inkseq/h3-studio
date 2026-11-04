@@ -31,7 +31,7 @@ export default function TakePreferencesSettings({ api, account, active }) {
     },
   });
   if (read.isError) return <p role="alert">{t('takes.preferencesError')}</p>;
-  if (!read.data) return null;
+  if (!read.data) return account ? <i className="ui-wait ui-wait-block" /> : null;
   return (
     <>
       <QuickChatPreferences

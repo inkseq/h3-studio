@@ -1,7 +1,7 @@
 // Review one take (h3-studio#626): a whole-take verdict — usable or redo — and range marks
 // that say which second to keep or change. Picks, stars and parts never set either one.
 // Read and saved through the shared data layer: only this panel's own buttons wait.
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Button } from './ui/Button.jsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { X } from 'lucide-react';
@@ -46,7 +46,9 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
   });
   const [editing, setEditing] = useState(null),
     [drag, setDrag] = useState(null),
-    [message, setMessage] = useState('');
+    [message, setMessage] = useState(''),
+    // A verdict pressed while another saves waits here, and already shows as chosen (#1032).
+    [queued, setQueued] = useState(null);
   const save = useMutation({
     mutationFn: ({ body }) =>
       adapter.saveTakeReview(shotId, artifactId, body, 'take-review-' + crypto.randomUUID()),
@@ -74,14 +76,29 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
               : 'review.failed',
         ),
       );
+      setQueued(null);
       if (error?.status === 409) void read.refetch();
     },
   });
   const data = read.data,
-    shown = save.isPending ? { ...data, ...save.variables.next } : data,
+    shown = {
+      ...data,
+      ...(save.isPending ? save.variables.next : null),
+      ...queued,
+    },
     marks = shown?.marks || [],
     saving = !data || save.isPending;
+  const sendQueued = useEffectEvent(() => {
+    if (save.isPending || !queued || !data) return;
+    setQueued(null);
+    commit(queued);
+  });
+  useEffect(() => sendQueued(), [save.isPending]);
   function commit(next) {
+    if (save.isPending && 'verdict' in next && !('marks' in next)) {
+      setQueued(next);
+      return;
+    }
     try {
       const body = { expected_revision: data.revision };
       if ('verdict' in next) body.verdict = next.verdict;
@@ -134,7 +151,7 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
               key={value}
               className={'take-review-pick ' + value + (shown?.verdict === value ? ' on' : '')}
               aria-pressed={shown?.verdict === value}
-              disabled={saving}
+              disabled={!data}
               onClick={() => commit({ verdict: nextVerdict(shown.verdict, value) })}
             >
               {t('review.' + value)}

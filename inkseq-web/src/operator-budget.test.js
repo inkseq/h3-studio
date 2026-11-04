@@ -784,7 +784,11 @@ test('definite monetary start rejection clears only its journal and allows expli
       }),
       controller = createP4OperatorController({ client: api, storage });
     await controller.setAccount('superdan');
-    await assert.rejects(controller.start({ preview_id: 'rejected-preview' }), /额度不足/);
+    // The test locale is English, so the Chinese server text gives way to the general words.
+    await assert.rejects(
+      controller.start({ preview_id: 'rejected-preview' }),
+      /did not go through/,
+    );
     assert.equal(controller.getState().pending, null);
     assert.equal(storage.getItem('sixnine:operator:dstack:pending:superdan'), null);
     assert.deepEqual(accepted, []);
