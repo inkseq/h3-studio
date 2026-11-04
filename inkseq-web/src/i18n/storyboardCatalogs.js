@@ -242,6 +242,8 @@ export const storyboardCatalogs = {
     'storyboard.copy54': 'Drag audio here from your library or computer',
     'storyboard.copy55': 'No voice sample yet. The model will choose a voice.',
     'voice.title': 'Choose a voice',
+    'voice.tooShort':
+      "That line is under 3 seconds, so it cannot be this character's voice sample. It is saved in the story's files. A longer line will work.",
     'voice.line': 'Say a line in this voice',
     'voice.linePlaceholder': 'What do they say?',
     'voice.direction': 'How they say it',
@@ -853,6 +855,8 @@ export const storyboardCatalogs = {
     'storyboard.copy54': '把声音拖到这里（从素材库或电脑）',
     'storyboard.copy55': '还没有声音样本，生成时模型会自己配声音。',
     'voice.title': '选择声音',
+    'voice.tooShort':
+      '这句不到 3 秒，不能作为这个角色的声音样本。它已存进故事的文件，写长一点就可以。',
     'voice.line': '用这个声音说一句',
     'voice.linePlaceholder': '要说什么？',
     'voice.direction': '怎么说',
