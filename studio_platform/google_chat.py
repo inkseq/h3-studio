@@ -55,8 +55,8 @@ def payload(
         raise ChatError("history_limit", "每个模型最多保留20轮，请另开一次对话。", 422)
     if not isinstance(instruction, str) or len(instruction) > 6000:
         raise ChatError("invalid_instruction", "助手指令不能超过6000字。", 422)
-    if type(max_tokens) is not int or not 64 <= max_tokens <= 4096:
-        raise ChatError("output_limit", "输出上限必须在64–4096 tokens之间。", 422)
+    if type(max_tokens) is not int or not 64 <= max_tokens <= 16384:
+        raise ChatError("output_limit", "输出上限必须在64–16384 tokens之间。", 422)
     contents = []
     total = len(instruction)
     for index, message in enumerate(messages):

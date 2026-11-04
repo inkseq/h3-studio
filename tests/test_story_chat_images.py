@@ -173,6 +173,28 @@ class StoryChatImageTests(unittest.TestCase):
             self.assertEqual(reply.headers["content-type"], "image/webp")
         missing = self.client.get("/v1/story-chats/starter-pictures/other")
         self.assertEqual(missing.status_code, 404)
+    def test_a_script_turn_has_its_own_limit_and_note(self):
+        project = self.story["project_id"]
+        path = f"/v1/story-chats/{project}/turns"
+        long_text = "x" * 5000
+        refused = self.client.post(
+            path, json={"turn_id": "turn-0002", "text": long_text}
+        )
+        self.assertEqual(refused.status_code, 422)
+        too_long = self.client.post(
+            path, json={"turn_id": "turn-0003", "text": "x" * 20001, "script": True}
+        )
+        self.assertEqual(too_long.status_code, 422)
+        self.assertEqual(too_long.json()["detail"]["max"], 20000)
+        bad = self.client.post(
+            path, json={"turn_id": "turn-0004", "text": "x", "script": False}
+        )
+        self.assertEqual(bad.status_code, 422)
+        self.model.plans.append({"reply": "Please check the shots.", "actions": []})
+        reply = self.client.post(
+            path, json={"turn_id": "turn-0005", "text": long_text, "script": True}
+        )
+        self.assertEqual(reply.status_code, 200, reply.text)
 
     def test_replay_does_not_draw_again(self):
         zib = self.story["cards"]["characters"][0]["id"]
