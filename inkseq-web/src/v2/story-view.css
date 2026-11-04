@@ -58,9 +58,14 @@
   white-space: nowrap;
 }
 .sb-workspace .card .card-meta > .warnbadge {
+  position: relative;
   width: 16px;
   height: 16px;
   min-width: 16px;
+  min-height: 16px;
+  padding: 0;
+  border: 0;
+  cursor: help;
   flex: none;
 }
 
@@ -564,8 +569,13 @@
   .sb-workspace .screen-expand {
     opacity: 1;
   }
-  .sb-workspace .card .card-no {
-    opacity: 0;
+  /* No hover here, so the circle is always shown and the shot number sits beside it (#1026). */
+  .sb-workspace .card .card-no,
+  .sb-workspace .card.picking .card-no,
+  .sb-workspace .card:has(.workbench-select.checked) .card-no,
+  .sb-workspace .card:has(.workbench-select:focus-visible) .card-no {
+    left: 46px;
+    opacity: 1;
   }
 }
 @media (max-width: 760px) {
@@ -1494,4 +1504,10 @@ body.sb-resizing-y video {
     flex: 1 1 100%;
     order: -1;
   }
+}
+/* A small mark with a finger-sized target. */
+.sb-workspace .card .card-meta > .warnbadge::after {
+  content: '';
+  position: absolute;
+  inset: -12px;
 }

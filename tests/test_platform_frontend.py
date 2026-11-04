@@ -230,6 +230,21 @@ class FrontendTests(unittest.TestCase):
         self.switch("f" * 40)
         self.assertEqual(self.client.get("/").status_code, 503)
 
+    def test_unknown_page_gets_the_app_while_api_clients_keep_json(self):
+        html = {"Accept": "text/html,application/xhtml+xml"}
+        self.client.cookies.clear()
+        page = self.client.get("/no-such-page", headers=html)
+        self.assertEqual(page.status_code, 404)
+        self.assertIn("text/html", page.headers["content-type"])
+        for path in ("/v1/unknown", "/api/unknown", "/assets/none.js", "/robots.txt"):
+            with self.subTest(path=path):
+                response = self.client.get(path, headers=html)
+                self.assertIn(response.status_code, {401, 404})
+                self.assertNotIn("text/html", response.headers["content-type"])
+        plain = self.client.get("/no-such-page")
+        self.assertIn(plain.status_code, {401, 404})
+        self.assertNotIn("text/html", plain.headers["content-type"])
+
     def test_metadata_and_unknown_paths_are_not_a_static_file_browser(self):
         commit = "a" * 40
         self.release(commit)

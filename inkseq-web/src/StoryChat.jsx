@@ -49,6 +49,7 @@ import './story-chat.css';
 // A card is busy while its picture is being drawn or a chosen photo is uploading.
 const busyCard = (card) => card.status === 'generating' || card.status === 'uploading';
 import { track } from './analytics.js';
+import { readComposerDraft, writeComposerDraft } from './chunk-reload.js';
 
 // Dragged narrow, the stories list snaps to an icon rail (owner, 2026-10-25).
 const RAIL = 56,
@@ -535,7 +536,10 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   }, [live]);
   const [state, dispatch] = useReducer(reducer, null, () => emptyChat());
   const [balance, setBalance] = useState(live ? Number.NaN : 0);
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => (live ? readComposerDraft(account, projectId) : ''));
+  useEffect(() => {
+    if (live) writeComposerDraft(account, story.current, text);
+  }, [live, account, text]);
   const [tab, setTab] = useState('chat');
   const [openId, setOpenId] = useState(null);
   // Desktop layout (owner, 2026-10-24): drag the story list and the card panel wider or
@@ -657,9 +661,10 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
   useEffect(() => {
     if (live && projectId && projectId !== story.current) {
       story.current = projectId;
+      setText(readComposerDraft(account, projectId));
       setSession((value) => value + 1);
     }
-  }, [live, projectId]);
+  }, [live, projectId, account]);
 
   // A new title (the chat names the story) updates the list.
   useEffect(() => {

@@ -19,11 +19,13 @@ import { installMonitoring, reactErrorHandler } from './monitoring.js';
 import { installAnalytics } from './analytics.js';
 import { installVersionCheck } from './version-check.js';
 import { showNotice } from './floating-notice.js';
+import { installChunkReload } from './chunk-reload.js';
 
 const monitored = installMonitoring();
 installAnalytics();
 startSkin();
 installAccountScope(cloudController);
+installChunkReload();
 createRoot(
   document.getElementById('root'),
   // React 19 reports render crashes here; send them to Sentry on the deployed sites.

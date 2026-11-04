@@ -1391,6 +1391,23 @@ function AppContent() {
         />
       );
     },
+    '/app': ({ location: page }) => routes['/']({ location: page }),
+    '/index.html': ({ location: page }) => routes['/']({ location: page }),
+    // Any other address: the app's own page, in the person's language (#1024).
+    '*': () => (
+      <div className="home">
+        <StudioHeader account={account} />
+        <main className="home-main">
+          <div className="ui-empty">
+            <b>{t('notFound.title')}</b>
+            <p>{t('notFound.body')}</p>
+            <Button variant="primary" onClick={() => navigateApp('/')}>
+              {t(account ? 'notFound.works' : 'notFound.home')}
+            </Button>
+          </div>
+        </main>
+      </div>
+    ),
     '/library': ({ active }) => (
       <Library
         key={account || 'signed-out'}
