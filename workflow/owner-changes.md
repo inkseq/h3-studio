@@ -900,3 +900,22 @@ After promotion, adopt the already-approved RDS configuration in #988, staging
 first and production second, preserving the old data and rollback path.
 Check the scheduled backup and retention result; #1010 cleanup is not authorized.
 No pricing, production charging-switch, unrelated frontend or voice changes.
+
+### 2026-11-04 — #849 phase 2 staging starts now
+
+Owner resumes the infrastructure rename from `sixnine` to `inkseq`: active host
+paths, containers/images, secret and parameter paths, buckets and customer-managed
+IAM names. Start staging now; it no longer waits for #988. Before any staging
+host change, check for an active main deployment and wait for that original run
+to finish. Announce service downtime on #849 before stopping services so concurrent
+frontend acceptance can coordinate. Production still waits for #988 to confirm
+the first successful natural business backup after the RDS cutover.
+
+Keep explicit old/new reads during migration, one authoritative writer, existing
+credential values, latest data and a working rollback path. Validate staging before
+production and retire old operational names only after retained references and
+recovery remain usable. All new resources use `inkseq`. Database names/users and
+tenant IDs are excluded and need a separate owner-scheduled window. Do not touch
+supervan, user pricing, charging switches or #1010 cleanup. Claude owns frontend,
+AI and voice; coordinate their consumers and required releases on #849. One
+non-author Tier2 PR review and affected local tests apply to changed behavior.

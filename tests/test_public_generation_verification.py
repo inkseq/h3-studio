@@ -426,6 +426,7 @@ class PublicGenerationVerificationTests(unittest.TestCase):
 
     def test_docker_decoder_uses_only_approved_immutable_image_and_media_bind(self):
         commit, image_id = 'a' * 40, 'sha256:' + 'b' * 64
+        image_reference = 'sixnine-platform:' + commit
         release_root = Path('/srv/sixnine')
         media = verifier.ROOT / 'generated.mp4'
         calls, approvals = [], []
@@ -449,7 +450,7 @@ class PublicGenerationVerificationTests(unittest.TestCase):
             return json.dumps(
                 {
                     'commit': commit,
-                    'image': 'sixnine-platform:' + commit,
+                    'image': image_reference,
                     'image_id': image_id,
                 }
             )
@@ -486,6 +487,21 @@ class PublicGenerationVerificationTests(unittest.TestCase):
             self.assertEqual(
                 set(options['environment']), {'PATH', 'LANG', 'DOCKER_CONFIG'}
             )
+            image_reference = 'inkseq-platform:' + commit
+            verifier.docker_decode(media, 'video')
+            self.assertEqual(calls[-2][0][2], image_reference)
+            self.assertIn(image_id, calls[-1][0])
+            for invalid in (
+                'inkseq-platform:latest',
+                'inkseq-platform:' + 'c' * 40,
+                'foreign-platform:' + commit,
+            ):
+                image_reference = invalid
+                before = len(calls)
+                with self.assertRaises(AssertionError):
+                    verifier.docker_decode(media, 'video')
+                self.assertEqual(len(calls), before)
+            image_reference = 'inkseq-platform:' + commit
             calls.clear()
             release.command = lambda *a, **k: ('sha256:' + 'c' * 64).encode()
             with self.assertRaises(AssertionError):

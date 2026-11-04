@@ -573,6 +573,53 @@ class MainAndRehearsalTests(unittest.TestCase):
 
 
 class RehearsalReadinessTests(unittest.TestCase):
+    def test_new_namespace_copy_keeps_network_isolation_and_exact_image(self):
+        image = 'inkseq-platform:' + COMMIT
+        plan = offline_rehearsal.commands(
+            COMMIT, 'postgres@sha256:' + 'f' * 64, 'd' * 32, image=image
+        )
+        workflow = offline_rehearsal.workflow_restore_command(
+            plan, Path('/copy'), COMMIT
+        )
+        self.assertIn(image, workflow)
+        self.assertEqual(
+            workflow[-5:],
+            [
+                image,
+                'python',
+                '-m',
+                'studio_platform.workflow_backup',
+                'restore-rehearsal',
+                '--directory',
+                '/backup',
+            ][-5:],
+        )
+        payment = offline_rehearsal.payment_command(
+            plan, COMMIT, 'sha256:' + 'b' * 64, 'check'
+        )
+        for command in (plan['migrate'], workflow, payment):
+            self.assertEqual(command[command.index('--network') + 1], 'none')
+            self.assertEqual(command[command.index('--pull') + 1], 'never')
+            self.assertNotIn('--publish', command)
+            self.assertNotIn('sixnine-platform:' + COMMIT, command)
+        self.assertNotIn(image, payment)
+        self.assertIn('sha256:' + 'b' * 64, payment)
+        self.assertIn('INKSEQ_STRIPE_MODE=off', payment)
+        for invalid in (
+            'inkseq-platform:latest',
+            'inkseq-platform:' + 'b' * 40,
+            'foreign-platform:' + COMMIT,
+        ):
+            with (
+                self.subTest(image=invalid),
+                self.assertRaisesRegex(
+                    offline_rehearsal.release.ReleaseError, 'rehearsal_image_differs'
+                ),
+            ):
+                offline_rehearsal.commands(
+                    COMMIT, 'postgres@sha256:' + 'f' * 64, 'd' * 32, image=invalid
+                )
+
     def plan(self):
         return offline_rehearsal.commands(
             COMMIT, 'postgres@sha256:' + 'f' * 64, 'd' * 32
@@ -837,7 +884,7 @@ class PaymentLiveRehearsalTests(unittest.TestCase):
                 patch.object(
                     offline_rehearsal.release,
                     'manifest',
-                    side_effect=lambda _p, c: {'image': 'sixnine-platform:' + c},
+                    side_effect=lambda _p, c: {'image': 'inkseq-platform:' + c},
                 ),
                 patch.object(
                     offline_rehearsal.release,

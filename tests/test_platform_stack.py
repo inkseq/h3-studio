@@ -29,12 +29,15 @@ class StackDrillSafetyTests(unittest.TestCase):
     def test_image_selection_is_explicit_and_distinguishes_precommit(self):
         self.assertIsNone(application_commit(IMAGES[0]))
         self.assertEqual(application_commit("sixnine-platform:" + "a" * 40), "a" * 40)
+        self.assertEqual(application_commit("inkseq-platform:" + "b" * 40), "b" * 40)
         for value in (
             None,
             "",
             "sixnine-platform:latest",
             "other-image:" + "a" * 40,
             "sixnine-platform:123",
+            "inkseq-platform:latest",
+            "inkseq-platform:" + "b" * 40 + "\n",
         ):
             with self.subTest(value=value), self.assertRaises(StackCheckError):
                 application_commit(value)
