@@ -1892,6 +1892,11 @@ export function createCloudController({
     guard(ctx);
     return value;
   }
+  // Voice names and samples only. Off answers `enabled: false`, and the picker stays hidden.
+  async function readVoices() {
+    requireCloud();
+    return api.request('/v1/voices');
+  }
   async function readShotReadiness() {
     requireCloud();
     const ctx = context();
@@ -2121,6 +2126,7 @@ export function createCloudController({
     readTakeReviewSummaries: (shotId) => readTakeReviewSummaries(shotId),
     readInkySuggestions: () => readInkySuggestions(),
     refreshInky: () => refreshInky(),
+    readVoices: () => readVoices(),
     readShotReadiness: () => readShotReadiness(),
     ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
     saveTakeReview: (shotId, artifactId, body, key) =>

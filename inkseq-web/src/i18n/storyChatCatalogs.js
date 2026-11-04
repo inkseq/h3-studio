@@ -59,6 +59,8 @@ export const storyChatCatalogs = {
     'storyChat.starter3': 'A bedtime story about a fox who can’t sleep',
     'storyChat.placeholder': 'Describe your story, or ask for a change…',
     'storyChat.attach': 'Add files',
+    'storyChat.scriptHelp':
+      'Have a script? Paste it below or drop in a text file, and you can check the shots first.',
     'storyChat.attachTo': 'Where {name} goes',
     'storyChat.attachLibrary': 'Story library',
     'storyChat.uploadPhoto': 'Upload photo',
@@ -190,6 +192,7 @@ export const storyChatCatalogs = {
     'storyChat.starter3': '一个睡不着的小狐狸的睡前故事',
     'storyChat.placeholder': '说说你的故事，或者告诉我要改什么…',
     'storyChat.attach': '添加文件',
+    'storyChat.scriptHelp': '已有剧本？粘贴到下面或拖入文本文件，可以先检查镜头。',
     'storyChat.attachTo': '{name} 放到哪里',
     'storyChat.attachLibrary': '故事素材库',
     'storyChat.uploadPhoto': '上传照片',

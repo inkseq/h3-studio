@@ -125,9 +125,42 @@ div.sc-tabs {
   max-width: 44ch;
 }
 .sc-starters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+/* The picture holds its space while it loads, so the words never move. */
+.sc-starter {
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 8px;
+  height: auto;
+  padding: 8px;
+  white-space: normal;
+  text-align: left;
+}
+.sc-starter img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  background: var(--line);
+  border-radius: 6px;
+}
+@media (max-width: 720px) {
+  .sc-starters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sc-starter {
+    flex-direction: row;
+    align-items: center;
+  }
+  .sc-starter img {
+    flex: 0 0 96px;
+    width: 96px;
+  }
 }
 .sc-msg {
   max-width: 88%;
