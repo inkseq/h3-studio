@@ -104,7 +104,6 @@ export function Inky({ projectId, items, shotIds, shotNumber, onIgnore }) {
     setIgnored((old) => new Set(old).add(item.id));
     onIgnore?.(item);
   };
-  if (!open.length && !perch) return null;
   return (
     <>
       {perch && (
