@@ -1,6 +1,7 @@
 """Story chat card pictures (#422) with a fake image model and a recording billing hook."""
 
 import io
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -174,6 +175,22 @@ class StoryChatImageTests(unittest.TestCase):
             self.assertEqual(reply.headers["content-type"], "image/webp")
         missing = self.client.get("/v1/story-chats/starter-pictures/other")
         self.assertEqual(missing.status_code, 404)
+
+    def test_a_script_may_plan_more_than_a_normal_turn(self):
+        from studio_platform.story_chat import (
+            MAX_ACTIONS,
+            MAX_SCRIPT_ACTIONS,
+            StoryChatError,
+            _parse,
+        )
+
+        plan = json.dumps({"reply": "ok", "actions": [{"op": "x"}] * (MAX_ACTIONS + 1)})
+        with self.assertRaises(StoryChatError):
+            _parse(plan)
+        self.assertEqual(
+            len(_parse(plan, max_actions=MAX_SCRIPT_ACTIONS)["actions"]),
+            MAX_ACTIONS + 1,
+        )
 
     def test_a_script_turn_has_its_own_limit_and_note(self):
         project = self.story["project_id"]
