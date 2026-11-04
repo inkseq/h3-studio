@@ -1520,3 +1520,31 @@ body.sb-resizing-y video {
   gap: 6px;
   margin-top: 8px;
 }
+
+/* Steps of a story (#995): one slim row above the page; the page keeps its own layout below it. */
+.layout.A {
+  grid-template-rows: auto minmax(0, 1fr);
+}
+.sb-stages {
+  grid-column: 1 / -1;
+  display: flex;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.layout.A.stage-library > .col {
+  display: none;
+}
+/* As its own step the library is the page, not the phone's slide-over. */
+.sb-workspace .layout.A.stage-library:not(.library-collapsed) > .library {
+  position: static;
+  width: auto;
+  z-index: auto;
+  box-shadow: none;
+  border-right: 0;
+}
+.layout.A.stage-library .plist {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  align-content: start;
+  gap: 10px;
+}

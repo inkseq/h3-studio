@@ -138,6 +138,18 @@ test('a shot look and camera come from closed lists, and empty means Auto', () =
   assert.equal(act(project, { type: 'update', id: shot.id, patch: { camera: 'crane' } }), false);
 });
 
+test('a character keeps a catalog voice id, and only a character', () => {
+  const project = fixture();
+  assert.notEqual(
+    act(project, { type: 'profile', id: 'hero', patch: { voiceId: 'v-warm' } }),
+    false,
+  );
+  assert.equal(get(project, 'hero').data.voiceId, 'v-warm');
+  assert.notEqual(act(project, { type: 'profile', id: 'hero', patch: { voiceId: '' } }), false);
+  assert.equal(get(project, 'hero').data.voiceId, '');
+  assert.equal(act(project, { type: 'profile', id: 'place', patch: { voiceId: 'v-warm' } }), false);
+});
+
 test('a shot added after a card lands right behind it, in its scene', () => {
   const project = fixture(),
     first = project.entities.find((entity) => entity.type === 'shot');
