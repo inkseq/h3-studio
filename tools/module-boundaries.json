@@ -9,7 +9,7 @@
   "capacity -> billing": 20,
   "capacity -> creation": 17,
   "capacity -> identity": 12,
-  "capacity -> jobs": 25,
+  "capacity -> jobs": 26,
   "capacity -> media": 3,
   "creation -> billing": 10,
   "creation -> identity": 21,

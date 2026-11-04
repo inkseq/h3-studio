@@ -13,7 +13,9 @@ from .repository import Conflict
 from .story_chat import (
     INSTRUCTION,
     LANGUAGES,
+    MAX_SCRIPT_CHARS,
     MAX_TEXT_CHARS,
+    SCRIPT_NOTE,
     MAX_TURNS,
     MODEL,
     TURN_ID,
@@ -216,6 +218,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             else None,
             "model": MODEL,
             "max_text_chars": MAX_TEXT_CHARS,
+            "max_script_chars": MAX_SCRIPT_CHARS,
             "max_turns": MAX_TURNS,
         }
 
@@ -390,13 +393,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
     @app.post("/v1/story-chats/{project_id}/turns")
     def story_chat_turn(project_id: str, request: Request, body: dict):
         principal = principal_of(request, "write")
-        if not isinstance(body, dict) or set(body) != {"turn_id", "text"}:
+        if (
+            not isinstance(body, dict)
+            or not {"turn_id", "text"} <= set(body)
+            or set(body) - {"turn_id", "text", "script"}
+            or body.get("script", True) is not True
+        ):
             _fail("story_chat_invalid", 422, field="body")
         turn_id, text = body["turn_id"], body["text"]
+        is_script = "script" in body
+        most = MAX_SCRIPT_CHARS if is_script else MAX_TEXT_CHARS
         if not isinstance(turn_id, str) or not TURN_ID.fullmatch(turn_id):
             _fail("story_chat_invalid", 422, field="turn_id")
-        if not isinstance(text, str) or not text.strip() or len(text) > MAX_TEXT_CHARS:
-            _fail("story_chat_invalid", 422, field="text", max=MAX_TEXT_CHARS)
+        if not isinstance(text, str) or not text.strip() or len(text) > most:
+            _fail("story_chat_invalid", 422, field="text", max=most)
         text = text.strip()
 
         def answer(row, messages):
@@ -439,9 +449,14 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             try:
                 result = model_client().generate(
                     MODEL,
-                    prompt_messages(row["payload"], chat, text),
+                    prompt_messages(
+                        row["payload"],
+                        chat,
+                        SCRIPT_NOTE + text if is_script else text,
+                    ),
                     story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
-                    max_tokens=4096,
+                    # A whole script can come back as dozens of shots.
+                    max_tokens=16384 if is_script else 4096,
                     json_mode=True,
                 )
                 plan = _parse(result["text"])
