@@ -556,7 +556,7 @@ function dismissInboxAction(project, action, _ctx) {
 }
 // A profile patch only sets fields this kind of profile has, and names real assets.
 function validProfilePatch(project, profile, patch) {
-  if (!fields(patch, ['name', 'desc', 'def', 'voice', 'ambient'])) return false;
+  if (!fields(patch, ['name', 'desc', 'def', 'voice', 'voiceId', 'ambient'])) return false;
   if (
     (owns(patch, 'name') && !text(patch.name, 160)) ||
     (owns(patch, 'desc') && !text(patch.desc, 24000))

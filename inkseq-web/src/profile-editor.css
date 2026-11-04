@@ -239,3 +239,14 @@
 .voice-name {
   font-weight: 600;
 }
+.voice-line {
+  display: grid;
+  gap: var(--sp-2);
+}
+.voice-line-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
