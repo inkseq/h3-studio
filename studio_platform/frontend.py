@@ -14,7 +14,7 @@ import re
 import stat
 
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 
 FRONTEND_CONTRACT = "sixnine-web-v1"
@@ -85,6 +85,31 @@ def is_public_frontend(settings, method: str, path: str) -> bool:
         (settings.frontend_dir is not None or settings.frontend_release_dir is not None)
         and method in {"GET", "HEAD"}
         and (path in HTML_ROUTES or path.startswith("/assets/"))
+    )
+
+
+_NOT_PAGES = (
+    "/v1/",
+    "/api/",
+    "/assets/",
+    "/internal/",
+    "/mcp",
+    "/.well-known/",
+    "/docs",
+    "/redoc",
+    "/openapi",
+)
+
+
+def is_page_navigation(settings, method: str, path: str, accept: str | None) -> bool:
+    """A browser asking for a page that does not exist; API clients keep JSON (#1024)."""
+    return bool(
+        (settings.frontend_dir is not None or settings.frontend_release_dir is not None)
+        and method in {"GET", "HEAD"}
+        and "text/html" in (accept or "")
+        and path not in HTML_ROUTES
+        and not path.startswith(_NOT_PAGES)
+        and "." not in path.rsplit("/", 1)[-1]
     )
 
 
@@ -174,7 +199,7 @@ def register_routes(app):
                 "Configured frontend build is missing or invalid; build the reviewed Inkseq source snapshot first"
             ) from None
 
-    def html(request: Request):
+    def html(request: Request, status_code: int = 200):
         try:
             path, metadata, commit = select_html(settings)
         except (OSError, ValueError, UnicodeError):
@@ -189,11 +214,19 @@ def register_routes(app):
             headers["X-Sixnine-Frontend-Commit"] = commit
         request.scope[STATIC_CACHE_SCOPE_KEY] = headers["Cache-Control"]
         return FileResponse(
-            path, media_type="text/html", stat_result=metadata, headers=headers
+            path,
+            status_code=status_code,
+            media_type="text/html",
+            stat_result=metadata,
+            headers=headers,
         )
 
+    def page(request: Request):
+        return html(request)
+
     for route in sorted(HTML_ROUTES):
-        app.add_api_route(route, html, methods=["GET", "HEAD"], include_in_schema=False)
+        app.add_api_route(route, page, methods=["GET", "HEAD"], include_in_schema=False)
+    app.state.frontend_not_found = lambda request: html(request, 404)
 
     @app.api_route(
         "/assets/{asset_path:path}", methods=["GET", "HEAD"], include_in_schema=False
@@ -226,3 +259,27 @@ def register_routes(app):
             request.scope[STATIC_CACHE_SCOPE_KEY] = cache
             return FileResponse(path, stat_result=metadata, headers=headers)
         raise HTTPException(404, "Not Found")
+
+
+def register_not_found_route(app):
+    """Only a 404 changes, so real routes, 405s and routes added later behave as before."""
+
+    async def not_found(request: Request, error: HTTPException):
+        render = getattr(app.state, "frontend_not_found", None)
+        if render is not None and is_page_navigation(
+            app.state.settings,
+            request.method,
+            request.url.path,
+            request.headers.get("accept"),
+        ):
+            try:
+                return render(request)
+            except HTTPException:
+                pass
+        return JSONResponse(
+            {"detail": error.detail},
+            status_code=404,
+            headers=getattr(error, "headers", None),
+        )
+
+    app.add_exception_handler(404, not_found)

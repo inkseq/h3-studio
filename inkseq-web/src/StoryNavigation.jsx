@@ -328,7 +328,7 @@ function useStoryLibrary(state) {
   const locals = currentSupportView()
     ? []
     : [
-        ...(currentLocal ? [currentLocal] : []),
+        ...(currentLocal && !currentLocal.sample ? [currentLocal] : []),
         ...library.projects.filter((project) => project.id !== currentLocal?.id),
       ];
   const cloudProjects = c.account ? [...c.projects] : [];

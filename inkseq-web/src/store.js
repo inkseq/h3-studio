@@ -572,6 +572,8 @@ export function mergeThreeWay(base, local, remote) {
 }
 
 export function createStore({ storage, now = () => Date.now(), seed = legacySeed } = {}) {
+  // The example a new browser starts with. Until someone edits it, it is not their story (#1025).
+  const firstVisitSample = () => ({ ...migrateLegacy(seed), sample: true });
   if (storage === undefined) {
     try {
       storage = globalThis.localStorage;
@@ -730,13 +732,13 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
       oldRaw = storage?.getItem(LEGACY_KEY);
       state = {
         ...state,
-        project: oldRaw ? migrateLegacy(JSON.parse(oldRaw)) : migrateLegacy(seed),
+        project: oldRaw ? migrateLegacy(JSON.parse(oldRaw)) : firstVisitSample(),
       };
       if (oldRaw) state = { ...state, notice: '已迁移原章节项目；旧浏览器数据仍保留。' };
     } catch {
       state = {
         ...state,
-        project: migrateLegacy(seed),
+        project: firstVisitSample(),
         notice: '旧项目无法迁移，原始数据仍保留。当前打开演示项目。',
       };
     }
@@ -767,6 +769,7 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
       observation && state.workspace.mode === 'cloud' && !state.workspace.dirty;
     // An observation keeps the story's own timestamp; stories made through the API may have
     // none, and an undefined field would make every later edit fail the plain-JSON check.
+    if (!observation) delete valid.project.sample;
     const updatedAt = observation ? state.project.updatedAt : timestamp();
     if (updatedAt === undefined) delete valid.project.updatedAt;
     else valid.project.updatedAt = updatedAt;
@@ -859,7 +862,9 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
     getLocalProjectSummary() {
       const project =
         state.workspace.mode === 'local' ? state.project : localWorkspace?.state.project;
-      return project ? { id: project.id, title: project.title } : null;
+      return project
+        ? { id: project.id, title: project.title, ...(project.sample ? { sample: true } : {}) }
+        : null;
     },
     getRecoveryRaw: () => recoveryRaw,
     getPersistenceRisk: () => ({
