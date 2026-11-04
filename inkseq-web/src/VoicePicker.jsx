@@ -36,11 +36,14 @@ function VoiceLine({ profile, language }) {
         language,
       });
       request.current = null;
-      await dispatch({ type: 'addVoice', pid: profile.id, asset: clip.entity_id });
       setText('');
+      // A voice sample needs 3 s; a shorter line stays in the story's files, ready to use elsewhere.
+      await Promise.resolve(
+        dispatch({ type: 'addVoice', pid: profile.id, asset: clip.entity_id }),
+      ).catch(() => setFailed('short'));
     } catch (error) {
       if (error?.detail?.detail?.nothing_charged === true) request.current = null;
-      setFailed(true);
+      setFailed('failed');
     } finally {
       setBusy(false);
     }
@@ -73,7 +76,7 @@ function VoiceLine({ profile, language }) {
           {t(busy ? 'voice.speaking' : 'voice.speak')}
         </Button>
       </div>
-      {failed && <p role="alert">{t('voice.failed')}</p>}
+      {failed && <p role="alert">{t(failed === 'short' ? 'voice.tooShort' : 'voice.failed')}</p>}
     </div>
   );
 }
