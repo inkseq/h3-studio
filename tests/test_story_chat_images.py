@@ -166,6 +166,14 @@ class StoryChatImageTests(unittest.TestCase):
         self.assertEqual(entities[prop]["data"]["imageIds"], ["image-pic-prop-001"])
         self.assertEqual([a for _, a in self.images.calls], ["16:9", "1:1"])
 
+    def test_starter_pictures_are_a_closed_list(self):
+        for name in ("alien", "coffee", "fox"):
+            reply = self.client.get("/v1/story-chats/starter-pictures/" + name)
+            self.assertEqual(reply.status_code, 200, name)
+            self.assertEqual(reply.headers["content-type"], "image/webp")
+        missing = self.client.get("/v1/story-chats/starter-pictures/other")
+        self.assertEqual(missing.status_code, 404)
+
     def test_replay_does_not_draw_again(self):
         zib = self.story["cards"]["characters"][0]["id"]
         first = self.draw(zib).json()
