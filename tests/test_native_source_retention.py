@@ -35,7 +35,7 @@ def synthetic_dstack_bundle(commit, destination):
         b"SYNTHETIC_DSTACK_IMAGE"
     )
     (Path(destination) / "dstack-native-provenance.json").write_text("{}")
-    return {"image": "sixnine-dstack:" + commit, "image_id": "sha256:" + "d" * 64}
+    return {"image": "inkseq-dstack:" + commit, "image_id": "sha256:" + "d" * 64}
 
 
 class Provenance(unittest.TestCase):
@@ -312,7 +312,7 @@ class NativeBytes(unittest.TestCase):
             )
         self.assertEqual((target / "source-set.tar.gz").read_bytes(), self.raw)
         self.assertEqual(manifest["commit"], NEW)
-        self.assertEqual(manifest["dispatch"]["image"], "sixnine-dispatch:" + NEW)
+        self.assertEqual(manifest["dispatch"]["image"], "inkseq-dispatch:" + NEW)
         self.assertEqual(manifest["source_index_sha256"], self.index_sha)
         self.assertEqual(
             manifest["files"]["source-set.tar.gz"], hashlib.sha256(self.raw).hexdigest()

@@ -189,6 +189,8 @@ class MigrationArtifacts(unittest.TestCase):
             ),
         )
         self.assertEqual(value, self.value)
+        for kind in ("dispatch", "dstack"):
+            self.assertEqual(value[kind]["image"], "inkseq-" + kind + ":" + COMMIT)
         self.assertEqual(
             release.validate_image_archive(
                 self.artifact / "dispatch-image.tar.gz",
@@ -232,12 +234,12 @@ class MigrationArtifacts(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "source_set_changed"):
             maintenance.verify_sources(target, value["source_index_sha256"])
 
-    def test_inkseq_images_keep_archive_platform_and_provenance_bindings(self):
+    def test_legacy_images_keep_archive_platform_and_provenance_bindings(self):
         for kind, filename in (
             ('dispatch', 'dispatch-image.tar.gz'),
             ('dstack', 'dstack-server-image.tar.gz'),
         ):
-            reference = 'inkseq-' + kind + ':' + COMMIT
+            reference = 'sixnine-' + kind + ':' + COMMIT
             self.value[kind]['image'] = reference
             archive_path = self.artifact / filename
             with self.assertRaisesRegex(
@@ -1028,9 +1030,21 @@ class MigrationArtifacts(unittest.TestCase):
             'b59c96674d41b523b6213ac9b17ee962065bfa48',
             'f9377740174c4e3c1abf11f846182ea8e2d22bea',
             'cd57ae8c4f65166089bbe157323402cfffc2b5f5',
+            '62a4d064db1e807727c255978af130c9b497551d',
+            'fdfd482afcb43919accda036dad30da599cd1561',
         }
+        expected_commits.add('97732961458e76eeac6542f9b0df5ddfbeeca9ad')
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
+        )
+        self.assertEqual(
+            maintenance.RETAINED_DSTACK_HELPER_PAIRS[
+                '97732961458e76eeac6542f9b0df5ddfbeeca9ad'
+            ],
+            (
+                '72f007982f93c18cd794d7bd9f452d5618f4dff6db538b637c71e7c4568845b3',
+                'f008cad4a6049f1492cf1371007ec848e04ff3bf8cff781ed1ddda64d936d48d',
+            ),
         )
         for commit in (
             '4bfe4d04b3a3702e4623dc1fa9c9f9b50b453c27',
@@ -1052,6 +1066,8 @@ class MigrationArtifacts(unittest.TestCase):
             'b59c96674d41b523b6213ac9b17ee962065bfa48',
             'f9377740174c4e3c1abf11f846182ea8e2d22bea',
             'cd57ae8c4f65166089bbe157323402cfffc2b5f5',
+            '62a4d064db1e807727c255978af130c9b497551d',
+            'fdfd482afcb43919accda036dad30da599cd1561',
         ):
             self.assertEqual(
                 maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
