@@ -42,7 +42,12 @@ from .agent_connect_routes import (
     GrantPreviewPrivacyMiddleware,
     register_routes as register_agent_connect_routes,
 )
-from .frontend import FRONTEND_CONTRACT, STATIC_CACHE_SCOPE_KEY, is_public_frontend
+from .frontend import (
+    FRONTEND_CONTRACT,
+    STATIC_CACHE_SCOPE_KEY,
+    is_page_navigation,
+    is_public_frontend,
+)
 from .operator_capacity import (
     OperatorRegistry,
 )  # Register additive tables before create_schema.
@@ -329,7 +334,11 @@ def create_app(
             # A dial-out GPU worker has no session; its one-time boot token
             # is checked by the route itself (#859).
             public_paths.add("/v1/worker/boot")
-        public_frontend = is_public_frontend(settings, request.method, request.url.path)
+        public_frontend = is_public_frontend(
+            settings, request.method, request.url.path
+        ) or is_page_navigation(
+            settings, request.method, request.url.path, request.headers.get("accept")
+        )
         public_discovery = (
             request.method in {"GET", "HEAD"} and request.url.path in AGENT_PUBLIC_PATHS
         )
@@ -675,4 +684,7 @@ def create_app(
 
     install_http_boundaries(app)
     app.add_middleware(GrantPreviewPrivacyMiddleware)
+    from .frontend import register_not_found_route
+
+    register_not_found_route(app)
     return app
