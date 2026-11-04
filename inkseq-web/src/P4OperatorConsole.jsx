@@ -1721,15 +1721,15 @@ const ADMIN_TABS = [
   ['hosts', 'operator.adminTab.hosts'],
 ];
 
-export default function P4OperatorConsole() {
+export default function P4OperatorConsole({ embedded = false }) {
   const { t, locale } = useI18n();
   const pageActive = usePageActive(),
     location = useAppLocation(),
     ownLocation = useRef(location);
-  if (pageActive && location.path === '/operator') ownLocation.current = location;
+  if (pageActive && !embedded && location.path === '/operator') ownLocation.current = location;
   useEffect(() => {
-    if (pageActive) document.title = t('operator.pageTitle');
-  }, [locale, pageActive, t]);
+    if (pageActive && !embedded) document.title = t('operator.pageTitle');
+  }, [embedded, locale, pageActive, t]);
   const c = useCloud(),
     controller = useMemo(() => createP4OperatorController({ locale: readBrowserLocale }), []),
     state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState),
@@ -1737,9 +1737,16 @@ export default function P4OperatorConsole() {
     [adminTab, setAdminTab] = useState('start'),
     [dialog, setDialog] = useState(null),
     [, setNow] = useState(Date.now());
-  const legacyView =
-    state.snapshot?.operator?.admin === true &&
-    new URLSearchParams(ownLocation.current.search).get('legacy') === '1';
+  const adminAccount = state.snapshot?.operator?.admin === true,
+    legacyView =
+      !embedded &&
+      adminAccount &&
+      new URLSearchParams(ownLocation.current.search).get('legacy') === '1';
+  // Admins read this console inside Admin; other operators keep their own page.
+  useEffect(() => {
+    if (!embedded && pageActive && adminAccount && !legacyView)
+      navigateApp('/admin?section=gpus', { replace: true });
+  }, [adminAccount, embedded, legacyView, pageActive]);
   useEffect(() => {
     quiet(cloud.initialize());
     return () => controller.destroy();
@@ -1848,25 +1855,30 @@ export default function P4OperatorConsole() {
   const totalCost = nodes.every((node) => finite(node.usage?.total_cost_microusd))
     ? nodes.reduce((sum, node) => sum + node.usage.total_cost_microusd, 0)
     : null;
+  const Main = embedded ? 'div' : 'main';
   return (
-    <div className="home ops-adapter">
-      <StudioHeader
-        account={c.account}
-        active="operator"
-        menuItems={admin && <MenuItem onSelect={showAdmin}>{t('operator.copy130')}</MenuItem>}
-      />
-      <main className="home-main ops-gpu-page">
+    <div className={embedded ? 'ops-adapter' : 'home ops-adapter'}>
+      {!embedded && (
+        <StudioHeader
+          account={c.account}
+          active="operator"
+          menuItems={admin && <MenuItem onSelect={showAdmin}>{t('operator.copy130')}</MenuItem>}
+        />
+      )}
+      <Main className={embedded ? 'ops-gpu-page' : 'home-main ops-gpu-page'}>
         <div className="home-head p4-page-heading">
-          {admin && (
+          {admin && !embedded && (
             <Button variant="ghost" size="sm" onClick={() => navigateApp('/admin')}>
               <ChevronLeft size={14} />
               {t('adminHome.title')}
             </Button>
           )}
-          <h1 className="page-title p4-page-title">
-            <Cpu size={20} />
-            {t('v2.gpus')}
-          </h1>
+          {!embedded && (
+            <h1 className="page-title p4-page-title">
+              <Cpu size={20} />
+              {t('v2.gpus')}
+            </h1>
+          )}
           <small className="muted p4-observed-at">
             {snapshot ? time(snapshot.observed_at, locale) : '—'}
           </small>
@@ -2207,7 +2219,7 @@ export default function P4OperatorConsole() {
         <p className="home-foot muted">
           {t('operator.copy138')} {t('operator.copy147')}
         </p>
-      </main>
+      </Main>
       {snapshot && !state.denied && dialog?.type === 'start' && (
         <StartDialog
           options={dialog.options}

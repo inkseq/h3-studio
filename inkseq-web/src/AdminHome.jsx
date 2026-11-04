@@ -25,6 +25,7 @@ import AllSettings from './AllSettings.jsx';
 import { AdminAudit, AdminPricing, AdminUsers, useClient } from './AdminConsole.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
+import OperatorConsole from './P4OperatorConsole.jsx';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { readAccessFor } from './account-access.js';
 import { Badge, EmptyState, Note } from './ui/Note.jsx';
@@ -377,7 +378,7 @@ function Overview({ data, api }) {
       <section className="ah-card">
         <header>
           <h2>{t('adminHome.machinesNow')}</h2>
-          <Button size="sm" variant="ghost" onClick={() => navigateApp('/operator')}>
+          <Button size="sm" variant="ghost" onClick={() => navigateApp('/admin?section=gpus')}>
             <Cpu size={14} aria-hidden="true" />
             {t('adminHome.openConsole')}
           </Button>
@@ -681,8 +682,7 @@ export default function AdminHome({ account }) {
     };
   }, [account]);
   const data = useAdminData(api, active && access?.admin === true, section);
-  // GPUs is the full machine console at /operator, listed here so Admin is the one place.
-  const go = (id) => navigateApp(id === 'gpus' ? '/operator' : '/admin?section=' + id);
+  const go = (id) => navigateApp('/admin?section=' + id);
   return (
     <div className="home admin-home">
       <StudioHeader account={account} active="admin" />
@@ -742,6 +742,7 @@ export default function AdminHome({ account }) {
                   />
                 </section>
               ))}
+            {section === 'gpus' && <OperatorConsole embedded />}
             {section === 'limits' && <Limits api={api} active={active} account={account} />}
             {section === 'settings' && <AllSettings api={api} active={active} />}
             {section === 'users' && <AdminUsers api={api} active={active} />}
