@@ -164,6 +164,17 @@ class RealCreditImageTests(unittest.TestCase):
         self.assertEqual(self.balance(), (95, 0))
         self.assertEqual(len(self.images.calls), 1)
 
+    def test_shot_picture_captures_like_a_card(self):
+        self.policy(True)
+        project_id = self.path.split("/")[3]
+        project = self.client.get("/v1/projects/" + project_id).json()["project"]
+        shot = next(e for e in project["entities"] if e["type"] == "shot")
+        reply = self.client.post(
+            self.path, json={"request_id": "pic-shot-0001", "card_id": shot["id"]}
+        )
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(self.balance(), (95, 0))
+
     def test_provider_failure_releases_the_hold(self):
         self.policy(True)
         self.images.fail = ImageError("image_not_returned", 422)

@@ -166,6 +166,54 @@ class StoryChatImageTests(unittest.TestCase):
         self.assertEqual(entities[prop]["data"]["imageIds"], ["image-pic-prop-001"])
         self.assertEqual([a for _, a in self.images.calls], ["16:9", "1:1"])
 
+    def shot(self):
+        return next(e for e in self.project()["entities"] if e["type"] == "shot")
+
+    def test_shot_picture_becomes_its_first_frame(self):
+        shot = self.shot()
+        first = self.draw(shot["id"], "pic-shot-001")
+        self.assertEqual(first.status_code, 200, first.text)
+        entity = self.shot()
+        self.assertEqual(
+            entity["data"]["storyboard"]["firstFrameId"], "image-pic-shot-001"
+        )
+        self.assertIs(entity["data"]["storyboard"]["continuePrevious"], False)
+        prompt, aspect = self.images.calls[0]
+        self.assertIn("first moment of this shot", prompt)
+        self.assertEqual(aspect, "16:9")
+        # Another picture takes over, and the earlier one stays in the story's files.
+        self.assertEqual(self.draw(shot["id"], "pic-shot-002").status_code, 200)
+        entity = self.shot()
+        self.assertEqual(
+            entity["data"]["storyboard"]["firstFrameId"], "image-pic-shot-002"
+        )
+        files = {e["id"] for e in self.project()["entities"] if e["type"] == "image"}
+        self.assertLessEqual({"image-pic-shot-001", "image-pic-shot-002"}, files)
+
+    def test_opening_hidden_keeps_the_story_out_of_quick_create(self):
+        story = self.client.post("/v1/projects", json={"title": "Plain story"}).json()
+        project_id = story.get("id") or story["project"]["id"]
+        path = f"/v1/story-chats/{project_id}/open"
+        first = self.client.post(path, json={"language": "en", "hidden": True})
+        self.assertEqual(first.status_code, 200, first.text)
+        listed = self.client.get("/v1/story-chats").json()
+        self.assertNotIn(project_id, str(listed))
+        # Asking again keeps it hidden; a plain open still brings it back.
+        self.assertEqual(self.client.post(path, json={"hidden": True}).status_code, 200)
+        self.assertNotIn(project_id, str(self.client.get("/v1/story-chats").json()))
+        self.assertEqual(self.client.post(path, json={}).status_code, 200)
+        self.assertIn(project_id, str(self.client.get("/v1/story-chats").json()))
+        self.assertEqual(
+            self.client.post(path, json={"hidden": False}).status_code, 422
+        )
+
+    def test_a_chapter_or_scene_is_not_a_picture_card(self):
+        scene = next(
+            e for e in self.project()["entities"] if e["type"] in {"scene", "chapter"}
+        )
+        self.assertEqual(self.draw(scene["id"]).status_code, 404)
+        self.assertEqual(self.images.calls, [])
+
     def test_replay_does_not_draw_again(self):
         zib = self.story["cards"]["characters"][0]["id"]
         first = self.draw(zib).json()

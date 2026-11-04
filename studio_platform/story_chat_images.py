@@ -39,8 +39,42 @@ class ImageError(Exception):
         super().__init__(code)
 
 
+def aspect_for(card):
+    """Pictures of a shot are its first frame, so they take the film's shape."""
+    return ASPECT.get(card["type"], "16:9")
+
+
+def shot_prompt(project, card, style, instruction):
+    """The first moment of a shot (#1039), from the same bounded context Inky reads."""
+    from .inky_source import shot_source
+
+    try:
+        context = shot_source(project, card)["context"]
+    except (ValueError, TypeError, AttributeError, KeyError):
+        context = {"shot_action": card.get("description") or card.get("title") or ""}
+    parts = [
+        "A single still frame from an animated short film: the first moment of this "
+        "shot, cinematic composition, natural light.",
+        f"What happens: {context['shot_action'].strip()[:2000]}",
+    ]
+    if context.get("characters"):
+        parts.append("Characters: " + ", ".join(context["characters"]))
+    if context.get("place"):
+        parts.append("Place: " + context["place"])
+    if context.get("props"):
+        parts.append("Props: " + ", ".join(context["props"]))
+    if style.strip():
+        parts.append("Overall film style: " + style.strip()[:2000])
+    if instruction.strip():
+        parts.append("Change requested: " + instruction.strip()[:1000])
+    parts.append("No text, captions, watermarks or borders.")
+    return "\n".join(parts)
+
+
 def prompt_for(project, card, instruction=""):
     style = (project.get("journey", {}).get("storyboard") or {}).get("style", "")
+    if card["type"] == "shot":
+        return shot_prompt(project, card, style, instruction)
     parts = [
         STYLE[card["type"]],
         f"Subject: {card.get('title', '').strip()}.",
@@ -173,6 +207,15 @@ def attach_actions(project, card, asset_id, image_entity_id):
         ]
         version["version"] = version.get("version", 1) + 1
         patch = {"versions": versions, "defaultVersionId": version["id"]}
+    elif card["type"] == "shot":
+        # The newest picture is the shot's first frame; earlier ones stay in the story's files.
+        patch = {
+            "storyboard": {
+                **(data.get("storyboard") or {}),
+                "firstFrameId": image_entity_id,
+                "continuePrevious": False,
+            }
+        }
     else:
         patch = {
             "imageIds": [image_entity_id]
@@ -209,6 +252,9 @@ def input_hash(project, card, instruction):
         "style": " ".join(str(style).split()),
         "instruction": " ".join(str(instruction).split()),
     }
+    if card.get("type") == "shot":
+        action = (card.get("data") or {}).get("prompt", "")
+        value["action"] = " ".join(str(action).split())
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
