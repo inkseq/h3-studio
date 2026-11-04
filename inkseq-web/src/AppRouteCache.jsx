@@ -15,7 +15,7 @@ export default function AppRouteCache({ location, routes }) {
   visited.current.set(location.path, location);
   return [...visited.current].map(([path, lastLocation]) => {
     const active = path === location.path,
-      render = routes[path] || routes['/'];
+      render = routes[path] || routes['*'];
     return (
       <PageActivity.Provider key={path} value={active}>
         <div

@@ -1,14 +1,22 @@
 import React from 'react';
 import { Button } from './ui/Button.jsx';
 import { navigateApp } from './app-navigation.js';
+import { isChunkError, reloadOnce } from './chunk-reload.js';
+import { store } from './store.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
+
+// "Saved" only when the open story is on the server with nothing newer here (#1023).
+function savedKnown() {
+  const { workspace } = store.getState();
+  return workspace.mode === 'cloud' && !workspace.dirty;
+}
 
 function Fallback({ onRetry }) {
   const { t } = useI18n();
   return (
     <div className="page-error" role="alert">
       <h2>{t('pageError.title')}</h2>
-      <p>{t('pageError.body')}</p>
+      <p>{t(savedKnown() ? 'pageError.body' : 'pageError.bodyUnknown')}</p>
       <div className="page-error-actions">
         <Button variant="primary" onClick={() => window.location.reload()}>
           {t('pageError.reload')}
@@ -32,6 +40,10 @@ export default class PageErrorBoundary extends React.Component {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
+  }
+  // A code file removed by a newer release: fetch the new version once instead of stopping here.
+  componentDidCatch(error) {
+    if (isChunkError(error)) reloadOnce();
   }
   // Moving to another address tries again; the route cache itself is never remounted.
   componentDidUpdate(previous) {

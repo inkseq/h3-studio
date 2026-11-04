@@ -1653,9 +1653,16 @@ export function ShotCard({
               <span className="q">{QUALITY_LABEL[shot.quality]}</span>
             )}
             {warnings.length > 0 && (
-              <span className="warnbadge" title={warnings.join('\n')}>
-                !
-              </span>
+              <Tooltip tap content={warnings.join('\n')}>
+                <Button
+                  className="warnbadge"
+                  aria-label={warnings.join('. ')}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  !
+                </Button>
+              </Tooltip>
             )}
           </span>
         </div>

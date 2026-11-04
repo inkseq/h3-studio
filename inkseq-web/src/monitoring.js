@@ -1,7 +1,13 @@
 // Error monitoring (h3-studio#501): Sentry, only on the deployed sites. Local development,
 // previews and tests send nothing. No personal data: no request bodies, no form or chat
 // text, no console messages (they can echo prompts), and no IP or cookies.
-import * as Sentry from '@sentry/react';
+// Loaded after the page has drawn (#1022); errors before that wait in a short queue.
+let Sentry = null;
+const early = [];
+const EARLY_MAX = 10;
+const remember = (error) => {
+  if (early.length < EARLY_MAX) early.push(error);
+};
 
 const DSN =
   'https://cb0e80ebfcd9cd965b42321da8a819e4@o4512306171019264.ingest.us.sentry.io/4512306294161408';
@@ -27,22 +33,37 @@ export function scrubBreadcrumb(crumb) {
 export function installMonitoring(location = globalThis.location) {
   const environment = monitoringEnvironment(location?.hostname);
   if (!environment) return false;
-  Sentry.init({
-    dsn: DSN,
-    environment,
-    sendDefaultPii: false,
-    tracesSampleRate: 0,
-    beforeBreadcrumb: scrubBreadcrumb,
-    beforeSend(event) {
-      if (event.request) {
-        delete event.request.data;
-        delete event.request.cookies;
-        if (event.request.url) event.request.url = event.request.url.split('?')[0];
-      }
-      return event;
-    },
-  });
+  const onError = (event) => remember(event.error || event.reason);
+  globalThis.addEventListener?.('error', onError);
+  globalThis.addEventListener?.('unhandledrejection', onError);
+  void import('@sentry/react')
+    .then((loaded) => {
+      loaded.init({
+        dsn: DSN,
+        environment,
+        sendDefaultPii: false,
+        tracesSampleRate: 0,
+        beforeBreadcrumb: scrubBreadcrumb,
+        beforeSend(event) {
+          if (event.request) {
+            delete event.request.data;
+            delete event.request.cookies;
+            if (event.request.url) event.request.url = event.request.url.split('?')[0];
+          }
+          return event;
+        },
+      });
+      Sentry = loaded;
+      for (const error of early.splice(0)) if (error) Sentry.captureException(error);
+    })
+    .catch(() => {})
+    .finally(() => {
+      globalThis.removeEventListener?.('error', onError);
+      globalThis.removeEventListener?.('unhandledrejection', onError);
+    });
   return true;
 }
 
-export const reactErrorHandler = Sentry.reactErrorHandler;
+export function reactErrorHandler() {
+  return (error, info) => (Sentry ? Sentry.reactErrorHandler()(error, info) : remember(error));
+}

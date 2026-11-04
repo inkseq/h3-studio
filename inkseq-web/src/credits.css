@@ -210,6 +210,12 @@
   .credits-chip .credits-word {
     display: none;
   }
+  /* The number needs its own width: a fixed icon-button width let it run over the next button. */
+  .hbar .credits-chip {
+    flex: none;
+    width: auto;
+    min-width: max-content;
+  }
   .packs {
     grid-template-columns: repeat(2, 1fr);
   }
