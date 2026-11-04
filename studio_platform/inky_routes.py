@@ -4,6 +4,7 @@ from fastapi import Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
+from .inky_hooks import queue_refresh
 from .inky_store import InkyStore
 
 PROJECT = Query(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9_-]+$")
@@ -14,6 +15,7 @@ def contract():
         "suggestions": "GET /v1/inky/suggestions?project_id=PROJECT",
         "readiness": "GET /v1/inky/readiness?project_id=PROJECT",
         "ignore": "POST /v1/inky/suggestions/ID/ignore?project_id=PROJECT",
+        "refresh": "POST /v1/inky/refresh?project_id=PROJECT",
         "settings": "GET/PATCH /v1/inky/settings?project_id=PROJECT",
         "read_scope": "projects:read",
         "write_scopes": ["projects:read", "projects:write"],
@@ -86,6 +88,18 @@ def register_routes(app):
         return response(
             store.ignore(request.state.principal, project_id, suggestion_id)
         )
+
+    @app.post("/v1/inky/refresh")
+    def refresh(request: Request, project_id: str = PROJECT):
+        # Stories saved before Inky was on have no advice until someone asks. At most three
+        # shots are judged per call, each source once, after this response.
+        principal = request.state.principal
+        pending = store.pending(principal, project_id)
+        if getattr(app.state, "inky_worker", None) is None:
+            pending = 0
+        if pending:
+            queue_refresh(principal, project_id)
+        return response({"pending": pending})
 
     @app.get("/v1/inky/settings")
     def settings(request: Request, project_id: str = PROJECT):

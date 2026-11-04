@@ -26,6 +26,11 @@ class InkyIntegrationTests(unittest.TestCase):
         self.app.state.inky_worker = worker
         return worker
 
+    def attach_only(self):
+        worker = Mock()
+        self.app.state.inky_worker = worker
+        return worker
+
     def edit(self, version=1, key="edit"):
         return self.client.post(
             "/v1/projects/story-one/actions",
@@ -40,6 +45,33 @@ class InkyIntegrationTests(unittest.TestCase):
                     }
                 ],
             },
+        )
+
+    def test_refresh_judges_a_story_saved_before_inky(self):
+        url = "/v1/inky/refresh?project_id=story-one"
+        self.setup_project()
+        self.app.state.inky_worker = None
+        self.assertEqual(self.edit().status_code, 200)
+        # Switched off: nothing to wait for, whatever the story holds.
+        self.assertEqual(self.client.post(url).json(), {"pending": 0})
+
+        worker = self.attach_only()
+        store = self.app.state.inky_store
+
+        def judged(principal, project_id):
+            store.claim(principal, project_id, "shot-one")
+
+        worker.refresh.side_effect = judged
+        first = self.client.post(url)
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json(), {"pending": 1})
+        self.assertEqual(first.headers["cache-control"], "no-store")
+        self.assertEqual(worker.refresh.call_count, 1)
+        # One evaluation per source: asking again costs nothing.
+        self.assertEqual(self.client.post(url).json(), {"pending": 0})
+        self.assertEqual(worker.refresh.call_count, 1)
+        self.assertEqual(
+            self.client.post("/v1/inky/refresh?project_id=no-such").status_code, 404
         )
 
     def test_committed_edit_only_replay_conflict_and_full_save(self):
