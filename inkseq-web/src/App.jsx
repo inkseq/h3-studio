@@ -20,7 +20,14 @@ import Landing from './Landing.jsx';
 import { CloudSaveStatus, useCloudAutosave } from './CloudAutosave.jsx';
 import Library from './Library.jsx';
 import UniversalTrash, { TrashProvider, TrashButton, StoryItemManager } from './UniversalTrash.jsx';
-import React, { useState, useEffect, useEffectEvent, useRef, useSyncExternalStore } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useSyncExternalStore,
+} from 'react';
 import {
   Plus,
   Workflow,
@@ -45,9 +52,11 @@ const Freestyle = React.lazy(() => import('./Freestyle.jsx'));
 const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
 const QuickCreateEntry = React.lazy(() => import('./QuickCreateEntry.jsx'));
 const LegacyQuickChatLink = React.lazy(() => import('./LegacyQuickChatLink.jsx'));
-import OperatorConsole from './P4OperatorConsole.jsx';
-import AdminHome from './AdminHome.jsx';
-import { CloudProjects, useCloud } from './CloudStudio.jsx';
+// Admin and operator code stays out of the public script, in chunks only those routes load.
+const OperatorConsole = React.lazy(() => import('./P4OperatorConsole.jsx'));
+const AdminHome = React.lazy(() => import('./AdminHome.jsx'));
+import { CloudProjects, useCloud, useFrameAccount } from './CloudStudio.jsx';
+import { storyPreview } from './story-preview.js';
 import AgentConnect from './AgentConnect.jsx';
 import AgentLink from './AgentLink.jsx';
 import ProjectActivity from './ProjectActivity.jsx';
@@ -132,7 +141,7 @@ function Modal({ title, children, onClose, wide = false }) {
     </Dialog>
   );
 }
-function SeriesApp({ sidebarView, onSidebarView }) {
+function SeriesApp({ sidebarView, onSidebarView, preview = null }) {
   const { t, locale } = useI18n();
   const pageActive = usePageActive();
   useEffect(() => {
@@ -140,10 +149,19 @@ function SeriesApp({ sidebarView, onSidebarView }) {
       document.title = t(sidebarView === 'library' ? 'app.libraryTitle' : 'app.storyTitle');
   }, [sidebarView, t, pageActive]);
   useEffect(() => {
-    if (!pageActive) return;
+    if (!pageActive || preview) return;
     return cloud.startPolling();
-  }, [pageActive]);
-  const state = useSyncExternalStore(store.subscribe, store.getState, store.getState),
+  }, [pageActive, preview]);
+  const live = useSyncExternalStore(store.subscribe, store.getState, store.getState),
+    state = preview
+      ? {
+          ...live,
+          project: preview,
+          selectedId: null,
+          scopeId: null,
+          workspace: { ...live.workspace, mode: 'cloud' },
+        }
+      : live,
     p = state.project;
   useCloudAutosave();
   const [modal, setModal] = useState(null),
@@ -152,6 +170,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
     [search, setSearch] = useState(''),
     [, setLegacyGuide] = useState(false);
   const c = useCloud(),
+    frameAccount = useFrameAccount(c.account),
     maintenance = modelsVisible();
   const importRef = useRef(),
     selected = find(p, state.selectedId),
@@ -308,7 +327,9 @@ function SeriesApp({ sidebarView, onSidebarView }) {
   // Account menu holds account things only (owner, 2026-10-26). Backup lives under Export,
   // Connect AI has its own button, local projects sit on the works page and the story list,
   // and rename / manage items / delete belong to Story settings.
-  const accountMenu = <AccountMenu account={c.account} onSignIn={() => open({ type: 'cloud' })} />;
+  const accountMenu = (
+    <AccountMenu account={frameAccount} onSignIn={() => open({ type: 'cloud' })} />
+  );
   return (
     <>
       <div className="home" hidden={sidebarView !== 'library'}>
@@ -327,7 +348,11 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           />
         </main>
       </div>
-      <div className="workspace v2-story-view" hidden={sidebarView === 'library'}>
+      <div
+        className="workspace v2-story-view"
+        hidden={sidebarView === 'library'}
+        inert={preview ? true : undefined}
+      >
         <header className="wbar">
           <Button
             variant="ghost"
@@ -530,6 +555,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
           </div>
         )}
         {sidebarView === 'story' &&
+          !preview &&
           (!linkHere ||
             linkTarget?.activity ||
             (linkTarget?.entityId && find(p, linkTarget.entityId)?.type !== 'shot')) && (
@@ -540,7 +566,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
               onActivity={showActivity}
             />
           )}
-        {sidebarView === 'story' && (
+        {sidebarView === 'story' && !preview && (
           <StoryOpenNotice
             quietLoading
             onOpened={() => onSidebarView('story', { selected: true })}
@@ -548,6 +574,7 @@ function SeriesApp({ sidebarView, onSidebarView }) {
         )}
         <StoryboardConnected
           key={c.account + ':' + p.id + ':' + state.workspaceEpoch}
+          preview={preview}
           onNewScene={() => add('scene')}
         />
       </div>
@@ -1197,31 +1224,20 @@ const storyPageFromUrl = (search = window.location.search) =>
   readAgentLink(search) || new URLSearchParams(search).get('view') === 'workspace'
     ? 'story'
     : 'library';
-// The story's page, before the story has arrived: its bar, its title and reserved space. A
-// failed open or a draft choice still comes up here through the notice.
-function StoryOpeningFrame({ projectId, title, onBack }) {
-  const { t } = useI18n();
+// The story's real page while it opens: the same bars, panels and saved layout, showing the copy
+// the works list already read, or reserved shots. Inert until the story arrives; only Back works.
+function StoryOpening({ projectId, title, account, onBack, onSidebarView }) {
+  const { t } = useI18n(),
+    preview = useMemo(() => storyPreview(account, projectId, title), [account, projectId, title]);
   return (
-    <div className="workspace v2-story-view" aria-busy="true">
-      <header className="wbar">
-        <Button variant="ghost" className="back story-home-back" onClick={onBack}>
-          <ChevronLeft size={16} />
-          {t('v2.works')}
-        </Button>
-      </header>
-      <div className="story-frame">
-        <i className="ui-wait story-frame-side" />
-        <main className="story-frame-main">
-          <h1 className="page-title">{title || '\u00a0'}</h1>
-          <div className="story-frame-shots">
-            {[0, 1, 2, 3, 4, 5].map((i) => (
-              <i key={i} className="ui-wait" />
-            ))}
-          </div>
-        </main>
-      </div>
+    <>
+      <SeriesApp preview={preview} sidebarView="story" onSidebarView={onSidebarView} />
+      <Button variant="ghost" className="back story-home-back story-opening-back" onClick={onBack}>
+        <ChevronLeft size={16} />
+        {t('v2.works')}
+      </Button>
       <StoryOpenNotice projectId={projectId} waiting quietLoading onClose={onBack} />
-    </div>
+    </>
   );
 }
 
@@ -1230,6 +1246,14 @@ function AppContent() {
     c = useCloud(),
     account = c.account;
   useEffect(() => installPersistenceGuard(store), []);
+  // Fetch the main create page while idle, so pressing Quick Create shows it straight away.
+  useEffect(() => {
+    const later = globalThis.requestIdleCallback || ((run) => setTimeout(run, 800));
+    later(() => {
+      void import('./QuickCreateEntry.jsx').catch(() => {});
+      void import('./StoryChat.jsx').catch(() => {});
+    });
+  }, []);
   // Pages with their own client report a refused session; the shared check signs out once.
   useEffect(() => {
     const recheck = () => {
@@ -1318,9 +1342,12 @@ function AppContent() {
         return c.sessionReady || !lastAccount() ? (
           <Landing />
         ) : readAgentLink(page.search) ? (
-          <StoryOpeningFrame
+          <StoryOpening
+            key={'opening:' + readAgentLink(page.search).projectId}
             projectId={readAgentLink(page.search).projectId}
+            account={lastAccount()}
             onBack={() => changePage('library')}
+            onSidebarView={changePage}
           />
         ) : (
           <div className="home">
@@ -1348,10 +1375,13 @@ function AppContent() {
           workspace.workspace.account === account &&
           workspace.project.id === destination.projectId;
       return destination && !here ? (
-        <StoryOpeningFrame
+        <StoryOpening
+          key={'opening:' + destination.projectId}
           projectId={destination.projectId}
           title={c.projects.find((row) => row.id === destination.projectId)?.title}
+          account={account}
           onBack={() => changePage('library')}
+          onSidebarView={changePage}
         />
       ) : (
         <SeriesApp
@@ -1382,14 +1412,30 @@ function AppContent() {
     '/settings': ({ active }) => (
       <SpendingSettings key={account || 'signed-out'} account={account} active={active} />
     ),
-    '/admin': () => <AdminHome account={account} />,
+    '/admin': () => (
+      <React.Suspense
+        fallback={
+          <div className="home">
+            <StudioHeader account={account} active="admin" />
+          </div>
+        }
+      >
+        <AdminHome account={account} />
+      </React.Suspense>
+    ),
     '/operator': ({ active }) => (
       <React.Suspense fallback={<InkLoader label={t('loading.operator')} />}>
         <OperatorConsole active={active} />
       </React.Suspense>
     ),
     '/quick-chat': ({ location: page }) => (
-      <React.Suspense fallback={<InkLoader label={t('loading.quickCreate')} />}>
+      <React.Suspense
+        fallback={
+          <div className="home sc-shell">
+            <StudioHeader account={account} active="quick" />
+          </div>
+        }
+      >
         {/* ?story=preview: sample replies; otherwise the chat story builder (#422). The
             original Quick Create was removed (owner, 2026-10-24): its old links open the
             story the conversation became, its preferences moved to Settings. */}

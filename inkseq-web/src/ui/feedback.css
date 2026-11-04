@@ -42,34 +42,28 @@
     animation: none;
   }
 }
-.story-frame {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  gap: 16px;
-  padding: 14px;
+/* Back works while the rest of the story page is inert; it sits exactly over the real one. */
+.story-opening-back {
+  position: fixed;
+  top: 12px;
+  left: 16px;
+  z-index: 30;
 }
-.story-frame-side {
-  flex: none;
-  width: 236px;
+/* Nothing has been read yet, so nothing may claim to be empty. */
+.story-placeholder .lib-empty,
+.story-placeholder .screen-empty,
+.story-placeholder .lib-tabs .filter-chip > :last-child {
+  visibility: hidden;
 }
-.story-frame-main {
-  flex: 1;
-  min-width: 0;
-}
-.story-frame-shots {
+/* Same size and gaps as the real shot cards. */
+.story-opening-shots {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 12px;
-  margin-top: 28px;
+  grid-template-columns: repeat(auto-fill, 169px);
+  gap: 13px;
+  padding-top: 46px;
 }
-.story-frame-shots > .ui-wait {
-  min-height: 176px;
-}
-@media (max-width: 760px) {
-  .story-frame-side {
-    display: none;
-  }
+.story-opening-shots > .ui-wait {
+  height: 157px;
 }
 .takes-save {
   min-width: 96px;

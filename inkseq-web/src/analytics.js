@@ -17,11 +17,13 @@ export function installAnalytics(location = globalThis.location) {
     autocapture: false,
     capture_pageview: 'history_change',
     capture_pageleave: true,
-    // Replay of page interactions for a sample of visits; typed text and inputs masked.
+    // Replay of page interactions for a sample of visits. All page text and inputs are masked,
+    // so story text never leaves the browser, as the privacy page says (#1021).
+    enable_recording_console_log: false,
     disable_session_recording: false,
     session_recording: {
       maskAllInputs: true,
-      maskTextSelector: 'textarea, input, .sc-msg, [contenteditable]',
+      maskTextSelector: '*',
     },
     persistence: 'localStorage',
     respect_dnt: true,

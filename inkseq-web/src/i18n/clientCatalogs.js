@@ -44,7 +44,7 @@ export const clientCatalogs = {
     'errors.maintenance_in_progress_soon':
       'Inkseq is updating. Nothing was submitted or charged. Try again in a few minutes.',
     'client.capacityDrain':
-      'The GPU is sleeping or switching. Nothing was submitted. Check again before generating; your work and references are retained.',
+      'Generation is switching over. Nothing was submitted. Check again before generating; your work and files are kept.',
     'client.versionChanged':
       'The cloud version changed. Your draft is retained; compare the latest version first.',
     'client.notFound': 'This cloud feature is not connected, or the content does not exist.',
@@ -127,7 +127,7 @@ export const clientCatalogs = {
     'errors.maintenance_in_progress_soon':
       'Inkseq 正在更新，这次没有提交也没有扣费。请几分钟后再试。',
     'client.capacityDrain':
-      'GPU 正在休眠或切换，任务尚未提交。请重新检查后生成；作品和素材已保留。',
+      '生成服务正在切换，任务还没有提交。请重新核对后再生成；作品和素材都已保留。',
     'client.versionChanged': '云端版本已改变。你的草稿已保留，请先比较新版本。',
     'client.notFound': '此云功能尚未连接，或该内容不存在。',
     'client.termsRequired':

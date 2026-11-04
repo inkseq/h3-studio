@@ -1,3 +1,4 @@
+import { Clapperboard } from 'lucide-react';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Button } from './ui/Button.jsx';
 import TakeRecipe from './QuickChatTakeRecipe.jsx';
@@ -218,10 +219,36 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
   );
 }
 
-export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScene }) {
+function PreviewFilmButton({ primary }) {
+  const { t } = useI18n();
+  return (
+    <span className="story-film-control">
+      <Button variant={primary ? 'primary' : undefined}>
+        <Clapperboard size={14} />
+        {t('film.open')}
+      </Button>
+    </span>
+  );
+}
+
+export default function StoryboardConnected({
+  onLegacyGuide,
+  onCanvas,
+  onNewScene,
+  preview = null,
+}) {
   const { t: at, locale } = useI18n();
-  const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
+  const live = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     c = useCloud(),
+    s = preview
+      ? {
+          ...live,
+          project: preview,
+          selectedId: null,
+          scopeId: null,
+          workspace: { ...live.workspace, mode: 'cloud', account: c.account },
+        }
+      : live,
     [queue, setQueue] = useState(null),
     [busy, setBusy] = useState(false),
     [lastAdded, setLastAdded] = useState(null),
@@ -301,7 +328,8 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
   const [creators, setCreators] = useState({});
   useEffect(() => {
     setCreators({});
-    if (!c.account || s.workspace.mode !== 'cloud' || s.workspace.account !== c.account) return;
+    if (preview || !c.account || s.workspace.mode !== 'cloud' || s.workspace.account !== c.account)
+      return;
     let active = true;
     const api = createQuickChatClient();
     api.setAccount(c.account);
@@ -315,7 +343,14 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
       active = false;
       api.reset();
     };
-  }, [c.account, s.project.id, s.workspace.mode, s.workspace.account, s.workspace.serverVersion]);
+  }, [
+    preview,
+    c.account,
+    s.project.id,
+    s.workspace.mode,
+    s.workspace.account,
+    s.workspace.serverVersion,
+  ]);
   const baseView = useMemo(
     () => ({
       ...storyboardView(s.project, {
@@ -326,12 +361,12 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
         queue,
         // Only page-switching cloud work locks the storyboard; generate and upload guard
         // their own second press (serial) instead of greying out everything (owner, 2026-10-26).
-        busy: c.busy,
+        busy: c.busy && !preview,
         error: c.error,
       }),
       lastAdded,
     }),
-    [s.project, s.scopeId, c.capabilities, c.jobs, queue, c.busy, c.error, lastAdded],
+    [s.project, s.scopeId, c.capabilities, c.jobs, queue, c.busy, c.error, lastAdded, preview],
   );
   const view = useMemo(
     () => ({
@@ -359,6 +394,8 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     return receipt || { ok: true };
   };
   const dispatch = async (action) => {
+    // A story that is still opening is only shown: nothing may change the story behind it.
+    if (preview) return { ok: false };
     if (action.type === 'workbenchShotSettings') {
       const context = captureWorkspace(store),
         live = store.getState();
@@ -660,6 +697,8 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     },
     state: {
       ...view,
+      opening: !!preview,
+      placeholder: !!preview?.placeholder,
       workspaceMode: s.workspace.mode,
       contextId: c.account + ':' + s.project.id + ':' + s.workspaceEpoch,
       projectVersion: s.workspace.serverVersion,
@@ -737,13 +776,17 @@ export default function StoryboardConnected({ onLegacyGuide, onCanvas, onNewScen
     <>
       <StoryboardWorkspace
         filmControl={
-          <StoryFilmControl
-            cloudState={c}
-            workspaceState={s}
-            onSave={cloud.save}
-            otherBusy={busy || !!adapter.state.workbenchPending}
-            primary
-          />
+          preview ? (
+            <PreviewFilmButton />
+          ) : (
+            <StoryFilmControl
+              cloudState={c}
+              workspaceState={s}
+              onSave={cloud.save}
+              otherBusy={busy || !!adapter.state.workbenchPending}
+              primary
+            />
+          )
         }
         onNewScene={onNewScene}
         adapter={adapter}

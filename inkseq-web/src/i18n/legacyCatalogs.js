@@ -737,37 +737,37 @@ export const legacyCatalogs = {
     'jobs.status.submission_unknown': 'Submission awaiting verification',
     'jobs.status.recovery_hold': 'Awaiting recovery verification',
     'jobs.reason.capacity_no_matching_gpu':
-      'No GPU currently matches the model, VRAM and price limit. The search continues; the original job is preserved. Do not resubmit.',
+      'Waiting for a place to generate. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_inventory_check_failed':
-      'GPU inventory cannot be confirmed right now. The system will retry the lookup. Keep the original job.',
+      'Waiting for a place to generate. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_rental_reconciliation':
-      'The GPU rental result needs verification. Generation has not started. Further rentals are paused to prevent duplicate charges; the original job is preserved.',
+      'Generation hit a problem and we are working on it. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_configuration_unavailable':
-      'The GPU execution configuration is unavailable and must be repaired. The original job is preserved; you can cancel waiting.',
+      'Generation hit a problem and we are working on it. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_bootstrap_repair_required':
-      'GPU environment preparation failed and is being repaired. The original job is preserved. Do not resubmit.',
+      'Generation hit a problem and we are working on it. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_queued_task_repair_required':
-      'The GPU worker needs recovery and has paused new work. Your job remains queued; you can cancel waiting. Do not resubmit.',
+      'Generation hit a problem and we are working on it. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_budget_or_limit':
-      'GPU budget or concurrency capacity is insufficient. The original job is preserved; the budget will not be raised automatically.',
+      'The generation limit is full for now. Your job is kept, and the limit will not rise on its own. You can cancel.',
     'jobs.reason.capacity_gpu_starting':
-      'Preparing the GPU, loading the model and checking execution requirements. The original job runs after these checks. Do not resubmit.',
+      'Getting ready to generate. It starts on its own; no need to resubmit.',
     'jobs.reason.capacity_provider_preparing':
-      'The GPU provider is preparing the machine. Model loading and generation have not started. The original job is preserved.',
+      'Getting ready to generate. It starts on its own; no need to resubmit.',
     'jobs.reason.capacity_provider_configuring_ssh':
-      'The provider is configuring remote access. Model loading and generation have not started. The original job is preserved.',
+      'Getting ready to generate. It starts on its own; no need to resubmit.',
     'jobs.reason.capacity_provider_preparation_failed':
-      'Provider preparation failed before generation. Machine removal and costs still need verification. The original job is preserved; do not resubmit.',
+      'Generation hit a problem and we are working on it. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_provider_preparation_timeout':
-      'Provider preparation timed out before generation. Machine removal and costs still need verification. The original job is preserved; do not resubmit.',
+      'Generation hit a problem and we are working on it. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_provider_preparation_retry_limit':
-      'Repeated provider preparation failures paused automatic rentals. An administrator must review them. Generation has not started; keep the original job or cancel waiting.',
+      'Generation hit a problem and we are working on it. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.reason.capacity_gpu_busy':
-      'The GPU is processing queued work. This job is waiting for a free slot. Do not resubmit.',
+      'Other work is ahead of this job. It starts on its own; no need to resubmit.',
     'jobs.reason.capacity_searching_gpu':
-      'Searching for a suitable GPU. Generation has not started. Machine preparation begins when one is found; you can cancel waiting.',
+      'Waiting for a place to generate. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.waitDefault':
-      'Waiting for compute startup and validation. Inference has not started. Keep the original job, or request cancellation; do not resubmit.',
+      'Getting ready to generate. It has not started. Your job is kept; you can cancel, and no need to resubmit.',
     'jobs.cancelReview':
       'Cancellation intent is recorded, but the original submission result needs administrator verification. Job and cost records are preserved. Do not resubmit.',
     'jobs.review':
@@ -2141,37 +2141,32 @@ export const legacyCatalogs = {
     'jobs.status.submission_unknown': '提交结果待核对',
     'jobs.status.recovery_hold': '恢复后待核对',
     'jobs.reason.capacity_no_matching_gpu':
-      '暂时没有符合型号、显存和价格上限的可用 GPU。系统会继续查找其他合适机器；原任务保留，无需重新提交。',
+      '正在排队等待生成。任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_inventory_check_failed':
-      '暂时无法确认 GPU 库存，系统会重试查询。目前尚未确认有可用机器，请保留原任务。',
+      '正在排队等待生成。任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_rental_reconciliation':
-      'GPU 租赁结果需要核对，当前尚未开始生成。为避免重复收费，已暂停再次租机；原任务保留，等待处理。',
+      '生成服务遇到问题，我们正在处理。还没有开始生成，任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_configuration_unavailable':
-      '当前 GPU 执行配置暂不可用，需修复后才能继续。原任务保留，可取消等待。',
+      '生成服务遇到问题，我们正在处理。还没有开始生成，任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_bootstrap_repair_required':
-      'GPU 环境准备失败，正在修复；原任务已保留，无需重新提交。',
+      '生成服务遇到问题，我们正在处理。还没有开始生成，任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_queued_task_repair_required':
-      'GPU 工作机需要恢复，已暂停接新任务。你的任务仍保留，等待恢复；可取消等待，请勿重复提交。',
+      '生成服务遇到问题，我们正在处理。还没有开始生成，任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_budget_or_limit':
-      '当前 GPU 预算或并发额度不足，暂时无法开机。原任务保留，不会自动提高预算。',
-    'jobs.reason.capacity_gpu_starting':
-      '正在准备 GPU、加载模型并检查运行条件，通过后自动执行原任务，无需再次提交。',
-    'jobs.reason.capacity_provider_preparing':
-      'GPU 供应商正在准备机器，尚未开始加载模型或生成。原任务保留，无需重新提交。',
+      '生成额度暂时用满了。任务已保留，额度不会自动提高，可以取消。',
+    'jobs.reason.capacity_gpu_starting': '正在准备生成，准备好会自动开始。不用重新提交。',
+    'jobs.reason.capacity_provider_preparing': '正在准备生成，准备好会自动开始。不用重新提交。',
     'jobs.reason.capacity_provider_configuring_ssh':
-      'GPU 供应商正在配置远程连接，尚未开始加载模型或生成。原任务保留，无需重新提交。',
+      '正在准备生成，准备好会自动开始。不用重新提交。',
     'jobs.reason.capacity_provider_preparation_failed':
-      'GPU 供应商准备机器失败，尚未开始生成。机器回收与费用仍需核对，原任务保留；无需重新提交。',
+      '生成服务遇到问题，我们正在处理。还没有开始生成，任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_provider_preparation_timeout':
-      'GPU 供应商准备机器超时，尚未开始生成。机器回收与费用仍需核对，原任务保留；无需重新提交。',
+      '生成服务遇到问题，我们正在处理。还没有开始生成，任务已保留，可以取消，不用重新提交。',
     'jobs.reason.capacity_provider_preparation_retry_limit':
-      'GPU 供应商准备机器连续失败，已暂停自动租机，等待管理员处理。尚未开始生成，原任务仍保留；可取消等待，无需重新提交。',
-    'jobs.reason.capacity_gpu_busy':
-      'GPU 正在处理队列中的任务，当前任务等待空闲执行位置，无需重新提交。',
-    'jobs.reason.capacity_searching_gpu':
-      '正在查找符合条件的 GPU，尚未开始生成。找到后会自动准备机器，可取消等待。',
-    'jobs.waitDefault':
-      '等待计算容量启动与验收，尚未开始模型推理。保持原任务，可请求取消；无需重新提交。',
+      '生成服务遇到问题，我们正在处理。还没有开始生成，任务已保留，可以取消，不用重新提交。',
+    'jobs.reason.capacity_gpu_busy': '前面还有任务在生成，轮到时会自动开始。不用重新提交。',
+    'jobs.reason.capacity_searching_gpu': '正在排队等待生成。任务已保留，可以取消，不用重新提交。',
+    'jobs.waitDefault': '正在准备生成，还没有开始。任务已保留，可以取消，不用重新提交。',
     'jobs.cancelReview':
       '已记录取消意愿，但原提交结果仍需管理员核对。原任务和费用记录保留，请勿重复提交。',
     'jobs.review': '原任务等待管理员核对执行与费用；作品仍可编辑，请勿重复提交。',

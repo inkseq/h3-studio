@@ -694,7 +694,7 @@ test('confirmed capacity drain rejects once, preserves work and requires explici
     h.controller.submit(h.shot),
     (error) =>
       error.status === 409 &&
-      /GPU is sleeping or switching/.test(error.message) &&
+      /switching over/.test(error.message) &&
       /Nothing was submitted/.test(error.message),
   );
   assert.equal(submits, 1);

@@ -222,7 +222,7 @@ export const storyCatalogs = {
     'story.copy203': 'Current connection status',
     'story.copy204': 'Plan production; media generation is not connected yet',
     'story.copy205':
-      'ComfyUI, video/music APIs, and Marble are not connected. The checks below assess input clarity, not verified model capability.',
+      'The checks below only look at whether your input is clear. They do not promise the result.',
     'story.copy206': 'Not connected',
     'story.copy207': 'Design your first shot',
     'story.copy208': 'Open a scene in a chapter, add a shot, then prepare references.',
@@ -576,8 +576,7 @@ export const storyCatalogs = {
     'story.copy202': '打开画布',
     'story.copy203': '当前连接状态',
     'story.copy204': '可以整理制作计划，尚不能生成媒体',
-    'story.copy205':
-      'ComfyUI、视频 / 音乐 API 和 Marble 都尚未接通。下面检查输入是否明确，不代表模型已验证能完成。',
+    'story.copy205': '下面只检查输入是否明确，不代表一定能生成理想的结果。',
     'story.copy206': '未连接',
     'story.copy207': '先设计第一个镜头',
     'story.copy208': '从章节进入一场戏，添加镜头，再准备参考。',
