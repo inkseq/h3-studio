@@ -746,6 +746,11 @@ inventory.json
 !tests/test_story_chat_advice.py
 !studio_platform/story_chat_images.py
 !studio_platform/story_chat_settings.py
+!studio_platform/speech_catalog.py
+!studio_platform/speech_provider.py
+!studio_platform/speech_routes.py
+!studio_platform/speech_settings.py
+!tests/test_speech.py
 !studio_platform/story_chat_undo.py
 !tests/test_story_chat_images.py
 !tests/test_story_chat_image_credits.py

@@ -575,6 +575,9 @@ def create_app(
         image_client=story_chat_image_client,
         billing=story_chat_billing,
     )
+    from .speech_routes import register_routes as register_speech_routes
+
+    register_speech_routes(app)
     from .storyboard_versions import register_routes as register_storyboard_routes
 
     register_storyboard_routes(app)
