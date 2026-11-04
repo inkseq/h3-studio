@@ -711,6 +711,8 @@ export const legacyCatalogs = {
       'No spoken lines yet. Write what is said in quotes, or say “no dialogue”, so the voice does not invent words.',
     'hint.focusRefs':
       'Lots of references, or reference videos, may only be partly used. A few focused references usually work better.',
+    'hint.audioNeedsPicture':
+      'A voice reference also needs a picture: add one to the character, or a first frame.',
     'hint.writeLines':
       'You added audio but no spoken lines. Write what is said, in quotes, so the voice says those words in your language.',
     'projection.limits':
@@ -2117,6 +2119,7 @@ export const legacyCatalogs = {
       '还没有写台词。用引号写出要说的话，或写明“无对白”，否则声音可能会自己编内容。',
     'hint.focusRefs':
       '参考素材很多或有参考视频时，模型可能只用上一部分。少而精的参考通常效果更好。',
+    'hint.audioNeedsPicture': '用声音做参考时，还需要一张图：给角色加张图，或加一个首帧。',
     'hint.writeLines':
       '加了音频但还没写台词。把要说的话用引号写进动作描述，声音才会说这些话、用你要的语言。',
     'projection.limits': '最多可放：图片 {images} · 视频 {videos} · 声音 {audios} · 共 {total}',

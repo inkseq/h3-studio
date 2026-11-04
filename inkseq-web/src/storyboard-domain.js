@@ -606,6 +606,12 @@ export function submitHints(shot, items, t) {
   if (sent.some((item) => item.kind === '视频') || sent.length > 6) hints.push(t('hint.focusRefs'));
   if (sent.some((item) => item.kind === '声音') && !DIALOGUE.test(shot.prompt || ''))
     hints.push(t('hint.writeLines'));
+  // The model refuses a voice with nothing to look at; say so before the person presses Generate.
+  if (
+    sent.some((item) => item.kind === '声音') &&
+    !sent.some((item) => item.kind === '图片' || item.kind === '视频')
+  )
+    hints.push(t('hint.audioNeedsPicture'));
   return hints;
 }
 
