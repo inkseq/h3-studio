@@ -255,6 +255,7 @@
   "dstack_controller -> settlement_recovery",
   "dstack_controller -> spending_limits",
   "dstack_controller -> telemetry",
+  "dstack_controller -> workflow_retention",
   "dstack_demand -> execution_policy",
   "dstack_demand -> execution_profiles",
   "dstack_demand -> identity",

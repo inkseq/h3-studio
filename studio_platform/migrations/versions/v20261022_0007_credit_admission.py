@@ -20,9 +20,22 @@ def normalize_check(value):
             "budget_role::text = ANY (ARRAY['accounting'::character varying, 'enforced'::character varying]::text[])"
         ),
     }
-    for column in ("budget_role", "(budget_role)", "(budget_role)::text"):
-        for cast in ("", "::text", "::character varying"):
-            array = f"ARRAY['accounting'{cast}, 'enforced'{cast}]"
+    # A dump and restore re-parses the array and casts each element (#988).
+    arrays = [
+        f"ARRAY['accounting'{cast}, 'enforced'{cast}]"
+        for cast in ("", "::text", "::character varying", "::character varying::text")
+    ]
+    arrays.append(
+        "ARRAY[('accounting'::character varying)::text, "
+        "('enforced'::character varying)::text]"
+    )
+    for column in (
+        "budget_role",
+        "budget_role::text",
+        "(budget_role)",
+        "(budget_role)::text",
+    ):
+        for array in arrays:
             for operand in (array, f"({array})::text[]"):
                 expression = f"{column} = ANY ({operand})"
                 for wrappers in range(3):

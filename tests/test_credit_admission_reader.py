@@ -249,6 +249,9 @@ class CreditAdmissionReaderTests(unittest.TestCase):
             "(budget_role IN ('accounting','enforced'))",
             "((budget_role)::text = ANY ((ARRAY['accounting'::character varying, 'enforced'::character varying])::text[]))",
             "(budget_role = ANY (ARRAY['accounting'::text, 'enforced'::text]))",
+            # Text PostgreSQL gives after a dump and restore (#988).
+            "budget_role::text = ANY (ARRAY['accounting'::character varying::text, 'enforced'::character varying::text])",
+            "((budget_role)::text = ANY (ARRAY[('accounting'::character varying)::text, ('enforced'::character varying)::text]))",
             "budget_role::text = ANY (ARRAY['accounting'::character varying, 'enforced'::character varying]::text[])",
         )
         for sql in positive:
@@ -265,6 +268,7 @@ class CreditAdmissionReaderTests(unittest.TestCase):
             for sql in (
                 f"budget_role IN ('{literal}', 'enforced')",
                 f"((budget_role)::text = ANY ((ARRAY['{literal}'::character varying, 'enforced'::character varying])::text[]))",
+                f"budget_role::text = ANY (ARRAY['{literal}'::character varying::text, 'enforced'::character varying::text])",
                 f"budget_role::text = ANY (ARRAY['{literal}'::character varying, 'enforced'::character varying]::text[])",
             ):
                 with self.subTest(sql=sql):
