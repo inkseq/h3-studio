@@ -281,11 +281,13 @@ def model_items(settings, now):
 
 def switch_items(app, connection):
     from .content_policy import public_policy
+    from .speech_settings import read as read_speech
     from .story_chat_settings import read
     from .modal_host import HostSpec
 
     settings, tenant = app.state.settings, app.state.settings.tenant_id
     content, story = public_policy(connection, tenant), read(connection, tenant)
+    speech = read_speech(connection, tenant)
     rows = [
         item(
             "content",
@@ -297,6 +299,19 @@ def switch_items(app, connection):
             revision=content["revision"],
             effective=content["revision"] is not None,
             edit_path="/v1/admin/content-policy",
+        ),
+        *(
+            item(
+                "speech",
+                name,
+                speech[name],
+                "database:speech_settings"
+                if speech["version"]
+                else "code:speech_settings.DEFAULT",
+                revision=speech["version"],
+                edit_path="/v1/admin/speech/settings",
+            )
+            for name in ("voice_enabled", "free_while_testing")
         ),
         item(
             "story_chat",

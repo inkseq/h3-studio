@@ -1,5 +1,7 @@
 import { WorkbenchBulk } from './StoryboardWorkbench.jsx';
 import { Button } from './ui/Button.jsx';
+import { Segmented } from './ui/Segmented.jsx';
+import { CARD_SIZES, readCardSize, rememberCardSize } from './shot-mention.js';
 import { FloatingMessage } from './floating-notice.js';
 import './v2/story-view.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
@@ -323,6 +325,11 @@ function FilmEditorButton({ chapterId }) {
 
 function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmControl }) {
   const { t } = useI18n();
+  const [cardSize, setCardSize] = useState(() => readCardSize(globalThis.localStorage));
+  const chooseCardSize = (value) => {
+    setCardSize(value);
+    rememberCardSize(globalThis.localStorage, value);
+  };
   const { state, dispatch } = useStoryboardUI(),
     trash = useTrash();
   const gone = trash?.hidden || EMPTY_SET,
@@ -598,6 +605,16 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
               </small>
             </div>
             <div className="row tight chapter-actions" data-icon-only={headCompact || undefined}>
+              <Segmented
+                className="card-size"
+                label={t('shotCard.size')}
+                options={CARD_SIZES.map((value) => ({
+                  value,
+                  label: t('shotCard.size.' + value),
+                }))}
+                value={cardSize}
+                onChange={chooseCardSize}
+              />
               <InkyForStory />
               {!multi && <FilmEditorButton chapterId={state.project.chapterId} />}
               {!groups.length && !state.placeholder && (
@@ -693,7 +710,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             items={state.shots.map((shot) => 'shot:' + shot.id)}
             strategy={rectSortingStrategy}
           >
-            <div className="sb-scene-groups">
+            <div className="sb-scene-groups" data-card-size={cardSize}>
               {state.placeholder ? (
                 <div className="story-opening-shots">
                   {[0, 1, 2, 3, 4, 5].map((i) => (

@@ -125,6 +125,32 @@ test('scene header rejects foreign, absent and non-scene targets without changin
   assert.equal(get(project, added.id).parentId, 'foreign-scene');
 });
 
+test('a shot look and camera come from closed lists, and empty means Auto', () => {
+  const project = fixture(),
+    shot = project.entities.find((entity) => entity.type === 'shot');
+  assert.notEqual(act(project, { type: 'update', id: shot.id, patch: { look: 'noir' } }), false);
+  assert.notEqual(act(project, { type: 'update', id: shot.id, patch: { camera: 'push' } }), false);
+  const block = project.entities.find((entity) => entity.id === shot.id).data.storyboard;
+  assert.equal(block.look, 'noir');
+  assert.equal(block.camera, 'push');
+  assert.notEqual(act(project, { type: 'update', id: shot.id, patch: { look: '' } }), false);
+  assert.equal(act(project, { type: 'update', id: shot.id, patch: { look: 'other' } }), false);
+  assert.equal(act(project, { type: 'update', id: shot.id, patch: { camera: 'crane' } }), false);
+});
+
+test('a shot added after a card lands right behind it, in its scene', () => {
+  const project = fixture(),
+    first = project.entities.find((entity) => entity.type === 'shot');
+  const added = act(project, { type: 'add', after: first.id, title: 'Next' });
+  const shots = children(project, first.parentId).filter((entity) => entity.type === 'shot');
+  assert.equal(shots[shots.indexOf(first) + 1].id, added.id);
+  assert.deepEqual(
+    shots.map((entity) => entity.order),
+    shots.map((_, index) => index),
+  );
+  assert.equal(act(project, { type: 'add', after: 'no-such-shot' }), false);
+});
+
 test('chapters: add, rename, move, and shots reorder across chapters', () => {
   const project = fixture();
   const first = project.entities.find((e) => e.type === 'chapter');
