@@ -42,6 +42,35 @@
     animation: none;
   }
 }
+.story-frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 16px;
+  padding: 14px;
+}
+.story-frame-side {
+  flex: none;
+  width: 236px;
+}
+.story-frame-main {
+  flex: 1;
+  min-width: 0;
+}
+.story-frame-shots {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 12px;
+  margin-top: 28px;
+}
+.story-frame-shots > .ui-wait {
+  min-height: 176px;
+}
+@media (max-width: 760px) {
+  .story-frame-side {
+    display: none;
+  }
+}
 .takes-save {
   min-width: 96px;
 }

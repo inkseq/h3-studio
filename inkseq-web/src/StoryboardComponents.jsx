@@ -1851,7 +1851,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   );
   if (!shot) return null;
   const index = state.shots.indexOf(shot);
-  const info = expand(shot, db, locale);
+  // Resolution and labels follow the pressed quality too, not only the toggle (#1032).
+  const info = expand({ ...shot, quality: shownQuality }, db, locale);
   const upd = (patch) => dispatch({ type: 'update', id: shot.id, patch });
   // One new take: a fresh seed only matters when the seed is locked; HD switches the tier first.
   const regenerate = async (patch) => {
@@ -1898,7 +1899,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
     made = shot.versions.some((v) => ['done', 'succeeded'].includes(v.status));
   const restoredExact = !!shot.entity?.data.h3?.explicitReferences && !shot.entity?.data.storyboard;
   const chosen = chosenVersion(shot),
-    qualityLabel = QUALITY_LABEL[shot.quality] || tr('storyboard.detail48'),
+    qualityLabel = QUALITY_LABEL[shownQuality] || tr('storyboard.detail48'),
     durationRange = info.durationRange;
 
   return (
@@ -2491,7 +2492,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                 </Button>
               </Tooltip>
             )}
-            {made && shot.quality !== 'final' && (
+            {made && shownQuality !== 'final' && (
               <Tooltip content={tr('storyboard.help.remakeSharp')}>
                 <Button disabled={regenerating} onClick={() => regenerate({ quality: 'final' })}>
                   {tr('storyboard.regenerateHd')}
