@@ -319,7 +319,7 @@ export const storyboardCatalogs = {
     'storyboard.detail53': 'Collecting outputs',
     'storyboard.detail54': 'Status pending',
     'storyboard.detail55': 'Video',
-    'storyboard.detail56': ' · Same seed',
+    'storyboard.detail56': ' · Same look',
     'storyboard.detail57': ' look',
     'storyboard.detail58': ' (no photos)',
     'storyboard.defaultLook': 'Default look',
@@ -383,7 +383,7 @@ export const storyboardCatalogs = {
     'storyboard.mixed20':
       'Open a profile and drag photos into it from Images. New uploads can be filed from Unfiled in one click.',
     'storyboard.mixed21':
-      'Fixed seed: change only the prompt or references and keep the rest like this take',
+      'Keep this look: change only the prompt or references, and the rest stays like this take',
     'storyboard.finish1': 'Search the library…',
     'storyboard.finish2': 'Whole clip',
     'storyboard.finish3': 'Remove',
@@ -861,7 +861,7 @@ export const storyboardCatalogs = {
     'storyboard.detail53': '收集结果',
     'storyboard.detail54': '状态待更新',
     'storyboard.detail55': '视频',
-    'storyboard.detail56': ' · 同种子',
+    'storyboard.detail56': ' · 同样的样子',
     'storyboard.detail57': '的造型',
     'storyboard.detail58': '（无照片）',
     'storyboard.defaultLook': '默认造型',
@@ -924,7 +924,7 @@ export const storyboardCatalogs = {
     'storyboard.mixed19': '建议：{profile} · {version}（这一镜里有）',
     'storyboard.mixed20':
       '打开档案后，可以把左边「图片」里的照片直接拖进去；新上传的图在「待整理」里一键归档。',
-    'storyboard.mixed21': '固定随机种子：只改提示词或素材，其他尽量和这一条保持一致',
+    'storyboard.mixed21': '保持这个样子：只改提示词或素材，其他尽量和这一条一致',
     'storyboard.finish1': '搜索素材库…',
     'storyboard.finish2': '整段',
     'storyboard.finish3': '移除',

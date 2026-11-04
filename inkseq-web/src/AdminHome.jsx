@@ -413,15 +413,17 @@ function Overview({ data, api }) {
 }
 
 // Per-account dollar budgets and per-GPU prices (moved from Settings → Admin).
-// Machine types that can run today, plus their other-owner twin; retired price rows fold away.
+// Machine types that can run today, under any owner; retired price rows fold away.
+const ownerless = (id) => id.replace(/-?[a-z]+$/, '');
 function activeIds(profiles = []) {
-  return new Set(
+  const ids = new Set(
     profiles
       .filter((p) => p.execution_eligibility?.status === 'confirmed')
       .map((p) => p.id || p.runtime_profile_id)
       .filter(Boolean)
-      .flatMap((id) => [id, id.replace(/superdan$/, 'supervan'), id + '-supervan']),
+      .flatMap((id) => [id, ownerless(id)]),
   );
+  return { has: (id) => ids.has(id) || ids.has(ownerless(id)) };
 }
 
 function BudgetAdministration({ account, part = 'all' }) {

@@ -76,43 +76,31 @@ export function recoveryMessage(job, locale = 'zh') {
     ? translate(locale, 'jobs.cancelReview')
     : translate(locale, 'jobs.review');
 }
+const WAIT_REASONS = new Set([
+  'capacity_no_matching_gpu',
+  'capacity_inventory_check_failed',
+  'capacity_rental_reconciliation',
+  'capacity_configuration_unavailable',
+  'capacity_bootstrap_repair_required',
+  'capacity_queued_task_repair_required',
+  'capacity_budget_or_limit',
+  'capacity_gpu_starting',
+  'capacity_provider_preparing',
+  'capacity_provider_configuring_ssh',
+  'capacity_provider_preparation_failed',
+  'capacity_provider_preparation_timeout',
+  'capacity_provider_preparation_retry_limit',
+  'capacity_gpu_busy',
+  'capacity_searching_gpu',
+]);
+// What the job's owner reads: no machines, providers, models or budgets behind the scenes (#1020).
 export function capacityWaitMessage(job, locale = 'zh') {
   if (
     job?.status !== 'waiting_capacity' &&
     !(job?.status === 'queued' && job?.error_code === 'capacity_queued_task_repair_required')
   )
     return '';
-  const reasons = {
-    capacity_no_matching_gpu:
-      '暂时没有符合型号、显存和价格上限的可用 GPU。系统会继续查找其他合适机器；原任务保留，无需重新提交。',
-    capacity_inventory_check_failed:
-      '暂时无法确认 GPU 库存，系统会重试查询。目前尚未确认有可用机器，请保留原任务。',
-    capacity_rental_reconciliation:
-      'GPU 租赁结果需要核对，当前尚未开始生成。为避免重复收费，已暂停再次租机；原任务保留，等待处理。',
-    capacity_configuration_unavailable:
-      '当前 GPU 执行配置暂不可用，需修复后才能继续。原任务保留，可取消等待。',
-    capacity_bootstrap_repair_required: 'GPU 环境准备失败，正在修复；原任务已保留，无需重新提交。',
-    capacity_queued_task_repair_required:
-      'GPU 工作机需要恢复，已暂停接新任务。你的任务仍保留，等待恢复；可取消等待，请勿重复提交。',
-    capacity_budget_or_limit:
-      '当前 GPU 预算或并发额度不足，暂时无法开机。原任务保留，不会自动提高预算。',
-    capacity_gpu_starting:
-      '正在准备 GPU、加载模型并检查运行条件，通过后自动执行原任务，无需再次提交。',
-    capacity_provider_preparing:
-      'GPU 供应商正在准备机器，尚未开始加载模型或生成。原任务保留，无需重新提交。',
-    capacity_provider_configuring_ssh:
-      'GPU 供应商正在配置远程连接，尚未开始加载模型或生成。原任务保留，无需重新提交。',
-    capacity_provider_preparation_failed:
-      'GPU 供应商准备机器失败，尚未开始生成。机器回收与费用仍需核对，原任务保留；无需重新提交。',
-    capacity_provider_preparation_timeout:
-      'GPU 供应商准备机器超时，尚未开始生成。机器回收与费用仍需核对，原任务保留；无需重新提交。',
-    capacity_provider_preparation_retry_limit:
-      'GPU 供应商准备机器连续失败，已暂停自动租机，等待管理员处理。尚未开始生成，原任务仍保留；可取消等待，无需重新提交。',
-    capacity_gpu_busy: 'GPU 正在处理队列中的任务，当前任务等待空闲执行位置，无需重新提交。',
-    capacity_searching_gpu:
-      '正在查找符合条件的 GPU，尚未开始生成。找到后会自动准备机器，可取消等待。',
-  };
-  return Object.hasOwn(reasons, job.error_code)
+  return WAIT_REASONS.has(job.error_code)
     ? translate(locale, 'jobs.reason.' + job.error_code)
     : translate(locale, 'jobs.waitDefault');
 }

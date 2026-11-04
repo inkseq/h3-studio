@@ -1,3 +1,4 @@
+import { rememberStoryPreview } from './story-preview.js';
 import { Badge, EmptyState, Note } from './ui/Note.jsx';
 import { Button } from './ui/Button.jsx';
 import { Popover } from './ui/Popover.jsx';
@@ -424,6 +425,7 @@ function useLibraryReader(account) {
         const record = checkedProjectRecord(await reader.project(id));
         guard();
         if (record.id !== id) throw Error(t('legacy.visible15'));
+        rememberStoryPreview(account, id, record.project);
         return record.project;
       },
       cover: (file) => {
