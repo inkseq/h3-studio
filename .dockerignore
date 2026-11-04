@@ -11,6 +11,8 @@
 !platform_app.py
 !studio_platform/
 !studio_platform/*.py
+!studio_platform/voice_samples/
+!studio_platform/voice_samples/*.mp3
 !studio_platform/migrations/
 !studio_platform/migrations/__init__.py
 !studio_platform/migrations/env.py

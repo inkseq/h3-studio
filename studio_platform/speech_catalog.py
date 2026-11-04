@@ -61,14 +61,15 @@ VOICES = {
 
 
 def public():
-    """What the app may show. Samples are static files of the web build."""
+    """What the app may show. Samples are made once and served by id, not by vendor."""
     return [
         {
             "id": ident,
             "name": voice["name"],
             "gender": voice["gender"],
             "samples": {
-                language: f"/voices/{ident}-{language}.mp3" for language in LANGUAGES
+                language: f"/v1/voices/{ident}/sample/{language}"
+                for language in LANGUAGES
             },
         }
         for ident, voice in VOICES.items()

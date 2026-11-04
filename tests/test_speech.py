@@ -180,6 +180,16 @@ class SpeechRouteTests(unittest.TestCase):
         )
         self.assertEqual(reply.status_code, 404)
 
+    def test_every_voice_has_its_samples(self):
+        self.prepare()
+        for entry in public():
+            for path in entry["samples"].values():
+                reply = self.client.get(path)
+                self.assertEqual(reply.status_code, 200, path)
+                self.assertEqual(reply.headers["content-type"], "audio/mpeg")
+        for path in ("/v1/voices/sarah/sample/zh", "/v1/voices/v-warm/sample/fr"):
+            self.assertEqual(self.client.get(path).status_code, 404)
+
     def test_admin_settings_require_an_admin(self):
         self.prepare()
         with patch("studio_platform.identity.is_admin", return_value=False):

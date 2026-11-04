@@ -750,6 +750,8 @@ inventory.json
 !studio_platform/speech_provider.py
 !studio_platform/speech_routes.py
 !studio_platform/speech_settings.py
+!studio_platform/voice_samples/
+!studio_platform/voice_samples/*.mp3
 !tests/test_speech.py
 !studio_platform/story_chat_undo.py
 !tests/test_story_chat_images.py

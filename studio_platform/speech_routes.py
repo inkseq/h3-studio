@@ -7,17 +7,20 @@ staging-only test switch is on, so nothing can be given away by accident.
 
 import hashlib
 import io
+from pathlib import Path
 import re
 
 from fastapi import HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from .repository import Conflict
-from .speech_catalog import VOICES, public
+from .speech_catalog import LANGUAGES, VOICES, public
 from .speech_provider import DIRECTIONS, SpeechError, configured, level
 
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 MAX_TEXT = 500
+SAMPLES = Path(__file__).parent / "voice_samples"
 
 
 class SpeechBody(BaseModel):
@@ -168,6 +171,17 @@ def register_routes(app):
     def voices():
         enabled = switches()["voice_enabled"] and bool(adapters())
         return {"enabled": enabled, "voices": public() if enabled else []}
+
+    @app.get("/v1/voices/{voice_id}/sample/{language}")
+    def sample(voice_id: str, language: str):
+        # Both parts come from closed lists, so a request never names a path.
+        if voice_id not in VOICES or language not in LANGUAGES:
+            _fail("voice_unknown", 404)
+        return FileResponse(
+            SAMPLES / f"{voice_id}-{language}.mp3",
+            media_type="audio/mpeg",
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
 
     @app.post("/v1/projects/{project_id}/speech")
     def speak(project_id: str, body: SpeechBody, request: Request):
