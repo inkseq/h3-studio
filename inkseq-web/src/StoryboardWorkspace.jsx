@@ -7,7 +7,8 @@ import { FloatingMessage } from './floating-notice.js';
 import './v2/story-view.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Plus,
   PanelLeftClose,
@@ -327,7 +328,13 @@ function FilmEditorButton({ chapterId }) {
 // Story, library and edit as steps of one project (h3-studio#995). Switching only changes what shows.
 function StageNav({ stage, stages, onChange }) {
   const { t } = useI18n();
-  return (
+  // Shown in the middle of the top bar, which SeriesApp draws above this page.
+  const [slot, setSlot] = useState(null),
+    place = useRef(null);
+  useLayoutEffect(() => {
+    setSlot(place.current?.closest('.workspace')?.querySelector('.wbar-stages') || null);
+  }, []);
+  const nav = (
     <nav className="sb-stages" aria-label={t('stage.title')}>
       <Segmented
         tabs
@@ -337,6 +344,11 @@ function StageNav({ stage, stages, onChange }) {
         onChange={onChange}
       />
     </nav>
+  );
+  return (
+    <span ref={place} hidden>
+      {slot && createPortal(nav, slot)}
+    </span>
   );
 }
 
@@ -671,7 +683,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                 value={cardSize}
                 onChange={chooseCardSize}
               />
-              <InkyForStory />
+              <InkyForStory selectedShot={selected} />
               {!groups.length && !state.placeholder && (
                 <Button
                   disabled={state.busy || !!state.workbenchPending}
