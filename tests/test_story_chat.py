@@ -156,6 +156,16 @@ class StoryChatTests(unittest.TestCase):
         current = {"role": "user", "text": "x" * 30000 + "y" * 20000}
         payload("gemini-3.8-flash", [*history, current], "i" * 6000, 16384, True)
 
+    def test_shots_the_assistant_writes_can_be_generated(self):
+        # A 3 s shot passed the chat and failed at Generate (found 2026-11-06).
+        from studio_platform.inference.wangp_compiler import control_schema
+        from studio_platform.story_chat import SECONDS, _seconds
+
+        shortest = control_schema()["duration"]["minimum"]
+        self.assertEqual(SECONDS[0], shortest)
+        self.assertEqual(_seconds(3), shortest)
+        self.assertIn(f"Shots are {shortest}-10 seconds", INSTRUCTION)
+
     def test_the_instruction_fits_the_limit_with_pictures_on_and_off(self):
         for enabled in (True, False):
             text = story_chat_advice.instruction(INSTRUCTION, enabled)
