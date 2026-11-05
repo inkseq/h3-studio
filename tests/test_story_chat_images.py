@@ -155,6 +155,99 @@ class StoryChatImageTests(unittest.TestCase):
         self.assertEqual(aspect, "3:4")
         self.assertEqual(self.client.get(card["image_url"]).status_code, 200)
 
+    def shot(self):
+        return next(e for e in self.project()["entities"] if e["type"] == "shot")
+
+    def type_to_inky(self, text="Make her look up slowly", turn=None, shot=None):
+        self._turn = getattr(self, "_turn", 0) + 1
+        return self.client.post(
+            f"/v1/story-chats/{self.story['project_id']}/turns",
+            json={
+                "turn_id": turn or f"inky-turn-{self._turn:04d}",
+                "text": text,
+                "inky": {"shot_id": shot},
+            },
+        )
+
+    def test_typing_to_inky_changes_the_shot_and_undo_restores_it(self):
+        shot = self.shot()
+        before = shot["data"].get("prompt")
+        self.model.plans.append(
+            {
+                "reply": "She now looks up slowly.",
+                "actions": [
+                    {
+                        "tool": "upsert_shot",
+                        "ref": shot["id"],
+                        "text": "She looks up slowly.",
+                    }
+                ],
+            }
+        )
+        reply = self.type_to_inky(shot=shot["id"])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(self.shot()["data"]["prompt"], "She looks up slowly.")
+        turn = reply.json()["turn"]
+        self.assertEqual(turn["chips"], [])
+        self.assertTrue(turn["changes"])
+        sent = str(self.model.calls[-1])
+        self.assertIn("typing to Inky", sent)
+        self.assertIn("Never mention another", sent)
+        self.assertIn(shot["id"], sent.split("looking at the shot")[1][:80])
+        undone = self.client.post(
+            f"/v1/story-chats/{self.story['project_id']}/undo",
+            json={"turn_id": turn["turn_id"]},
+        )
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(self.shot()["data"].get("prompt"), before)
+
+    def test_typing_to_inky_cannot_remove_or_move_towards_spending(self):
+        shot = self.shot()
+        cards_before = len(self.project()["entities"])
+        self.model.plans.append(
+            {
+                "reply": "Done.",
+                "actions": [
+                    {"tool": "remove_card", "ref": shot["id"]},
+                    {"tool": "propose_generate", "shots": ["all"]},
+                    {"tool": "propose_image", "ref": shot["id"]},
+                    {"tool": "propose_new_story", "idea": "Another"},
+                ],
+            }
+        )
+        reply = self.type_to_inky(shot=shot["id"])
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(len(self.project()["entities"]), cards_before)
+        self.assertIsNone(reply.json()["turn"]["proposal"])
+        self.assertEqual(self.images.calls, [])
+
+    def test_typing_to_inky_stops_at_the_daily_limit(self):
+        shot = self.shot()
+        with patch("studio_platform.story_chat_routes.INKY_DAILY_TURNS", 1):
+            self.model.plans.append({"reply": "One.", "actions": []})
+            self.assertEqual(self.type_to_inky(shot=shot["id"]).status_code, 200)
+            calls = len(self.model.calls)
+            limited = self.type_to_inky(shot=shot["id"])
+        self.assertEqual(limited.status_code, 429, limited.text)
+        self.assertEqual(limited.json()["detail"]["code"], "inky_daily_limit")
+        self.assertEqual(len(self.model.calls), calls)
+
+    def test_typing_to_inky_on_a_story_without_a_chat_stays_out_of_quick_create(self):
+        created = self.client.post("/v1/projects", json={"title": "Plain story"}).json()
+        project_id = created.get("id") or created["project"]["id"]
+        self.model.plans.append({"reply": "Nothing to change yet.", "actions": []})
+        reply = self.client.post(
+            f"/v1/story-chats/{project_id}/turns",
+            json={
+                "turn_id": "inky-plain-0001",
+                "text": "Hello",
+                "inky": {"shot_id": None},
+            },
+        )
+        self.assertEqual(reply.status_code, 200, reply.text)
+        listed = self.client.get("/v1/story-chats").json()
+        self.assertNotIn(project_id, str(listed))
+
     def test_place_and_prop_use_their_editor_shapes(self):
         place = self.story["cards"]["places"][0]["id"]
         prop = self.story["cards"]["props"][0]["id"]

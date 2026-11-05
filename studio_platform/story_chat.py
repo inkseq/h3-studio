@@ -108,6 +108,40 @@ actions in the same turn may reuse):
 """
 
 
+# Typing to Inky from the story page (#1065). Free with a daily limit (owner, 2026-11-05). It uses
+# the same assistant, but can only change cards: it never removes one or moves towards spending.
+INKY_DAILY_TURNS = 30
+INKY_TOOLS = frozenset(
+    {"upsert_shot", "upsert_character", "upsert_place", "upsert_prop"}
+)
+INKY_NOTE = (
+    "[The person is typing to Inky from the story page. Make only the change they ask for, "
+    "and keep everything else as it is, including quoted spoken lines unless they ask to "
+    "change them. Say in one or two short sentences what you changed. Do not offer chips. "
+    "You cannot remove cards, draw pictures, start a new story or start generation. If they "
+    "ask for one of those, change nothing and say what to press: the card's own menu to "
+    "remove it, the Generate button on the shot to make a video. Never mention another "
+    "chat or assistant.]\n"
+)
+INKY_FOCUS = (
+    "[They are looking at the shot with id {shot}. Unless they name other cards, change "
+    "only this shot.]\n"
+)
+
+
+def inky_plan(plan):
+    """Only card edits survive, whatever the model returned."""
+    return {
+        **{key: value for key, value in plan.items() if key != "risk_review"},
+        "chips": [],
+        "actions": [
+            action
+            for action in plan["actions"]
+            if isinstance(action, dict) and action.get("tool") in INKY_TOOLS
+        ],
+    }
+
+
 class StoryChatError(Exception):
     def __init__(self, code, status=422, **detail):
         self.code, self.status, self.detail = code, status, detail
@@ -867,7 +901,7 @@ def prompt_messages(project, chat, text):
     return history
 
 
-def append_turn(chat, turn_id, text, plan, changes, proposal, actor=None):
+def append_turn(chat, turn_id, text, plan, changes, proposal, actor=None, via=None):
     value = copy.deepcopy(chat)
     at = now_iso()
     value["turns"] = value.get("turns", 0) + 1
@@ -881,6 +915,8 @@ def append_turn(chat, turn_id, text, plan, changes, proposal, actor=None):
     if actor:
         # A connection's turn (Agent, Telegram) is attributed for its daily cap.
         user["actor"] = actor
+    if via:
+        user["via"] = via
     value["messages"] = value.get("messages", []) + [
         user,
         {
