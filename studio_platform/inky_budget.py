@@ -7,6 +7,9 @@ from sqlalchemy import and_, case, func, insert, select, text, update
 from .repository import Conflict, Scope, documents, request_hash
 
 ACCOUNT_DAILY = 30
+# A person's own request has its own allowance. Automatic examples run on every edited shot and
+# would otherwise use it up before the person ever pressed anything. The monthly cap is shared.
+REWRITE_DAILY = 30
 GLOBAL_MONTHLY_MICROS = 20_000_000
 SCOPE = Scope("__inky_global", "__system", "__terra_usage")
 KIND = "inky_terra_call"
@@ -38,7 +41,9 @@ class InkyBudget:
             conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK})
         # Repository.transaction uses BEGIN IMMEDIATE for SQLite.
 
-    def reserve(self, *, tenant, owner, project, source_id, max_cost_micros):
+    def reserve(
+        self, *, tenant, owner, project, source_id, max_cost_micros, purpose="example"
+    ):
         for value in (tenant, owner, project, source_id):
             if not isinstance(value, str) or not 1 <= len(value) <= 200:
                 raise ValueError("inky_budget_binding_invalid")
@@ -79,6 +84,8 @@ class InkyBudget:
                             data["day"].as_string() == date,
                             data["tenant"].as_string() == tenant,
                             data["owner"].as_string() == owner,
+                            func.coalesce(data["purpose"].as_string(), "example")
+                            == purpose,
                         )
                     ),
                     func.coalesce(
@@ -97,7 +104,7 @@ class InkyBudget:
                 ).where(*self.where(), data["month"].as_string() == month)
             ).one()
             if (
-                daily >= ACCOUNT_DAILY
+                daily >= (REWRITE_DAILY if purpose == "rewrite" else ACCOUNT_DAILY)
                 or used + max_cost_micros > GLOBAL_MONTHLY_MICROS
                 or overrun
             ):
@@ -108,6 +115,7 @@ class InkyBudget:
                 }
             value = {
                 **binding,
+                "purpose": purpose,
                 "day": date,
                 "month": month,
                 "status": "reserved",
