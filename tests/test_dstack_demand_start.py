@@ -1250,7 +1250,7 @@ class DemandStartTests(LedgerCase):
         self.assertTrue(preview['offers'])
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
 
-    def test_vast_offers_outside_us_and_eu_are_not_used(self):
+    def test_vast_offers_outside_the_us_are_not_used(self):
         native = self.client.plan
 
         def plan(spec):
@@ -1277,8 +1277,8 @@ class DemandStartTests(LedgerCase):
                 dict(
                     offer_id='54321',
                     machine_id='19494',
-                    country='Germany',
-                    region='de-berlin',
+                    country='US',
+                    region='us-texas',
                     advertised_download_mbps=1500,
                 ),
             ],
