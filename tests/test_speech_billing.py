@@ -129,6 +129,12 @@ class SpeechBillingTests(unittest.TestCase):
         self.assertEqual(response.status_code, 402, response.text)
         self.assertEqual(self.adapter.calls, [])
         self.assertEqual(self.ledger(), [])
+        # Refused before the start fence: after a top-up the same request still works.
+        with self.repo.transaction() as connection:
+            connection.execute(update(accounts).values(balance=100))
+        retry = self.speak()
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(len(self.adapter.calls), 1)
 
     def test_free_original_stays_free_when_charging_and_catalog_change(self):
         self.policy(False)

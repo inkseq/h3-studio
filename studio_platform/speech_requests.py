@@ -166,6 +166,30 @@ class SpeechRequest:
             return self.finish()
         fail("speech_in_progress", 409)
 
+    def affordable(self):
+        """Refuse before the start fence, so a short balance never strands the request id."""
+        need = speech_credit_proof.quote(self.public["characters"])["credits"]
+        with self.repo.engine.connect() as connection:
+            if not credits._ready(connection):
+                return
+            try:
+                view = credits.account(
+                    connection,
+                    self.settings.tenant_id,
+                    self.principal.owner,
+                    now=self.repo.clock(),
+                )
+            except credits.CreditError:
+                return  # No account yet: the hold itself decides, as for pictures.
+        if view["available"] < need:
+            fail(
+                "insufficient_credits",
+                402,
+                need=need,
+                have=view["available"],
+                nothing_charged=True,
+            )
+
     def begin(self, voice, *, charged):
         self.bind(
             {
@@ -174,6 +198,8 @@ class SpeechRequest:
             }
         )
         self.charged = charged
+        if charged:
+            self.affordable()
         token = uuid4().hex
         marker = {
             "input_hash": self.binding["input_hash"],
