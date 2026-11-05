@@ -158,7 +158,9 @@ class DstackPreview:
                 excluded = excluded_download_machines(
                     connection, self.settings.tenant_id, demand_job_id
                 )
-            bad_suppliers = denied_suppliers(store, connection, nodes, mapping["offers"])
+            bad_suppliers = denied_suppliers(
+                store, connection, nodes, mapping["offers"]
+            )
 
             def supplier_allowed(offer):
                 # A machine an admin chose to prefer stays usable.
@@ -191,12 +193,14 @@ class DstackPreview:
             # patch also preserves the explicit preferred-first order.
             offers = sorted(
                 allowed,
-                key=lambda r: store.read(
-                    connection,
-                    by_offer[r["offer_id"]]["machine_id"],
-                    nodes=nodes,
-                )[0]["effective"]
-                != "prefer",
+                key=lambda r: (
+                    store.read(
+                        connection,
+                        by_offer[r["offer_id"]]["machine_id"],
+                        nodes=nodes,
+                    )[0]["effective"]
+                    != "prefer"
+                ),
             )[:MAX_HOST_CANDIDATES]
             require(offers, "dstack_no_compatible_host_offers")
             approved = [copy.deepcopy(by_offer[r["offer_id"]]) for r in offers]
