@@ -15,7 +15,7 @@ const freshId = () => 'shot-pic-' + crypto.randomUUID().replaceAll('-', '').slic
 
 export function ShotPicture({ shot, hasPicture }) {
   const { t, locale } = useI18n();
-  const { adapter } = useStore();
+  const { adapter, dispatch } = useStore();
   const c = useCloud();
   const balance = useCredits(c?.account)?.available;
   const read = adapter?.readPictureSettings,
@@ -29,7 +29,8 @@ export function ShotPicture({ shot, hasPicture }) {
   });
   const [open, setOpen] = useState(false),
     [busy, setBusy] = useState(false),
-    [failed, setFailed] = useState(false);
+    [failed, setFailed] = useState(''),
+    mode = shot.mode;
   // A retry after an unknown outcome reuses the id, so one click never draws or charges twice.
   const request = useRef(null);
   if (!draw || data?.pictures_enabled !== true) return null;
@@ -37,19 +38,28 @@ export function ShotPicture({ shot, hasPicture }) {
   const close = () => {
     if (busy) return;
     setOpen(false);
-    setFailed(false);
+    setFailed('');
   };
   const start = async () => {
     setBusy(true);
-    setFailed(false);
+    setFailed('');
     request.current ||= freshId();
     try {
+      // A shot saved the older way moves to the current settings first, the same way choosing its
+      // mode does, keeping its people, place and references. The server refuses it otherwise.
+      if (!shot.entity?.data?.storyboard) {
+        await dispatch({ type: 'update', id: shot.id, patch: { mode } });
+      }
       await draw(shot.id, request.current, locale === 'en' ? 'en' : 'zh');
       request.current = null;
       setOpen(false);
     } catch (error) {
       if (error?.detail?.detail?.nothing_charged === true) request.current = null;
-      setFailed(true);
+      setFailed(
+        error?.detail?.detail?.code === 'story_chat_shot_settings_invalid'
+          ? 'shotPicture.settingsChanged'
+          : 'shotPicture.failed',
+      );
     } finally {
       setBusy(false);
     }
@@ -64,7 +74,7 @@ export function ShotPicture({ shot, hasPicture }) {
         <Dialog title={t('shotPicture.title')} onClose={close} busy={busy}>
           <p className="sb-confirm-note">{t('shotPicture.note')}</p>
           <CreditUsageBar credits={credits} balance={balance} />
-          {failed && <p role="alert">{t('shotPicture.failed')}</p>}
+          {failed && <p role="alert">{t(failed)}</p>}
           <DialogActions>
             <Button disabled={busy} onClick={close}>
               {t('shotPicture.cancel')}
