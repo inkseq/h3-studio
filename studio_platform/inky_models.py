@@ -165,6 +165,11 @@ def expected_score(answer):
     return sum(i * p for i, p in enumerate(values))
 
 
+def finding_applies(kind, value):
+    """A shot with nobody in it has no body to act out a feeling, whatever the judge scored."""
+    return kind != "emotion_not_shown" or bool(value.get("characters"))
+
+
 def text_findings(response):
     if not isinstance(response, dict) or not isinstance(response.get("answers"), dict):
         raise ValueError("inky_score_invalid")
