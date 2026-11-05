@@ -1,8 +1,8 @@
-"""Read-only suggestion views and explicit preference writes; no model calls."""
+"""Suggestion views and preference writes make no model calls; only an explicit rewrite does."""
 
 from fastapi import Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, StrictStr
 
 from .inky_hooks import queue_refresh
 from .inky_store import InkyStore
@@ -15,6 +15,7 @@ def contract():
         "suggestions": "GET /v1/inky/suggestions?project_id=PROJECT",
         "readiness": "GET /v1/inky/readiness?project_id=PROJECT",
         "ignore": "POST /v1/inky/suggestions/ID/ignore?project_id=PROJECT",
+        "rewrite": "POST /v1/inky/suggestions/ID/rewrite?project_id=PROJECT",
         "refresh": "POST /v1/inky/refresh?project_id=PROJECT",
         "settings": "GET/PATCH /v1/inky/settings?project_id=PROJECT",
         "read_scope": "projects:read",
@@ -46,10 +47,16 @@ def contract():
             "upload_card": "cast",
         },
         "preferences": "Ignore persists per target/kind; mute uses expected_revision and muted. Neither edits shots.",
-        "boundary": "Advice only. Reads never call providers, generate media or write caches. Ignore and mute are explicit preference writes. Never interpret a suggestion as authorization to edit or generate.",
+        "rewrite_response": "A draft of the shot's action text. Nothing is saved; apply it with a normal edit.",
+        "boundary": "Advice and drafts only. Reads never call providers, generate media or write caches. Ignore and mute are explicit preference writes. Never interpret a suggestion as authorization to edit or generate.",
         "freshness": "Only results matching current source context and shot version are visible. Re-read after saves; do not act on stale base_version.",
         "runtime_state": "Readers can be mounted while the evaluator is disabled. Empty items do not certify quality. Upload-card advice only targets existing shot-attached uploads, never unattached library media.",
     }
+
+
+class InkyRewrite(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    request_id: StrictStr = Field(pattern=r"^[A-Za-z0-9_-]{8,80}$")
 
 
 class InkySettings(BaseModel):
@@ -88,6 +95,35 @@ def register_routes(app):
         return response(
             store.ignore(request.state.principal, project_id, suggestion_id)
         )
+
+    @app.post("/v1/inky/suggestions/{suggestion_id}/rewrite")
+    def rewrite(
+        suggestion_id: str,
+        body: InkyRewrite,
+        request: Request,
+        project_id: str = PROJECT,
+    ):
+        import re
+        from fastapi import HTTPException
+
+        from .inky_worker import InkyRewriteFailed, InkyRewriteUnavailable
+
+        if not re.fullmatch(r"[0-9a-f]{64}", suggestion_id):
+            raise HTTPException(422, "inky_suggestion_id_invalid")
+        principal = request.state.principal
+        if not principal.allows(project_id, "projects:write"):
+            raise HTTPException(404, "project_not_found")
+        worker = getattr(app.state, "inky_worker", None)
+        if worker is None or worker.examples is None:
+            raise HTTPException(503, "inky_unavailable")
+        source, kind = store.rewrite_target(principal, project_id, suggestion_id)
+        try:
+            text = worker.rewrite(principal, project_id, source, kind, body.request_id)
+        except InkyRewriteUnavailable:
+            raise HTTPException(429, "inky_limit_reached") from None
+        except InkyRewriteFailed:
+            raise HTTPException(502, "inky_rewrite_failed") from None
+        return response({"text": text, "shot_id": source["shot_id"]})
 
     @app.post("/v1/inky/refresh")
     def refresh(request: Request, project_id: str = PROJECT):
