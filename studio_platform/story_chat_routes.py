@@ -892,6 +892,15 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             if current is None:
                 release("card_missing")
                 _fail("story_chat_card_missing", 409, ref=card_id, nothing_charged=True)
+            # Settings saved while the picture was drawn: they win, and nothing is charged.
+            if current["type"] == "shot" and older_settings_in_use(project, current):
+                release("version_conflict")
+                _fail(
+                    "story_chat_shot_settings_invalid",
+                    409,
+                    ref=card_id,
+                    nothing_charged=True,
+                )
             # Exactly the receipt shape the credit capture verifies.
             record = {
                 "card_id": card_id,
