@@ -87,6 +87,8 @@ export function InkyForStory({ selectedShot }) {
       selectedShot={selectedShot}
       onIgnore={(item) => adapter.ignoreInkySuggestion?.(item.id)}
       onRewrite={adapter.rewriteInkySuggestion}
+      onSend={adapter.sendInkyMessage}
+      onUndoSend={adapter.undoInkyMessage}
       onApply={(id, prompt) => dispatch({ type: 'update', id, patch: { prompt } })}
     />
   );

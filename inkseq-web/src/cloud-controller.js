@@ -26,6 +26,7 @@ import {
 import { roughCutSnapshot, roughCutJobs } from './roughcut-model.js';
 import { burnCaptionStatus } from './caption-model.js';
 import { requireModeAvailable } from './generation-availability.js';
+import { resetAnalytics } from './analytics.js';
 import {
   chapterShots,
   storyboardProfile,
@@ -852,8 +853,8 @@ export function createCloudController({
         !selected ||
         selected.generation_support?.[b.mode]?.enabled !== true ||
         (b.quality === 'final'
-          ? selected.model_id !== 'MiniMax-H3-Base-INT8'
-          : selected.model_id !== 'MiniMax-H3-Pruned-Rank8-INT8')
+          ? !selected.model_id?.endsWith('-Base-INT8')
+          : !selected.model_id?.endsWith('-Pruned-Rank8-INT8'))
       )
         throw Error(words('所选模型与草稿/精修配置不一致或尚不可用；未使用另一模型替代。'));
       if (
@@ -1892,6 +1893,33 @@ export function createCloudController({
     guard(ctx);
     return value;
   }
+  async function readPictureSettings() {
+    requireCloud();
+    return api.request('/v1/story-chats/config');
+  }
+  // A shot's first frame (#1039). The story needs a chat only for the picture receipts, so it
+  // opens hidden. The newest server project then comes in like any other remote change.
+  async function drawShotPicture(shotId, requestId, language) {
+    requireCloud();
+    const ctx = context(),
+      base = `/v1/story-chats/${encodeURIComponent(ctx.projectId)}`;
+    await api.request(base + '/open', { method: 'POST', body: { language, hidden: true } });
+    guard(ctx);
+    // Drawing plus storing a picture takes 15–40 s.
+    await api.request(base + '/images', {
+      method: 'POST',
+      body: { request_id: requestId, card_id: shotId },
+      timeoutMs: 180000,
+    });
+    guard(ctx);
+    const record = checkedProjectRecord(await api.project(ctx.projectId));
+    guard(ctx);
+    if (
+      record.version > current().workspace.serverVersion &&
+      !store.rebaseCloud(record.project, { account: ctx.account, version: record.version })
+    )
+      emit({ remoteUpdate: { id: record.id, version: record.version } });
+  }
   // Voice names and samples only. Off answers `enabled: false`, and the picker stays hidden.
   async function readVoices() {
     requireCloud();
@@ -1922,6 +1950,40 @@ export function createCloudController({
     const value = await api.request('/v1/inky/readiness' + inkyQuery(ctx));
     guard(ctx);
     return value;
+  }
+  // The server changed the story: bring the page up to date, as a remote change.
+  async function pullServerStory(ctx) {
+    const record = checkedProjectRecord(await api.project(ctx.projectId));
+    guard(ctx);
+    if (
+      record.version > current().workspace.serverVersion &&
+      !store.rebaseCloud(record.project, { account: ctx.account, version: record.version })
+    )
+      emit({ remoteUpdate: { id: record.id, version: record.version } });
+  }
+  // Typing to Inky (#1065): the person's own unsaved text goes first, so nothing of theirs is lost.
+  async function sendInkyMessage(text, shotId) {
+    requireCloud();
+    const ctx = context();
+    if (current().workspace.dirty) await save();
+    const value = await api.request(`/v1/story-chats/${encodeURIComponent(ctx.projectId)}/turns`, {
+      method: 'POST',
+      body: { turn_id: 'inky-' + crypto.randomUUID(), text, inky: { shot_id: shotId || null } },
+      timeoutMs: 120000,
+    });
+    guard(ctx);
+    await pullServerStory(ctx);
+    return value.turn;
+  }
+  async function undoInkyMessage(turnId) {
+    requireCloud();
+    const ctx = context();
+    await api.request(`/v1/story-chats/${encodeURIComponent(ctx.projectId)}/undo`, {
+      method: 'POST',
+      body: { turn_id: turnId },
+    });
+    guard(ctx);
+    await pullServerStory(ctx);
   }
   // A draft of the shot's action text. The server saves nothing; the person decides.
   async function rewriteInkySuggestion(id) {
@@ -2156,11 +2218,15 @@ export function createCloudController({
     readTakeReviewSummaries: (shotId) => readTakeReviewSummaries(shotId),
     readInkySuggestions: () => readInkySuggestions(),
     refreshInky: () => refreshInky(),
+    readPictureSettings: () => readPictureSettings(),
+    drawShotPicture: (shotId, requestId, language) => drawShotPicture(shotId, requestId, language),
     readVoices: () => readVoices(),
     speakLine: (body) => speakLine(body),
     readShotReadiness: () => readShotReadiness(),
     ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
     rewriteInkySuggestion: (id) => rewriteInkySuggestion(id),
+    sendInkyMessage: (text, shotId) => sendInkyMessage(text, shotId),
+    undoInkyMessage: (turnId) => undoInkyMessage(turnId),
     saveTakeReview: (shotId, artifactId, body, key) =>
       saveTakeReview(shotId, artifactId, body, key),
     // Story edits share one version, so they run one after another: a quick second click
@@ -2224,7 +2290,10 @@ export function createCloudController({
           void clearVideoCache().catch(() => {});
           const result = await api.logout();
           rememberVisit({ mode: 'local' });
-          replaceIdentity(null, '已退出。云草稿仍按原账户保留，本机作品已恢复。');
+          const leaving = state.account;
+          replaceIdentity(null, '已退出。未保存的云草稿仍按原账户保留，本机作品已恢复。');
+          store.forgetSavedCloudDrafts(leaving);
+          resetAnalytics();
           announceSession();
           const providerLogout = providerLogoutUrl(result);
           if (providerLogout && typeof window !== 'undefined')
@@ -2238,7 +2307,10 @@ export function createCloudController({
           void clearVideoCache().catch(() => {});
           await api.revokeAllSessions('sessions-' + uid());
           rememberVisit({ mode: 'local' });
-          replaceIdentity(null, '已在所有设备退出。云草稿仍按原账户保留。');
+          const leaving = state.account;
+          replaceIdentity(null, '已在所有设备退出。未保存的云草稿仍按原账户保留。');
+          store.forgetSavedCloudDrafts(leaving);
+          resetAnalytics();
           announceSession();
         },
         { blocking: true },

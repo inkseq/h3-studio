@@ -78,7 +78,7 @@ export const clientCatalogs = {
     'errors.spending_settings_invalid':
       'The spending settings are invalid. Check amounts and time limits.',
     'errors.admin_hourly_price_limit_reached':
-      'The hourly price exceeds the admin limit. Change it in Settings → Admin or choose another machine.',
+      'The hourly price exceeds the admin limit. Change it in Settings → Admin.',
     'errors.dstack_test_runtime_limit_reached':
       'The test runtime limit leaves too little time to complete this job and stop safely. Adjust it in Settings → Admin.',
     'errors.dstack_test_daily_limit_reached':
@@ -90,7 +90,7 @@ export const clientCatalogs = {
     'errors.dstack_test_task_required':
       'Enter the acceptance task ID before checking or starting a test machine.',
     'errors.assistant_quote_unavailable':
-      'A verified text-model quote is unavailable, so this call cannot honor your spending limit. No model call was made.',
+      "We couldn't confirm the price of this step, so it can't stay within your spending limit. Nothing was run or charged.",
     'errors.spending_confirmation_consumed':
       'This approval has already been used. Recover the original submission instead of approving it again.',
   },
@@ -154,7 +154,7 @@ export const clientCatalogs = {
     'errors.spending_settings_changed': '消费设置已改变，请重新读取当前设置或核对报价后再提交。',
     'errors.spending_settings_invalid': '消费设置无效，请核对金额与时间上限。',
     'errors.admin_hourly_price_limit_reached':
-      '小时价格超过管理员上限，请在“设置 → 管理员”中修改，或选择其他机器。',
+      '小时价格超过管理员上限，请在“设置 → 管理员”中修改。',
     'errors.dstack_test_runtime_limit_reached':
       '测试运行时间上限不足以完成本任务并安全关机，请在“设置 → 管理员”中调整。',
     'errors.dstack_test_daily_limit_reached':
@@ -164,7 +164,7 @@ export const clientCatalogs = {
     'errors.dstack_test_task_invalid': '测试任务编号无效，请为本次验收沿用同一个有效编号。',
     'errors.dstack_test_task_required': '请先填写验收任务编号，再查询或启动测试机器。',
     'errors.assistant_quote_unavailable':
-      '目前没有可验证的文本模型报价，无法保证本次调用符合消费上限，因此尚未调用模型。',
+      '暂时无法确认这一步的价格，所以没法保证不超过你的花费上限。没有运行，也没有扣费。',
     'errors.spending_confirmation_consumed': '本次确认已经使用，请恢复原提交，不要重复确认。',
   },
 };

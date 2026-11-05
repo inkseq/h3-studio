@@ -92,7 +92,7 @@ export default function Landing() {
   return (
     <div className="landing">
       <header className="landing-bar">
-        <a className="logo" href="/">
+        <a className="logo" href="/" aria-label={t('app.name')}>
           <InkMark size={26} />
           <span>{t('app.name')}</span>
         </a>

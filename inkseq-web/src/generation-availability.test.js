@@ -112,7 +112,7 @@ test('ready and busy allow admission checking; starting, unavailable, disabled a
   assert.match(
     modeAvailability(snapshot('starting', 'ready', 100000), capabilities, settings, 'fl', 100001)
       .message,
-    /等待就绪/,
+    /稍等/,
   );
   assert.doesNotMatch(
     modeAvailability(snapshot('starting', 'ready', 100000), capabilities, settings, 'fl', 100001)
@@ -198,7 +198,7 @@ test('new submit rechecks live availability and keeps draft/assets without creat
     materials: controller.getState().materials,
   });
   value = snapshot('unavailable');
-  await assert.rejects(controller.submit(revision, { id: 'preflight' }), /暂无可用机器/);
+  await assert.rejects(controller.submit(revision, { id: 'preflight' }), /暂时不可用/);
   assert.equal(reads, 2);
   assert.equal(posts, 0);
   assert.equal(controller.getState().pending, null);
@@ -229,7 +229,7 @@ test('busy capacity accepts one confirmed submission after fresh read; unavailab
   assert.equal(posts, 1);
   await assert.rejects(
     controller.submit({ ...revision, recipe_id: 'ref-recipe' }, { id: 'another' }),
-    /暂无可用机器/,
+    /暂时不可用/,
   );
   assert.equal(posts, 1);
 });

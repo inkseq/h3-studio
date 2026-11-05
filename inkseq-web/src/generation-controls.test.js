@@ -10,7 +10,8 @@ import {
   automaticInputMode,
   newExcerptControl,
 } from './quick-chat-model.js';
-import { failureDetails, jobMessage } from './cloud-model.js';
+import { jobMessage } from './cloud-model.js';
+import { failureDetails } from './generation-failure-model.js';
 
 const limits = {
   input_count_semantics: 'native_roles_v2',

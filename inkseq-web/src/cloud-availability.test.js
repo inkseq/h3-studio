@@ -166,7 +166,7 @@ test('Yingxu checks fresh mode at submit, allows busy, and never borrows ready F
     });
     h.store.addLink(reference, refShot, 'reference');
     await h.controller.prepare(refShot);
-    await assert.rejects(h.controller.submit(refShot), /Ref2VA/);
+    await assert.rejects(h.controller.submit(refShot), /全能参考/);
     assert.equal(h.calls.filter((c) => c[0] === 'submit').length, 1);
   } finally {
     h.controller.destroy();
@@ -241,7 +241,7 @@ test('Yingxu rejects entire new mixed-mode batch before persisting intent if one
     h.store.addLink(image, refShot, 'reference');
     await h.controller.prepareBatch([h.shot, refShot]);
     h.setAvailability(snapshot('ready', 'unavailable'));
-    await assert.rejects(h.controller.submitBatch([h.shot, refShot]), /Ref2VA/);
+    await assert.rejects(h.controller.submitBatch([h.shot, refShot]), /全能参考/);
     assert.equal(h.controller.getState().batchPending, null);
     assert.equal(
       h.calls.some((c) => c[0] === 'batch'),

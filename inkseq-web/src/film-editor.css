@@ -1,9 +1,11 @@
 /* Film editor (#347): preview on top, the selected clip's trim bar, then a timeline with a
-   ruler, the picture track and the sound lane sharing one scale and one playhead. */
+   ruler, the picture track and the sound lane sharing one scale and one playhead. It is the Edit
+   step of the story page (#1062), so it fills the page under the top bar. */
 .film-editor {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: auto minmax(160px, 1fr) auto auto auto auto auto auto auto;
   gap: 8px;
@@ -21,9 +23,19 @@
   min-width: 0;
   margin-inline-end: auto;
 }
+.film-editor-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
 .film-editor-head h2 {
   margin: 0;
   font-size: 17px;
+}
+.film-chapter-pick {
+  width: auto;
+  max-width: min(320px, 100%);
 }
 .film-editor-captions {
   display: inline-flex;

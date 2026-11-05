@@ -247,7 +247,9 @@ function AppContent() {
         <StudioHeader account={account} />
         <main className="home-main">
           <div className="ui-empty">
-            <b>{t('notFound.title')}</b>
+            <b role="heading" aria-level={1}>
+              {t('notFound.title')}
+            </b>
             <p>{t('notFound.body')}</p>
             <Button variant="primary" onClick={() => navigateApp('/')}>
               {t(account ? 'notFound.works' : 'notFound.home')}

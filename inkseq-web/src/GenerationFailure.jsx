@@ -1,7 +1,7 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
 import React from 'react';
-import { failureDetails } from './cloud-model.js';
+import { failureDetails } from './generation-failure-model.js';
 
 export default function GenerationFailure({ job }) {
   const { t: at, locale } = useI18n();

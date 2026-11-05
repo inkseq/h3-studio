@@ -46,7 +46,7 @@
   font-variant-numeric: tabular-nums;
 }
 .side-nav-item.alert > small {
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 72%, var(--ink));
 }
 @media (max-width: 760px) {
   .side-nav {

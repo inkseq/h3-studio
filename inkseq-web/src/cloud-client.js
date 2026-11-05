@@ -171,6 +171,11 @@ function specialRefusal(status, detail) {
 }
 
 // The words for a refused request: maintenance, budget limits, server detail or status.
+// Operator pages name their own error codes, so those names stay out of the first script.
+const operatorErrorCodes = new Set();
+export const addOperatorErrorCodes = (codes) => {
+  for (const code of codes) operatorErrorCodes.add(code);
+};
 function refusalMessage(status, detail, expectedAccount, maintenance) {
   const reason =
     status === 409 && detail?.detail === 'capacity_drain_repreflight'
@@ -200,10 +205,9 @@ function refusalMessage(status, detail, expectedAccount, maintenance) {
     'spending_settings_changed',
     'spending_settings_invalid',
     'admin_hourly_price_limit_reached',
-    'dstack_test_runtime_limit_reached',
-    'dstack_test_daily_limit_reached',
     'assistant_quote_unavailable',
     'spending_confirmation_consumed',
+    ...operatorErrorCodes,
   ].includes(detail?.code)
     ? 'errors.' + detail.code
     : null;

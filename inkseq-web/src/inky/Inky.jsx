@@ -146,6 +146,99 @@ function InkyPerch({ perch, onClose, onRewrite, onApply }) {
   );
 }
 
+// Typing to Inky (#1065). A reply says what changed; the latest change can be undone.
+function InkyChat({ shotNumber, selectedShot, onSend, onUndo }) {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState(''),
+    [talk, setTalk] = useState([]),
+    [sending, setSending] = useState(false);
+  const say = (entry) => setTalk((old) => [...old, entry]);
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || sending) return;
+    setDraft('');
+    say({ who: 'me', text });
+    setSending(true);
+    try {
+      const turn = await onSend(text, selectedShot);
+      const reply = turn.messages.find((message) => message.role === 'assistant')?.text || '';
+      setTalk((old) => [
+        ...old.map((entry) => ({ ...entry, undo: undefined })),
+        { who: 'inky', text: reply, undo: turn.changes?.length ? turn.turn_id : undefined },
+      ]);
+    } catch (failure) {
+      say({
+        who: 'inky',
+        text: t(failure?.status === 429 ? 'inky.chat.limit' : 'inky.chat.failed'),
+      });
+      setDraft(text);
+    } finally {
+      setSending(false);
+    }
+  };
+  const undo = async (entry) => {
+    setTalk((old) => old.map((item) => (item === entry ? { ...item, undo: undefined } : item)));
+    try {
+      await onUndo(entry.undo);
+      say({ who: 'inky', text: t('inky.chat.undone') });
+    } catch {
+      say({ who: 'inky', text: t('inky.chat.undoFailed') });
+    }
+  };
+  return (
+    <div className="inky-chat" data-keep-open>
+      {talk.length > 0 && (
+        <ul className="inky-thread">
+          {talk.map((entry, index) => (
+            <li key={index} className={'inky-say ' + entry.who}>
+              <p>{entry.text}</p>
+              {entry.undo && (
+                <Button size="xs" variant="secondary" onClick={() => undo(entry)}>
+                  {t('inky.chat.undo')}
+                </Button>
+              )}
+            </li>
+          ))}
+          {sending && (
+            <li className="inky-say inky">
+              <p>{t('inky.chat.thinking')}</p>
+            </li>
+          )}
+        </ul>
+      )}
+      <form
+        className="inky-compose"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void send();
+        }}
+      >
+        <textarea
+          rows={2}
+          value={draft}
+          maxLength={2000}
+          aria-label={t('inky.chat.label')}
+          placeholder={
+            selectedShot
+              ? t('inky.chat.shotHint', { number: shotNumber?.(selectedShot) ?? '' })
+              : t('inky.chat.storyHint')
+          }
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+        />
+        <Button size="sm" variant="primary" type="submit" disabled={!draft.trim() || sending}>
+          {t('inky.chat.send')}
+        </Button>
+      </form>
+    </div>
+  );
+}
+
 export function Inky({
   projectId,
   items,
@@ -155,6 +248,8 @@ export function Inky({
   onIgnore,
   onRewrite,
   onApply,
+  onSend,
+  onUndoSend,
 }) {
   const { t } = useI18n();
   const [ignored, setIgnored] = useState(() => new Set()),
@@ -261,6 +356,14 @@ export function Inky({
               </li>
             ))}
           </ul>
+          {onSend && (
+            <InkyChat
+              shotNumber={shotNumber}
+              selectedShot={selectedShot}
+              onSend={onSend}
+              onUndo={onUndoSend}
+            />
+          )}
         </Popover>
       </div>
     </>

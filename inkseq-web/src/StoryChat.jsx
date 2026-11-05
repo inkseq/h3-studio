@@ -858,6 +858,9 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
             </IconButton>
           </div>
           <div className="sc-thread" ref={thread}>
+            {state.messages.length > 0 && (
+              <h1 className="visually-hidden">{t('nav.quickCreate')}</h1>
+            )}
             {!state.messages.length && (
               <div className="sc-welcome">
                 <h1>{t('storyChat.welcome')}</h1>

@@ -20,7 +20,6 @@ import { StoryboardWorkspace } from './StoryboardWorkspace.jsx';
 import { store } from './store.js';
 import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
-import { createP4OperatorClient } from './p4-operator-client.js';
 import { storyboardView, expandStoryboard, storyboardDrop } from './storyboard-domain.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
 import { uploadLibraryFiles } from './media-operations.js';
@@ -290,9 +289,8 @@ export default function StoryboardConnected({
       setQueue(null);
       return;
     }
-    const api = createP4OperatorClient();
-    api.setAccount(c.account);
-    let stopped = false,
+    let api,
+      stopped = false,
       timer;
     const read = async () => {
       // Queue hints read the whole GPU workspace: skip hidden tabs, 30 s apart.
@@ -318,11 +316,19 @@ export default function StoryboardConnected({
       }
       if (!stopped) timer = setTimeout(read, 30000);
     };
-    read();
+    // Operator code stays out of what ordinary accounts download (#1020).
+    void import('./p4-operator-client.js')
+      .then(({ createP4OperatorClient }) => {
+        if (stopped) return;
+        api = createP4OperatorClient();
+        api.setAccount(c.account);
+        void read();
+      })
+      .catch(() => {});
     return () => {
       stopped = true;
       clearTimeout(timer);
-      api.reset();
+      api?.reset();
     };
   }, [c.account, c.operatorAccess]);
   const [creators, setCreators] = useState({});
@@ -679,11 +685,15 @@ export default function StoryboardConnected({
     readTakeReviewSummaries: (shot) => cloud.readTakeReviewSummaries(shot),
     readInkySuggestions: cloud.readInkySuggestions && (() => cloud.readInkySuggestions()),
     refreshInky: cloud.refreshInky,
+    readPictureSettings: cloud.readPictureSettings,
+    drawShotPicture: cloud.drawShotPicture,
     readVoices: cloud.readVoices,
     speakLine: cloud.speakLine,
     readShotReadiness: cloud.readShotReadiness && (() => cloud.readShotReadiness()),
     ignoreInkySuggestion: (id) => cloud.ignoreInkySuggestion?.(id),
     rewriteInkySuggestion: (id) => cloud.rewriteInkySuggestion(id),
+    sendInkyMessage: (text, shotId) => cloud.sendInkyMessage(text, shotId),
+    undoInkyMessage: (turnId) => cloud.undoInkyMessage(turnId),
     saveTakeReview: (shot, artifact, body, key) => cloud.saveTakeReview(shot, artifact, body, key),
     readCopies: () => cloud.workbenchCopies(),
     readPreferences: () => cloud.workbenchPreferences(),

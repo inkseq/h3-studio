@@ -1,5 +1,7 @@
-import { createCloudClient, CloudError } from './cloud-client.js';
+import { addOperatorErrorCodes, createCloudClient, CloudError } from './cloud-client.js';
 import { translateForAccount } from './i18n/locale.js';
+
+addOperatorErrorCodes(['dstack_test_runtime_limit_reached', 'dstack_test_daily_limit_reached']);
 
 const ROOT = '/v1/operator/dstack';
 const id = (value) => encodeURIComponent(value);

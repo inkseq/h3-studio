@@ -513,7 +513,7 @@ dialog::backdrop {
 
 /* Story top bar: below laptop width the Connect AI and Settings buttons show icons only,
    so the account menu stays on screen (tablet 768px overflowed). */
-@media (max-width: 1100px) {
+@media (max-width: 1560px) {
   .wbar .bar-label {
     display: none;
   }
@@ -565,7 +565,7 @@ dialog::backdrop {
   padding: 0 6px;
   border-radius: 8px;
   background: color-mix(in srgb, var(--ink) 8%, transparent);
-  color: var(--muted);
+  color: var(--ink-2);
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
