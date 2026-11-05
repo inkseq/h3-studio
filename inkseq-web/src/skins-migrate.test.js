@@ -34,4 +34,6 @@ test('a skin never puts a hidden heading back into the page layout', () => {
   // the first grid cell, so its navigation and content swapped places in that skin.
   const css = readFileSync(new URL('./skins.css', import.meta.url), 'utf8');
   assert.doesNotMatch(css, /\.home-main > \*/);
+  // Nor unsticks the settings navigation.
+  assert.match(css, /\.home-main > :not\(\.visually-hidden, \.snav\)/);
 });
