@@ -68,6 +68,7 @@ export default function StudioHeader({
   account,
   active = 'works',
   accountMenu,
+  carryMenuOpen,
   menuItems,
   onSignIn,
 }) {
@@ -144,7 +145,14 @@ export default function StudioHeader({
           <Trash2 size={15} />
         </Button>
         <ReportProblem account={frame} />
-        {accountMenu || <AccountMenu account={frame} items={menuItems} onSignIn={onSignIn} />}
+        {accountMenu || (
+          <AccountMenu
+            account={frame}
+            items={menuItems}
+            onSignIn={onSignIn}
+            carryOpen={carryMenuOpen}
+          />
+        )}
       </header>
     </>
   );
