@@ -10,6 +10,8 @@ ACCOUNT_DAILY = 30
 # A person's own request has its own allowance. Automatic examples run on every edited shot and
 # would otherwise use it up before the person ever pressed anything. The monthly cap is shared.
 REWRITE_DAILY = 30
+# Notes about shots that do not match. Only shots the judge flagged reach this.
+CONTINUITY_DAILY = 60
 GLOBAL_MONTHLY_MICROS = 20_000_000
 SCOPE = Scope("__inky_global", "__system", "__terra_usage")
 KIND = "inky_terra_call"
@@ -104,7 +106,10 @@ class InkyBudget:
                 ).where(*self.where(), data["month"].as_string() == month)
             ).one()
             if (
-                daily >= (REWRITE_DAILY if purpose == "rewrite" else ACCOUNT_DAILY)
+                daily
+                >= {"rewrite": REWRITE_DAILY, "continuity": CONTINUITY_DAILY}.get(
+                    purpose, ACCOUNT_DAILY
+                )
                 or used + max_cost_micros > GLOBAL_MONTHLY_MICROS
                 or overrun
             ):
