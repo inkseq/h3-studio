@@ -66,7 +66,7 @@ flowchart TD
 ```mermaid
 flowchart TD
   A[用户确认出图] --> B{画什么}
-  B -->|角色、地点、道具卡| C[卡片文字 + 全片风格]
+  B -->|角色、地点、道具卡| C[卡片文字 + 全片风格 + 已有卡片图的画风]
   B -->|镜头首帧| D[镜头动作 + 用到的卡片文字 + 卡片图 + 全片风格]
   C --> E[Nano Banana 2.1]
   D --> E
@@ -76,7 +76,7 @@ flowchart TD
 
 | 情况 | prompt 文件 |
 |---|---|
-| 角色、地点、道具卡 | [`card_picture_styles.md`](../studio_platform/prompts/card_picture_styles.md) |
+| 角色、地点、道具卡 | [`card_picture_styles.md`](../studio_platform/prompts/card_picture_styles.md)；故事里已有卡片图时，第一张作为画风参考，见 [`card_picture_match.md`](../studio_platform/prompts/card_picture_match.md) |
 | 镜头首帧 | [`first_frame.md`](../studio_platform/prompts/first_frame.md) |
 
 某张卡片的图读不出来时，首帧照样画，只是这张卡只发文字。

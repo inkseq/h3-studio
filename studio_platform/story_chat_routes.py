@@ -691,6 +691,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             load_pictures,
             prompt_for,
             reference_cards,
+            style_card,
         )
 
         principal = principal_of(request, browser_only=True)
@@ -939,15 +940,13 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             release("version_conflict")
             _fail("story_chat_image_in_progress", 409)
         try:
-            pictures = (
-                load_pictures(
-                    app.state.assets,
-                    principal,
-                    project_id,
-                    reference_cards(row["payload"], card),
-                )
+            rows = (
+                reference_cards(row["payload"], card)
                 if card["type"] == "shot"
-                else []
+                else [style_card(row["payload"], card)]
+            )
+            pictures = load_pictures(
+                app.state.assets, principal, project_id, [r for r in rows if r]
             )
             mime, data = holder["image"].generate(
                 prompt_for(row["payload"], card, instruction, pictures),
