@@ -1,15 +1,15 @@
 import { translate } from './i18n/locale.js';
 /* Advisory capacity only. Submission and original-operation recovery stay server-owned. */
-export const MODE_LABELS = { fl: 'FL2VA 首尾帧', ref: 'Ref2VA 全能参考' };
-const copy = {
-  ready: ['可生成', '当前模式已有就绪机器，提交时仍会检查输入和执行条件。'],
-  busy: ['可排队', '对应机器正在生成，可提交排队；以后台准入结果为准。'],
-  starting: ['正在准备', '对应机器正在准备，请等待就绪。'],
-  unavailable: ['暂无机器', '暂无可用机器，请联系管理员启动对应模式。'],
-  disabled: ['暂未开放', '该模式暂未开放，请联系管理员核对运行配置。'],
-  unknown: ['状态待确认', '暂时无法确认执行状态，请刷新后重试。'],
-  stale: ['状态已过期', '执行状态已过期，请刷新后再生成。'],
-};
+const MODE_LABELS = { fl: '首尾帧', ref: '全能参考' };
+const STATES = new Set([
+  'ready',
+  'busy',
+  'starting',
+  'unavailable',
+  'disabled',
+  'unknown',
+  'stale',
+]);
 export function modeAvailability(
   snapshot,
   capabilities,
@@ -58,7 +58,7 @@ export function modeAvailability(
   if (
     !row ||
     row.recipe_id !== recipe?.id ||
-    !Object.hasOwn(copy, row.state) ||
+    !STATES.has(row.state) ||
     row.state === 'stale' ||
     typeof row.available !== 'boolean'
   )

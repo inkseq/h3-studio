@@ -7,9 +7,18 @@ Real adapters must enforce their quoted worst-case cost before this can activate
 import logging
 
 from .inky_budget import InkyBudget
-from .inky_models import example_text, text_findings
+from .inky_models import example_text, rewrite_text, text_findings
 from .inky_source import sources
 from .repository import Conflict, NotFound
+
+
+class InkyRewriteUnavailable(Exception):
+    """The daily or monthly allowance said no; no provider was called."""
+
+
+class InkyRewriteFailed(Exception):
+    """The provider call or its answer was unusable. Nothing changed."""
+
 
 LOG = logging.getLogger(__name__)
 
@@ -81,6 +90,33 @@ class InkyWorker:
             except Exception:
                 LOG.info("inky_upload_unavailable")
         return findings, attempted
+
+    def rewrite(self, principal, project_id, source, kind, request_id):
+        """A draft of the shot's action text. Nothing is saved: the person decides."""
+        reservation = self.budget.reserve(
+            tenant=self.store.tenant,
+            owner=principal.owner,
+            project=project_id,
+            source_id=source["source_id"] + ":" + kind + ":rewrite:" + request_id,
+            max_cost_micros=self.examples.max_cost_micros,
+        )
+        if not reservation["allowed"]:
+            LOG.info(reservation["reason"])
+            raise InkyRewriteUnavailable(reservation["reason"])
+        try:
+            response = self.examples.rewrite(source["context"], kind)
+            actual = response.get("actual_micros")
+            if type(actual) is int and actual >= 0:
+                settled = self.budget.settle(reservation["call_id"], actual)
+                LOG.info("inky_rewrite_usage", extra={"inky_cost_micros": actual})
+                if settled["overrun"]:
+                    LOG.error("inky_example_budget")
+            else:
+                LOG.warning("inky_rewrite_usage_unknown")
+            return rewrite_text(response.get("text"), source["context"]["lang"])
+        except Exception:
+            LOG.info("inky_rewrite_failed")
+            raise InkyRewriteFailed() from None
 
     def example(self, principal, project_id, source, kind):
         # The trusted adapter, never user input, supplies an enforced ceiling.

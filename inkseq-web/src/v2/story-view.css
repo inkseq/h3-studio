@@ -699,7 +699,7 @@ body.sb-resizing-y video {
 }
 .sb-chapter-head h2 small {
   flex: none;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 72%, var(--ink));
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -1528,14 +1528,26 @@ body.sb-resizing-y video {
 .wbar {
   position: relative;
 }
+.wbar-inky {
+  display: inline-flex;
+}
 .wbar-stages {
   position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
 }
-/* No room in the middle: the steps take their own row under the bar. */
-@media (max-width: 1100px) {
+/* The story title gives way before it can reach the steps or push a third row of controls. */
+.story-recent-title {
+  display: block;
+  max-width: calc(50vw - 370px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* No room in the middle: the steps take their own row under the bar. The controls on the right
+   are about 610 px wide with their labels, and the steps are always centred on the window. */
+@media (max-width: 1340px) {
   .v2-story-view .wbar {
     height: auto;
     min-height: 48px;
@@ -1553,8 +1565,24 @@ body.sb-resizing-y video {
     display: flex;
     justify-content: center;
   }
+  .story-recent-title {
+    max-width: max(120px, calc(100vw - 900px));
+  }
+  /* Exactly over the real Back in the taller bar. */
+  .story-home-back.story-opening-back {
+    top: 6px;
+  }
+}
+/* The right-hand labels have gone to icons here (page-bridge.css), which leaves the title more. */
+@media (max-width: 1100px) {
+  .story-recent-title {
+    max-width: max(120px, calc(100vw - 700px));
+  }
 }
 .layout.A.stage-library > .col {
+  display: none;
+}
+.layout.A.stage-edit > :not(.film-editor) {
   display: none;
 }
 /* As its own step the library is the page, not the phone's slide-over. */
@@ -1564,6 +1592,25 @@ body.sb-resizing-y video {
   z-index: auto;
   box-shadow: none;
   border-right: 0;
+}
+/* The panel's narrow layout, opened out for a whole page. */
+.layout.A.stage-library .lib-search {
+  max-width: 480px;
+}
+.layout.A.stage-library .lib-tabs {
+  display: flex;
+  flex-wrap: wrap;
+}
+.layout.A.stage-library .lib-tabs .filter-chip > span {
+  overflow: visible;
+}
+.layout.A.stage-library .grid {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+.layout.A.stage-library .inbox {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  align-items: start;
 }
 .layout.A.stage-library .plist {
   display: grid;

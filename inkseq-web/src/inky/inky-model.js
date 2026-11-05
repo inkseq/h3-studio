@@ -11,6 +11,8 @@ export const INKY_KINDS = Object.freeze({
   upload_card: 'cast',
 });
 export const INKY_MAX_OPEN = 3;
+// Advice about the action text: Inky can draft a new version of it.
+export const canRewrite = (kind) => INKY_KINDS[kind] === 'action';
 
 const valid = (item) =>
   item &&

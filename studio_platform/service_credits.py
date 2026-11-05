@@ -234,6 +234,12 @@ def _attachment(connection, binding, *, release=False):
             and receipt["entity_id"] in item["imageIds"]
             for item in variants
         )
+    elif card.get("type") == "shot":
+        storyboard = data.get("storyboard")
+        linked = (
+            type(storyboard) is dict
+            and storyboard.get("firstFrameId") == receipt["entity_id"]
+        )
     else:
         linked = (
             card.get("type") == "prop"

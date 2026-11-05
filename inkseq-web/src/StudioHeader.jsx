@@ -122,7 +122,7 @@ export default function StudioHeader({
         </div>
       )}
       <header className="hbar">
-        <a className="logo" href={frame ? '/quick-chat' : '/'}>
+        <a className="logo" href={frame ? '/quick-chat' : '/'} aria-label={t('app.name')}>
           <InkMark size={26} variant={dailyInkMark()} />
           <span>{t('app.name')}</span>
         </a>

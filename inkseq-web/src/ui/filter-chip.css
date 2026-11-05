@@ -44,7 +44,7 @@
 }
 .filter-chip.alert > small {
   padding: 0 5px;
-  color: var(--accent-ink);
+  color: var(--warn-ink);
   background: var(--warn);
   border-radius: 8px;
 }
@@ -108,6 +108,6 @@
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
 .filter-chip.icon-only.alert > small {
-  color: var(--accent-ink);
+  color: var(--warn-ink);
   background: var(--warn);
 }

@@ -14,8 +14,11 @@ import { jobStatusLabel, jobMessage, activeJobStatuses } from './cloud-model.js'
 import { download } from './media.js';
 import './cloud-studio.css';
 import ApiKeys from './ApiKeys.jsx';
-import GenerationFailure from './GenerationFailure.jsx';
+import { modelsVisible } from './model-visibility.js';
 import { ServiceStatus } from './ServiceStatus.jsx';
+
+// Hosts, GPUs and model settings are for admins; everyone else reads the job's own message.
+const GenerationFailure = React.lazy(() => import('./GenerationFailure.jsx'));
 
 const run = (promise) => promise.catch(() => {});
 export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
@@ -349,7 +352,11 @@ export function JobList({ jobs, project, onInspect, onReview }) {
               </small>
               <code>{job.id}</code>
             </div>
-            <GenerationFailure job={job} />
+            {modelsVisible() && (
+              <React.Suspense fallback={null}>
+                <GenerationFailure job={job} />
+              </React.Suspense>
+            )}
             <div className="cloud-actions">
               {activeJobStatuses.has(job.status) && (
                 <Button disabled={c.busy} onClick={() => run(cloud.cancel(job.id))}>

@@ -40,7 +40,7 @@ export const workbenchCatalogs = {
     'workbench.compare': 'Compare',
     'workbench.compareHint': 'Pick two to compare',
     'workbench.unknown': 'Original settings unavailable',
-    'workbench.recipeOld': "Made with an older model, so its settings can't be reused",
+    'workbench.recipeOld': "Made with an older version, so its settings can't be reused",
     'workbench.changedFields': 'Changed since last: {fields}',
     'workbench.noChanges': 'Same settings as last',
     'workbench.restoreHint':
@@ -71,11 +71,11 @@ export const workbenchCatalogs = {
     'workbench.costUnknown':
       "We couldn't read the price yet. Nothing is charged until you confirm.",
     'workbench.timing':
-      'A 5-second shot usually takes a few minutes. The first one can take up to 15 minutes while a machine starts.',
+      'A 5-second shot usually takes a few minutes. The first one can take up to 25 minutes.',
     'workbench.shotN': 'Shot {number}',
     'workbench.shotInvalid': '{shot}: {why}',
     'workbench.notReady':
-      "No machine can take these shots right now, so they can't start yet. Nothing has been charged. Please try again in a few minutes.",
+      "We can't take these shots right now, so they can't start yet. Nothing has been charged. Please try again in a few minutes.",
     'workbench.seconds': '{seconds} s',
     'workbench.empty': 'No takes yet',
     'workbench.shotUnavailable': "This shot isn't in the saved version. Save or refresh the story.",
@@ -141,7 +141,7 @@ export const workbenchCatalogs = {
     'workbench.compare': '对比',
     'workbench.compareHint': '选两条来对比',
     'workbench.unknown': '原设置不可用',
-    'workbench.recipeOld': '这条是旧版模型生成的，不能复用它的设置',
+    'workbench.recipeOld': '这条是旧版本生成的，不能复用它的设置',
     'workbench.changedFields': '和上一条相比改了：{fields}',
     'workbench.noChanges': '设置和上一条一样',
     'workbench.restoreHint': '把这些设置填到当前草稿里，已有结果不受影响。',
@@ -169,10 +169,10 @@ export const workbenchCatalogs = {
     'workbench.blockedInput':
       '这个镜头的图片或设置暂时不能生成，没有扣费。请检查镜头的参考素材后再试。',
     'workbench.costUnknown': '暂时读不到价格。确认之前不会扣费。',
-    'workbench.timing': '一个 5 秒镜头通常几分钟做好。第一个镜头要等机器启动，最长约 15 分钟。',
+    'workbench.timing': '一个 5 秒镜头通常几分钟做好。第一个镜头最长约 25 分钟。',
     'workbench.shotN': '镜头 {number}',
     'workbench.shotInvalid': '{shot}：{why}',
-    'workbench.notReady': '现在没有机器能接这些镜头，所以还不能开始。没有扣费，请过几分钟再试。',
+    'workbench.notReady': '现在暂时接不了这些镜头，所以还不能开始。没有扣费，请过几分钟再试。',
     'workbench.seconds': '{seconds} 秒',
     'workbench.empty': '还没生成',
     'workbench.shotUnavailable': '云端版本里没有这个镜头。请先保存或刷新故事。',

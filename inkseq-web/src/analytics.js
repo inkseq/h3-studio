@@ -1,6 +1,6 @@
 // Product analytics (h3-studio#501): PostHog, only on the deployed sites, to see the
 // signup → first story → generation → purchase funnel. Privacy first: no autocapture
-// (clicked elements can carry story text), session replay with all typed text masked,
+// (clicked elements can carry story text), session replay with all page text masked,
 // no cookies, anonymous
 // ids, Do Not Track respected, and events never carry prompts, story text or names.
 import { monitoringEnvironment } from './monitoring.js';
@@ -12,6 +12,58 @@ let ready = false,
   // Loaded while the browser is idle, so it never slows the first page (#1022).
   waiting = null;
 const WAITING_MAX = 20;
+
+// Attributes can hold what people wrote: shot titles in `title`, character names in `aria-label`.
+const TEXT_ATTRIBUTES = new Set([
+  'title',
+  'aria-label',
+  'aria-description',
+  'aria-valuetext',
+  'aria-placeholder',
+  'alt',
+  'label',
+  'placeholder',
+  'download',
+]);
+const ADDRESS_ATTRIBUTES = new Set(['src', 'href', 'xlink:href', 'poster', 'action', 'data-src']);
+const PUBLIC_HOSTS = /^(fonts\.googleapis\.com|fonts\.gstatic\.com)$/;
+
+/** An address as a replay may keep it: our own pages without their query, others by host only. */
+export function replayAddress(value, origin = globalThis.location?.origin) {
+  try {
+    const url = new URL(value, origin);
+    if (!/^https?:$/.test(url.protocol)) return url.protocol + '//';
+    if (PUBLIC_HOSTS.test(url.hostname)) return url.href;
+    return url.origin === origin ? url.origin + url.pathname : url.origin;
+  } catch {
+    return '';
+  }
+}
+
+/** Replay attributes keep the page's shape, never its words or media links (#1021). */
+export function replayAttribute(name, value) {
+  const attribute = String(name).toLowerCase();
+  if (TEXT_ATTRIBUTES.has(attribute)) return '*'.repeat(String(value).length);
+  if (attribute === 'srcset') return '';
+  if (ADDRESS_ATTRIBUTES.has(attribute)) return replayAddress(value);
+  if (attribute === 'style' && String(value).includes('url('))
+    return String(value).replace(/url\([^)]*\)/g, 'none');
+  return value;
+}
+
+/** Speed events name the slowest element and its address; the numbers are what we need. */
+export function withoutAttribution(event) {
+  for (const [name, value] of Object.entries(event?.properties || {}))
+    if (name.startsWith('$web_vitals_') && value?.attribution) {
+      const { attribution: _attribution, ...kept } = value;
+      event.properties[name] = kept;
+    }
+  return event;
+}
+
+export function replayRequest(request) {
+  return { ...request, name: replayAddress(request.name) };
+}
 
 export function installAnalytics(location = globalThis.location) {
   const environment = monitoringEnvironment(location?.hostname);
@@ -26,14 +78,18 @@ export function installAnalytics(location = globalThis.location) {
           autocapture: false,
           capture_pageview: 'history_change',
           capture_pageleave: true,
-          // Replay of page interactions for a sample of visits. All page text and inputs are masked,
-          // so story text never leaves the browser, as the privacy page says (#1021).
+          // Replay of page interactions for a sample of visits. Page text, inputs, text in
+          // attributes and addresses are masked, so story text and media links never leave the
+          // browser, as the privacy page says (#1021).
           enable_recording_console_log: false,
           disable_session_recording: false,
           session_recording: {
             maskAllInputs: true,
             maskTextSelector: '*',
+            maskAttributeFn: replayAttribute,
+            maskCapturedNetworkRequestFn: replayRequest,
           },
+          before_send: withoutAttribution,
           persistence: 'localStorage',
           respect_dnt: true,
           person_profiles: 'identified_only',
@@ -64,6 +120,16 @@ export function safeProperties(properties = {}) {
         (typeof value === 'string' && /^[a-z0-9_-]{1,40}$/i.test(value)),
     ),
   );
+}
+
+// Sign-out on a shared browser: the next person starts with a new anonymous id.
+export function resetAnalytics() {
+  if (!ready) return;
+  try {
+    posthog.reset();
+  } catch {
+    /* analytics must never break the product */
+  }
 }
 
 // The anonymous PostHog id, for server events that close the checkout funnel (h3-studio#725).

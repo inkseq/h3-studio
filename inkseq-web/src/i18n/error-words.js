@@ -3,6 +3,7 @@
 import { readBrowserLocale } from './locale.js';
 
 const ENGLISH = {
+  '已撤销上一步。': 'Undid the last step.',
   '请先核对登录账户和当前创作，再下载原文件。':
     'Check your account and current work first, then download the original file.',
   '产物标识无效，请刷新原任务后下载。':

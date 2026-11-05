@@ -6,7 +6,6 @@ import { Note } from './ui/Note.jsx';
 import { previewingAsUser } from './preview-as-user.js';
 import VideoCacheSettings from './VideoCacheSettings.jsx';
 import TakePreferencesSettings from './TakePreferencesSettings.jsx';
-import SpendingBreakdown from './SpendingBreakdown.jsx';
 import { admissionExposure } from './spending-breakdown.js';
 import { microsToDollars, dollarsToMicros, formatMoneyMicros } from './money.js';
 import AssistantConnections from './AssistantConnections.jsx';
@@ -23,8 +22,11 @@ import { UserRound, SlidersHorizontal, Bot, Wallet, Coins, LogOut, RefreshCw } f
 import { cloudController as cloud } from './cloud-controller.js';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
-import OperatorBudgetPanel from './OperatorBudgetPanel.jsx';
 import './v2/ops-adapter.css';
+
+// Only without credit charging, which ordinary accounts never see (#1020).
+const SpendingBreakdown = React.lazy(() => import('./SpendingBreakdown.jsx'));
+const OperatorBudgetPanel = React.lazy(() => import('./OperatorBudgetPanel.jsx'));
 
 const dollars = microsToDollars;
 function micros(value) {
@@ -400,7 +402,9 @@ export default function SpendingSettings({ account }) {
             >
               {!creditMode && (
                 <div className="card-box">
-                  <SpendingBreakdown usage={user.usage} scope="account" />
+                  <React.Suspense fallback={null}>
+                    <SpendingBreakdown usage={user.usage} scope="account" />
+                  </React.Suspense>
                   {exposure && exposure.limit > 0 && (
                     <div className="agent-spend spend-admission">
                       <span>
@@ -447,7 +451,9 @@ export default function SpendingSettings({ account }) {
             </form>
           )}
           {user && draft && !creditMode && section === 'budget' && pageActive && (
-            <OperatorBudgetPanel account={account} />
+            <React.Suspense fallback={null}>
+              <OperatorBudgetPanel account={account} />
+            </React.Suspense>
           )}
           {section === 'credits' && <CreditsPanel account={account} active={pageActive} />}
           <div id="my-assistants" hidden={section !== 'assistants'}>

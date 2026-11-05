@@ -441,3 +441,22 @@ test('a shot dropped on an empty scene moves there and keeps its cast and place'
   assert.equal(moved.data.storyboard.place.locationId, 'place');
   assert.equal(edit(project, { type: 'moveToScene', from: 'shot-a', scene: 'scene-empty' }), false);
 });
+
+test('a scene keeps its own text from the script page', () => {
+  const project = fixture(),
+    scene = get(project, 'scene-a');
+  assert.ok(act(project, { type: 'sceneScript', id: 'scene-a', script: 'Rain.' }));
+  assert.equal(scene.data.script, 'Rain.');
+  assert.equal(scene.version, 2);
+  assert.equal(validateProject(project).ok, true);
+  // The same text again is not a change.
+  assert.ok(act(project, { type: 'sceneScript', id: 'scene-a', script: 'Rain.' }));
+  assert.equal(scene.version, 2);
+  // Only scenes, only text, no longer than the saved shape allows.
+  assert.equal(act(project, { type: 'sceneScript', id: 'shot-a', script: 'x' }), false);
+  assert.equal(act(project, { type: 'sceneScript', id: 'scene-a', script: 1 }), false);
+  assert.equal(
+    act(project, { type: 'sceneScript', id: 'scene-a', script: 'x'.repeat(120001) }),
+    false,
+  );
+});

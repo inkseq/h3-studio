@@ -9,7 +9,7 @@ import json
 import httpx
 
 from .central_registry import load_api
-from .inky_models import example_payload, judgement_payload
+from .inky_models import example_payload, judgement_payload, rewrite_payload
 
 TYPE_PROFILE = "typesafe--avatar-user-20261008"
 OPEN_PROFILE = "openai--inkseq"
@@ -156,7 +156,12 @@ class Terra:
         self.client = Client("openai", **kwargs)
 
     def __call__(self, source, kind):
-        body = example_payload(source, kind)
+        return self._complete(example_payload(source, kind))
+
+    def rewrite(self, source, kind):
+        return self._complete(rewrite_payload(source, kind))
+
+    def _complete(self, body):
         size = sum(
             len(message["content"].encode("utf-8")) for message in body["messages"]
         )

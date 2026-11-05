@@ -539,3 +539,33 @@ test('a story without updatedAt stays editable after a file-presence observation
   );
   assert.ok(s.addEntity('note', null, { title: 'after observation' }));
 });
+
+test('signing out forgets drafts the server has and keeps unsaved ones', () => {
+  const map = new Map([
+    ['yingxu-cloud-draft-v1:sam:saved', JSON.stringify({ dirty: false })],
+    ['yingxu-cloud-draft-v1:sam:unsaved', JSON.stringify({ dirty: true })],
+    ['yingxu-cloud-draft-v1:sam:broken', '{'],
+    ['yingxu-cloud-draft-v1:alex:saved', JSON.stringify({ dirty: false })],
+    ['yingxu-cloud-pending-v1:sam:saved', '{}'],
+  ]);
+  const storage = {
+    get length() {
+      return map.size;
+    },
+    key: (i) => [...map.keys()][i] ?? null,
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => map.set(key, value),
+    removeItem: (key) => map.delete(key),
+  };
+  const s = createStore({ storage });
+  assert.equal(s.forgetSavedCloudDrafts('sam'), 1);
+  assert.equal(map.has('yingxu-cloud-draft-v1:sam:saved'), false);
+  for (const kept of [
+    'yingxu-cloud-draft-v1:sam:unsaved',
+    'yingxu-cloud-draft-v1:sam:broken',
+    'yingxu-cloud-draft-v1:alex:saved',
+    'yingxu-cloud-pending-v1:sam:saved',
+  ])
+    assert.equal(map.has(kept), true, kept);
+  assert.equal(s.forgetSavedCloudDrafts(''), 0);
+});

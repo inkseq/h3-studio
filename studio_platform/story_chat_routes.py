@@ -14,6 +14,10 @@ from .google_chat import ChatError, GoogleChatClient
 from . import llm_tracing, story_chat_advice, story_chat_undo
 from .repository import Conflict
 from .story_chat import (
+    INKY_DAILY_TURNS,
+    INKY_FOCUS,
+    INKY_NOTE,
+    inky_plan,
     INSTRUCTION,
     LANGUAGES,
     MAX_SCRIPT_ACTIONS,
@@ -110,6 +114,45 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 "story_chat_browser_only" if browser_only else "story_chat_scope", 403
             )
         return principal
+
+    def inky_turns_today(principal):
+        """Typed messages to Inky in the last 24 h, across the owner's stories."""
+        since = time.time() - 86400
+        rows = app.state.repository.list_documents(
+            app.state.generation_access.project_scope(principal),
+            "project",
+            limit=100,
+            exclude_managed=True,
+            story_chat=True,
+        )
+        return sum(
+            1
+            for row in rows
+            for message in chat_of(row["payload"]).get("messages", [])
+            if message.get("via") == "inky"
+            and message.get("role") == "user"
+            and iso_seconds(message.get("at")) >= since
+        )
+
+    def ensure_inky_chat(principal, project_id):
+        """A story with no chat gets one that stays out of the Quick Create list."""
+        for _attempt in range(3):
+            row = app.state.authorized_project(principal, project_id, "projects:write")
+            project = row["payload"]
+            if project.get("journey", {}).get("storyChat") is not None:
+                return read(principal, project_id, "projects:write")
+            actions = open_actions(project, "zh")
+            actions[-1]["patch"]["storyChat"]["hidden"] = True
+            try:
+                app.state.guided.mutate(
+                    principal,
+                    project_id,
+                    {"expected_version": row["version"], "actions": actions},
+                )
+            except Conflict as error:
+                if str(error) != "document_version_conflict":
+                    raise
+        _fail("document_version_conflict", 409, nothing_written=True)
 
     def connection_turns_today(principal):
         """Chat turns this connection sent in the last 24 h, across the owner's stories."""
@@ -338,8 +381,12 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         principal = principal_of(request, "write")
         body = body or {}
         language = body.get("language", "zh")
-        if set(body) - {"language"} or language not in LANGUAGES:
+        # A shot picture needs the chat's receipts but must not list the story in Quick Create.
+        stay_hidden = body.get("hidden") is True
+        if set(body) - {"language", "hidden"} or language not in LANGUAGES:
             _fail("story_chat_invalid", 422, field="body")
+        if "hidden" in body and not stay_hidden:
+            _fail("story_chat_invalid", 422, field="hidden")
         for _attempt in range(3):
             row = app.state.authorized_project(principal, project_id, "projects:write")
             project = row["payload"]
@@ -350,7 +397,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     # Present but not a chat this version reads: never replace it.
                     _fail("story_chat_unsupported", 409)
                 chat = project["journey"]["storyChat"]
-                if not chat.get("hidden"):
+                if stay_hidden or not chat.get("hidden"):
                     return view(row)
                 # Continuing a removed chat from Works brings it back to Quick Create.
                 value = {k: v for k, v in chat.items() if k != "hidden"}
@@ -375,13 +422,17 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             reject_managed(project)
             if project.get("schemaVersion") != 4:
                 _fail("story_chat_unsupported_story", 422)
+            actions = open_actions(project, language)
+            if stay_hidden:
+                patch = actions[-1]["patch"]
+                patch["storyChat"] = {**patch["storyChat"], "hidden": True}
             try:
                 app.state.guided.mutate(
                     principal,
                     project_id,
                     {
                         "expected_version": row["version"],
-                        "actions": open_actions(project, language),
+                        "actions": actions,
                     },
                 )
             except Conflict as error:
@@ -424,11 +475,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         if (
             not isinstance(body, dict)
             or not {"turn_id", "text"} <= set(body)
-            or set(body) - {"turn_id", "text", "script"}
+            or set(body) - {"turn_id", "text", "script", "inky"}
             or body.get("script", True) is not True
         ):
             _fail("story_chat_invalid", 422, field="body")
         turn_id, text = body["turn_id"], body["text"]
+        inky = body.get("inky")
+        if "inky" in body and (
+            principal.machine
+            or "script" in body
+            or not isinstance(inky, dict)
+            or set(inky) != {"shot_id"}
+            or not (inky["shot_id"] is None or isinstance(inky["shot_id"], str))
+        ):
+            _fail("story_chat_invalid", 422, field="inky")
         is_script = "script" in body
         most = MAX_SCRIPT_CHARS if is_script else MAX_TEXT_CHARS
         if not isinstance(turn_id, str) or not TURN_ID.fullmatch(turn_id):
@@ -452,7 +512,11 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 },
             }
 
-        row = read(principal, project_id, "projects:write")
+        row = (
+            ensure_inky_chat(principal, project_id)
+            if inky is not None
+            else read(principal, project_id, "projects:write")
+        )
         chat = chat_of(row["payload"])
         seen, seen_version = snapshot(row["payload"]), row["version"]
         # A replayed turn returns what was stored and never calls the model twice.
@@ -461,6 +525,19 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             return answer(row, prior)
         if chat.get("turns", 0) >= MAX_TURNS:
             _fail("story_chat_turn_limit", 429, max_turns=MAX_TURNS)
+        note = ""
+        if inky is not None:
+            if inky_turns_today(principal) >= INKY_DAILY_TURNS:
+                _fail(
+                    "inky_daily_limit",
+                    429,
+                    limit=INKY_DAILY_TURNS,
+                    nothing_written=True,
+                )
+            shots = {e["id"] for e in row["payload"]["entities"] if e["type"] == "shot"}
+            note = INKY_NOTE
+            if inky["shot_id"] in shots:
+                note += INKY_FOCUS.format(shot=inky["shot_id"])
         if principal.machine:
             limit = settings.story_chat_connection_daily_turns
             if connection_turns_today(principal) >= limit:
@@ -480,7 +557,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     prompt_messages(
                         row["payload"],
                         chat,
-                        SCRIPT_NOTE + text if is_script else text,
+                        SCRIPT_NOTE + text if is_script else note + text,
                     ),
                     story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
                     # A whole script can come back as dozens of shots.
@@ -499,6 +576,8 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 )
             except StoryChatError as error:
                 _fail(error.code, error.status, **error.detail)
+            if inky is not None:
+                plan = inky_plan(plan)
             traced.update(
                 output={
                     "reply": llm_tracing.clip(plan["reply"], 2000),
@@ -558,6 +637,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 changes,
                 proposal,
                 actor=principal.actor_id if principal.machine else None,
+                via="inky" if inky is not None else None,
             )
             story_chat_undo.remember(
                 app, principal, project_id, turn_id, version, project
@@ -596,10 +676,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         from .story_chat import now_iso
         from .story_chat_images import (
-            ASPECT,
             KINDS,
             REQUEST_ID,
             ImageError,
+            aspect_for,
             attach_actions,
             configured_image_client,
             prompt_for,
@@ -625,11 +705,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         def card_in(project):
             card = next((e for e in project["entities"] if e["id"] == card_id), None)
-            if (
-                card is None
-                or card["type"] not in KINDS
-                or card["parentId"] is not None
-            ):
+            if card is None or card["type"] == "shot":
+                return card
+            if card["type"] not in KINDS or card["parentId"] is not None:
                 return None
             return card
 
@@ -637,7 +715,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         from .credits import CreditError
         from .guided import receipts
-        from .story_chat_images import RELEASE_REASON, input_hash
+        from .story_chat_images import RELEASE_REASON, input_hash, older_settings_in_use
 
         def credit_fail(error):
             _fail(error.code, error.status, **getattr(error, "data", {}))
@@ -674,6 +752,15 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             # Admin switch off: no new picture, before any hold or provider call. Requests
             # that already started still settle their original outcome below.
             _fail("story_chat_pictures_disabled", 403)
+        if started is None and attached is None and card and card["type"] == "shot":
+            # A picture would cost this shot its older settings: refuse before any spending.
+            if older_settings_in_use(row["payload"], card):
+                _fail(
+                    "story_chat_shot_settings_invalid",
+                    409,
+                    ref=card_id,
+                    nothing_charged=True,
+                )
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
         original = None
@@ -845,7 +932,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             _fail("story_chat_image_in_progress", 409)
         try:
             mime, data = holder["image"].generate(
-                prompt_for(row["payload"], card, instruction), ASPECT[card["type"]]
+                prompt_for(row["payload"], card, instruction), aspect_for(card)
             )
         except ImageError as error:
             release(RELEASE_REASON.get(error.code, "provider_failed"))
@@ -877,6 +964,15 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             if current is None:
                 release("card_missing")
                 _fail("story_chat_card_missing", 409, ref=card_id, nothing_charged=True)
+            # Settings saved while the picture was drawn: they win, and nothing is charged.
+            if current["type"] == "shot" and older_settings_in_use(project, current):
+                release("version_conflict")
+                _fail(
+                    "story_chat_shot_settings_invalid",
+                    409,
+                    ref=card_id,
+                    nothing_charged=True,
+                )
             # Exactly the receipt shape the credit capture verifies.
             record = {
                 "card_id": card_id,

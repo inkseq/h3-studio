@@ -443,6 +443,7 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
             <Badge tone="local">{t('story.copy9')}</Badge>
           )}
           <div className="spacer" />
+          <div className="wbar-inky" />
           <Button
             variant="ghost"
             className="icon-only"

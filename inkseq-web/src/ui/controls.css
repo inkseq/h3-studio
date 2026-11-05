@@ -111,7 +111,7 @@ button.option:hover {
 button.link {
   min-height: 0;
   padding: 0;
-  color: var(--accent);
+  color: color-mix(in srgb, var(--accent) 72%, var(--ink));
   background: none;
   border: 0;
   text-decoration: underline;

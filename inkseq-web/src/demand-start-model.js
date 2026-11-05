@@ -9,6 +9,13 @@ const REASONS = [
   'no_qualified_profile',
   'retry_backoff',
   'download_retry_limit',
+  'budget_limit',
+  'capacity_limit',
+  'tenant_daily_limit_reached',
+  'tenant_daily_usage_unconfirmed',
+  'authority_unavailable',
+  'policy_changed',
+  'offer_unavailable',
 ];
 const count = (value) => (Number.isInteger(value) && value >= 0 ? value : null);
 

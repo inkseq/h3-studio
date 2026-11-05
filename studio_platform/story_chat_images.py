@@ -39,8 +39,47 @@ class ImageError(Exception):
         super().__init__(code)
 
 
+def aspect_for(card):
+    """Pictures of a shot are its first frame, so they take the film's shape."""
+    return ASPECT.get(card["type"], "16:9")
+
+
+def shot_context(project, card):
+    """What a shot's picture is drawn from: the same bounded context Inky reads."""
+    from .inky_source import shot_source
+
+    try:
+        return shot_source(project, card)["context"]
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return {"shot_action": card.get("description") or card.get("title") or ""}
+
+
+def shot_prompt(project, card, style, instruction):
+    """The first moment of a shot (#1039)."""
+    context = shot_context(project, card)
+    parts = [
+        "A single still frame from an animated short film: the first moment of this "
+        "shot, cinematic composition, natural light.",
+        f"What happens: {context['shot_action'].strip()[:2000]}",
+    ]
+    if context.get("characters"):
+        parts.append("Characters: " + ", ".join(context["characters"]))
+    if context.get("place"):
+        parts.append("Place: " + context["place"])
+    if context.get("props"):
+        parts.append("Props: " + ", ".join(context["props"]))
+    if style.strip():
+        parts.append("Overall film style: " + style.strip()[:2000])
+    if instruction.strip():
+        parts.append("Change requested: " + instruction.strip()[:1000])
+    parts.append("No text, captions, watermarks or borders.")
+    return "\n".join(parts)
+
+
 def prompt_for(project, card, instruction=""):
     style = (project.get("journey", {}).get("storyboard") or {}).get("style", "")
+    if card["type"] == "shot":
+        return shot_prompt(project, card, style, instruction)
     parts = [
         STYLE[card["type"]],
         f"Subject: {card.get('title', '').strip()}.",
@@ -173,6 +212,15 @@ def attach_actions(project, card, asset_id, image_entity_id):
         ]
         version["version"] = version.get("version", 1) + 1
         patch = {"versions": versions, "defaultVersionId": version["id"]}
+    elif card["type"] == "shot":
+        # The newest picture is the shot's first frame; earlier ones stay in the story's files.
+        patch = {
+            "storyboard": {
+                **shot_storyboard(data),
+                "firstFrameId": image_entity_id,
+                "continuePrevious": False,
+            }
+        }
     else:
         patch = {
             "imageIds": [image_entity_id]
@@ -197,6 +245,27 @@ RELEASE_REASON = {
 }
 
 
+def shot_storyboard(data):
+    """A shot's generation settings. One with none gets the default block; the route has already
+    refused any shot whose older settings a new block would lose."""
+    return data.get("storyboard") or {"version": 1, "mode": "fl"}
+
+
+def older_settings_in_use(project, card):
+    """Saved through the older settings path, without a storyboard block. Adding a block moves the
+    shot to the storyboard compiler, which ignores those inputs, so the shot could no longer make
+    its video. Such a shot keeps its settings and gets no picture here."""
+    data = card.get("data") or {}
+    if data.get("storyboard"):
+        return False
+    h3 = data.get("h3")
+    if isinstance(h3, dict) and any(
+        h3.get(key) for key in ("recipeId", "inputMode", "guides")
+    ):
+        return True
+    return any(link.get("target") == card["id"] for link in project.get("links", []))
+
+
 def input_hash(project, card, instruction):
     """What a picture was drawn from; a replay with different material conflicts."""
     import hashlib
@@ -209,6 +278,16 @@ def input_hash(project, card, instruction):
         "style": " ".join(str(style).split()),
         "instruction": " ".join(str(instruction).split()),
     }
+    if card.get("type") == "shot":
+        action = (card.get("data") or {}).get("prompt", "")
+        value["action"] = " ".join(str(action).split())
+        # Everything else the prompt reads, so an edit to the cast, place or props is noticed.
+        value["older_settings"] = older_settings_in_use(project, card)
+        context = shot_context(project, card)
+        value["context"] = {
+            key: context.get(key)
+            for key in ("shot_action", "characters", "place", "props")
+        }
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
