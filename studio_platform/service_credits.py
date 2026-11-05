@@ -1,4 +1,4 @@
-"""Caller-transaction image charges using the existing customer-credit ledger.
+"""Caller-transaction image and speech charges using the existing credit ledger.
 
 The route owns provider execution and fences late attachment before releasing a
 stale request. These primitives never call a provider, retry, or create jobs.
@@ -46,15 +46,18 @@ _BINDING_KEYS = {
 }
 
 
-def _binding(scope, reference_id, binding):
-    if type(binding) is not dict or set(binding) != _BINDING_KEYS:
+def _binding(scope, reference_id, binding, service=REFERENCE_TYPE):
+    if type(service) is not str or service not in {REFERENCE_TYPE, "speech"}:
         raise credits.CreditError("credit_service_binding_invalid", 422)
-    for value in binding.values():
-        credits._text(value, 200)
+    keys = _BINDING_KEYS | ({"speech"} if service == "speech" else set())
+    if type(binding) is not dict or set(binding) != keys:
+        raise credits.CreditError("credit_service_binding_invalid", 422)
+    for key in _BINDING_KEYS:
+        credits._text(binding[key], 200)
     if (
         not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", binding["request_id"])
         or not re.fullmatch(r"[0-9a-f]{64}", binding["input_hash"])
-        or reference_id != "story_chat_image:" + binding["request_id"]
+        or reference_id != service + ":" + binding["request_id"]
     ):
         raise credits.CreditError("credit_service_binding_invalid", 422)
     if (
@@ -64,6 +67,10 @@ def _binding(scope, reference_id, binding):
         binding["actor_id"],
     ) != (scope.tenant_id, scope.owner_id, scope.project_id, scope.actor_id):
         raise credits.CreditError("credit_idempotency_conflict")
+    if service == "speech":
+        from .speech_credit_proof import validate_binding
+
+        return validate_binding(binding)
     return dict(binding)
 
 
@@ -83,8 +90,8 @@ def _fingerprint(binding, quote):
     return request_hash({"binding": binding, "quote": quote})
 
 
-def _context(connection, scope, reference_id, binding):
-    binding = _binding(scope, reference_id, binding)
+def _context(connection, scope, reference_id, binding, service=REFERENCE_TYPE):
+    binding = _binding(scope, reference_id, binding, service)
     # Same account-authority and content fences as normal writes. The spending
     # owner lock precedes BOTH daily projection and the credit account CAS.
     lock_account_gate(connection)
@@ -98,7 +105,7 @@ def _context(connection, scope, reference_id, binding):
             select(entries).where(
                 entries.c.tenant == scope.tenant_id,
                 entries.c.user_id == user["id"],
-                entries.c.reference_type == REFERENCE_TYPE,
+                entries.c.reference_type == service,
                 entries.c.reference_id == reference_id,
             )
         ).mappings()
@@ -153,7 +160,11 @@ def _project(connection, binding):
     return project
 
 
-def _attachment(connection, binding, *, release=False):
+def _attachment(connection, binding, *, release=False, service=REFERENCE_TYPE):
+    if service == "speech":
+        from .speech_credit_proof import attachment
+
+        return attachment(connection, binding, release=release)
     current = _project(connection, binding)
     journey = current.get("journey", {})
     story = journey.get("storyChat", {}) if type(journey) is dict else None
@@ -289,8 +300,19 @@ def _result(row, entry, created, hold, terminal=None, attachment=None):
     }
 
 
-def service_hold(connection, repo, scope, reference_id, *, binding, quote=None):
-    binding, user, hold, terminal = _context(connection, scope, reference_id, binding)
+def service_hold(
+    connection,
+    repo,
+    scope,
+    reference_id,
+    *,
+    binding,
+    quote=None,
+    service=REFERENCE_TYPE,
+):
+    binding, user, hold, terminal = _context(
+        connection, scope, reference_id, binding, service
+    )
     if hold:
         if quote is not None and _quote(quote) != {
             "credits": hold["held_delta"],
@@ -300,11 +322,18 @@ def service_hold(connection, repo, scope, reference_id, *, binding, quote=None):
         row = credits._account(
             connection, scope.tenant_id, user["id"], now=repo.clock()
         )
-        attachment = None if terminal else _attachment(connection, binding)
+        attachment = (
+            None if terminal else _attachment(connection, binding, service=service)
+        )
         return _result(row, hold, False, hold, terminal, attachment)
     if not credits.credit_policy(connection, scope.tenant_id)["enabled"]:
         return None
-    frozen = credits_pricing.image_price(connection, scope.tenant_id)
+    if service == "speech":
+        from .speech_credit_proof import quote as speech_quote
+
+        frozen = speech_quote(binding["speech"]["characters"])
+    else:
+        frozen = credits_pricing.image_price(connection, scope.tenant_id)
     if frozen is None:
         raise credits.CreditError("credit_image_price_required", 503)
     frozen = _quote(frozen)
@@ -339,10 +368,10 @@ def service_hold(connection, repo, scope, reference_id, *, binding, quote=None):
         kind="hold",
         amount=0,
         held_delta=frozen["credits"],
-        reference_type=REFERENCE_TYPE,
+        reference_type=service,
         reference_id=reference_id,
         actor=binding["actor_id"],
-        reason="Story image reserved",
+        reason="Speech reserved" if service == "speech" else "Story image reserved",
         idempotency_key=reference_id + ":hold",
         now=repo.clock(),
         price_revision=frozen["price_revision"],
@@ -352,8 +381,20 @@ def service_hold(connection, repo, scope, reference_id, *, binding, quote=None):
     return {**result, "hold": result["entry"], "terminal": None, "attachment": None}
 
 
-def _terminal(connection, repo, scope, reference_id, *, binding, kind, reason):
-    binding, user, hold, terminal = _context(connection, scope, reference_id, binding)
+def _terminal(
+    connection,
+    repo,
+    scope,
+    reference_id,
+    *,
+    binding,
+    kind,
+    reason,
+    service=REFERENCE_TYPE,
+):
+    binding, user, hold, terminal = _context(
+        connection, scope, reference_id, binding, service
+    )
     if hold is None:
         return None
     row = credits._account(connection, scope.tenant_id, user["id"], now=repo.clock())
@@ -361,7 +402,9 @@ def _terminal(connection, repo, scope, reference_id, *, binding, kind, reason):
         if terminal["kind"] != kind:
             raise credits.CreditError("credit_terminal_conflict")
         return _result(row, terminal, False, hold, terminal)
-    attachment = _attachment(connection, binding, release=kind == "release")
+    attachment = _attachment(
+        connection, binding, release=kind == "release", service=service
+    )
     if kind == "capture" and attachment is None:
         raise credits.CreditError("credit_attachment_required")
     result = credits._change(
@@ -370,7 +413,7 @@ def _terminal(connection, repo, scope, reference_id, *, binding, kind, reason):
         kind=kind,
         amount=-hold["held_delta"] if kind == "capture" else 0,
         held_delta=-hold["held_delta"],
-        reference_type=REFERENCE_TYPE,
+        reference_type=service,
         reference_id=reference_id,
         actor=hold["actor"],
         reason=reason,
@@ -388,7 +431,9 @@ def _terminal(connection, repo, scope, reference_id, *, binding, kind, reason):
     }
 
 
-def service_capture(connection, repo, scope, reference_id, *, binding):
+def service_capture(
+    connection, repo, scope, reference_id, *, binding, service=REFERENCE_TYPE
+):
     return _terminal(
         connection,
         repo,
@@ -396,11 +441,14 @@ def service_capture(connection, repo, scope, reference_id, *, binding):
         reference_id,
         binding=binding,
         kind="capture",
-        reason="Story image captured",
+        reason="Speech captured" if service == "speech" else "Story image captured",
+        service=service,
     )
 
 
-def service_release(connection, repo, scope, reference_id, *, binding, reason):
+def service_release(
+    connection, repo, scope, reference_id, *, binding, reason, service=REFERENCE_TYPE
+):
     if not isinstance(reason, str) or reason not in RELEASE_REASONS:
         raise credits.CreditError("credit_release_reason_invalid", 422)
     return _terminal(
@@ -411,4 +459,5 @@ def service_release(connection, repo, scope, reference_id, *, binding, reason):
         binding=binding,
         kind="release",
         reason=reason,
+        service=service,
     )

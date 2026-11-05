@@ -1,11 +1,10 @@
 """Voices and generated lines (#997). Default OFF; no silent fallback; no vendor names out.
 
 A generated line is a normal audio asset on the story, with what made it kept beside it.
-Charging is not built yet: with customer charging on, a line is refused unless the
-staging-only test switch is on, so nothing can be given away by accident.
+The existing credit ledger reserves a frozen quote and captures only after the
+original audio attachment succeeds. Production switches remain unchanged.
 """
 
-import hashlib
 import io
 from pathlib import Path
 import re
@@ -14,7 +13,9 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
-from .repository import Conflict
+from .credits import CreditError
+from .speech_credit_proof import quote as speech_quote
+from .speech_requests import SpeechRequest
 from .speech_catalog import LANGUAGES, VOICES, public
 from .speech_provider import DIRECTIONS, SpeechError, configured, level
 
@@ -42,11 +43,11 @@ def clean(text):
     return re.sub(r" {2,}", " ", spoken).strip()
 
 
-def checked(body):
+def checked(body, *, voice_required=True):
     """The catalog voice and the words to speak, or a refusal before anything is spent."""
     voice = VOICES.get(body.voice_id)
     text = clean(body.text)
-    if voice is None:
+    if voice is None and voice_required:
         _fail("voice_unknown", 422)
     if (
         not REQUEST_ID.fullmatch(body.request_id)
@@ -58,64 +59,32 @@ def checked(body):
     return voice, text
 
 
-def answer(entity):
-    return {
-        "entity_id": entity["id"],
-        "asset_id": entity["data"]["cloudAssetId"],
-        "content_path": entity["data"]["cloudContentPath"],
-        "voice_id": entity["data"]["speech"]["voice_id"],
-    }
-
-
-def find(project, entity_id):
-    return next((e for e in project.get("entities", []) if e["id"] == entity_id), None)
-
-
-def made_by(body, voice, text, characters):
-    return {
-        "voice_id": body.voice_id,
-        "provider": voice["provider"],
-        "model": voice["model"],
-        "provider_voice": voice["provider_voice"],
-        "direction": body.direction,
-        "text_sha256": hashlib.sha256(text.encode()).hexdigest(),
-        "characters": characters,
-    }
-
-
-def attach(app, principal, project_id, entity_id, asset_id, title, provenance, key):
-    """Put the stored clip on the story; a concurrent edit only means trying again."""
-    for _attempt in range(3):
-        row = app.state.authorized_project(principal, project_id, "projects:write")
-        try:
-            app.state.guided.mutate(
-                principal,
-                project_id,
-                {
-                    "expected_version": row["version"],
-                    "actions": [
-                        {
-                            "op": "asset.attach",
-                            "asset_id": asset_id,
-                            "entity_id": entity_id,
-                            "title": title,
-                        },
-                        {
-                            "op": "entity.update",
-                            "entity_id": entity_id,
-                            "patch": {"data": {"speech": provenance}},
-                        },
-                    ],
-                },
-                key,
-            )
-        except Conflict as error:
-            if str(error) != "document_version_conflict":
-                _fail("speech_store_failed", 502, nothing_charged=True)
-            continue
-        current = app.state.authorized_project(principal, project_id, "projects:read")
-        return answer(find(current["payload"], entity_id))
-    _fail("document_version_conflict", 409, nothing_charged=True)
+def generate(attempt, adapter, voice, body, text, store):
+    try:
+        spoken = adapter.synthesize(text, voice, body.direction, body.language)
+        data = level(spoken.data)
+    except SpeechError as error:
+        released = attempt.release("provider_failed")
+        _fail(
+            error.code, error.status, **({"nothing_charged": True} if released else {})
+        )
+    except Exception:
+        released = attempt.release("provider_failed")
+        _fail(
+            "speech_provider_failed",
+            502,
+            **({"nothing_charged": True} if released else {}),
+        )
+    try:
+        asset_id = store(attempt.principal, attempt.project_id, data, body.request_id)
+    except Exception:
+        released = attempt.release("store_failed")
+        _fail(
+            "speech_store_failed",
+            502,
+            **({"nothing_charged": True} if released else {}),
+        )
+    return attempt.attach(asset_id, text[:40], attempt.provenance(spoken.characters))
 
 
 def register_routes(app):
@@ -152,8 +121,7 @@ def register_routes(app):
         current = switches()
         if not current["voice_enabled"]:
             _fail("voice_disabled", 409, nothing_charged=True)
-        if charging() and not current["free_while_testing"]:
-            _fail("speech_billing_unavailable", 503, nothing_charged=True)
+        return current
 
     def store(principal, project_id, data, request_id):
         asset = app.state.assets.upload(
@@ -183,6 +151,22 @@ def register_routes(app):
             headers={"Cache-Control": "private, max-age=86400"},
         )
 
+    @app.post("/v1/projects/{project_id}/speech/quote")
+    def quote(project_id: str, body: SpeechBody, request: Request):
+        from .generation_admission import reject_managed
+
+        row = app.state.authorized_project(
+            request.state.principal, project_id, "projects:write"
+        )
+        reject_managed(row["payload"])
+        current = allowed()
+        _voice, text = checked(body)
+        return {
+            "characters": len(text),
+            **speech_quote(len(text)),
+            "charging": charging() and not current["free_while_testing"],
+        }
+
     @app.post("/v1/projects/{project_id}/speech")
     def speak(project_id: str, body: SpeechBody, request: Request):
         from .generation_admission import reject_managed
@@ -190,30 +174,30 @@ def register_routes(app):
         principal = request.state.principal
         row = app.state.authorized_project(principal, project_id, "projects:write")
         reject_managed(row["payload"])
-        allowed()
-        voice, text = checked(body)
-        entity_id = "speech-" + body.request_id
-        replay = find(row["payload"], entity_id)
-        if replay is not None:
-            return answer(replay)
-        adapter = adapters().get(voice["provider"])
-        if adapter is None:
-            _fail("assistant_unavailable", 503, nothing_charged=True)
+        # Existing receipts retain their catalog and charging decision. Catalog or
+        # enable-switch changes only decide admission of a genuinely new request.
+        voice, text = checked(body, voice_required=False)
+        attempt = SpeechRequest(app, principal, project_id, body, text)
         try:
-            spoken = adapter.synthesize(text, voice, body.direction, body.language)
-            data = level(spoken.data)
-        except SpeechError as error:
-            _fail(error.code, error.status, nothing_charged=True)
-        return attach(
-            app,
-            principal,
-            project_id,
-            entity_id,
-            store(principal, project_id, data, body.request_id),
-            text[:40],
-            made_by(body, voice, text, spoken.characters),
-            "speech-attach-" + body.request_id,
-        )
+            replay = attempt.replay()
+            if replay is not None:
+                return replay
+            current = allowed()
+            if voice is None:
+                _fail("voice_unknown", 422, nothing_charged=True)
+            adapter = adapters().get(voice["provider"])
+            if adapter is None:
+                _fail("assistant_unavailable", 503, nothing_charged=True)
+            attempt.begin(
+                voice, charged=charging() and not current["free_while_testing"]
+            )
+            return generate(attempt, adapter, voice, body, text, store)
+        except CreditError as error:
+            _fail(error.code, error.status, **error.data)
+        except HTTPException:
+            raise
+        except Exception:
+            _fail("speech_outcome_unconfirmed", 502)
 
     @app.get("/v1/admin/speech/settings")
     def get_settings(request: Request):

@@ -146,13 +146,13 @@ class SpeechRouteTests(unittest.TestCase):
         self.assertTrue(reply.json()["detail"]["nothing_charged"])
         self.assertEqual(len(self.adapter.calls), 1)
 
-    def test_charging_on_refuses_unless_the_test_switch_is_on(self):
+    def test_charging_without_an_account_never_calls_the_provider(self):
         self.prepare(voice_enabled=True)
         with patch("studio_platform.credits.credit_policy") as policy:
             policy.return_value = {"enabled": True}
             reply = self.speak()
-        self.assertEqual(reply.status_code, 503)
-        self.assertEqual(reply.json()["detail"]["code"], "speech_billing_unavailable")
+        self.assertEqual(reply.status_code, 403)
+        self.assertEqual(reply.json()["detail"]["code"], "credit_account_unavailable")
         self.assertEqual(self.adapter.calls, [])
 
     def test_free_while_testing_passes_charging(self):

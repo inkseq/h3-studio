@@ -1156,3 +1156,9 @@ inventory.json
 !studio_platform/inference/mock.py
 !studio_platform/quick_chat_migration_projection.py
 !tests/test_refactor_small_boundaries.py
+
+# #997 voice billing through the existing service ledger
+!studio_platform/speech_credit_proof.py
+!studio_platform/speech_requests.py
+!tests/test_speech_credit_core.py
+!tests/test_speech_billing.py

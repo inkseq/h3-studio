@@ -58,6 +58,8 @@ class ModuleBoundaryTests(unittest.TestCase):
 
     def test_domains_are_assigned_by_prefix(self):
         self.assertEqual(boundaries.domain("credits_routes"), "billing")
+        self.assertEqual(boundaries.domain("speech_credit_proof"), "billing")
+        self.assertEqual(boundaries.domain("speech_requests"), "billing")
         self.assertEqual(boundaries.domain("modal_host"), "capacity")
         self.assertEqual(boundaries.domain("story_chat"), "creation")
         self.assertEqual(boundaries.domain("repository"), "platform")

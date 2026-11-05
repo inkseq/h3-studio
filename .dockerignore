@@ -123,3 +123,7 @@ deploy/wangp/profiles/*
 # #899 shared HTTP/controller service composition
 !studio_platform/application_services.py
 !studio_platform/render_sources.py
+
+# #997 voice billing (also covered by the platform module wildcard)
+!studio_platform/speech_credit_proof.py
+!studio_platform/speech_requests.py

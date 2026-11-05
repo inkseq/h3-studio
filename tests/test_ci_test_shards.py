@@ -277,6 +277,7 @@ class ShardTests(unittest.TestCase):
             "test_platform_wangp_ref_api",
         }
         self.assertTrue(critical.issubset(ci.POSTGRES_MODULES))
+        self.assertIn("test_speech_credit_core", ci.POSTGRES_MODULES)
         self.assertEqual(len(ci.POSTGRES_MODULES), len(set(ci.POSTGRES_MODULES)))
         for name in ci.POSTGRES_MODULES:
             self.assertTrue((ci.ROOT / "tests" / (name + ".py")).is_file(), name)

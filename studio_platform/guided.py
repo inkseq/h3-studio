@@ -63,6 +63,22 @@ from .shot_segments import (
 from .inky_hooks import queue_refresh
 
 metadata = MetaData()
+
+
+def receipt_key(key, channel, *, create):
+    """Reserve a closed server-only key space before any receipt lookup."""
+    if channel is None:
+        if key is not None and (not isinstance(key, str) or not ID.fullmatch(key)):
+            raise ValueError("Idempotency-Key须为1至160个字母、数字、横线或下划线")
+    elif (
+        channel != "speech"
+        or create
+        or not isinstance(key, str)
+        or not re.fullmatch(r"speech-v1:(?:start|attach):[A-Za-z0-9_-]{8,64}", key)
+    ):
+        raise ValueError("Invalid internal receipt channel")
+
+
 receipts = Table(
     "platform_edit_receipts",
     metadata,
@@ -435,9 +451,17 @@ class Guided:
             queue_refresh(principal, project_id)
             return self.envelope({"document_id": project_id, **values})
 
-    def mutate(self, principal, project_id, body, key=None, *, create=False):
-        if key is not None and (not isinstance(key, str) or not ID.fullmatch(key)):
-            raise ValueError("Idempotency-Key须为1至160个字母、数字、横线或下划线")
+    def mutate(
+        self,
+        principal,
+        project_id,
+        body,
+        key=None,
+        *,
+        create=False,
+        receipt_channel=None,
+    ):
+        receipt_key(key, receipt_channel, create=create)
         fingerprint = request_hash(
             {
                 "create": create,

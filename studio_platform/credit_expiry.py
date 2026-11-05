@@ -44,12 +44,12 @@ def check_adoption(connection, tenant, old, new, now):
         .limit(1)
     ).first()
     terminal = entries.alias("expiry_service_terminal")
-    image_hold = connection.execute(
+    service_hold = connection.execute(
         select(entries.c.id)
         .where(
             entries.c.tenant == tenant,
             entries.c.kind == "hold",
-            entries.c.reference_type == "story_chat_image",
+            entries.c.reference_type.in_(("story_chat_image", "speech")),
             ~exists(
                 select(terminal.c.id).where(
                     terminal.c.tenant == entries.c.tenant,
@@ -62,7 +62,7 @@ def check_adoption(connection, tenant, old, new, now):
         )
         .limit(1)
     ).first()
-    if job or image_hold:
+    if job or service_hold:
         raise PricingError(
             "credit_expiry_adoption_busy",
             "Wait for accepted work before expiry adoption.",

@@ -1,8 +1,9 @@
 """Admin switches for voice (#997). Both default OFF.
 
-`voice_enabled` shows voices and allows generating. While customer charging is on and
-voice has no price, generating is refused unless `free_while_testing` is on, which a
-production deployment refuses outright. Same document, CAS and audit shape as pictures.
+`voice_enabled` shows voices and allows generating. When customer charging is on,
+voice reserves the character quote and captures only delivered audio unless
+`free_while_testing` is on, which production refuses outright. Existing CAS and audit
+shape are unchanged; enabling voice is still an explicit administrative decision.
 """
 
 import uuid

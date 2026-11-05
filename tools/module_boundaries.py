@@ -47,6 +47,8 @@ DOMAINS = (
             "budget_policy",
             "invoice_checks",
             "service_credits",
+            "speech_credit_proof",
+            "speech_requests",
             "reference_video_pricing",
             "settlement_recovery",
             "welcome_eligibility",
