@@ -2,6 +2,7 @@
 // previews and tests send nothing. No personal data: no request bodies, no form or chat
 // text, no console messages (they can echo prompts), and no IP or cookies.
 // Loaded after the page has drawn (#1022); errors before that wait in a short queue.
+import { runningVersion } from './version-check.js';
 let Sentry = null;
 const early = [];
 const EARLY_MAX = 10;
@@ -41,6 +42,7 @@ export function installMonitoring(location = globalThis.location) {
       loaded.init({
         dsn: DSN,
         environment,
+        release: runningVersion() || undefined,
         sendDefaultPii: false,
         tracesSampleRate: 0,
         beforeBreadcrumb: scrubBreadcrumb,

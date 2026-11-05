@@ -4,6 +4,7 @@
 // no cookies, anonymous
 // ids, Do Not Track respected, and events never carry prompts, story text or names.
 import { monitoringEnvironment } from './monitoring.js';
+import { runningVersion } from './version-check.js';
 
 const KEY = 'phc_rQdpUhKN9KJA8k9doCZGui6czQhqGj8NingDHmXmtEvc';
 let ready = false,
@@ -39,7 +40,7 @@ export function installAnalytics(location = globalThis.location) {
           mask_all_text: true,
           mask_all_element_attributes: true,
         });
-        posthog.register({ environment });
+        posthog.register({ environment, app_version: runningVersion() });
         ready = true;
         for (const [event, properties] of waiting.splice(0)) track(event, properties);
         waiting = null;

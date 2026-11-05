@@ -169,18 +169,18 @@
 }
 .chip i {
   font-style: normal;
-  opacity: 0.65;
+  font-weight: 400;
   margin-left: 4px;
 }
 .chip.character {
-  color: var(--char);
+  color: color-mix(in srgb, var(--char) 65%, var(--ink));
   background: var(--char-soft);
 }
 .chip.location {
-  color: var(--loc);
+  color: color-mix(in srgb, var(--loc) 65%, var(--ink));
   background: var(--loc-soft);
 }
 .chip.prop {
-  color: var(--prp);
+  color: color-mix(in srgb, var(--prp) 65%, var(--ink));
   background: var(--prp-soft);
 }
