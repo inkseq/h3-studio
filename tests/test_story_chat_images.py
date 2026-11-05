@@ -236,13 +236,79 @@ class StoryChatImageTests(unittest.TestCase):
         )
         self.assertEqual(len(self.images.calls), 1)
 
-    def test_older_shot_keeps_the_mode_the_editor_shows(self):
+    def test_older_shot_gets_the_mode_of_its_selected_recipe(self):
+        ref = {"version": 1, "mode": "ref"}
+        fl = {"version": 1, "mode": "fl"}
+        self.assertEqual(shot_storyboard({"h3": {"inputMode": "ref"}}), ref)
+        self.assertEqual(shot_storyboard({}), fl)
+        # An explicit recipe wins over the input mode, as in the draft compiler.
         self.assertEqual(
-            shot_storyboard({"h3": {"inputMode": "ref"}}), {"version": 1, "mode": "ref"}
+            shot_storyboard({"h3": {"recipeId": "h3-base-ref2va-v1"}}), ref
         )
-        self.assertEqual(shot_storyboard({}), {"version": 1, "mode": "fl"})
+        self.assertEqual(
+            shot_storyboard(
+                {"h3": {"recipeId": "h3-base-ref2va-v1", "inputMode": "fl"}}
+            ),
+            ref,
+        )
+        self.assertEqual(shot_storyboard({"h3": {"recipeId": "h3-base-fl2va-v1"}}), fl)
+        with self.assertRaises(ImageError):
+            shot_storyboard({"h3": {"recipeId": "not-a-recipe"}})
         kept = {"version": 1, "mode": "ref", "quality": "final"}
         self.assertEqual(shot_storyboard({"storyboard": kept}), kept)
+
+    def test_older_ref_recipe_shot_still_compiles_after_its_first_frame(self):
+        from studio_platform.storyboard import compile_draft
+
+        shot = self.shot()
+        project = self.client.get("/v1/projects/" + self.story["project_id"]).json()
+        created = self.client.post(
+            f"/v1/projects/{self.story['project_id']}/actions",
+            json={
+                "expected_version": project["version"],
+                "actions": [
+                    {
+                        "op": "entity.create",
+                        "entity": {
+                            "id": "older-ref-shot",
+                            "type": "shot",
+                            "parentId": shot["parentId"],
+                            "title": "Older REF shot",
+                            "data": {
+                                "seconds": 5,
+                                "prompt": "She looks up.",
+                                "h3": {"recipeId": "h3-base-ref2va-v1"},
+                            },
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        reply = self.draw("older-ref-shot", "pic-older-ref-1")
+        self.assertEqual(reply.status_code, 200, reply.text)
+        current = self.project()
+        entity = next(e for e in current["entities"] if e["id"] == "older-ref-shot")
+        self.assertEqual(entity["data"]["storyboard"]["mode"], "ref")
+        # The API shows the public recipe name.
+        self.assertEqual(entity["data"]["h3"]["recipeId"], "video-ref-v1")
+        compiled = compile_draft(
+            current, entity, recipes=[{"id": "video-ref-v1", "mode": "ref"}]
+        )
+        self.assertNotIn("分镜模式与保存配方不一致", str(compiled))
+
+    def test_shot_with_an_unknown_recipe_is_refused_before_any_spending(self):
+        # Saving an unknown recipe needs an administrator, so the stored shape is simulated here.
+        refused = ImageError("story_chat_shot_settings_invalid", 409)
+        with patch(
+            "studio_platform.story_chat_images.shot_storyboard", side_effect=refused
+        ):
+            reply = self.draw(self.shot()["id"], "pic-unknown-001")
+        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(
+            reply.json()["detail"]["code"], "story_chat_shot_settings_invalid"
+        )
+        self.assertEqual(self.images.calls, [])
 
     def test_opening_hidden_keeps_the_story_out_of_quick_create(self):
         story = self.client.post("/v1/projects", json={"title": "Plain story"}).json()

@@ -246,14 +246,23 @@ RELEASE_REASON = {
 
 
 def shot_storyboard(data):
-    """A shot's generation settings. An older shot may have none: it gets the mode the editor
-    already shows for it (storyboard-domain.js), because a stored block must be complete."""
+    """A shot's generation settings. An older shot may have none: it gets the mode of the recipe
+    the draft compiler would select, because a stored block must be complete and agree with it.
+    A selection that resolves to no recipe is refused, so the route stops before any spending."""
+    from .capabilities import RECIPES
+    from .generation_draft import selected_recipe
+
     current = data.get("storyboard")
     if current:
         return current
     h3 = data.get("h3")
-    mode = h3.get("inputMode") if isinstance(h3, dict) else None
-    return {"version": 1, "mode": mode if mode in {"fl", "ref"} else "fl"}
+    recipe = selected_recipe(
+        [{"id": key, "mode": mode} for key, mode in RECIPES.items()],
+        h3 if isinstance(h3, dict) else {},
+    )
+    if recipe is None:
+        raise ImageError("story_chat_shot_settings_invalid", 409)
+    return {"version": 1, "mode": recipe["mode"]}
 
 
 def input_hash(project, card, instruction):
