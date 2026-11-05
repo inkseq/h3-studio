@@ -25,6 +25,7 @@ inkseq.com, www.sixnine.art {
         Strict-Transport-Security "max-age=31536000"
         X-Frame-Options DENY
         Content-Security-Policy "frame-ancestors 'none'"
+        Content-Security-Policy-Report-Only "default-src 'self'; script-src 'self' https://us-assets.i.posthog.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.r2.cloudflarestorage.com; media-src 'self' data: blob: https://*.r2.cloudflarestorage.com; connect-src 'self' https://*.r2.cloudflarestorage.com https://us.i.posthog.com https://us-assets.i.posthog.com https://*.ingest.us.sentry.io; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
         -Server
     }
     # 512 MiB file + 1 MiB multipart envelope; app checks actual receive bytes.
