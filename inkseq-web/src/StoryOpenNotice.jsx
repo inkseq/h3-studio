@@ -5,7 +5,7 @@ import { Dialog } from './ui/Dialog.jsx';
 import { Spinner } from './ui/Field.jsx';
 import { createPortal } from 'react-dom';
 import { usePageActive } from './AppRouteCache.jsx';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { store } from './store.js';
 import { useI18n } from './i18n/I18nProvider.jsx';

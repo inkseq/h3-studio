@@ -1,4 +1,4 @@
-import { lastAccount } from './account-access.js';
+import { useCloud } from './use-cloud.js';
 import { TrashMenu } from './UniversalTrash.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
@@ -6,7 +6,7 @@ import { FloatingMessage } from './floating-notice.js';
 import HostedSignIn from './HostedSignIn.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import './i18n/workspace-language.css';
-import React, { useEffect, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LogOut, RefreshCw, ChevronRight } from 'lucide-react';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
@@ -17,12 +17,6 @@ import ApiKeys from './ApiKeys.jsx';
 import GenerationFailure from './GenerationFailure.jsx';
 import { ServiceStatus } from './ServiceStatus.jsx';
 
-export const useCloud = () => useSyncExternalStore(cloud.subscribe, cloud.getState, cloud.getState);
-// Who to draw the page frame for: the account, or while the sign-in read is out, the last one.
-export function useFrameAccount(account) {
-  const { sessionReady } = useCloud();
-  return account || (sessionReady ? null : lastAccount());
-}
 const run = (promise) => promise.catch(() => {});
 export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
   const { t } = useI18n();

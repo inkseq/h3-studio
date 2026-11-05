@@ -5,7 +5,7 @@ import StudioHeader from './StudioHeader.jsx';
 import { createCloudClient } from './cloud-client.js';
 import { navigateApp } from './app-navigation.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import './story-open.css';
 
 // The original Quick Create is gone (owner, 2026-10-24). Its old links (?session=, card,

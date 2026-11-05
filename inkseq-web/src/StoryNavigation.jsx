@@ -30,7 +30,7 @@ import {
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useThumbnailSource } from './use-thumbnail-source.js';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { useAccountLabel } from './StudioHeader.jsx';
 import {
   createLocalStory,

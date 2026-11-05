@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Button } from './ui/Button.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { useClient } from './AdminConsole.jsx';
+import { useClient } from './use-client.js';
 import { TERMS_REQUIRED } from './terms-gate.js';
 import { LEGAL } from './legal-content.js';
 

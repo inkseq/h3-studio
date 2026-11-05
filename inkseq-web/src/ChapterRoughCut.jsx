@@ -4,7 +4,7 @@ import { Button } from './ui/Button.jsx';
 import React, { useSyncExternalStore } from 'react';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { roughCutSnapshot, roughCutSummary, roughCutJobs } from './roughcut-model.js';
 import {
   stableJSON,

@@ -8,7 +8,7 @@ import { Login } from './LoginDialog.jsx';
 import { navigateApp } from './app-navigation.js';
 import { usePageActive } from './AppRouteCache.jsx';
 import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { hostedSignInEnabled, hostedSignInUrl } from './account-access.js';
 import './landing.css';
 

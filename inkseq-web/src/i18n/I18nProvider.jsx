@@ -1,7 +1,23 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import { Button } from '../ui/Button.jsx';
 import { Globe } from 'lucide-react';
-import { isLocale, LOCALE_STORAGE_KEY, readLocale, rememberLocale, translate } from './locale.js';
+import {
+  isLocale,
+  LOCALE_STORAGE_KEY,
+  readLocale,
+  readWordsVersion,
+  rememberLocale,
+  subscribeWords,
+  translate,
+} from './locale.js';
 
 const I18nContext = createContext(null);
 const browserStorage = () => {
@@ -36,9 +52,11 @@ export function I18nProvider({ account = '', children }) {
     },
     [account],
   );
+  // Late words arrived: a new value makes the pages that drew without them draw again.
+  const wordsVersion = useSyncExternalStore(subscribeWords, readWordsVersion, readWordsVersion);
   const value = useMemo(
-    () => ({ locale, setLocale, t: (key, values) => translate(locale, key, values) }),
-    [locale, setLocale],
+    () => ({ locale, setLocale, wordsVersion, t: (key, vars) => translate(locale, key, vars) }),
+    [locale, setLocale, wordsVersion],
   );
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }

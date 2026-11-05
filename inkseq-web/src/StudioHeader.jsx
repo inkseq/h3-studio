@@ -16,7 +16,7 @@ import { LanguageSwitcher, useI18n } from './i18n/I18nProvider.jsx';
 import { navigateApp } from './app-navigation.js';
 import { currentSupportView, endSupportView } from './support-view.js';
 import { accountLabel, readAccess, readAccessFor, rememberedAccess } from './account-access.js';
-import { useFrameAccount } from './CloudStudio.jsx';
+import { useFrameAccount } from './use-cloud.js';
 import { CreditsChip } from './CreditsUI.jsx';
 import AccountMenu from './AccountMenu.jsx';
 import ReportProblem from './ReportProblem.jsx';

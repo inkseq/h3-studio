@@ -7,7 +7,7 @@ import { Button } from './ui/Button.jsx';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { CreditUsageBar, creditShortfall, useCredits } from './CreditsUI.jsx';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { batchEnhanceTakes, enhanceable } from './enhance-take.js';
