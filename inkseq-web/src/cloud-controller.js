@@ -1903,6 +1903,7 @@ export function createCloudController({
     requireCloud();
     const ctx = context(),
       base = `/v1/story-chats/${encodeURIComponent(ctx.projectId)}`;
+    if (current().workspace.dirty) await save();
     await api.request(base + '/open', { method: 'POST', body: { language, hidden: true } });
     guard(ctx);
     // Drawing plus storing a picture takes 15–40 s.

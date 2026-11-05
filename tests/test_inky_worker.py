@@ -179,6 +179,30 @@ class InkyWorkerTests(InkyStoreTests):
             )
         self.assertEqual(worker.examples.rewrite.call_count, 1)
 
+    def test_a_shot_with_nobody_in_it_gets_no_advice_about_feelings(self):
+        worker = self.worker()
+        entry, (source, _) = self.rewrite_target(self.rewrite_worker())
+        empty = {**source, "context": {**source["context"], "characters": []}}
+        with patch(
+            "studio_platform.inky_worker.text_findings",
+            return_value=["emotion_not_shown", "vague_action"],
+        ):
+            findings, _ = worker.evaluate(
+                self.principal, self.scope.project_id, empty, 0
+            )
+        self.assertEqual([f["kind"] for f in findings], ["vague_action"])
+
+    def test_saved_advice_about_feelings_stays_hidden_on_a_shot_with_nobody(self):
+        worker = self.rewrite_worker()
+        self.refresh(worker)
+        before = self.read()["items"]
+        with patch(
+            "studio_platform.inky_store.finding_applies",
+            side_effect=lambda kind, value: kind != before[0]["kind"],
+        ):
+            after = self.read()["items"]
+        self.assertNotIn(before[0]["kind"], [item["kind"] for item in after])
+
     def test_budget_exhaustion_keeps_templates_and_logs_without_context(self):
         InkyBudget(self.repo).reserve(
             tenant="other",

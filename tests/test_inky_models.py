@@ -53,6 +53,14 @@ class InkyModelsTests(unittest.TestCase):
             ):
                 core.judgement_payload(self.source(**changes))
 
+    def test_a_shot_with_nobody_in_it_has_no_feeling_to_act_out(self):
+        empty = {"characters": []}
+        self.assertFalse(core.finding_applies("emotion_not_shown", empty))
+        self.assertTrue(core.finding_applies("vague_action", empty))
+        self.assertTrue(
+            core.finding_applies("emotion_not_shown", {"characters": ["Lin"]})
+        )
+
     def test_expected_score_threshold_is_inclusive_only_for_keyframe(self):
         answers = {
             "spec": self.distribution(),

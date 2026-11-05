@@ -3,7 +3,7 @@
 from sqlalchemy import insert, select, update
 
 from .content_lifecycle import _assert_project_available, owner_reference_gate
-from .inky_models import KINDS, REWRITE_KINDS, example_text
+from .inky_models import KINDS, REWRITE_KINDS, example_text, finding_applies
 from .inky_source import item, sources, suggestion_id
 from .repository import Conflict, NotFound, Scope, documents, request_hash
 
@@ -142,6 +142,9 @@ class InkyStore:
                 if not source or source["source_id"] != value.get("source_id"):
                     continue
                 for entry in value.get("items", []):
+                    # Advice saved before this rule stays hidden too.
+                    if not finding_applies(entry["kind"], source["context"]):
+                        continue
                     if entry["kind"] == "upload_card" and not self.upload_available(
                         principal, project_id, source
                     ):

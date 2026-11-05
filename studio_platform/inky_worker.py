@@ -7,7 +7,7 @@ Real adapters must enforce their quoted worst-case cost before this can activate
 import logging
 
 from .inky_budget import InkyBudget
-from .inky_models import example_text, rewrite_text, text_findings
+from .inky_models import example_text, finding_applies, rewrite_text, text_findings
 from .inky_source import sources
 from .repository import Conflict, NotFound
 
@@ -69,6 +69,8 @@ class InkyWorker:
             kinds = []
         findings, attempted = [], 0
         for kind in kinds:
+            if not finding_applies(kind, source["context"]):
+                continue
             if not self.store.eligible(principal, project_id, source, kind):
                 continue
             entry = {"kind": kind}

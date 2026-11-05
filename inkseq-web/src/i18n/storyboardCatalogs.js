@@ -261,6 +261,8 @@ export const storyboardCatalogs = {
       "The picture becomes this shot's first frame, so you can check the look before making the video.",
     'shotPicture.failed':
       'That picture did not work. Nothing was added to the shot. Please try again.',
+    'shotPicture.settingsChanged':
+      "This shot's settings changed, so no picture was made and nothing was charged. Please try again.",
     'shotPicture.cancel': 'Cancel',
     'shotPicture.confirm': 'Make it',
     'voice.title': 'Choose a voice',
@@ -890,6 +892,8 @@ export const storyboardCatalogs = {
     'shotPicture.title': '生成首帧',
     'shotPicture.note': '这张图会成为这个镜头的首帧，可以先看画面，再生成视频。',
     'shotPicture.failed': '这张图没有生成成功，镜头没有变化。请再试一次。',
+    'shotPicture.settingsChanged':
+      '这个镜头的设置刚刚变了，所以没有生成，也没有扣积分。请再试一次。',
     'shotPicture.cancel': '取消',
     'shotPicture.confirm': '生成',
     'voice.title': '选择声音',
