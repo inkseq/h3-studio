@@ -172,7 +172,7 @@ class DstackPreview:
                     == "prefer"
                 )
 
-            # Vast only from these countries; the next lane covers the rest (owner, 2026-11-06).
+            # Vast only from the US; the next lane covers the rest (owner, 2026-11-06).
             allowed = [
                 r
                 for r in offers
