@@ -34,7 +34,8 @@ MAX_ACTIONS = 40
 MAX_SCRIPT_ACTIONS = 120
 MAX_SHOTS = 60
 MAX_CARDS = 60
-SECONDS = (2, 10)
+# The video model's own limit is 4 to 15 seconds; a shorter shot can never be generated.
+SECONDS = (4, 10)
 KINDS = {"character": "character", "place": "location", "prop": "prop"}
 TURN_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 LANGUAGES = {"zh", "en"}
