@@ -1523,13 +1523,36 @@ body.sb-resizing-y video {
 
 /* Steps of a story (#995): one slim row above the page; the page keeps its own layout below it. */
 .layout.A {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
-.sb-stages {
-  grid-column: 1 / -1;
-  display: flex;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--line);
+.wbar {
+  position: relative;
+}
+.wbar-stages {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+/* No room in the middle: the steps take their own row under the bar. */
+@media (max-width: 1100px) {
+  .v2-story-view .wbar {
+    height: auto;
+    min-height: 48px;
+    flex-wrap: wrap;
+    row-gap: 4px;
+    padding-block: 6px;
+  }
+  .wbar-stages {
+    position: static;
+    order: 10;
+    flex-basis: 100%;
+    transform: none;
+  }
+  .wbar-stages .sb-stages {
+    display: flex;
+    justify-content: center;
+  }
 }
 .layout.A.stage-library > .col {
   display: none;

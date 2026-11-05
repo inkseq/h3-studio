@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cornerState, itemHref, openItems, perchPoint } from './inky/inky-model.js';
+import { cornerState, itemHref, openItems } from './inky/inky-model.js';
 
 const item = (id, kind = 'vague_action', shot_id = 's1') => ({ id, kind, shot_id });
 
@@ -36,19 +36,4 @@ test('corner state: quiet while typing, notify only for unseen items', () => {
   assert.equal(cornerState({ count: 2, typing: true, seen: 0 }), 'quiet');
   assert.equal(cornerState({ count: 2, typing: false, seen: 1 }), 'notify');
   assert.equal(cornerState({ count: 2, typing: false, seen: 2 }), 'idle');
-});
-
-test('Inky perches beside a field without covering it', () => {
-  const vp = { width: 1440, height: 900 };
-  assert.deepEqual(perchPoint({ left: 100, right: 500, top: 300 }, vp), {
-    side: 'right',
-    left: 510,
-    top: 300,
-  });
-  // A field at the right edge: Inky sits to its left, anchored from the right.
-  assert.deepEqual(perchPoint({ left: 1019, right: 1422, top: 4 }, vp), {
-    side: 'left',
-    right: 1440 - 1019 + 10,
-    top: 10,
-  });
 });
