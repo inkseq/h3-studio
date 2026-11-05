@@ -28,17 +28,10 @@ BACKEND_MARKER = "dstack-v1"
 
 MAX_HOST_CANDIDATES = 10
 
+# Vast starts by place, staging 10-31 to 11-05: US 9 ready of 11 (both failures one machine),
+# Europe 1 of 5. Owner, 2026-11-06: blacklist where machines do not start.
 PREFERRED_DOWNLOAD_COUNTRIES = frozenset(
-    'us at be bg hr cy cz dk ee fi fr de gr hu ie it lv lt lu mt nl pl pt ro sk si es se'.split()
-) | frozenset(
-    (
-        'United States|United States of America|Austria|Belgium|Bulgaria|Croatia|Cyprus|'
-        'Czechia|Czech Republic|Denmark|Estonia|Finland|France|Germany|Greece|Hungary|'
-        'Ireland|Italy|Latvia|Lithuania|Luxembourg|Malta|Netherlands|Poland|Portugal|'
-        'Romania|Slovakia|Slovenia|Spain|Sweden'
-    )
-    .lower()
-    .split('|')
+    {"us", "usa", "united states", "united states of america"}
 )
 
 

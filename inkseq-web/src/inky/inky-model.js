@@ -3,6 +3,8 @@
 import { guideHref } from '../guide.js';
 
 export const INKY_KINDS = Object.freeze({
+  continuity_mismatch: 'action',
+  continuity_question: 'action',
   vague_action: 'action',
   emotion_not_shown: 'action',
   multiple_camera_moves: 'action',
@@ -12,7 +14,9 @@ export const INKY_KINDS = Object.freeze({
 });
 export const INKY_MAX_OPEN = 3;
 // Advice about the action text: Inky can draft a new version of it.
-export const canRewrite = (kind) => INKY_KINDS[kind] === 'action';
+// Not when two shots disagree: which one is right is the person's call.
+export const isContinuity = (kind) => kind?.startsWith('continuity_');
+export const canRewrite = (kind) => INKY_KINDS[kind] === 'action' && !isContinuity(kind);
 
 const valid = (item) =>
   item &&
@@ -33,6 +37,9 @@ export function openItems(items, { ignored = new Set(), shotIds = null } = {}) {
 export const itemField = (item) => item.field || INKY_KINDS[item.kind];
 export const itemHref = (item, projectId) =>
   guideHref({ projectId, shotId: item.shot_id, field: itemField(item) });
+// The earlier shot a continuity note compares with. Its card clash has none.
+export const otherHref = (item, projectId) =>
+  guideHref({ projectId, shotId: item.other_shot_id, field: 'action' });
 
 // Mascot state for the corner button: quiet while the person types, notify when there is
 // something new, otherwise idle.

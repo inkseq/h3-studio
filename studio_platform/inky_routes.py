@@ -32,8 +32,12 @@ def contract():
             "lang",
             "example?",
             "card_name?",
+            "note?",
+            "other_shot_id?",
         ],
         "kinds": [
+            "continuity_mismatch",
+            "continuity_question",
             "vague_action",
             "needs_keyframe",
             "emotion_not_shown",

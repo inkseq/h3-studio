@@ -9,7 +9,13 @@ import json
 import httpx
 
 from .central_registry import load_api
-from .inky_models import example_payload, judgement_payload, rewrite_payload
+from .inky_models import (
+    continuity_note_payload,
+    continuity_payload,
+    example_payload,
+    judgement_payload,
+    rewrite_payload,
+)
 
 TYPE_PROFILE = "typesafe--avatar-user-20261008"
 OPEN_PROFILE = "openai--inkseq"
@@ -39,7 +45,7 @@ class Client:
             raise InkyProviderError("inky_profile_invalid")
         self.service, self.loader, self.transport = service, loader, transport
 
-    def post(self, path, body, *, images=False):
+    def post(self, path, body, *, images=False, read_timeout=8):
         from .llm_tracing import clip, generation, usage as traced_usage
 
         model = body.get("model") if isinstance(body, dict) else None
@@ -49,7 +55,7 @@ class Client:
             # Upload judgements carry a picture: record that one was sent, never the bytes.
             input={"images": True} if images else clip(body),
         ) as traced:
-            value = self._post(path, body, images=images)
+            value = self._post(path, body, images=images, read_timeout=read_timeout)
             usage = value.get("usage") if isinstance(value.get("usage"), dict) else {}
             details = usage.get("prompt_tokens_details")
             traced.update(
@@ -67,7 +73,7 @@ class Client:
             )
         return value
 
-    def _post(self, path, body, *, images=False):
+    def _post(self, path, body, *, images=False, read_timeout=8):
         try:
             cfg = self.loader(self.service)
             origin = TYPE_ORIGIN if self.service == "typesafe" else OPEN_ORIGIN
@@ -82,7 +88,7 @@ class Client:
             ):
                 raise InkyProviderError("inky_profile_invalid")
             with httpx.Client(
-                timeout=httpx.Timeout(8, connect=3),
+                timeout=httpx.Timeout(read_timeout, connect=3),
                 follow_redirects=False,
                 transport=self.transport,
                 trust_env=False,
@@ -125,6 +131,9 @@ class Jev:
     def __call__(self, source):
         return self.client.post("/systemone", judgement_payload(source))
 
+    def continuity(self, state):
+        return self.client.post("/systemone", continuity_payload(state))
+
     def upload(self, upload, jpeg):
         from .inky_uploads import upload_payload
 
@@ -161,14 +170,24 @@ class Terra:
     def rewrite(self, source, kind):
         return self._complete(rewrite_payload(source, kind))
 
-    def _complete(self, body):
+    def continuity(self, state, lang):
+        # A whole story: 64KiB of message bytes + 4096 framing tokens at $1/M and 2048 output tokens
+        # at $5/M => about $0.08, also below the reservation. It reads longer than a tip.
+        return self._complete(
+            continuity_note_payload(state, lang),
+            max_bytes=65536,
+            max_tokens=2048,
+            read_timeout=30,
+        )
+
+    def _complete(self, body, *, max_bytes=16384, max_tokens=1024, read_timeout=8):
         size = sum(
             len(message["content"].encode("utf-8")) for message in body["messages"]
         )
-        if size > 16384:
+        if size > max_bytes:
             raise InkyProviderError("inky_example_context_limit")
-        body.update(max_completion_tokens=1024, stream=False)
-        result = self.client.post("/chat/completions", body)
+        body.update(max_completion_tokens=max_tokens, stream=False)
+        result = self.client.post("/chat/completions", body, read_timeout=read_timeout)
         actual = token_cost(result.get("usage"))
         choices = result.get("choices")
         text = None

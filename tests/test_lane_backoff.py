@@ -55,10 +55,12 @@ class LaneBackoffTests(unittest.TestCase):
             [(1300, "a" * 32, "modal-dialout")],
         )
 
-    def test_one_failing_lane_backs_off_alone_and_cross_lane_loops_still_pause(self):
+    def test_failing_lanes_back_off_alone_and_only_real_loops_pause(self):
         one = [(200, "a", "modal-dialout"), (400, "b", "modal-dialout")]
         self.assertFalse(start_loop(one))
-        self.assertTrue(start_loop([(200, "a", "modal-dialout"), (400, "b", "vastai")]))
+        self.assertFalse(
+            start_loop([(200, "a", "modal-dialout"), (400, "b", "vastai")])
+        )
         self.assertTrue(start_loop([(200, "a", None), (400, "b", "vastai")]))
         self.assertTrue(start_loop([(t, str(t), "vastai") for t in range(4)]))
         self.assertFalse(start_loop([(200, "a", None)]))

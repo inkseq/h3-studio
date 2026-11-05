@@ -1250,7 +1250,7 @@ class DemandStartTests(LedgerCase):
         self.assertTrue(preview['offers'])
         self.assertEqual(self.repo.get_job(self.scope, job['id']), job)
 
-    def test_us_eu_offer_preference_preserves_other_qualifying_fallback(self):
+    def test_vast_offers_outside_the_us_are_not_used(self):
         native = self.client.plan
 
         def plan(spec):
@@ -1277,8 +1277,8 @@ class DemandStartTests(LedgerCase):
                 dict(
                     offer_id='54321',
                     machine_id='19494',
-                    country='Germany',
-                    region='de-berlin',
+                    country='US',
+                    region='us-texas',
                     advertised_download_mbps=1500,
                 ),
             ],
@@ -1286,7 +1286,7 @@ class DemandStartTests(LedgerCase):
         preview = self.service.preview(
             self.owner, dict(profile_id='5090-fl', keep_on='idle')
         )
-        self.assertEqual([r['offer_id'] for r in preview['offers']], ['54321', '12345'])
+        self.assertEqual([r['offer_id'] for r in preview['offers']], ['54321'])
         self.client.vast_offer_mapping = lambda *a, **kw: dict(
             observed_at=self.now,
             offers=[
@@ -1299,10 +1299,8 @@ class DemandStartTests(LedgerCase):
                 )
             ],
         )
-        fallback = self.service.preview(
-            self.owner, dict(profile_id='5090-fl', keep_on='idle')
-        )
-        self.assertEqual([r['offer_id'] for r in fallback['offers']], ['12345'])
+        with self.assertRaisesRegex(Exception, 'dstack_no_compatible'):
+            self.service.preview(self.owner, dict(profile_id='5090-fl', keep_on='idle'))
 
     def test_fresh_bandwidth_floor_drift_refuses_before_paid_apply(self):
         preview = self.service.preview(

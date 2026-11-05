@@ -446,6 +446,25 @@ def download_too_slow(binding, now, *, fresh_seconds=30):
     return rate is not None and rate < MIN_DOWNLOAD_BYTES_PER_SECOND
 
 
+# Measured on staging, 2026-10-31 to 11-05: 8 healthy machines were ready 43 to 270 s after the
+# model finished downloading. 4 bad ones had not loaded it after 690 to 1032 s.
+MODEL_LOAD_SECONDS = 360
+
+
+def model_load_stalled(binding, now):
+    """The whole model arrived, yet the machine has not loaded it in far longer than a good one."""
+    progress = binding.get("download_progress")
+    if not isinstance(progress, dict) or progress.get("valid") is not True:
+        return False
+    done = progress.get("completed_at")
+    return (
+        type(done) in (int, float)
+        and math.isfinite(done)
+        and binding.get("first_runtime_ready_at") is None
+        and now - done >= MODEL_LOAD_SECONDS
+    )
+
+
 def download_startup_credit(binding, now):
     """Seconds of measured on-pace download excluded from the cold-start window.
 

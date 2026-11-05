@@ -90,7 +90,8 @@ html[data-skin='taisho'] .home-main::before {
 html[data-skin='taisho'] .home-main {
   position: relative;
 }
-html[data-skin='taisho'] .home-main > * {
+/* Sticky navigation is already positioned above the pattern; relative would unstick it. */
+html[data-skin='taisho'] .home-main > :not(.visually-hidden, .snav) {
   position: relative;
 }
 html[data-skin='taisho'] .page-title {

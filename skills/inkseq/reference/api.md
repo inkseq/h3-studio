@@ -672,3 +672,14 @@ PATCH requires project read and write scopes. On CAS409, reload and resolve the
 user's intent; after an unknown response, read the original settings before any
 new write. Muting hides advice and suppresses new claims, without modifying shots
 or cancelling an already accepted external call. Views use `Cache-Control:no-store`.
+
+## Writing shots
+
+Only when the person asks you to write or rework shots; their own words stay as they are.
+
+- Open on someone moving, with the conflict clear in 3 seconds. End on a hook.
+- Prefer 4-5 second shots, the shortest the video model makes. Cut between speakers and show the listener after a heavy line.
+- Name a framing and angle that changes between shots, and one camera move as an action.
+- Say where each person is. Use everyday actions, and show feelings in the body.
+- A shot that follows another keeps its people, clothes, props and place unless the story changes them.
+- Spoken lines use `(S1) <d>[Chinese] line</d>`, never quotation marks, which get drawn on screen.

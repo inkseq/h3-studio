@@ -3,12 +3,20 @@
 from sqlalchemy import insert, select, update
 
 from .content_lifecycle import _assert_project_available, owner_reference_gate
-from .inky_models import KINDS, REWRITE_KINDS, example_text
+from .inky_continuity import reviews
+from .inky_models import (
+    CONTINUITY_KINDS,
+    KINDS,
+    REWRITE_KINDS,
+    example_text,
+    finding_applies,
+)
 from .inky_source import item, sources, suggestion_id
 from .repository import Conflict, NotFound, Scope, documents, request_hash
 
 CACHE = "inky_cache"
 CLAIM = "inky_evaluation"
+CONTINUITY = "inky_continuity"
 IGNORE = "inky_ignore"
 SETTINGS = "inky_settings"
 
@@ -142,19 +150,50 @@ class InkyStore:
                 if not source or source["source_id"] != value.get("source_id"):
                     continue
                 for entry in value.get("items", []):
+                    # Advice saved before this rule stays hidden too.
+                    if not finding_applies(entry["kind"], source["context"]):
+                        continue
                     if entry["kind"] == "upload_card" and not self.upload_available(
                         principal, project_id, source
                     ):
                         continue
                     if self.ignore_id(source["shot_id"], entry["kind"]) not in ignored:
                         visible.append(entry)
-            visible.sort(key=lambda v: (v["shot_id"], KINDS.index(v["kind"])))
+            for value in conn.execute(
+                select(documents.c.payload).where(
+                    *self.where(principal, project_id, CONTINUITY)
+                )
+            ).scalars():
+                source = current.get(value.get("shot_id"))
+                other = value.get("other_shot_id")
+                # Holds until either shot changes; a recheck of an earlier edit may replace it.
+                if (
+                    not source
+                    or source["source_id"] != value.get("source_id")
+                    or (
+                        other is not None
+                        and (current.get(other) or {}).get("source_id")
+                        != value.get("other_source_id")
+                    )
+                ):
+                    continue
+                for entry in value.get("items", []):
+                    if self.ignore_id(source["shot_id"], entry["kind"]) not in ignored:
+                        visible.append(entry)
+
+            def rank(entry):
+                kind = entry["kind"]
+                first = CONTINUITY_KINDS.index(kind) if kind in CONTINUITY_KINDS else 2
+                return first, entry["shot_id"], KINDS.index(kind)
+
+            visible.sort(key=rank)
             return {"items": visible[:3]}
 
     def pending(self, principal, project_id):
         """Shots with something to judge and no evaluation yet. Never calls a provider."""
         with self.repo.transaction() as conn:
-            current = sources(self.project(conn, principal, project_id, write=True))
+            project = self.project(conn, principal, project_id, write=True)
+            current, compared = sources(project), reviews(project)
             settings = self.row(conn, principal, project_id, SETTINGS, "settings")
             if settings and settings["payload"].get("muted"):
                 return 0
@@ -170,7 +209,7 @@ class InkyStore:
             for source in current.values()
             if source["source_id"] not in claimed
             and (source["context"]["shot_action"].strip() or source.get("upload"))
-        )
+        ) + sum(1 for review in compared.values() if review["digest"] not in claimed)
 
     def claim(self, principal, project_id, shot_id):
         """Reserve exactly one evaluation per current source; never retry unknown."""
@@ -197,6 +236,82 @@ class InkyStore:
                 {"shot_id": shot_id, "state": "claimed"},
             )
             return source
+
+    def claim_continuity(self, principal, project_id):
+        """The earliest shot not yet compared with the story as it now stands."""
+        with self.repo.transaction() as conn:
+            project = self.project(conn, principal, project_id, write=True)
+            settings = self.row(conn, principal, project_id, SETTINGS, "settings")
+            if settings and settings["payload"].get("muted"):
+                return None
+            claimed = set(
+                conn.execute(
+                    select(documents.c.document_id).where(
+                        *self.where(principal, project_id, CLAIM)
+                    )
+                ).scalars()
+            )
+            for shot_id, review in reviews(project).items():
+                if review["digest"] in claimed:
+                    continue
+                self.put(
+                    conn,
+                    principal,
+                    project_id,
+                    CLAIM,
+                    review["digest"],
+                    {"shot_id": shot_id, "state": "claimed"},
+                )
+                return review
+            return None
+
+    def publish_continuity(self, principal, project_id, review, finding):
+        """A result for a story that has moved on is dropped; its new version gets checked."""
+        source = review["source"]
+        with self.repo.transaction() as conn:
+            current = reviews(
+                self.project(conn, principal, project_id, write=True)
+            ).get(source["shot_id"])
+            if not current or current["digest"] != review["digest"]:
+                return False
+            other = finding.get("other_shot_id") if finding else None
+            items = []
+            if finding:
+                entry = item(source, finding["kind"])
+                entry["note"] = finding["note"]
+                if other is not None:
+                    entry["other_shot_id"] = other
+                items.append(entry)
+            self.put(
+                conn,
+                principal,
+                project_id,
+                CONTINUITY,
+                source["shot_id"],
+                {
+                    "shot_id": source["shot_id"],
+                    "source_id": source["source_id"],
+                    "other_shot_id": other,
+                    "other_source_id": next(
+                        (
+                            review["others"][n]
+                            for n, ident in review["numbers"].items()
+                            if ident == other
+                        ),
+                        None,
+                    ),
+                    "items": items,
+                },
+            )
+            self.put(
+                conn,
+                principal,
+                project_id,
+                CLAIM,
+                review["digest"],
+                {"shot_id": source["shot_id"], "state": "published"},
+            )
+            return True
 
     def publish(self, principal, project_id, source, findings):
         """Late results and purged/trash sources cannot resurrect advice."""
@@ -326,7 +441,13 @@ class InkyStore:
             if not match:
                 raise Conflict("inky_suggestion_stale")
             source, kind = match
-            cache = self.row(conn, principal, project_id, CACHE, source["shot_id"])
+            cache = self.row(
+                conn,
+                principal,
+                project_id,
+                CONTINUITY if kind in CONTINUITY_KINDS else CACHE,
+                source["shot_id"],
+            )
             if not cache or not any(
                 v["id"] == ident for v in cache["payload"].get("items", [])
             ):

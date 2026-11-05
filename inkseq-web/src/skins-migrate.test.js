@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 function storage(values) {
   const map = new Map(Object.entries(values));
@@ -26,4 +27,13 @@ test('the old light/dark pair moves to coral once; later choices are kept', asyn
   globalThis.localStorage = storage({});
   assert.equal(chosenSkin(), '');
   delete globalThis.localStorage;
+});
+
+test('a skin never puts a hidden heading back into the page layout', () => {
+  // position: relative on every child of .home-main made the settings page's hidden <h1> take
+  // the first grid cell, so its navigation and content swapped places in that skin.
+  const css = readFileSync(new URL('./skins.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /\.home-main > \*/);
+  // Nor unsticks the settings navigation.
+  assert.match(css, /\.home-main > :not\(\.visually-hidden, \.snav\)/);
 });

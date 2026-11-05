@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 
 import test_platform_repository as ledger
 import test_dstack_operator as fixtures
+from studio_platform.host_policy import HostPolicyStore, denied_suppliers, selection
 from studio_platform.dstack_capacity import DstackClient, DstackError, _owns
 from studio_platform.host_scorecard import OperatorHosts
 from studio_platform.operator_capacity import operator_nodes
@@ -77,6 +78,82 @@ class HostSelectionTests(ledger.LedgerCase):
         run["run_spec"]["configuration"]["instance_types"] = ["bad"]
         with self.assertRaises(DstackError):
             _owns(run, binding, self.client.project)
+
+    def supplier_offers(self):
+        def mapping(*_args, **_kwargs):
+            return {
+                "observed_at": self.now,
+                "offers": [
+                    {
+                        "offer_id": "12345",
+                        "machine_id": "19493",
+                        "host_id": "777",
+                        "country": "US",
+                        "region": "us-texas",
+                        "advertised_download_mbps": 2000,
+                    },
+                    {
+                        "offer_id": "54321",
+                        "machine_id": "19494",
+                        "host_id": "777",
+                        "country": "Germany",
+                        "region": "de-berlin",
+                        "advertised_download_mbps": 2000,
+                    },
+                ],
+            }
+
+        self.client.vast_offer_mapping = mapping
+
+    def test_a_denied_machine_blacklists_its_supplier(self):
+        self.supplier_offers()
+        self.deny()
+        with self.repo.engine.connect() as connection:
+            suppliers = denied_suppliers(
+                HostPolicyStore(self.repo, self.settings.tenant_id),
+                connection,
+                [],
+                self.client.vast_offer_mapping()["offers"],
+            )
+        self.assertEqual(suppliers, {"777"})
+
+    def test_supplier_from_an_earlier_start_is_still_known(self):
+        self.supplier_offers()
+        self.deny()
+        past = [
+            {
+                "payload": {
+                    "dstack": {
+                        "host_selection": {
+                            "offers": [{"machine_id": "19493", "host_id": "888"}]
+                        }
+                    }
+                }
+            }
+        ]
+        with self.repo.engine.connect() as connection:
+            suppliers = denied_suppliers(
+                HostPolicyStore(self.repo, self.settings.tenant_id),
+                connection,
+                past,
+                [],
+            )
+        self.assertEqual(suppliers, {"888"})
+
+    def test_supplier_id_is_accepted_in_a_frozen_selection(self):
+        offer = self.client.vast_offer_mapping
+        self.supplier_offers()
+        value = selection(
+            {
+                "version": 1,
+                "observed_at": self.now,
+                "expires_at": self.now + 60,
+                "policy_snapshot": "0" * 64,
+                "offers": self.client.vast_offer_mapping()["offers"],
+            }
+        )
+        self.assertEqual(value["offers"][0]["host_id"], "777")
+        self.client.vast_offer_mapping = offer
 
     def test_manual_deny_or_mapping_drift_refuses_before_reservation(self):
         preview = self.preview()
