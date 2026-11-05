@@ -87,6 +87,9 @@ import { useShotReadiness } from './shot-readiness.js';
 import { StoryboardNameDialog } from './StoryboardDialog.jsx';
 import { createStoryboardPlayback } from './storyboard-playback.js';
 
+// A draggable card that holds buttons of its own is a group, not one big button.
+const CARD_WITH_BUTTONS = { role: 'group' };
+
 function displayLabels(tr) {
   return {
     TYPE_LABEL: {
@@ -135,6 +138,7 @@ function Tile({ asset, used, onClick, onZoom, dragId, children }) {
   const { t: tr } = useI18n();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: dragId || 'asset:' + asset.id,
+    attributes: CARD_WITH_BUTTONS,
   });
   return (
     <div
@@ -210,7 +214,7 @@ function Tile({ asset, used, onClick, onZoom, dragId, children }) {
 function ProfileCard({ p, used, onOpen, onAdd }) {
   const { t: tr } = useI18n();
   const { db, state } = useStore();
-  const drag = useDraggable({ id: 'profile:' + p.id });
+  const drag = useDraggable({ id: 'profile:' + p.id, attributes: CARD_WITH_BUTTONS });
   const drop = useDroppable({ id: 'pdrop:' + p.id });
   const cover = coverOf(db, p, p.def);
   const count = p.variants.reduce((n, v) => n + v.images.length, 0);
@@ -1450,7 +1454,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
 /* ---------- shot card ---------- */
 
 export function useShotSortable(id) {
-  const s = useSortable({ id: 'shot:' + id });
+  const s = useSortable({ id: 'shot:' + id, attributes: CARD_WITH_BUTTONS });
   return {
     ...s,
     style: {

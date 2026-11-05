@@ -1,8 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { entryOf, installVersionCheck, isNewer } from './version-check.js';
+import { entryOf, installVersionCheck, isNewer, runningVersion } from './version-check.js';
 
 const page = (entry) => `<script type="module" crossorigin src="${entry}"></script>`;
+
+test('the running version is the hash of the entry script', () => {
+  const docWith = (...sources) => ({
+    querySelectorAll: () => sources.map((source) => ({ getAttribute: () => source })),
+  });
+  assert.equal(
+    runningVersion(docWith('https://cdn.example/recorder.js', '/assets/index-Dg0_PIQm.js')),
+    'Dg0_PIQm',
+  );
+  assert.equal(runningVersion(docWith('/src/main.jsx')), null);
+  assert.equal(runningVersion(null), null);
+});
 
 test('reads the hashed entry script', () => {
   assert.equal(entryOf(page('/assets/index-Dg0PIQOm.js')), '/assets/index-Dg0PIQOm.js');

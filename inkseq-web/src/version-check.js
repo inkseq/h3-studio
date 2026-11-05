@@ -11,6 +11,16 @@ export function entryOf(html) {
   return String(html || '').match(ENTRY)?.[0] || null;
 }
 
+const entryScript = (doc) =>
+  entryOf(
+    [...doc.querySelectorAll('script[src]')].map((script) => script.getAttribute('src')).join(' '),
+  );
+
+/** This page's build: the hash in its entry script's name. Null on the dev server. */
+export function runningVersion(doc = globalThis.document) {
+  return (doc && entryScript(doc)?.match(/index-([\w-]+)\.js/)?.[1]) || null;
+}
+
 /** True only when both entries are known and differ. */
 export const isNewer = (running, served) => !!running && !!served && running !== served;
 
@@ -21,9 +31,7 @@ export function installVersionCheck({
   reload = () => window.location.reload(),
   every = EVERY,
 } = {}) {
-  const running = entryOf(
-    [...doc.querySelectorAll('script[src]')].map((script) => script.getAttribute('src')).join(' '),
-  );
+  const running = entryScript(doc);
   if (!running) return () => {};
   let shown = false,
     busy = false;
