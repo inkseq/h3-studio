@@ -57,7 +57,7 @@ def build(commit, destination):
     destination = Path(destination)
     # Refuse an existing destination; never absorb private files in an artifact.
     destination.mkdir(parents=False, exist_ok=False)
-    image = "sixnine-platform:"+commit
+    image = "inkseq-platform:"+commit
     inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", image], stderr=subprocess.DEVNULL))[0]
     if inspected.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") != commit:
         raise ValueError("Tested image revision does not match requested release")
@@ -83,7 +83,7 @@ def build(commit, destination):
 
 def bundle_dstack(commit, destination):
     """Export only the tested, offline-verified CPU server derivative."""
-    server_image = "sixnine-dstack:" + commit
+    server_image = "inkseq-dstack:" + commit
     server = json.loads(subprocess.check_output(["docker", "image", "inspect", server_image], stderr=subprocess.DEVNULL))[0]
     if (server.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") != commit
             or server.get("Architecture") != "amd64" or server.get("Os") != "linux"):
@@ -140,7 +140,7 @@ def build_migration(commit, platform_directory, destination, selections, *,
         raise ValueError("Historical native sources require a complete explicit retention binding")
     destination = Path(destination)
     destination.mkdir(parents=False, exist_ok=False)
-    image = "sixnine-dispatch:" + commit
+    image = "inkseq-dispatch:" + commit
     inspected = json.loads(subprocess.check_output(["docker", "image", "inspect", image], stderr=subprocess.DEVNULL))[0]
     if (inspected.get("Config", {}).get("Labels", {}).get("org.opencontainers.image.revision") != commit
             or inspected.get("Architecture") != "amd64" or inspected.get("Os") != "linux"):

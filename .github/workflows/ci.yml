@@ -454,7 +454,7 @@ jobs:
           load: true
           platforms: linux/amd64
           provenance: false
-          tags: sixnine-platform:${{ github.sha }}
+          tags: inkseq-platform:${{ github.sha }}
           labels: org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=sixnine-platform-linux-amd64
           # Cache upload is optional; image build/load and every release gate remain mandatory.
@@ -465,31 +465,31 @@ jobs:
             --memory 1g --cpus 2 --tmpfs /data:size=268435456,uid=10001,gid=10001,mode=0700 \
             --tmpfs /tmp:size=134217728,mode=1777 \
             --mount "type=bind,source=$PWD/tools/check_platform_container.py,target=/check_platform_container.py,readonly" \
-            "sixnine-platform:$GITHUB_SHA" python /check_platform_container.py
+            "inkseq-platform:$GITHUB_SHA" python /check_platform_container.py
       - name: Build exact CPU dispatch derivative
         # The base was loaded into this Docker daemon. A separate Buildx
         # container cannot resolve that private local tag as a registry image.
         run: |
-          docker build --build-arg "PLATFORM_IMAGE=sixnine-platform:$GITHUB_SHA" \
+          docker build --build-arg "PLATFORM_IMAGE=inkseq-platform:$GITHUB_SHA" \
             -f Dockerfile.dispatch --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            -t "sixnine-dispatch:$GITHUB_SHA" .
+            -t "inkseq-dispatch:$GITHUB_SHA" .
       - name: Check pinned dispatch imports without network or credentials
         run: |
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
             --tmpfs /tmp:size=134217728,mode=1777 --memory 1g --cpus 2 \
-            "sixnine-dispatch:$GITHUB_SHA" python -c \
+            "inkseq-dispatch:$GITHUB_SHA" python -c \
             'import studio_platform.postgres_dispatch, studio_platform.dstack_controller, studio_platform.dstack_factory, studio_platform.telemetry; import importlib.metadata as m; assert m.version("opentelemetry-sdk")=="1.45.0"'
       - name: Build exact CPU dstack safety derivative
         run: |
           docker build --build-arg "SOURCE_COMMIT=$GITHUB_SHA" \
             -f deploy/dstack/Dockerfile.server-vast --label "org.opencontainers.image.revision=$GITHUB_SHA" \
-            -t "sixnine-dstack:$GITHUB_SHA" .
+            -t "inkseq-dstack:$GITHUB_SHA" .
           python -m unittest deploy.dstack.test_native_vast_safety -v
           docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges:true \
             --memory 512m --cpus 1 \
             --mount "type=bind,source=$PWD/deploy/dstack,target=/checks,readonly" \
             --entrypoint /root/.local/share/uv/tools/dstack/bin/python \
-            "sixnine-dstack:$GITHUB_SHA" -B /checks/test_native_runpod_safety.py \
+            "inkseq-dstack:$GITHUB_SHA" -B /checks/test_native_runpod_safety.py \
             --installed-root /root/.local/share/uv/tools/dstack/lib/python3.11/site-packages -v
       - name: Verify explicitly selected prior native source preparation
         if: needs.changes.outputs.action == 'prepare-platform' && inputs.retain_native_sources_run != '' && inputs.retain_native_sources_transport != 's3'
