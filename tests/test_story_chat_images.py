@@ -22,6 +22,7 @@ from studio_platform.story_chat_images import (
     older_settings_in_use,
     prompt_for,
     reference_cards,
+    style_card,
     shot_storyboard,
 )
 from test_story_chat import CAST, ScriptedModel
@@ -833,6 +834,20 @@ class StoryChatImageTests(unittest.TestCase):
         before = input_hash(project, shot, "")
         project["entities"][1]["description"] = "Now in a blue coat."
         self.assertNotEqual(before, input_hash(project, shot, ""))
+
+    def test_a_new_card_is_drawn_in_the_style_of_the_first_drawn_card(self):
+        project = self.first_frame_project()
+        bo = next(e for e in project["entities"] if e["id"] == "bo")
+        row = style_card(project, bo)
+        self.assertEqual((row["name"], row["asset_id"]), ("Lin", "asset-ma"))
+        prompt = prompt_for(project, bo, "", [{"row": row, "jpeg": b"x"}])
+        self.assertIn("Match its drawing style", prompt)
+        self.assertNotIn("Match its drawing style", prompt_for(project, bo))
+        ma = next(e for e in project["entities"] if e["id"] == "ma")
+        self.assertIsNone(style_card(project, ma))
+        before = input_hash(project, bo, "")
+        project["entities"][0]["data"]["cloudAssetId"] = "asset-other"
+        self.assertNotEqual(before, input_hash(project, bo, ""))
 
     def test_an_unreadable_picture_leaves_the_others(self):
         rows = [
