@@ -28,7 +28,7 @@ import {
   Settings2,
   ShieldCheck,
 } from 'lucide-react';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { createOperatorController } from './operator-controller.js';
 import {

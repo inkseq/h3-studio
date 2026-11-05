@@ -1033,19 +1033,24 @@ class MigrationArtifacts(unittest.TestCase):
             '62a4d064db1e807727c255978af130c9b497551d',
             'fdfd482afcb43919accda036dad30da599cd1561',
         }
-        expected_commits.add('97732961458e76eeac6542f9b0df5ddfbeeca9ad')
+        reader_commits = (
+            '97732961458e76eeac6542f9b0df5ddfbeeca9ad',
+            'd152d9cad90a4288d17556fa0eb9bda8a8769742',
+            '91b99b5daa9a59ecea70a48f2d4a352c10e59908',
+            '490df125bb51dd9c49cb96f5072c34345f01613b',
+        )
+        expected_commits.update(reader_commits)
         self.assertEqual(
             set(maintenance.RETAINED_DSTACK_HELPER_PAIRS), expected_commits
         )
-        self.assertEqual(
-            maintenance.RETAINED_DSTACK_HELPER_PAIRS[
-                '97732961458e76eeac6542f9b0df5ddfbeeca9ad'
-            ],
-            (
-                '72f007982f93c18cd794d7bd9f452d5618f4dff6db538b637c71e7c4568845b3',
-                'f008cad4a6049f1492cf1371007ec848e04ff3bf8cff781ed1ddda64d936d48d',
-            ),
-        )
+        for commit in reader_commits:
+            self.assertEqual(
+                maintenance.RETAINED_DSTACK_HELPER_PAIRS[commit],
+                (
+                    '72f007982f93c18cd794d7bd9f452d5618f4dff6db538b637c71e7c4568845b3',
+                    'f008cad4a6049f1492cf1371007ec848e04ff3bf8cff781ed1ddda64d936d48d',
+                ),
+            )
         for commit in (
             '4bfe4d04b3a3702e4623dc1fa9c9f9b50b453c27',
             'ff027f33079cfff153cb78cf5c23c92739c428ba',

@@ -18,7 +18,7 @@ import React, {
 } from 'react';
 import { StoryboardWorkspace } from './StoryboardWorkspace.jsx';
 import { store } from './store.js';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { createP4OperatorClient } from './p4-operator-client.js';
 import { storyboardView, expandStoryboard, storyboardDrop } from './storyboard-domain.js';

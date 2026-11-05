@@ -416,13 +416,13 @@ html[data-skin='coral'] {
   --ink: #0f1115;
   --ink-2: #3f4350;
   --muted: #666b78;
-  --placeholder: #8a8f99;
+  --placeholder: #6f7480;
   --fill: rgba(15, 17, 21, 0.04);
   --accent: #ff5a36;
   --accent-ink: #140805;
   --accent-soft: rgba(255, 90, 54, 0.12);
   --accent-glow: 0 4px 14px rgba(255, 90, 54, 0.22);
-  --good: #16a34a;
+  --good: #15803d;
   --good-soft: rgba(22, 163, 74, 0.1);
   --warn: #c2410c;
   --warn-soft: rgba(194, 65, 12, 0.1);

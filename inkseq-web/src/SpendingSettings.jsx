@@ -1,3 +1,4 @@
+import { runningVersion } from './version-check.js';
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
 import { Button } from './ui/Button.jsx';
 import { SideNav, SideNavItem } from './ui/SideNav.jsx';
@@ -13,7 +14,7 @@ import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'rea
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
-import { useCloud, useFrameAccount } from './CloudStudio.jsx';
+import { useCloud, useFrameAccount } from './use-cloud.js';
 import AccountPassword from './AccountPassword.jsx';
 import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
@@ -58,6 +59,7 @@ const settingsSection = (search) => {
 
 export default function SpendingSettings({ account }) {
   const { t } = useI18n(),
+    version = runningVersion(),
     api = useMemo(() => {
       const client = createCloudClient();
       client.setAccount(account);
@@ -245,6 +247,7 @@ export default function SpendingSettings({ account }) {
     <div className="home ops-adapter">
       <StudioHeader account={account} active="settings" />
       <main className="home-main settings-page">
+        <h1 className="visually-hidden">{t('settings.title')}</h1>
         <SideNav as="aside" className="snav" aria-label={t('settings.title')}>
           {[
             ['account', 'settings.account', UserRound],
@@ -361,6 +364,11 @@ export default function SpendingSettings({ account }) {
                   )}
                 </div>
               </>
+            )}
+            {version && (
+              <small className="muted">
+                {t('settings.version')} {version}
+              </small>
             )}
           </div>
           <div className="ops-tab-panel" hidden={section !== 'defaults'}>
