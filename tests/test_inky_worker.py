@@ -85,12 +85,41 @@ class InkyWorkerTests(InkyStoreTests):
     def test_rewrite_over_the_allowance_calls_nothing(self):
         worker = self.rewrite_worker()
         _, (source, kind) = self.rewrite_target(worker)
-        with patch("studio_platform.inky_budget.ACCOUNT_DAILY", 0):
+        with patch("studio_platform.inky_budget.REWRITE_DAILY", 0):
             with self.assertRaises(InkyRewriteUnavailable):
                 worker.rewrite(
                     self.principal, self.scope.project_id, source, kind, "request-0003"
                 )
         self.assertEqual(worker.examples.rewrite.call_count, 0)
+
+    def test_automatic_examples_do_not_use_up_a_person_s_rewrites(self):
+        worker = self.rewrite_worker()
+        _, (source, kind) = self.rewrite_target(worker)
+        with patch("studio_platform.inky_budget.ACCOUNT_DAILY", 0):
+            text = worker.rewrite(
+                self.principal, self.scope.project_id, source, kind, "request-0004"
+            )
+        self.assertEqual(text, "Rain runs down her raised hand.")
+        # And rewrites leave the automatic allowance alone.
+        budget = InkyBudget(self.repo)
+        with patch("studio_platform.inky_budget.REWRITE_DAILY", 1):
+            refused = budget.reserve(
+                tenant=self.store.tenant,
+                owner=self.principal.owner,
+                project=self.scope.project_id,
+                source_id="another-rewrite",
+                max_cost_micros=1000,
+                purpose="rewrite",
+            )
+            allowed = budget.reserve(
+                tenant=self.store.tenant,
+                owner=self.principal.owner,
+                project=self.scope.project_id,
+                source_id="an-example",
+                max_cost_micros=1000,
+            )
+        self.assertFalse(refused["allowed"])
+        self.assertTrue(allowed["allowed"])
 
     def test_rewrite_refuses_an_unusable_answer(self):
         for answer in (

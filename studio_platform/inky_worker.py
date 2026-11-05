@@ -99,6 +99,7 @@ class InkyWorker:
             project=project_id,
             source_id=source["source_id"] + ":" + kind + ":rewrite:" + request_id,
             max_cost_micros=self.examples.max_cost_micros,
+            purpose="rewrite",
         )
         if not reservation["allowed"]:
             LOG.info(reservation["reason"])
