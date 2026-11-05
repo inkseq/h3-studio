@@ -1,5 +1,6 @@
 """One-shot advice orchestration with fake providers; no paid requests."""
 
+import json
 from unittest.mock import Mock, patch
 
 from studio_platform.inky_worker import (
@@ -202,6 +203,136 @@ class InkyWorkerTests(InkyStoreTests):
         ):
             after = self.read()["items"]
         self.assertNotIn(before[0]["kind"], [item["kind"] for item in after])
+
+    def two_shots(self, first="Lin holds a letter in her right hand."):
+        shot = self.project["entities"][3]
+        shot["data"]["prompt"] = first
+        self.project["entities"].append(
+            {
+                **shot,
+                "id": "later",
+                "order": 1,
+                "data": {**shot["data"], "prompt": "Lin holds it in her left hand."},
+            }
+        )
+        self.save()
+
+    def continuity_worker(self, score=0.9, note=None):
+        worker = self.worker()
+        worker.judge.continuity = Mock(
+            return_value={"answers": {"conflict": {"noul": score}}}
+        )
+        worker.examples.continuity = Mock(
+            return_value={
+                "text": note
+                or json.dumps(
+                    {
+                        "verdict": "mismatch",
+                        "with_shot": 1,
+                        "note": "The letter was in her right hand.",
+                    }
+                ),
+                "actual_micros": 500,
+            }
+        )
+        return worker
+
+    def continuity_items(self):
+        kinds = ("continuity_mismatch", "continuity_question")
+        return [i for i in self.read()["items"] if i["kind"] in kinds]
+
+    def test_a_flagged_shot_gets_a_note_naming_the_earlier_shot_and_comes_first(self):
+        self.two_shots()
+        worker = self.continuity_worker()
+        self.refresh(worker)
+        entry = self.read()["items"][0]
+        self.assertEqual(entry["kind"], "continuity_mismatch")
+        self.assertEqual(entry["shot_id"], "later")
+        self.assertEqual(entry["other_shot_id"], "shot")
+        self.assertEqual(entry["note"], "The letter was in her right hand.")
+        # Checked once: nothing changed, so nothing is asked again.
+        self.refresh(worker)
+        self.assertEqual(worker.judge.continuity.call_count, 1)
+        self.assertEqual(self.store.pending(self.principal, self.scope.project_id), 0)
+
+    def test_a_shot_below_the_gate_costs_no_note(self):
+        self.two_shots()
+        worker = self.continuity_worker(score=0.2)
+        self.refresh(worker)
+        worker.examples.continuity.assert_not_called()
+        self.assertEqual(self.continuity_items(), [])
+
+    def test_the_writer_can_clear_a_flag(self):
+        self.two_shots()
+        worker = self.continuity_worker(
+            note=json.dumps({"verdict": "none", "with_shot": None, "note": ""})
+        )
+        self.refresh(worker)
+        self.assertEqual(self.continuity_items(), [])
+
+    def test_a_refused_check_shows_nothing_and_says_so_in_the_log(self):
+        self.two_shots()
+        worker = self.continuity_worker()
+        worker.judge.continuity.side_effect = RuntimeError("provider said no")
+        with self.assertLogs("studio_platform.inky_worker", "WARNING") as logs:
+            self.refresh(worker)
+        self.assertEqual(self.continuity_items(), [])
+        self.assertNotIn("provider said no", "".join(logs.output))
+
+    def test_a_note_goes_when_either_shot_changes_and_the_new_story_is_checked(self):
+        self.two_shots()
+        worker = self.continuity_worker()
+        self.refresh(worker)
+        self.assertEqual(len(self.continuity_items()), 1)
+        self.project["entities"][3]["data"]["prompt"] = "Lin holds it in her left hand."
+        self.save()
+        self.assertEqual(self.continuity_items(), [])
+        worker.judge.continuity.return_value = {"answers": {"conflict": {"noul": 0.1}}}
+        self.refresh(worker)
+        self.assertEqual(worker.judge.continuity.call_count, 2)
+        self.assertEqual(self.continuity_items(), [])
+
+    def test_ignoring_a_note_keeps_it_away(self):
+        self.two_shots()
+        worker = self.continuity_worker()
+        self.refresh(worker)
+        entry = self.continuity_items()[0]
+        self.store.ignore(self.principal, self.scope.project_id, entry["id"])
+        self.assertEqual(self.continuity_items(), [])
+
+    def test_muted_inky_checks_nothing(self):
+        self.two_shots()
+        worker = self.continuity_worker()
+        with self.repo.transaction() as conn:
+            self.store.put(
+                conn,
+                self.principal,
+                self.scope.project_id,
+                "inky_settings",
+                "settings",
+                {"muted": True},
+            )
+        self.refresh(worker)
+        worker.judge.continuity.assert_not_called()
+
+    def test_one_refresh_stays_within_its_bounds(self):
+        shot = self.project["entities"][3]
+        for index in range(12):
+            self.project["entities"].append(
+                {
+                    **shot,
+                    "id": f"more{index}",
+                    "order": index + 1,
+                    "data": {**shot["data"], "prompt": f"Lin takes step {index}."},
+                }
+            )
+        self.save()
+        worker = self.continuity_worker()
+        self.refresh(worker)
+        self.assertEqual(worker.examples.continuity.call_count, 2)
+        worker = self.continuity_worker(score=0.1)
+        self.refresh(worker)
+        self.assertEqual(worker.judge.continuity.call_count, 8)
 
     def test_budget_exhaustion_keeps_templates_and_logs_without_context(self):
         InkyBudget(self.repo).reserve(
