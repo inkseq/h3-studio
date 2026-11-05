@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 
 from sqlalchemy import insert, select, update
 
+from studio_platform.dstack_preparation import MODEL_LOAD_SECONDS
 from studio_platform.capacity_watchdog import (
     fenced_node_stop,
     reclaim_node,
@@ -359,6 +360,33 @@ class NodeWatchdogTests(LedgerCase):
         self.assertEqual(result["code"], "capacity_startup_timeout")
         node, intent = self.node(node_id)
         self.assertEqual(node["payload"]["capacity_watchdog"]["timeout_seconds"], 500)
+        with self.repo.engine.connect() as connection:
+            self.assertTrue(fenced_node_stop(connection, node, intent))
+
+    def test_machine_that_cannot_load_the_downloaded_model_stops_early(self):
+        node_id = self.start()["node_id"]
+        node, _ = self.node(node_id)
+        payload = node["payload"]
+        payload["dstack"]["download_progress"] = {
+            "valid": True,
+            "completed_at": self.now + 300,
+        }
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node["intent_id"])
+                .values(payload=payload)
+            )
+        controller = self.controller()
+        self.now += 300 + MODEL_LOAD_SECONDS - 1
+        self.assertNotIn("code", controller.tick()["nodes"][0])
+        self.assertEqual(self.client.stopped, [])
+        self.now += 2
+        result = controller.tick()["nodes"][0]
+        self.assertEqual(result["code"], "capacity_startup_timeout")
+        self.assertEqual(len(self.client.stopped), 1)
+        node, intent = self.node(node_id)
+        self.assertLess(node["payload"]["capacity_watchdog"]["timeout_seconds"], 1200)
         with self.repo.engine.connect() as connection:
             self.assertTrue(fenced_node_stop(connection, node, intent))
 

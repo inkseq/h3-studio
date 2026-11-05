@@ -125,13 +125,14 @@ def start_loop(cycles):
     `cycles` are (stopped, intent_id, lane) in the loop window; lane is None
     unless an allocated machine never became ready. A lane that fails on its own is cooled
     by scheduling.health (#931 step 2), so the global switch is for loops that
-    are not one lane's: two lanes, a machine that was ready but never served,
-    or four failed starts in the window.
+    are not one lane's: a machine that was ready but never served, or four failed
+    starts in the window. One bad machine on each of two lanes must not stop
+    automatic start for everyone (owner, 2026-11-06).
     """
     if len(cycles) < 2:
         return False
     backends = {backend for _, _, backend in cycles}
-    return len(cycles) >= 4 or None in backends or len(backends) >= 2
+    return len(cycles) >= 4 or None in backends
 
 
 def evaluate(

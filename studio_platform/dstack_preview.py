@@ -131,7 +131,12 @@ class DstackPreview:
 
     def _vast_host_selection(self, request, offers, demand_job_id):
         """Filter planned Vast offers by host policy/download speed; freeze the selector."""
-        from .host_policy import FRESH_SECONDS, HostPolicyStore, selection
+        from .host_policy import (
+            FRESH_SECONDS,
+            HostPolicyStore,
+            denied_suppliers,
+            selection,
+        )
 
         mapper = getattr(self.capacity.client, "vast_offer_mapping", None)
         require(callable(mapper), "host_identity_unconfirmed")
@@ -153,10 +158,27 @@ class DstackPreview:
                 excluded = excluded_download_machines(
                     connection, self.settings.tenant_id, demand_job_id
                 )
+            bad_suppliers = denied_suppliers(
+                store, connection, nodes, mapping["offers"]
+            )
+
+            def supplier_allowed(offer):
+                # A machine an admin chose to prefer stays usable.
+                return (
+                    offer.get("host_id") not in bad_suppliers
+                    or store.read(connection, offer["machine_id"], nodes=nodes)[0][
+                        "effective"
+                    ]
+                    == "prefer"
+                )
+
+            # Vast only from these countries; the next lane covers the rest (owner, 2026-11-06).
             allowed = [
                 r
                 for r in offers
                 if r.get("offer_id") in by_offer
+                and preferred_download_offer(by_offer[r['offer_id']])
+                and supplier_allowed(by_offer[r['offer_id']])
                 and by_offer[r['offer_id']]['machine_id'] not in excluded
                 and type(by_offer[r['offer_id']].get('advertised_download_mbps'))
                 in (int, float)
@@ -167,19 +189,17 @@ class DstackPreview:
                 )[0]["effective"]
                 != "deny"
             ]
-            # Preference must not discard qualified ordinary fallback.
             # instance_types freezes membership; the reviewed native Vast
             # patch also preserves the explicit preferred-first order.
             offers = sorted(
                 allowed,
                 key=lambda r: (
-                    not preferred_download_offer(by_offer[r['offer_id']]),
                     store.read(
                         connection,
                         by_offer[r["offer_id"]]["machine_id"],
                         nodes=nodes,
                     )[0]["effective"]
-                    != "prefer",
+                    != "prefer"
                 ),
             )[:MAX_HOST_CANDIDATES]
             require(offers, "dstack_no_compatible_host_offers")
