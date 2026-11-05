@@ -4,7 +4,8 @@ import { FloatingMessage } from './floating-notice.js';
 import React, { useEffect, useRef, useState, useEffectEvent } from 'react';
 import { Activity, RefreshCw, ChevronRight } from 'lucide-react';
 import { cloudController as cloud } from './cloud-controller.js';
-import { JobList, useCloud } from './CloudStudio.jsx';
+import { JobList } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { emptyActivityWindow, updateActivityWindow } from './activity-window.js';
 import './project-activity.css';
 

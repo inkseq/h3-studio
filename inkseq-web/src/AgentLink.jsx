@@ -3,7 +3,7 @@ import { Button } from './ui/Button.jsx';
 import React, { useEffect, useState } from 'react';
 import { readAgentLink } from './agent-navigation.js';
 import { cloudController as cloud } from './cloud-controller.js';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 
 export default function AgentLink({ state, onOpenCloud, onLocate, onActivity }) {
   const { t: at } = useI18n();

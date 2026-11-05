@@ -4,7 +4,7 @@ import { Dialog } from './ui/Dialog.jsx';
 import { LogOut } from 'lucide-react';
 import HostedSignIn from './HostedSignIn.jsx';
 import { useAccountLabel } from './StudioHeader.jsx';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 

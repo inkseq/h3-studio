@@ -2,7 +2,7 @@ import React, { useRef, useState, useSyncExternalStore } from 'react';
 import { Bug } from 'lucide-react';
 import { Button, IconButton } from './ui/Button.jsx';
 import { Dialog } from './ui/Dialog.jsx';
-import { useClient } from './AdminConsole.jsx';
+import { useClient } from './use-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { store } from './store.js';
 import {

@@ -151,3 +151,8 @@ export const catalogs = {
     'locale.switchToEnglish': '切换为英文',
   },
 };
+// In source and tests every word is here. The build swaps this file for a smaller first set that
+// loads the rest on demand (catalog-tiers.js); these are its stand-ins.
+export const catalogsPending = () => false;
+export const loadCatalogs = () => Promise.resolve();
+export const loadAllCatalogs = () => Promise.resolve();

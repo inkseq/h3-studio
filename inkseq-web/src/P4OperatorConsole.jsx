@@ -22,7 +22,7 @@ import {
   Timer,
   ChevronLeft,
 } from 'lucide-react';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { createP4OperatorController } from './p4-operator-controller.js';
 import OperatorBudgetPanel, { BudgetWorkspace } from './OperatorBudgetPanel.jsx';

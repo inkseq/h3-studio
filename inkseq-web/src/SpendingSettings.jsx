@@ -13,7 +13,7 @@ import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'rea
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import StudioHeader, { useAccess, useAccountLabel } from './StudioHeader.jsx';
-import { useCloud, useFrameAccount } from './CloudStudio.jsx';
+import { useCloud, useFrameAccount } from './use-cloud.js';
 import AccountPassword from './AccountPassword.jsx';
 import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
