@@ -246,23 +246,24 @@ RELEASE_REASON = {
 
 
 def shot_storyboard(data):
-    """A shot's generation settings. An older shot may have none: it gets the mode of the recipe
-    the draft compiler would select, because a stored block must be complete and agree with it.
-    A selection that resolves to no recipe is refused, so the route stops before any spending."""
-    from .capabilities import RECIPES
-    from .generation_draft import selected_recipe
+    """A shot's generation settings. One with none gets the default block; the route has already
+    refused any shot whose older settings a new block would lose."""
+    return data.get("storyboard") or {"version": 1, "mode": "fl"}
 
-    current = data.get("storyboard")
-    if current:
-        return current
+
+def older_settings_in_use(project, card):
+    """Saved through the older settings path, without a storyboard block. Adding a block moves the
+    shot to the storyboard compiler, which ignores those inputs, so the shot could no longer make
+    its video. Such a shot keeps its settings and gets no picture here."""
+    data = card.get("data") or {}
+    if data.get("storyboard"):
+        return False
     h3 = data.get("h3")
-    recipe = selected_recipe(
-        [{"id": key, "mode": mode} for key, mode in RECIPES.items()],
-        h3 if isinstance(h3, dict) else {},
-    )
-    if recipe is None:
-        raise ImageError("story_chat_shot_settings_invalid", 409)
-    return {"version": 1, "mode": recipe["mode"]}
+    if isinstance(h3, dict) and any(
+        h3.get(key) for key in ("recipeId", "inputMode", "guides")
+    ):
+        return True
+    return any(link.get("target") == card["id"] for link in project.get("links", []))
 
 
 def input_hash(project, card, instruction):
@@ -281,6 +282,7 @@ def input_hash(project, card, instruction):
         action = (card.get("data") or {}).get("prompt", "")
         value["action"] = " ".join(str(action).split())
         # Everything else the prompt reads, so an edit to the cast, place or props is noticed.
+        value["older_settings"] = older_settings_in_use(project, card)
         context = shot_context(project, card)
         value["context"] = {
             key: context.get(key)

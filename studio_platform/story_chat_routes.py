@@ -643,7 +643,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         from .credits import CreditError
         from .guided import receipts
-        from .story_chat_images import RELEASE_REASON, input_hash, shot_storyboard
+        from .story_chat_images import RELEASE_REASON, input_hash, older_settings_in_use
 
         def credit_fail(error):
             _fail(error.code, error.status, **getattr(error, "data", {}))
@@ -681,11 +681,14 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             # that already started still settle their original outcome below.
             _fail("story_chat_pictures_disabled", 403)
         if started is None and attached is None and card and card["type"] == "shot":
-            # Settings the attachment could not complete: refuse before any hold or provider call.
-            try:
-                shot_storyboard(card.get("data") or {})
-            except ImageError as error:
-                _fail(error.code, error.status, ref=card_id, nothing_charged=True)
+            # A picture would cost this shot its older settings: refuse before any spending.
+            if older_settings_in_use(row["payload"], card):
+                _fail(
+                    "story_chat_shot_settings_invalid",
+                    409,
+                    ref=card_id,
+                    nothing_charged=True,
+                )
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
         original = None
