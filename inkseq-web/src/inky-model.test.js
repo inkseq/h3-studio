@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cornerState, itemHref, openItems } from './inky/inky-model.js';
+import { canRewrite, cornerState, itemHref, openItems, otherHref } from './inky/inky-model.js';
 
 const item = (id, kind = 'vague_action', shot_id = 's1') => ({ id, kind, shot_id });
 
@@ -36,4 +36,14 @@ test('corner state: quiet while typing, notify only for unseen items', () => {
   assert.equal(cornerState({ count: 2, typing: true, seen: 0 }), 'quiet');
   assert.equal(cornerState({ count: 2, typing: false, seen: 1 }), 'notify');
   assert.equal(cornerState({ count: 2, typing: false, seen: 2 }), 'idle');
+});
+
+test('two shots that disagree are for the person to settle, with a way to the other shot', () => {
+  assert.equal(canRewrite('continuity_mismatch'), false);
+  assert.equal(canRewrite('continuity_question'), false);
+  assert.equal(canRewrite('vague_action'), true);
+  const note = { ...item('c', 'continuity_mismatch', 's2'), other_shot_id: 's1' };
+  assert.equal(openItems([note]).length, 1);
+  assert.match(otherHref(note, 'project-1'), /entity=s1/);
+  assert.match(itemHref(note, 'project-1'), /entity=s2/);
 });

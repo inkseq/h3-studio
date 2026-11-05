@@ -10,7 +10,15 @@ import { navigateApp } from '../app-navigation.js';
 import { Popover } from '../ui/Popover.jsx';
 import { Button } from '../ui/Button.jsx';
 import { InkyMark } from './InkyMark.jsx';
-import { canRewrite, cornerState, itemField, itemHref, openItems } from './inky-model.js';
+import {
+  canRewrite,
+  cornerState,
+  isContinuity,
+  itemField,
+  itemHref,
+  openItems,
+  otherHref,
+} from './inky-model.js';
 import './inky.css';
 
 const reducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
@@ -106,7 +114,9 @@ function InkyPerch({ perch, onClose, onRewrite, onApply }) {
           <p className="inky-draft">{help.text}</p>
         ) : (
           <p>
-            {help.state === 'idle' ? t('inky.perch.' + perch.kind) : t('inky.help.' + help.state)}
+            {help.state === 'idle'
+              ? perch.note || t('inky.perch.' + perch.kind)
+              : t('inky.help.' + help.state)}
           </p>
         )}
         <div className="inky-bubble-actions">
@@ -299,7 +309,13 @@ export function Inky({
     const href = itemHref(item, projectId);
     if (!href) return;
     navigateApp(href, { restore: false });
-    setPending({ id: item.id, kind: item.kind, shotId: item.shot_id, field: itemField(item) });
+    setPending({
+      id: item.id,
+      kind: item.kind,
+      note: item.note,
+      shotId: item.shot_id,
+      field: itemField(item),
+    });
   };
   const ignore = (item) => {
     setIgnored((old) => new Set(old).add(item.id));
@@ -334,27 +350,44 @@ export function Inky({
           </div>
           {open.length === 0 && <p className="inky-empty">{t('inky.empty')}</p>}
           <ul className="inky-items">
-            {open.map((item) => (
-              <li key={item.id}>
-                <span className="inky-where">
-                  {t('inky.shot', { number: shotNumber?.(item.shot_id) ?? '' })}
-                </span>
-                <p>{t('inky.tip.' + item.kind, { card: item.card_name || '' })}</p>
-                {item.example && (
-                  <p className="inky-example">{t('inky.example', { example: item.example })}</p>
-                )}
-                <div className="inky-actions">
-                  <Button size="sm" variant="primary" onClick={() => go(item)}>
-                    {t('inky.go')}
-                  </Button>
-                  <span data-keep-open>
-                    <Button size="sm" variant="secondary" onClick={() => ignore(item)}>
-                      {t('inky.ignore')}
-                    </Button>
+            {open.map((item) => {
+              const other = item.other_shot_id ? shotNumber?.(item.other_shot_id) : 0;
+              return (
+                <li key={item.id}>
+                  <span className="inky-where">
+                    {t('inky.shot', { number: shotNumber?.(item.shot_id) ?? '' })}
                   </span>
-                </div>
-              </li>
-            ))}
+                  <p>
+                    {isContinuity(item.kind)
+                      ? t('inky.tip.' + item.kind + (other ? '' : '_card'), { other })
+                      : t('inky.tip.' + item.kind, { card: item.card_name || '' })}
+                  </p>
+                  {item.note && <p className="inky-example">{item.note}</p>}
+                  {item.example && (
+                    <p className="inky-example">{t('inky.example', { example: item.example })}</p>
+                  )}
+                  <div className="inky-actions">
+                    <Button size="sm" variant="primary" onClick={() => go(item)}>
+                      {t('inky.go')}
+                    </Button>
+                    {other > 0 && (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => navigateApp(otherHref(item, projectId), { restore: false })}
+                      >
+                        {t('inky.seeOther', { number: other })}
+                      </Button>
+                    )}
+                    <span data-keep-open>
+                      <Button size="sm" variant="secondary" onClick={() => ignore(item)}>
+                        {t('inky.ignore')}
+                      </Button>
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
           {onSend && (
             <InkyChat
