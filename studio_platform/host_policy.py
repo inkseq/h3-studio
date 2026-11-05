@@ -214,6 +214,25 @@ def original_nodes(connection, tenant, *, owner=None):
     return rows
 
 
+def denied_suppliers(store, connection, nodes, offers, *, now=None):
+    """Suppliers with a denied machine, from today's offers and the offers frozen at past starts."""
+    machines = {}
+    for node in nodes:
+        frozen = node.get("payload", {}).get("dstack", {}).get("host_selection")
+        for item in frozen.get("offers", []) if isinstance(frozen, dict) else []:
+            if isinstance(item, dict) and item.get("host_id"):
+                machines[item["machine_id"]] = item["host_id"]
+    for item in offers:
+        if item.get("host_id"):
+            machines[item["machine_id"]] = item["host_id"]
+    return {
+        supplier
+        for machine, supplier in machines.items()
+        if store.read(connection, machine, nodes=nodes, now=now)[0]["effective"]
+        == "deny"
+    }
+
+
 def automatic_deny(nodes, machine_id, *, now):
     """Derive fixed seven-day intervals from distinct original failed rentals.
 
@@ -504,7 +523,7 @@ def selection(value, *, now=None):
             isinstance(item, dict)
             and {"offer_id", "machine_id"}
             <= set(item)
-            <= {"offer_id", "machine_id"} | OFFER_METADATA_FIELDS,
+            <= {"offer_id", "machine_id", "host_id"} | OFFER_METADATA_FIELDS,
             "host_selection_invalid",
         )
         offer_metadata({key: item[key] for key in OFFER_METADATA_FIELDS if key in item})

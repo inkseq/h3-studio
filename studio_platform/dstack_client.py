@@ -398,6 +398,9 @@ class DstackClient:
                 "region": region,
                 "advertised_download_mbps": bandwidth,
             }
+            supplier = row.get("host_id")
+            if type(supplier) is int and supplier > 0:
+                item["host_id"] = str(supplier)
             _require(
                 str(offer) not in found or found[str(offer)] == item,
                 "dstack_host_offer_identity_conflict",
