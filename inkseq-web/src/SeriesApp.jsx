@@ -299,14 +299,23 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
   // Connect AI has its own button, local projects sit on the works page and the story list,
   // and rename / manage items / delete belong to Story settings.
   const accountMenu = (
-    <AccountMenu account={frameAccount} onSignIn={() => open({ type: 'cloud' })} />
+    <AccountMenu
+      account={frameAccount}
+      onSignIn={() => open({ type: 'cloud' })}
+      carryOpen={sidebarView !== 'library'}
+    />
   );
   return (
     <>
       <div className="home" hidden={sidebarView !== 'library'}>
         {/* The same account menu as every other page; the story actions (ZIP backup, local
             import, connect AI, trash) stay in the open story's own header below (#358). */}
-        <StudioHeader account={c.account} active="works" onSignIn={() => open({ type: 'cloud' })} />
+        <StudioHeader
+          account={c.account}
+          active="works"
+          onSignIn={() => open({ type: 'cloud' })}
+          carryMenuOpen={sidebarView === 'library'}
+        />
         <main id={sidebarView === 'library' ? 'workspace' : undefined} tabIndex={-1}>
           <StoryLibraryHome
             state={state}

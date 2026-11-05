@@ -31,6 +31,19 @@ createRoot(
   </QueryClientProvider>,
 );
 
+// The Chinese font stylesheet is about 120 kB (Inter ships with the first CSS), so it waits for the
+// first paint instead of sharing a slow line with the first script. Chinese text shows in the
+// system font until then, as display=swap does anyway.
+requestAnimationFrame(() =>
+  setTimeout(() => {
+    const fonts = document.createElement('link');
+    fonts.rel = 'stylesheet';
+    fonts.href =
+      'https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap';
+    document.head.append(fonts);
+  }),
+);
+
 if (import.meta.env.PROD) {
   installVideoCache(videoCacheWorkerURL);
   installVersionCheck({ notify: showNotice });
