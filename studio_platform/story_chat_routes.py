@@ -19,6 +19,7 @@ from .story_chat import (
     INKY_NOTE,
     inky_plan,
     INSTRUCTION,
+    THINKING,
     LANGUAGES,
     MAX_SCRIPT_ACTIONS,
     MAX_SCRIPT_CHARS,
@@ -549,7 +550,11 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             session=project_id,
             tags=["story-chat", chat.get("language", "zh")],
             input=llm_tracing.clip(text),
-            metadata={"machine": principal.machine},
+            metadata={
+                "machine": principal.machine,
+                "prompt": "story_assistant",
+                "prompt_version": llm_tracing.digest(INSTRUCTION),
+            },
         ) as traced:
             try:
                 result = model_client().generate(
@@ -563,6 +568,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     # A whole script can come back as dozens of shots.
                     max_tokens=16384 if is_script else 4096,
                     json_mode=True,
+                    thinking=THINKING,
                 )
                 plan = (
                     _parse(result["text"], max_actions=MAX_SCRIPT_ACTIONS)
@@ -682,7 +688,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             aspect_for,
             attach_actions,
             configured_image_client,
+            load_pictures,
             prompt_for,
+            reference_cards,
         )
 
         principal = principal_of(request, browser_only=True)
@@ -931,8 +939,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             release("version_conflict")
             _fail("story_chat_image_in_progress", 409)
         try:
+            pictures = (
+                load_pictures(
+                    app.state.assets,
+                    principal,
+                    project_id,
+                    reference_cards(row["payload"], card),
+                )
+                if card["type"] == "shot"
+                else []
+            )
             mime, data = holder["image"].generate(
-                prompt_for(row["payload"], card, instruction), aspect_for(card)
+                prompt_for(row["payload"], card, instruction, pictures),
+                aspect_for(card),
+                pictures,
             )
         except ImageError as error:
             release(RELEASE_REASON.get(error.code, "provider_failed"))

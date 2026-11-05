@@ -9,18 +9,16 @@ from pathlib import Path
 import httpx
 
 from .llm_tracing import clip, digest, generation, usage as traced_usage
+from .prompt_files import text as prompt_text
 
 ORIGIN = "https://generativelanguage.googleapis.com"
 PROFILE = "gemini--user-supplied"
+# One story turn carries a whole script or all of a long story's cards: up to 20,000 + 30,000
+# characters in one message, plus the instruction and recent history.
+MAX_MESSAGE_CHARS = 60000
+MAX_TOTAL_CHARS = 100000
 MODELS = {"gemma-4-31b-it": "Gemma 4 31B IT", "gemini-3.8-flash": "Gemini 3.8 Flash"}
-DEFAULT_INSTRUCTION = """你是视频创作对话助手。帮助用户逐轮表达主体、场景、动作、镜头、声音和时长。
-用户提出修改时，保留此前未要求改变的创作内容；区分改一个版本与续拍下一段。
-意图明确就给出更新后的方案，不反复确认。只有影响结果的关键歧义才简短追问。
-用户问问题时先回答，不把每句话都当成生成指令。不要声称看过未提供的图片或视频。
-你只负责讨论和提示词，不会执行视频生成、租GPU、上传或修改项目。
-需要给方案时，简短列出本轮改变与保留项，并给出可独立使用的完整视频提示词。
-提示词里的台词一律写成 (S1) <d>[Chinese] 台词原文</d>，不要用引号（引号里的字会被画成字幕）；
-同一个人始终用同一个编号（S1、S2…），多人镜头写明谁说哪句、其他人不说话；按电影镜头来写，不要写成综艺、直播或 vlog。"""
+DEFAULT_INSTRUCTION = prompt_text("quick_chat_default")
 
 
 class ChatError(Exception):
@@ -48,6 +46,7 @@ def payload(
     instruction=DEFAULT_INSTRUCTION,
     max_tokens=2048,
     json_mode=False,
+    thinking=None,
 ):
     if not isinstance(model, str) or model not in MODELS:
         raise ChatError("model_not_allowed", "请选择已接入的两个模型之一。", 422)
@@ -67,19 +66,19 @@ def payload(
             or message.get("role") != expected
             or not isinstance(message.get("text"), str)
             or not message["text"].strip()
-            or len(message["text"]) > 16000
+            or len(message["text"]) > MAX_MESSAGE_CHARS
         ):
             raise ChatError(
                 "invalid_history",
-                "对话需从用户开始并按用户、助手交替，单条最多16000字。",
+                f"对话需从用户开始并按用户、助手交替，单条最多{MAX_MESSAGE_CHARS}字。",
                 422,
             )
         total += len(message["text"])
         contents.append({"role": expected, "parts": [{"text": message["text"]}]})
-    if contents[-1]["role"] != "user" or total > 60000:
+    if contents[-1]["role"] != "user" or total > MAX_TOTAL_CHARS:
         raise ChatError(
             "history_limit",
-            "请以用户消息结束；上下文总量最多60000字，超限请新建对话。",
+            f"请以用户消息结束；上下文总量最多{MAX_TOTAL_CHARS}字，超限请新建对话。",
             422,
         )
     # Both models receive the same user-role preamble. Do not assume Gemma
@@ -95,6 +94,8 @@ def payload(
         if not model.startswith("gemini"):
             raise ChatError("json_mode_not_supported", "该模型不支持JSON输出。", 422)
         config["responseMimeType"] = "application/json"
+    if thinking:
+        config["thinkingConfig"] = {"thinkingLevel": thinking}
     return {"contents": contents, "generationConfig": config}
 
 
@@ -190,13 +191,18 @@ class GoogleChatClient:
         instruction=DEFAULT_INSTRUCTION,
         max_tokens=2048,
         json_mode=False,
+        thinking=None,
     ):
-        body = payload(model, messages, instruction, max_tokens, json_mode)
+        body = payload(model, messages, instruction, max_tokens, json_mode, thinking)
         with generation(
             "gemini-generate",
             model=model,
             input=clip(messages[-1]["text"]),
-            model_parameters={"max_tokens": max_tokens, "json_mode": json_mode},
+            model_parameters={
+                "max_tokens": max_tokens,
+                "json_mode": json_mode,
+                "thinking": thinking,
+            },
             metadata={"instruction": digest(instruction), "turns": len(messages)},
         ) as traced:
             result = self._generate(model, body)

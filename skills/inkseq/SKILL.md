@@ -101,9 +101,9 @@ Long-shot [preview/confirm and recovery](reference/api.md#confirmed-long-shot-wi
 
 ## Reviews and feedback
 
-[Verdicts, CAS, summaries and suggestions](reference/api.md#explicit-take-reviews).
+[Verdicts and suggestions](reference/api.md#explicit-take-reviews).
 [Redo diff preview](reference/api.md#redo-from-marks).
 
-[Feedback](reference/api.md#feedback).
+[Feedback](reference/api.md#feedback). [Craft](reference/api.md#writing-shots).
 
 [Inky advice](reference/api.md#inky-suggestions) never authorizes edits or generation; empty advice is not a quality verdict.

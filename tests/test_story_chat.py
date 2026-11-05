@@ -9,10 +9,12 @@ import unittest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 
+from studio_platform import story_chat_advice
 from studio_platform.api import create_app
 from studio_platform.google_chat import ChatError, payload
 from studio_platform.repository import jobs
 from studio_platform.settings import Settings
+from studio_platform.story_chat import INSTRUCTION
 
 
 class ScriptedModel:
@@ -21,9 +23,17 @@ class ScriptedModel:
     def __init__(self):
         self.plans, self.calls, self.during = [], [], None
 
-    def generate(self, model, messages, instruction, max_tokens=2048, json_mode=False):
+    def generate(
+        self,
+        model,
+        messages,
+        instruction,
+        max_tokens=2048,
+        json_mode=False,
+        thinking=None,
+    ):
         # Validate exactly as the real adapter does before any network call.
-        body = payload(model, messages, instruction, max_tokens, json_mode)
+        body = payload(model, messages, instruction, max_tokens, json_mode, thinking)
         self.configs = getattr(self, "configs", []) + [body["generationConfig"]]
         self.calls.append(
             {"model": model, "messages": messages, "instruction": instruction}
@@ -126,6 +136,31 @@ class StoryChatTests(unittest.TestCase):
     def jobs(self):
         with self.app.state.repository.engine.connect() as conn:
             return conn.execute(select(func.count()).select_from(jobs)).scalar()
+
+    def test_thinking_level_reaches_the_request(self):
+        body = payload(
+            "gemini-3.8-flash", [{"role": "user", "text": "x"}], thinking="low"
+        )
+        self.assertEqual(
+            body["generationConfig"]["thinkingConfig"], {"thinkingLevel": "low"}
+        )
+        plain = payload("gemini-3.8-flash", [{"role": "user", "text": "x"}])
+        self.assertNotIn("thinkingConfig", plain["generationConfig"])
+
+    def test_the_longest_script_and_a_full_story_both_reach_the_model(self):
+        # One message holds all of a story's cards or a whole script (found 2026-11-06).
+        history = [
+            {"role": "user" if i % 2 == 0 else "model", "text": "h" * 1500}
+            for i in range(22)
+        ]
+        current = {"role": "user", "text": "x" * 30000 + "y" * 20000}
+        payload("gemini-3.8-flash", [*history, current], "i" * 6000, 16384, True)
+
+    def test_the_instruction_fits_the_limit_with_pictures_on_and_off(self):
+        for enabled in (True, False):
+            text = story_chat_advice.instruction(INSTRUCTION, enabled)
+            self.assertLessEqual(len(text), 6000)
+            payload("gemini-3.8-flash", [{"role": "user", "text": "x"}], text)
 
     def test_disabled_by_default(self):
         app = create_app(

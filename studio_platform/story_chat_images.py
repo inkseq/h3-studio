@@ -17,20 +17,16 @@ import httpx
 from sqlalchemy import select
 
 from .google_chat import ORIGIN, ChatError
+from .prompt_files import sections as prompt_sections
 
 MODEL = "gemini-nano-banana-2.1"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 KINDS = {"character", "location", "prop"}
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 ASPECT = {"character": "3:4", "location": "16:9", "prop": "1:1"}
-STYLE = {
-    "character": "Character reference sheet for an animated short film: full body, front view, "
-    "neutral pose, plain light-grey background, soft even studio light.",
-    "location": "Establishing reference image of a film location, wide shot, no people, "
-    "cinematic natural light.",
-    "prop": "Product-style reference image of a single prop, centred, plain light-grey "
-    "background, soft studio light.",
-}
+STYLE = prompt_sections("card_picture_styles")
+FIRST_FRAME = prompt_sections("first_frame")
+MAX_CARD_TEXT = 400
 
 
 class ImageError(Exception):
@@ -54,32 +50,110 @@ def shot_context(project, card):
         return {"shot_action": card.get("description") or card.get("title") or ""}
 
 
-def shot_prompt(project, card, style, instruction):
-    """The first moment of a shot (#1039)."""
+def reference_cards(project, card):
+    """The cards a shot's picture must match, in the order the prompt lists them."""
+    from .inky_source import shot_cards
+    from .story_chat import card_image
+
+    try:
+        cast, place, props = shot_cards(project, card)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return []
+    lookup = {e["id"]: e for e in project.get("entities", [])}
+    rows, seen = [], set()
+    for role, cards, limit in (
+        ("character", cast, 4),
+        ("place", [place] if place else [], 1),
+        ("prop", props, 2),
+    ):
+        for entity in cards:
+            if entity["id"] in seen or not limit:
+                continue
+            seen.add(entity["id"])
+            limit -= 1
+            image = lookup.get(card_image(entity)) or {}
+            rows.append(
+                {
+                    "role": role,
+                    "name": " ".join(str(entity.get("title", "")).split())[:80],
+                    "description": " ".join(
+                        str(entity.get("description") or "").split()
+                    )[:MAX_CARD_TEXT],
+                    "asset_id": (image.get("data") or {}).get("cloudAssetId"),
+                }
+            )
+    return rows
+
+
+def load_pictures(assets, principal, project_id, rows):
+    """The pictures of those cards that can be read. A missing one leaves its text in the prompt."""
+    from .inky_uploads import preview
+
+    pictures = []
+    for row in rows:
+        if not row["asset_id"]:
+            continue
+        try:
+            jpeg = preview(
+                assets, principal, project_id, {"image": {"asset_id": row["asset_id"]}}
+            )
+        except Exception:
+            continue
+        pictures.append({"row": row, "jpeg": jpeg})
+    return pictures
+
+
+def _card_lines(label, rows):
+    if not rows:
+        return []
+    return [
+        label
+        + ": "
+        + "; ".join(
+            f"{row['name']} ({row['description']})"
+            if row["description"]
+            else row["name"]
+            for row in rows
+        )
+    ]
+
+
+def shot_prompt(project, card, style, instruction, pictures=()):
+    """The first moment of a shot (#1039), composed from the shot's own cards."""
     context = shot_context(project, card)
+    rows = reference_cards(project, card)
     parts = [
-        "A single still frame from an animated short film: the first moment of this "
-        "shot, cinematic composition, natural light.",
+        FIRST_FRAME["open"],
         f"What happens: {context['shot_action'].strip()[:2000]}",
     ]
-    if context.get("characters"):
-        parts.append("Characters: " + ", ".join(context["characters"]))
-    if context.get("place"):
-        parts.append("Place: " + context["place"])
-    if context.get("props"):
-        parts.append("Props: " + ", ".join(context["props"]))
+    for role, label in (
+        ("character", "Characters"),
+        ("place", "Place"),
+        ("prop", "Props"),
+    ):
+        parts += _card_lines(label, [row for row in rows if row["role"] == role])
+    if any(row["role"] == "character" for row in rows):
+        parts.append(FIRST_FRAME["only_listed"])
+    if pictures:
+        parts.append(FIRST_FRAME["attached"])
+        parts += [
+            FIRST_FRAME[item["row"]["role"]].format(
+                number=number, name=item["row"]["name"]
+            )
+            for number, item in enumerate(pictures, 1)
+        ]
     if style.strip():
         parts.append("Overall film style: " + style.strip()[:2000])
     if instruction.strip():
         parts.append("Change requested: " + instruction.strip()[:1000])
-    parts.append("No text, captions, watermarks or borders.")
+    parts.append(FIRST_FRAME["end"])
     return "\n".join(parts)
 
 
-def prompt_for(project, card, instruction=""):
+def prompt_for(project, card, instruction="", pictures=()):
     style = (project.get("journey", {}).get("storyboard") or {}).get("style", "")
     if card["type"] == "shot":
-        return shot_prompt(project, card, style, instruction)
+        return shot_prompt(project, card, style, instruction, pictures)
     parts = [
         STYLE[card["type"]],
         f"Subject: {card.get('title', '').strip()}.",
@@ -100,25 +174,41 @@ class GeminiImageClient:
         self.loader, self.transport = loader, transport
         self.timeout = timeout or httpx.Timeout(120, connect=15)
 
-    def generate(self, prompt, aspect="1:1"):
+    def generate(self, prompt, aspect="1:1", pictures=()):
         from .llm_tracing import clip, generation
 
         with generation(
             "gemini-picture",
             model=MODEL,
             input=clip(prompt, 2000),
-            model_parameters={"aspect": aspect},
+            model_parameters={"aspect": aspect, "pictures": len(pictures)},
         ) as traced:
-            mime, data = self._generate(prompt, aspect)
+            mime, data = self._generate(prompt, aspect, pictures)
             traced.update(output={"mime": mime, "bytes": len(data)})
         return mime, data
 
-    def _generate(self, prompt, aspect):
+    def _generate(self, prompt, aspect, pictures=()):
         config = self.loader()
         if config.base_url != ORIGIN or not config.api_key:
             raise ImageError("image_profile_mismatch", 503)
         body = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [
+                        {"text": prompt},
+                        *(
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/jpeg",
+                                    "data": base64.b64encode(item["jpeg"]).decode(),
+                                }
+                            }
+                            for item in pictures
+                        ),
+                    ],
+                }
+            ],
             "generationConfig": {
                 "responseModalities": ["IMAGE"],
                 "imageConfig": {"aspectRatio": aspect},
@@ -288,6 +378,7 @@ def input_hash(project, card, instruction):
             key: context.get(key)
             for key in ("shot_action", "characters", "place", "props")
         }
+        value["references"] = reference_cards(project, card)
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
