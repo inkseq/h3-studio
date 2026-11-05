@@ -164,6 +164,17 @@ class RealCreditImageTests(unittest.TestCase):
         self.assertEqual(self.balance(), (95, 0))
         self.assertEqual(len(self.images.calls), 1)
 
+    def test_shot_picture_captures_like_a_card(self):
+        self.policy(True)
+        project_id = self.path.split("/")[3]
+        project = self.client.get("/v1/projects/" + project_id).json()["project"]
+        shot = next(e for e in project["entities"] if e["type"] == "shot")
+        reply = self.client.post(
+            self.path, json={"request_id": "pic-shot-0001", "card_id": shot["id"]}
+        )
+        self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(self.balance(), (95, 0))
+
     def test_provider_failure_releases_the_hold(self):
         self.policy(True)
         self.images.fail = ImageError("image_not_returned", 422)
@@ -225,6 +236,149 @@ class RealCreditImageTests(unittest.TestCase):
         self.assertEqual(response.json()["detail"]["code"], "story_chat_card_changed")
         self.assertEqual(self.images.calls, [])
         self.assertEqual(self.balance(), (100, 0))
+
+    def edit_at_the_fence(self, entity_id, patch_value):
+        original = self.app.state.guided.mutate
+
+        def edit_then_mutate(principal, project_id, body, key=None, **kwargs):
+            if (
+                key
+                and key.startswith("story-chat-image-start-")
+                and not getattr(self, "_edited", False)
+            ):
+                self._edited = True
+                current = self.client.get("/v1/projects/" + project_id).json()
+                edited = self.client.post(
+                    f"/v1/projects/{project_id}/actions",
+                    json={
+                        "expected_version": current["version"],
+                        "actions": [
+                            {
+                                "op": "entity.update",
+                                "entity_id": entity_id,
+                                "patch": patch_value,
+                            }
+                        ],
+                    },
+                )
+                self.assertEqual(edited.status_code, 200, edited.text)
+            return original(principal, project_id, body, key, **kwargs)
+
+        self.app.state.guided.mutate = edit_then_mutate
+
+    def test_shot_material_changed_at_the_fence_draws_nothing_and_releases(self):
+        project_id = self.path.split("/")[3]
+        project = self.client.get("/v1/projects/" + project_id).json()
+        entities = project["project"]["entities"]
+        shot = next(e for e in entities if e["type"] == "shot")
+        plain_mutate = self.app.state.guided.mutate
+        for kind, field in (
+            ("location", "locationId"),
+            ("character", "cast"),
+            ("prop", "propIds"),
+        ):
+            with self.subTest(kind=kind):
+                self._edited = False
+                project = self.client.get("/v1/projects/" + project_id).json()
+                entities = project["project"]["entities"]
+                other = next(e for e in entities if e["type"] == kind)
+                value = other["id"] if field == "locationId" else [other["id"]]
+                board = next(e for e in entities if e["id"] == shot["id"])["data"].get(
+                    "storyboard", {}
+                )
+                data = {field: value}
+                if field == "locationId" and "place" in board:
+                    data["storyboard"] = {
+                        key: item for key, item in board.items() if key != "place"
+                    }
+                if field == "propIds":
+                    data = {"storyboard": {**board, "propIds": [other["id"]]}}
+                saved = self.client.post(
+                    f"/v1/projects/{project_id}/actions",
+                    json={
+                        "expected_version": project["version"],
+                        "actions": [
+                            {
+                                "op": "entity.update",
+                                "entity_id": shot["id"],
+                                "patch": {"data": data},
+                            }
+                        ],
+                    },
+                )
+                self.assertEqual(saved.status_code, 200, saved.text)
+                self.policy(True)
+                self.edit_at_the_fence(other["id"], {"title": "Renamed " + kind})
+                reply = self.client.post(
+                    self.path,
+                    json={"request_id": "pic-fence-" + kind, "card_id": shot["id"]},
+                )
+                self.assertEqual(reply.status_code, 409, reply.text)
+                self.assertEqual(
+                    reply.json()["detail"]["code"], "story_chat_card_changed"
+                )
+                self.assertEqual(self.images.calls, [])
+                self.assertEqual(self.balance(), (100, 0))
+                self.app.state.guided.mutate = plain_mutate
+
+    def test_settings_saved_during_the_drawing_win_and_nothing_is_charged(self):
+        self.policy(True)
+        project_id = self.path.split("/")[3]
+        project = self.client.get("/v1/projects/" + project_id).json()
+        shot = next(e for e in project["project"]["entities"] if e["type"] == "shot")
+        created = self.client.post(
+            f"/v1/projects/{project_id}/actions",
+            json={
+                "expected_version": project["version"],
+                "actions": [
+                    {
+                        "op": "entity.create",
+                        "entity": {
+                            "id": "bare-shot",
+                            "type": "shot",
+                            "parentId": shot["parentId"],
+                            "title": "Bare shot",
+                            "data": {"seconds": 5, "prompt": "She looks up."},
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        draw = self.images.generate
+
+        def configure_then_draw(*args, **kwargs):
+            current = self.client.get("/v1/projects/" + project_id).json()
+            saved = self.client.post(
+                f"/v1/projects/{project_id}/actions",
+                json={
+                    "expected_version": current["version"],
+                    "actions": [
+                        {
+                            "op": "entity.update",
+                            "entity_id": "bare-shot",
+                            "patch": {
+                                "data": {"h3": {"recipeId": "h3-base-ref2va-v1"}}
+                            },
+                        }
+                    ],
+                },
+            )
+            self.assertEqual(saved.status_code, 200, saved.text)
+            return draw(*args, **kwargs)
+
+        self.images.generate = configure_then_draw
+        reply = self.client.post(
+            self.path, json={"request_id": "pic-race-bare-1", "card_id": "bare-shot"}
+        )
+        self.assertEqual(reply.status_code, 409, reply.text)
+        self.assertEqual(
+            reply.json()["detail"]["code"], "story_chat_shot_settings_invalid"
+        )
+        self.assertEqual(self.balance(), (100, 0))
+        after = self.client.get("/v1/projects/" + project_id).json()["project"]
+        entity = next(e for e in after["entities"] if e["id"] == "bare-shot")
+        self.assertNotIn("storyboard", entity["data"])
 
     def test_capture_interrupted_after_attach_recovers_with_original_material(self):
         self.policy(True)

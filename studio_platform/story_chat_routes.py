@@ -381,8 +381,12 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         principal = principal_of(request, "write")
         body = body or {}
         language = body.get("language", "zh")
-        if set(body) - {"language"} or language not in LANGUAGES:
+        # A shot picture needs the chat's receipts but must not list the story in Quick Create.
+        stay_hidden = body.get("hidden") is True
+        if set(body) - {"language", "hidden"} or language not in LANGUAGES:
             _fail("story_chat_invalid", 422, field="body")
+        if "hidden" in body and not stay_hidden:
+            _fail("story_chat_invalid", 422, field="hidden")
         for _attempt in range(3):
             row = app.state.authorized_project(principal, project_id, "projects:write")
             project = row["payload"]
@@ -393,7 +397,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     # Present but not a chat this version reads: never replace it.
                     _fail("story_chat_unsupported", 409)
                 chat = project["journey"]["storyChat"]
-                if not chat.get("hidden"):
+                if stay_hidden or not chat.get("hidden"):
                     return view(row)
                 # Continuing a removed chat from Works brings it back to Quick Create.
                 value = {k: v for k, v in chat.items() if k != "hidden"}
@@ -418,13 +422,17 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             reject_managed(project)
             if project.get("schemaVersion") != 4:
                 _fail("story_chat_unsupported_story", 422)
+            actions = open_actions(project, language)
+            if stay_hidden:
+                patch = actions[-1]["patch"]
+                patch["storyChat"] = {**patch["storyChat"], "hidden": True}
             try:
                 app.state.guided.mutate(
                     principal,
                     project_id,
                     {
                         "expected_version": row["version"],
-                        "actions": open_actions(project, language),
+                        "actions": actions,
                     },
                 )
             except Conflict as error:
@@ -668,10 +676,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         from .story_chat import now_iso
         from .story_chat_images import (
-            ASPECT,
             KINDS,
             REQUEST_ID,
             ImageError,
+            aspect_for,
             attach_actions,
             configured_image_client,
             prompt_for,
@@ -697,11 +705,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         def card_in(project):
             card = next((e for e in project["entities"] if e["id"] == card_id), None)
-            if (
-                card is None
-                or card["type"] not in KINDS
-                or card["parentId"] is not None
-            ):
+            if card is None or card["type"] == "shot":
+                return card
+            if card["type"] not in KINDS or card["parentId"] is not None:
                 return None
             return card
 
@@ -709,7 +715,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
         from .credits import CreditError
         from .guided import receipts
-        from .story_chat_images import RELEASE_REASON, input_hash
+        from .story_chat_images import RELEASE_REASON, input_hash, older_settings_in_use
 
         def credit_fail(error):
             _fail(error.code, error.status, **getattr(error, "data", {}))
@@ -746,6 +752,15 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             # Admin switch off: no new picture, before any hold or provider call. Requests
             # that already started still settle their original outcome below.
             _fail("story_chat_pictures_disabled", 403)
+        if started is None and attached is None and card and card["type"] == "shot":
+            # A picture would cost this shot its older settings: refuse before any spending.
+            if older_settings_in_use(row["payload"], card):
+                _fail(
+                    "story_chat_shot_settings_invalid",
+                    409,
+                    ref=card_id,
+                    nothing_charged=True,
+                )
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
         original = None
@@ -917,7 +932,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             _fail("story_chat_image_in_progress", 409)
         try:
             mime, data = holder["image"].generate(
-                prompt_for(row["payload"], card, instruction), ASPECT[card["type"]]
+                prompt_for(row["payload"], card, instruction), aspect_for(card)
             )
         except ImageError as error:
             release(RELEASE_REASON.get(error.code, "provider_failed"))
@@ -949,6 +964,15 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             if current is None:
                 release("card_missing")
                 _fail("story_chat_card_missing", 409, ref=card_id, nothing_charged=True)
+            # Settings saved while the picture was drawn: they win, and nothing is charged.
+            if current["type"] == "shot" and older_settings_in_use(project, current):
+                release("version_conflict")
+                _fail(
+                    "story_chat_shot_settings_invalid",
+                    409,
+                    ref=card_id,
+                    nothing_charged=True,
+                )
             # Exactly the receipt shape the credit capture verifies.
             record = {
                 "card_id": card_id,
