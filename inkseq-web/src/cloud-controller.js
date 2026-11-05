@@ -1923,6 +1923,17 @@ export function createCloudController({
     guard(ctx);
     return value;
   }
+  // A draft of the shot's action text. The server saves nothing; the person decides.
+  async function rewriteInkySuggestion(id) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(
+      `/v1/inky/suggestions/${encodeURIComponent(id)}/rewrite` + inkyQuery(ctx),
+      { method: 'POST', body: { request_id: crypto.randomUUID() }, timeoutMs: 60000 },
+    );
+    guard(ctx);
+    return value;
+  }
   async function ignoreInkySuggestion(id) {
     requireCloud();
     const ctx = context();
@@ -2149,6 +2160,7 @@ export function createCloudController({
     speakLine: (body) => speakLine(body),
     readShotReadiness: () => readShotReadiness(),
     ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
+    rewriteInkySuggestion: (id) => rewriteInkySuggestion(id),
     saveTakeReview: (shotId, artifactId, body, key) =>
       saveTakeReview(shotId, artifactId, body, key),
     // Story edits share one version, so they run one after another: a quick second click

@@ -227,7 +227,7 @@
   flex-direction: row-reverse;
   align-items: flex-end;
   gap: 4px;
-  max-width: 300px;
+  max-width: 380px;
   pointer-events: none;
 }
 .inky-flyer {
@@ -235,7 +235,7 @@
 }
 .inky-bubble {
   pointer-events: auto;
-  max-width: 240px;
+  max-width: 320px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -251,6 +251,15 @@
   margin: 0;
   font-size: 13px;
   line-height: 1.55;
+}
+.inky-bubble-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.inky-bubble .inky-draft {
+  max-height: 180px;
+  overflow-y: auto;
 }
 @keyframes inky-bubble {
   from {
