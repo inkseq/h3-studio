@@ -449,6 +449,14 @@ function renameChapterAction(project, action, _ctx) {
   chapter.version++;
   return { id: chapter.id };
 }
+function sceneScriptAction(project, action, _ctx) {
+  const scene = find(project, action.id);
+  if (scene?.type !== 'scene' || !text(action.script, 120000)) return false;
+  if ((scene.data.script || '') === action.script) return { id: scene.id };
+  scene.data.script = action.script;
+  scene.version++;
+  return { id: scene.id };
+}
 function moveChapterAction(project, action, _ctx) {
   const chapters = storyChapters(project),
     index = chapters.findIndex((row) => row.id === action.id),
@@ -711,6 +719,7 @@ const SHOT_AND_PAGE_ACTIONS = {
   moveToScene: moveToSceneAction,
   addChapter: addChapterAction,
   renameChapter: renameChapterAction,
+  sceneScript: sceneScriptAction,
   moveChapter: moveChapterAction,
   update: updateGroupAction,
   drop: updateGroupAction,

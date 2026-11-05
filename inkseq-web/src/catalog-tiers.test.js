@@ -26,6 +26,16 @@ test('the first script carries the public words and leaves operator words behind
   assert.ok(!tiers.shell.some((key) => key.startsWith('legacyOp.')));
 });
 
+test('words people can download without being an admin name no vendor, seed or sampling', () => {
+  const tiers = partitionKeys(src, keys);
+  const banned =
+    /dstack|RunPod|Lium|Targon|CloudRift|EveryFrame|OpenRouter|ComfyUI|WanGP|TaoMate|\bVast\b|\bseed\b|[Ss]ampling|sampler|种子|采样/;
+  const found = [...tiers.shell, ...tiers.app].filter(
+    (key) => banned.test(catalogs.en[key]) || banned.test(catalogs.zh[key]),
+  );
+  assert.deepEqual(found, []);
+});
+
 test('the first script reaches no workspace or admin page', () => {
   const first = reachable(path.join(src, 'main.jsx')).map((file) => path.basename(file));
   for (const name of [

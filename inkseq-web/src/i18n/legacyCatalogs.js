@@ -279,7 +279,6 @@ export const legacyCatalogs = {
       'Skip characters for unpopulated, product or abstract visuals. Locations can start with text descriptions.',
     'legacy.journey28': 'No chapters yet',
     'legacy.journey29': 'One shot, one clear idea',
-    'legacy.journey30': 'Describe action and emotion before adding technical model terms.',
     'legacy.journey31': 'Storyboard and camera choices · Optional',
     'legacy.journey32': 'Let the story decide',
     'legacy.journey33': 'Close-up · Details or emotion',
@@ -461,8 +460,6 @@ export const legacyCatalogs = {
     'deployment.private': 'Original profile · Not currently listed',
     'deployment.disabled':
       'This profile cannot run yet. You can save a draft; capacity and parameters are checked before generation.',
-    'deployment.help':
-      'An explicit selection uses that profile without switching models automatically. Leave it unselected to use the existing service.',
     'composer.summary': '{seconds}s · {resolution} · {copies} copies',
     'composer.flLimits': 'First frame {first}/1 · Last frame {last}/1 · Media is optional',
     'composer.signedIn': 'Signed in. You can start creating.',
@@ -471,32 +468,25 @@ export const legacyCatalogs = {
     'composer.confirmUploads':
       'Pending uploads remain local. Confirm saving them to the current account before continuing.',
     'availability.ready': 'Ready to generate',
-    'availability.readyMessage':
-      'A machine is ready for this mode. Inputs and execution requirements are still checked on submission.',
+    'availability.readyMessage': 'Ready. Inputs are still checked when you start.',
     'availability.busy': 'Queue available',
-    'availability.busyMessage':
-      'The machine is generating. You may queue a submission, subject to backend admission.',
+    'availability.busyMessage': 'Busy right now. You can still join the line.',
     'availability.starting': 'Preparing',
-    'availability.startingMessage': 'The machine is preparing. Wait until it is ready.',
-    'availability.cold': 'Ready · starts a machine',
-    'availability.coldMessage':
-      'No machine is running. Submit and one starts automatically; this usually takes a few minutes.',
-    'availability.unavailable': 'No machine available',
+    'availability.startingMessage': 'Getting ready. Please wait a moment.',
+    'availability.cold': 'Ready · takes a few minutes to begin',
+    'availability.coldMessage': 'You can start now. It usually takes a few minutes to begin.',
+    'availability.unavailable': 'Not available right now',
     'availability.unavailableMessage':
-      'No machine is available. Ask an administrator to start this mode.',
+      'This is not available right now. Please try again in a few minutes.',
     'availability.disabled': 'Not enabled',
-    'availability.disabledMessage':
-      "This mode isn't available right now. Use Auto, or try again later.",
+    'availability.disabledMessage': 'This is not open yet.',
     'availability.unknown': 'Status unconfirmed',
     'availability.unknownMessage':
       'Execution status cannot be confirmed right now. Refresh and try again.',
     'availability.stale': 'Status expired',
     'availability.staleMessage': 'Execution status has expired. Refresh before generating.',
     'deployment.history': 'Historical measurements for the same specifications',
-    'deployment.measurement': '{width} × {height} · {frames} frames · {steps} steps: ',
     'deployment.samples': '{date} · {count} samples · Cache conditions were not controlled',
-    'deployment.historyHelp':
-      'Historical job duration includes in-job loading, but excludes rental, downloads and queuing. This is not an ETA or quality guarantee for this job.',
     'composer.refLimits':
       'Images {images}/{maxImages} · Videos {videos}/{maxVideos} · Audio {audios}/{maxAudios} · Total {total}/{maxTotal}',
     'composer.nativeLimits':
@@ -533,7 +523,7 @@ export const legacyCatalogs = {
     'legacy.visible25': 'Last frame of the previous shot’s selected version',
     'legacy.visible26': 'Waiting for a selected version of the previous shot',
     'legacy.visible27': 'Submission awaiting verification',
-    'legacy.visible28': 'Waiting for a machine',
+    'legacy.visible28': 'In line',
     'legacy.visible29': 'Saving and verifying results',
     'legacy.visible30': 'Generating',
     'legacy.visible31': 'Generation failed · View details',
@@ -704,7 +694,7 @@ export const legacyCatalogs = {
     'legacy.lookImageMissing':
       'The {slot} image for “{character} / {look}” is missing. Upload it again or explicitly defer it.',
     'projection.missingLook': 'The saved look for “{name}” no longer exists. Choose another.',
-    'projection.countLimit': 'Current model/API count limit ({kind}: {max}, total: {total})',
+    'projection.countLimit': 'Limit: {kind} up to {max}, {total} in total',
     'hint.characterPicture':
       '{names} has no picture yet. Add one, or a first frame, or the person may look different in every shot.',
     'hint.speechUnspecified':
@@ -719,13 +709,12 @@ export const legacyCatalogs = {
       'Room for up to: images {images} · videos {videos} · audio {audios} · {total} in total',
     'projection.voice': 'Voice for {name}',
     'projection.prop': 'Prop · {name}',
-    'projection.noModel': 'No model selected',
+    'projection.noModel': 'No quality selected',
     'projection.unconfirmed': 'Unconfirmed',
-    'projection.noCapabilities':
-      'Model capabilities have not been loaded. Refresh service capabilities.',
+    'projection.noCapabilities': "Options haven't loaded yet. Refresh and try again.",
     'jobs.status.planned': 'Waiting for batch confirmation',
-    'jobs.status.waiting_capacity': 'Waiting for a machine',
-    'jobs.status.queued': 'Waiting for a machine',
+    'jobs.status.waiting_capacity': 'In line',
+    'jobs.status.queued': 'In line',
     'jobs.status.claimed': 'Assigned',
     'jobs.status.submitting': 'Submitting',
     'jobs.status.running': 'Generating',
@@ -777,8 +766,7 @@ export const legacyCatalogs = {
     'jobs.cacheFull':
       'The rough-cut workspace is full. This job stopped before encoding. Media is unchanged; wait for an administrator to resolve capacity before preflighting and confirming a new rough cut.',
     'jobs.noQuote': 'No cost quote is available. This does not mean the job is free.',
-    'jobs.mockCost':
-      'Simulation does not call the model and costs $0.00; real inference pricing is not verified.',
+    'jobs.mockCost': 'This is a simulation, so it costs nothing.',
     'jobs.includedCost':
       'This rough cut currently has no separate charge; server resources still incur operating costs.',
     'jobs.reservedCost':
@@ -834,11 +822,8 @@ export const legacyCatalogs = {
     'cloud.shot44': 'This plan has been submitted',
     'cloud.shot45':
       'This text is the generation prompt. Simulation does not run real generation. Chapter scripts and reference purposes are not automatically added to the prompt.',
-    'cloud.shot46': 'Sampler',
-    'cloud.shot47': 'Sampling steps',
     'cloud.shot48': 'The anchor must be before the generated clip’s end.',
     'cloud.shot49': 'Denoising strength',
-    'cloud.shot50': 'Random seed',
     'cloud.shot51': 'Audio VAE decoding',
     'cloud.shot52': 'Audio tile size',
     'cloud.shot53': 'Audio tile overlap',
@@ -853,17 +838,11 @@ export const legacyCatalogs = {
     'cloud.currentMode': 'Current mode: {mode} · Change it above the media area',
     'cloud.aspectNote':
       'Planned project aspect: {planned}; this shot generates {current}. Settings are saved independently and do not automatically change existing shots.',
-    'cloud.editDuration':
-      'The {seconds}s edit plan is saved separately from generation duration. Native model dimensions are confirmed at preflight.',
-    'cloud.customHelp':
-      '. Custom dimensions apply only to custom resolution; other resolutions use native model sizes. Compression changes encoding, not model detail. Reference size applies only in all-reference mode; video tiling applies only with tiled VAE decoding. Other modes preserve these settings for later use.',
     'cloud.useSourceAudio': ' · Use source audio as a reference',
     'cloud.sourceRange': ' · Source {start}–{end}s',
     'cloud.guide': '{title} · {seconds}s{range} · {audio}',
     'cloud.inputLimits':
       'Up to {images} images / {videos} videos / {audios} audio clips, {total} files total. Video and audio trims: {min}–{max}s, subject to service preflight.',
-    'cloud.output':
-      'Model sampling: {width} × {height} · {frames} frames · {seconds}s. Job parameters determine the final export duration.',
     'cloud.loadedProjects':
       '{count} projects loaded{more}. Search covers only loaded projects. Updated ordering may overlap pages; projects are deduplicated by ID.',
     'cloud.moreProjects': '; earlier records can be loaded manually',
@@ -1224,8 +1203,6 @@ export const legacyCatalogs = {
     'handover.ui1': 'Enter an in point and an out point.',
     'handover.ui2':
       'Trim and shot duration saved together. Later shots or audio may move; review subtitles again. You can undo this.',
-    'handover.ui3':
-      'This trims the selected video without changing the source file or generation references. Save explicitly; closing, cancelling or changing steps does not apply unsaved edits.',
     'handover.ui4': 'Set in point here',
     'handover.ui5': 'Set out point here',
     'handover.ui6': 'Source video',
@@ -1737,7 +1714,6 @@ export const legacyCatalogs = {
     'legacy.journey27': '无人、产品或抽象画面可以跳过人物设定。地点也可以先用文字说明。',
     'legacy.journey28': '还没有章节',
     'legacy.journey29': '一个镜头，说清一件事',
-    'legacy.journey30': '写动作与情绪，比堆叠模型术语更重要。',
     'legacy.journey31': '分镜说明与拍法 · 可选',
     'legacy.journey32': '让故事需求决定',
     'legacy.journey33': '特写 · 只看细节或情绪',
@@ -1894,33 +1870,29 @@ export const legacyCatalogs = {
     'deployment.title': '视频部署配方',
     'deployment.private': '原配方 · 当前未公开',
     'deployment.disabled': '该配方当前尚不可执行；可以保存草稿，开始生成前会核对容量和参数。',
-    'deployment.help': '明确选择后按该配方执行，不自动切换模型。未选择时沿用现有服务。',
     'composer.summary': '{seconds} 秒 · {resolution} · {copies}份',
     'composer.flLimits': '首帧 {first}/1 · 尾帧 {last}/1 · 可不放素材',
     'composer.signedIn': '已登录，可以直接开始创作。',
     'composer.accountChanged': '账户已切换，旧会话和响应未加入新账户。原账户草稿仍按账户保存。',
     'composer.confirmUploads': '待上传文件还在本地。请确认要保存到当前账户后继续。',
     'availability.ready': '可生成',
-    'availability.readyMessage': '当前模式已有就绪机器，提交时仍会检查输入和执行条件。',
+    'availability.readyMessage': '可以开始，提交时仍会检查输入。',
     'availability.busy': '可排队',
-    'availability.busyMessage': '对应机器正在生成，可提交排队；以后台准入结果为准。',
+    'availability.busyMessage': '现在比较忙，可以提交排队。',
     'availability.starting': '正在准备',
-    'availability.startingMessage': '对应机器正在准备，请等待就绪。',
-    'availability.cold': '可提交 · 自动开机',
-    'availability.coldMessage': '现在没有运行中的机器。提交后会自动启动，通常需要几分钟。',
-    'availability.unavailable': '暂无机器',
-    'availability.unavailableMessage': '暂无可用机器，请联系管理员启动对应模式。',
+    'availability.startingMessage': '正在准备，请稍等。',
+    'availability.cold': '可提交 · 需要几分钟开始',
+    'availability.coldMessage': '现在可以提交，通常需要几分钟开始。',
+    'availability.unavailable': '暂时不可用',
+    'availability.unavailableMessage': '暂时不可用，请过几分钟再试。',
     'availability.disabled': '暂未开放',
-    'availability.disabledMessage': '这个模式暂时不可用，可以先用「自动」，或稍后再试。',
+    'availability.disabledMessage': '暂未开放。',
     'availability.unknown': '状态待确认',
     'availability.unknownMessage': '暂时无法确认执行状态，请刷新后重试。',
     'availability.stale': '状态已过期',
     'availability.staleMessage': '执行状态已过期，请刷新后再生成。',
     'deployment.history': '相同规格的历史实测',
-    'deployment.measurement': '{width} × {height} · {frames} 帧 · {steps} 步：',
     'deployment.samples': '{date} · {count} 个样本 · 缓存条件未受控',
-    'deployment.historyHelp':
-      '历史任务耗时，包含任务内加载；不包含租机、下载和排队。不是本次预计完成时间或质量保证。',
     'composer.refLimits':
       '图片 {images}/{maxImages} · 视频 {videos}/{maxVideos} · 音频 {audios}/{maxAudios} · 合计 {total}/{maxTotal}',
     'composer.nativeLimits': ' · 首尾帧、图片锚点另计；摘录以预检条数为准',
@@ -1956,7 +1928,7 @@ export const legacyCatalogs = {
     'legacy.visible25': '上一镜选用那条的最后一帧',
     'legacy.visible26': '等待上一镜选定一条',
     'legacy.visible27': '提交待核对',
-    'legacy.visible28': '在等机器',
+    'legacy.visible28': '在排队',
     'legacy.visible29': '保存与核验结果',
     'legacy.visible30': '生成中',
     'legacy.visible31': '生成失败 · 查看原因',
@@ -2112,7 +2084,7 @@ export const legacyCatalogs = {
     'legacy.referenceChanged': '「{title}」的原文件或有效范围有变化，请重新试听并保存选段。',
     'legacy.lookImageMissing': '「{character} / {look}」的{slot}图缺失；补传或明确改为稍后补充。',
     'projection.missingLook': '保存的「{name}」造型不存在，请重新选择。',
-    'projection.countLimit': '当前模型/API 数量上限（{kind} {max}，总计 {total}）',
+    'projection.countLimit': '数量上限：{kind} {max}，总计 {total}',
     'hint.characterPicture':
       '{names} 还没有图片。加一张图或一个首帧，否则这个人物在每个镜头里可能长得不一样。',
     'hint.speechUnspecified':
@@ -2125,12 +2097,12 @@ export const legacyCatalogs = {
     'projection.limits': '最多可放：图片 {images} · 视频 {videos} · 声音 {audios} · 共 {total}',
     'projection.voice': '{name} 的声音',
     'projection.prop': '道具 · {name}',
-    'projection.noModel': '未选择模型',
+    'projection.noModel': '未选择画质',
     'projection.unconfirmed': '待确认',
-    'projection.noCapabilities': '当前模型能力尚未读取，请刷新服务能力。',
+    'projection.noCapabilities': '选项尚未读取，请刷新后再试。',
     'jobs.status.planned': '等待批次确认',
-    'jobs.status.waiting_capacity': '在等机器',
-    'jobs.status.queued': '在等机器',
+    'jobs.status.waiting_capacity': '在排队',
+    'jobs.status.queued': '在排队',
     'jobs.status.claimed': '已分配',
     'jobs.status.submitting': '正在提交',
     'jobs.status.running': '生成中',
@@ -2176,7 +2148,7 @@ export const legacyCatalogs = {
     'jobs.cacheFull':
       '粗剪服务的工作空间已满，本次已停止，尚未开始编码。素材保持不变；请等管理员处理容量后，再预检并确认新的粗剪任务。',
     'jobs.noQuote': '费用尚未报价，不能据此认为免费。',
-    'jobs.mockCost': '模拟测试不调用模型，费用为 $0.00；真实推理价格尚未验证。',
+    'jobs.mockCost': '这是模拟，不花钱。',
     'jobs.includedCost': '此项粗剪当前不单独计费；服务器资源仍有运行成本。',
     'jobs.reservedCost':
       '预算预留 {amount} {currency}；这是运营配置的额度占用，实际费用待核对，不是最终账单。',
@@ -2228,11 +2200,8 @@ export const legacyCatalogs = {
     'cloud.shot44': '这份计划已提交',
     'cloud.shot45':
       '这段文字作为生成任务的提示词；模拟模式不会真正生成。章节剧本和参考用途不会自动变成提示词。',
-    'cloud.shot46': '采样器',
-    'cloud.shot47': '采样步数',
     'cloud.shot48': '锚点必须在生成片段结束之前。',
     'cloud.shot49': '降噪强度',
-    'cloud.shot50': '随机种子',
     'cloud.shot51': '音频 VAE 解码',
     'cloud.shot52': '音频分块大小',
     'cloud.shot53': '音频分块重叠',
@@ -2247,16 +2216,11 @@ export const legacyCatalogs = {
     'cloud.currentMode': '当前方式：{mode} · 可在素材区上方切换',
     'cloud.aspectNote':
       '项目计划画幅 {planned}；此镜头当前生成 {current}。参数各自保存，不会自动改变已有镜头。',
-    'cloud.editDuration': '剪辑计划 {seconds} 秒与生成时长分别保存；模型的原生尺寸以预检结果为准。',
-    'cloud.customHelp':
-      '。仅在分辨率选择 custom 时生效。普通分辨率使用模型原生尺寸。压缩质量只改变输出编码，不增加模型细节。参考图尺寸仅全能参考模式生效；视频分块参数仅在视频 VAE 解码选 tiled 时生效。其他模式保留这些设置，切换到适用模式后使用。',
     'cloud.useSourceAudio': ' · 将原声作为参考',
     'cloud.sourceRange': ' · 原片 {start}–{end} 秒',
     'cloud.guide': '{title} · {seconds} 秒{range} · {audio}',
     'cloud.inputLimits':
       '最多 {images} 张图 / {videos} 段视频 / {audios} 段音频，合计 {total} 份。视频与音频选段限制 {min}–{max} 秒，以服务预检为准。',
-    'cloud.output':
-      '模型采样：{width} × {height} · {frames} 帧 · {seconds} 秒。最终导出时长以任务参数为准。',
     'cloud.loadedProjects':
       '已载入 {count} 个项目{more}。搜索仅覆盖已载入列表；更新后的排序可能让分页重叠，列表按编号去重。',
     'cloud.moreProjects': '，还有更早记录可手动加载',
@@ -2592,8 +2556,6 @@ export const legacyCatalogs = {
     'handover.ui1': '请填写入点和出点。',
     'handover.ui2':
       '剪辑选段与镜头时长已一起保存。后续镜头/音轨位置可能改变，请重新核对字幕；可撤销恢复。',
-    'handover.ui3':
-      '调整的是采用视频的剪辑，不会修改原文件或生成输入参考。填写后点保存；收起、取消或切换步骤不会应用未保存的输入。',
     'handover.ui4': '将当前位置设为入点',
     'handover.ui5': '将当前位置设为出点',
     'handover.ui6': '剪辑源片',

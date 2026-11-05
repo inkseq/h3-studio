@@ -780,7 +780,7 @@ test('empty explicit prompt is not silently replaced and fee wording separates u
   store.updateEntity(shot, { data: { prompt: '' } });
   assert.throws(() => buildPlanPayload(store.exportProject(), shot, { recipe }), /先写清/);
   assert.match(estimateLabel({ cost_microusd: null }), /尚未报价/);
-  assert.match(estimateLabel({ source: 'mock', cost_microusd: 0 }), /真实推理价格尚未验证/);
+  assert.match(estimateLabel({ source: 'mock', cost_microusd: 0 }), /模拟/);
   assert.match(estimateLabel({ cost_microusd: 50000, currency: 'USD' }), /\$0.05 USD/);
 });
 test('freestyle uses the existing project schema and creates no plan or job', async () => {

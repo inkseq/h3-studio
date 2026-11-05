@@ -54,8 +54,6 @@ export const h3MoreCatalogs = {
     'h3more.copy48': '① Choose a generation mode',
     'h3more.copy49': 'A prompt, or the opening and closing images',
     'h3more.copy50': 'Describe your idea with character images, motion video and audio',
-    'h3more.copy51':
-      'Loading generation modes. Your draft is retained; new model inputs are not accepted yet.',
     'h3more.copy52':
       'Organising local media; cloud capabilities have not been checked. Available modes, counts and durations are verified by the signed-in service’s preflight.',
     'h3more.copy53': '② Add media directly to this shot',
@@ -269,7 +267,6 @@ export const h3MoreCatalogs = {
     'h3more.copy48': '① 先选择生成方式',
     'h3more.copy49': '一句提示词，或指定开始与结尾的画面',
     'h3more.copy50': '用人物图、动作视频和声音表达你的想法',
-    'h3more.copy51': '正在读取生成方式；可保留草稿，暂不接受新的模型输入。',
     'h3more.copy52':
       '本机素材整理，尚未核对云端能力。云端可执行模式、数量和时长以登录后的服务预检为准。',
     'h3more.copy53': '② 把素材直接放进这个镜头',

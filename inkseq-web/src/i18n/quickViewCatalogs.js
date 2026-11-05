@@ -8,11 +8,9 @@ export const quickViewCatalogs = {
     'quickView.showMore': 'Show more',
     'quickView.showLess': 'Show less',
     'quickView.machineReady': 'ready',
-    'quickView.machineMissing': 'no machine ready',
     'quickView.assistantOptions': 'Assistant options',
     'quickView.reuseMaterials': 'Reuse media ({count})',
     'quickView.inputDetails': 'Input details',
-    'quickView.modelDetails': 'Model details',
     'quickSidebar.changed':
       'This creation changed. Reopen its menu and try again; the current draft is unchanged.',
     'quickSidebar.invalid': 'This row action is not valid. Reopen the menu and try again.',
@@ -68,7 +66,6 @@ export const quickViewCatalogs = {
     'quickView.emptyTitle': 'What do you want to shoot?',
     'quickView.emptyHelp':
       'Describe one shot: what we see and what happens. You will see the settings and price before anything is generated.',
-    'quickView.availableMachines': 'Available machines',
     'quickView.loadingSettings': 'Loading settings…',
   },
   zh: {
@@ -80,11 +77,9 @@ export const quickViewCatalogs = {
     'quickView.showMore': '展开',
     'quickView.showLess': '收起',
     'quickView.machineReady': '已就绪',
-    'quickView.machineMissing': '暂无就绪机器',
     'quickView.assistantOptions': '助手选项',
     'quickView.reuseMaterials': '复用素材（{count}）',
     'quickView.inputDetails': '输入详情',
-    'quickView.modelDetails': '模型详情',
     'quickSidebar.changed': '这条创作已经更新，请重新打开它的菜单再试；当前草稿保持不变。',
     'quickSidebar.invalid': '这项行操作无效，请重新打开菜单再试。',
     'quickSidebar.failed': '尚不能确认结果，请保留原请求并核对。',
@@ -133,6 +128,5 @@ export const quickViewCatalogs = {
     'quickView.emptyHelp':
       '描述一个镜头：画面里有什么、发生了什么。生成前会先显示设置和价格，确认后才开始。',
     'quickView.loadingSettings': '正在读取设置…',
-    'quickView.availableMachines': '可用机器',
   },
 };

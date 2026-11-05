@@ -3,7 +3,7 @@
 from sqlalchemy import insert, select, update
 
 from .content_lifecycle import _assert_project_available, owner_reference_gate
-from .inky_models import KINDS, example_text
+from .inky_models import KINDS, REWRITE_KINDS, example_text
 from .inky_source import item, sources, suggestion_id
 from .repository import Conflict, NotFound, Scope, documents, request_hash
 
@@ -283,6 +283,29 @@ class InkyStore:
                     conn, principal, project_id, source["shot_id"], kind
                 )
             )
+
+    def rewrite_target(self, principal, project_id, ident):
+        """The current shot and kind behind a visible text suggestion, or a refusal."""
+        with self.repo.engine.connect() as conn:
+            current = sources(self.project(conn, principal, project_id))
+            match = next(
+                (
+                    (s, k)
+                    for s in current.values()
+                    for k in REWRITE_KINDS
+                    if suggestion_id(s, k) == ident
+                ),
+                None,
+            )
+            if not match:
+                raise Conflict("inky_suggestion_stale")
+            source, kind = match
+            cache = self.row(conn, principal, project_id, CACHE, source["shot_id"])
+            if not cache or not any(
+                v["id"] == ident for v in cache["payload"].get("items", [])
+            ):
+                raise NotFound("inky_suggestion_not_found")
+            return source, kind
 
     def ignore(self, principal, project_id, ident):
         with self.repo.transaction() as conn:

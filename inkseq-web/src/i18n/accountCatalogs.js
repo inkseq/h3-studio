@@ -69,8 +69,7 @@ export const accountCatalogs = {
     'account.copy51': 'Keep',
     'account.copy52': 'Revoke',
     'account.copy53': 'No API keys yet. Make one per assistant so you can revoke each separately.',
-    'account.copy54':
-      "Generation still follows your limits and the queue. A key doesn't start machines.",
+    'account.copy54': 'Generation still follows your limits and the queue.',
     'account.copy55':
       'After an interrupted upload, check whether the original file was received. Recovery verifies and saves the same material on the server; it is not a browser upload resume.',
     'account.copy56': 'Check material status and usage',
@@ -151,8 +150,6 @@ export const accountCatalogs = {
     'account.copy118': 'Original file end (optional)',
     'account.copy119': 'Include audio',
     'account.copy120': 'Add anchor',
-    'account.copy121':
-      'Edit and save all controls here. This is a local draft; generation requires a saved cloud project and preflight. Changing settings does not rent a machine.',
     'account.copy122': 'Check again',
     'account.copy123': "Generation isn't available right now. You can keep saving drafts.",
     'account.copy124': 'Refresh service status',
@@ -218,8 +215,6 @@ export const accountCatalogs = {
       'Return relevant web links and suggestions. I will decide whether to expand access.',
     'account.status16':
       'Save creative changes and return their web links. Before generation, preflight and confirm the job and cost. After a timeout, reconcile the original job without resubmitting.',
-    'account.status17':
-      'Return generated results as candidates to the original shot. Do not replace selected versions unless requested. Explain changes, unfinished steps, and where to review or continue editing.',
     'account.status18':
       'Work instructions copied. Share them with AI, then configure its access locally.',
     'account.status19':
@@ -422,7 +417,7 @@ export const accountCatalogs = {
     'account.copy51': '保留',
     'account.copy52': '撤销',
     'account.copy53': '还没有 API Key。可以给每个助手单独建一个，方便单独撤销。',
-    'account.copy54': '生成仍受账户额度和排队限制，Key 不会自动开机器。',
+    'account.copy54': '生成仍受账户额度和排队限制。',
     'account.copy55':
       '上传中断后，先检查是否已收到原文件。恢复沿用同一素材，只处理后台校验和保存；不是浏览器断点续传。',
     'account.copy56': '检查素材状态与用量',
@@ -497,8 +492,6 @@ export const accountCatalogs = {
     'account.copy118': '原文件终点（可选）',
     'account.copy119': '包含声音',
     'account.copy120': '添加锚点',
-    'account.copy121':
-      '全部控制可在这里编辑和保存。当前是本机草稿；真实生成需保存到云项目并完成预检，不会因调整参数而租机。',
     'account.copy122': '重新检查',
     'account.copy123': '现在暂时不能生成，草稿可以继续保存。',
     'account.copy124': '刷新服务状态',
@@ -554,8 +547,6 @@ export const accountCatalogs = {
     'account.status15': '返回相关内容的网页链接和建议，由我决定是否扩大授权。',
     'account.status16':
       '保存创作变更并返回对应的网页链接。提交生成前预检并确认本次任务与费用；超时先核对原任务，不重复提交。',
-    'account.status17':
-      '生成结果先作为候选回到原镜头；未经我要求，不自动替换已采用的版本。完成后告诉我改了什么、哪些步骤未完成，以及从哪里查看或继续调整。',
     'account.status18': '已复制工作说明。粘贴给 AI 后，在本地为它配置授权。',
     'account.status19': '已复制入门说明；其中没有本机作品内容或工作位置。',
     'account.status20': '浏览器未允许自动复制。下方说明已选中，请按 Ctrl+C 或 ⌘C 手动复制。',

@@ -80,6 +80,7 @@ import {
   queuePositions,
 } from './storyboard-ui-model.js';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
+import { ShotPicture } from './ShotPicture.jsx';
 import { ShotLook } from './ShotLook.jsx';
 import { ShotCardPrompt } from './ShotCardPrompt.jsx';
 import { VoicePicker } from './VoicePicker.jsx';
@@ -446,10 +447,19 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
 
 /* ---------- library ---------- */
 
-export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false, onToggle }) {
+// The panel beside the storyboard holds everything, so any of it can be dragged onto a shot. As a
+// whole page it holds one half: page 'world' the people, places and props, page 'files' the files.
+export function AssetLibrary({
+  onPick,
+  selectedShot,
+  compact,
+  collapsed = false,
+  onToggle,
+  page = null,
+}) {
   const { t: tr } = useI18n();
   const { TYPE_LABEL } = displayLabels(tr);
-  const LIB_TABS = [
+  const ALL_TABS = [
     ['character', tr('storyboard.detail10'), UserRound],
     ['location', tr('storyboard.detail11'), MapPin],
     ['prop', tr('storyboard.copy88'), Box],
@@ -458,11 +468,20 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
     ['audio', tr('storyboard.copy51'), Music],
     ['inbox', tr('storyboard.detail13'), Inbox],
   ];
+  const LIB_TABS = ALL_TABS.filter(
+    ([k]) => !page || ['character', 'location', 'prop'].includes(k) === (page === 'world'),
+  );
 
   const { state, dispatch, db } = useStore();
-  const [tab, setTab] = useState('character'),
-    [q, setQ] = useState(''),
-    [wide, setWide] = useState(false),
+  // Each page keeps its own category and search.
+  const place = page || 'panel',
+    [tabs, setTabs] = useState({}),
+    [searches, setSearches] = useState({}),
+    tab = tabs[place] || LIB_TABS[0][0],
+    q = searches[place] || '',
+    setTab = (value) => setTabs((old) => ({ ...old, [place]: value })),
+    setQ = (value) => setSearches((old) => ({ ...old, [place]: value }));
+  const [wide, setWide] = useState(false),
     [zoom, setZoom] = useState(null),
     [newProfileType, setNewProfileType] = useState(null);
   const uploadInput = useRef();
@@ -498,6 +517,17 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
       : [],
   );
   const isProfileTab = ['character', 'location', 'prop'].includes(tab);
+  const profileCount = tr(
+      state.profiles.length === 1 ? 'storyboard.oneProfile' : 'storyboard.profiles',
+      { count: state.profiles.length },
+    ),
+    fileCount = tr(state.assets.length === 1 ? 'storyboard.oneFile' : 'storyboard.files', {
+      count: state.assets.length,
+    });
+  const newProfileLabel = tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] }),
+    heading = tr(
+      page === 'world' ? 'stage.world' : page === 'files' ? 'stage.library' : 'storyboard.copy41',
+    );
   return (
     <aside
       className={
@@ -506,26 +536,22 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
         (compact ? ' compact' : '') +
         (collapsed ? ' collapsed' : '')
       }
-      aria-label={tr('storyboard.copy41')}
+      aria-label={heading}
     >
       <div className="lib-head">
         {!collapsed && (
           <>
-            <b>{tr('storyboard.copy41')}</b>
+            <b>{heading}</b>
             <small>
-              {tr('storyboard.libraryCounts', {
-                profiles: tr(
-                  state.profiles.length === 1 ? 'storyboard.oneProfile' : 'storyboard.profiles',
-                  { count: state.profiles.length },
-                ),
-                assets: tr(state.assets.length === 1 ? 'storyboard.oneFile' : 'storyboard.files', {
-                  count: state.assets.length,
-                }),
-              })}
+              {page === 'world'
+                ? profileCount
+                : page === 'files'
+                  ? fileCount
+                  : tr('storyboard.libraryCounts', { profiles: profileCount, assets: fileCount })}
             </small>
           </>
         )}
-        {onToggle ? (
+        {page ? null : onToggle ? (
           <Button
             variant="ghost"
             size="sm"
@@ -544,19 +570,26 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
         )}
       </div>
       <div className="row tight">
-        <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
-          <Upload size={14} />
-          {tr('storyboard.copy42')}
-        </Button>
-        {isProfileTab && (
+        {page === 'world' ? (
+          <Button size="sm" onClick={() => setNewProfileType(tab)}>
+            <Plus size={14} />
+            {newProfileLabel}
+          </Button>
+        ) : (
+          <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
+            <Upload size={14} />
+            {tr('storyboard.copy42')}
+          </Button>
+        )}
+        {isProfileTab && !page && (
           // #232 (#8): one "+" that creates whatever category is open.
           <Button
             variant="ghost"
             size="sm"
             className="lib-new"
             disabled={state.busy}
-            title={tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] })}
-            aria-label={tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] })}
+            title={newProfileLabel}
+            aria-label={newProfileLabel}
             onClick={() => setNewProfileType(tab)}
           >
             <Plus size={14} />
@@ -576,8 +609,20 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
       </div>
       <input
         className="lib-search"
-        aria-label={tr('storyboard.detail72')}
-        placeholder={tr('storyboard.detail73')}
+        aria-label={tr(
+          page === 'world'
+            ? 'stage.searchWorld'
+            : page === 'files'
+              ? 'stage.searchFiles'
+              : 'storyboard.detail72',
+        )}
+        placeholder={
+          page === 'world'
+            ? tr('stage.searchWorld')
+            : page === 'files'
+              ? tr('stage.searchFiles')
+              : tr('storyboard.detail73')
+        }
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -620,7 +665,7 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
                 </span>
                 <Button size="sm" disabled={state.busy} onClick={() => setNewProfileType(tab)}>
                   <Plus size={14} />
-                  {tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] })}
+                  {newProfileLabel}
                 </Button>
               </div>
             )}
@@ -638,11 +683,11 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
           </div>
           <div className="lib-tip">
             {tab === 'character'
-              ? tr('storyboard.detail18')
+              ? tr(page === 'world' ? 'stage.worldCharacterTip' : 'storyboard.detail18')
               : tab === 'location'
                 ? tr('storyboard.detail19')
                 : tr('storyboard.detail20')}
-            {tr('storyboard.mixed20')}
+            {tr(page === 'world' ? 'stage.worldTip' : 'storyboard.mixed20')}
           </div>
         </>
       )}
@@ -656,7 +701,14 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
                 key={a.id}
                 asset={a}
                 used={usedA.has(a.id)}
-                onClick={() => onPick?.({ asset: a.id })}
+                // On its own page there is no shot to add to: a click just looks at the file.
+                onClick={
+                  page
+                    ? a.kind === 'audio'
+                      ? undefined
+                      : () => setZoom(a)
+                    : () => onPick?.({ asset: a.id })
+                }
                 onZoom={setZoom}
               />
             ))}
@@ -665,10 +717,12 @@ export function AssetLibrary({ onPick, selectedShot, compact, collapsed = false,
 
       {tab === 'inbox' && (
         <div className="inbox">
-          <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
-            <Upload size={14} />
-            {tr('storyboard.copy44')}
-          </Button>
+          {!page && (
+            <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
+              <Upload size={14} />
+              {tr('storyboard.copy44')}
+            </Button>
+          )}
           {!inbox.length && <p className="muted">{tr('storyboard.copy45')}</p>}
           {inbox.map((a) => (
             <InboxRow key={a.id} a={a} />
@@ -2286,6 +2340,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         <div className={'modepanel ' + info.mode.toLowerCase()}>
           {info.frameInputs && (
             <>
+              <ShotPicture shot={shot} hasPicture={!!sf?.asset} />
               <div className="slots" data-guide-field="frames">
                 <Slot
                   onFiles={(files) =>

@@ -334,6 +334,7 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
         inert={preview ? true : undefined}
       >
         <header className="wbar">
+          <div className="wbar-stages" />
           <Button
             variant="ghost"
             className="back story-home-back"
@@ -442,6 +443,7 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
             <Badge tone="local">{t('story.copy9')}</Badge>
           )}
           <div className="spacer" />
+          <div className="wbar-inky" />
           <Button
             variant="ghost"
             className="icon-only"

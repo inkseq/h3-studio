@@ -166,7 +166,7 @@ export const adjunctCatalogs = {
     'adjunct.serviceStatus.copy125':
       "Read the original task's progress and artifacts. Results retain the shot association at submission. Downloads require authorization; do not store signed storage URLs long term.",
     'adjunct.serviceStatus.copy126':
-      "A recipe ID identifies this service's recipe, not the upstream model ID. You explicitly create keys and their full values appear once. Public AI instructions need no login; work and task APIs still require authorization.",
+      'You create keys yourself and see their full value once. Public AI instructions need no login; work and task APIs still require authorization.',
     'adjunct.serviceStatus.copy127':
       'Reference limits have not been read. This does not mean arbitrary counts or durations are supported.',
     'adjunct.serviceStatus.copy128': 'Current shot input usage',
@@ -188,8 +188,6 @@ export const adjunctCatalogs = {
       '; {v0} durations are unknown and cannot be counted as passing',
     'adjunct.serviceStatus.copy144': '. Anchors must also fit entirely within the output duration.',
     'adjunct.serviceStatus.copy145': 'Per-file upload limit: ',
-    'adjunct.serviceStatus.copy146':
-      ' MiB; accepting an upload does not mean the model can use the whole file.',
     'adjunct.serviceStatus.copy147': 'Resolve these inputs first',
     'adjunct.serviceStatus.copy148':
       'Remove excess links or save selections in References and valid clips; in Quick creation use Reuse media / Video and audio selections.',
@@ -284,9 +282,6 @@ export const adjunctCatalogs = {
     'adjunct.quickChatWorkspace.copy209': 'Current account: ',
     'adjunct.quickChatWorkspace.copy210':
       'The selected assistant is enabled. Its actual media-reading list for each turn determines which media it understood.',
-    'adjunct.quickChatWorkspace.copy211':
-      'The assistant is not enabled. Sending saves the current text, media and parameters as an editable task card; it does not call a chat model or automatically generate video.',
-    'adjunct.quickChatWorkspace.copy212': 'This chat model does not yet support ',
     'adjunct.quickChatWorkspace.copy213': 'image',
     'adjunct.quickChatWorkspace.copy214': 'video',
     'adjunct.quickChatWorkspace.copy215': 'audio',
@@ -376,7 +371,6 @@ export const adjunctCatalogs = {
     'adjunct.storyboardConnected.copy322': 'Reference',
     'adjunct.storyboardConnected.copy323': 'First/last frame',
     'adjunct.storyboardConnected.copy324': ' seconds · ',
-    'adjunct.storyboardConnected.copy325': ' steps',
     'adjunct.storyboardConnected.copy326': 'Actual prompt and inputs',
     'adjunct.storyboardConnected.copy327': 'Send',
     'adjunct.storyboardConnected.copy328': 'Do not send',
@@ -388,8 +382,6 @@ export const adjunctCatalogs = {
     'adjunct.storyboardConnected.copy333':
       'The change did not complete. Original records are preserved.',
     'adjunct.storyboardConnected.copy334': 'Shot not found.',
-    'adjunct.storyboardConnected.copy335':
-      'The current model profile is not connected. No other precision will be substituted.',
     'adjunct.storyboardConnected.copy336': 'The original operation is still in progress.',
     'adjunct.storyboardConnected.copy337':
       'Sign in and save as a cloud project before generating real video.',
@@ -407,16 +399,16 @@ export const adjunctCatalogs = {
     'adjunct.storyboardConnected.copy347': 'Closing frame',
     'adjunct.executionStatus.copy0': 'Execution capabilities not loaded',
     'adjunct.executionStatus.copy1':
-      'Check the cloud connection first. Signing in or editing does not mean generation capacity is available.',
+      'Check the connection first. Being signed in does not mean generation is available.',
     'adjunct.executionStatus.copy2': 'Real generation is not enabled',
     'adjunct.executionStatus.copy3':
-      'Projects, media and preflight remain available; no model generation tasks will be created for you.',
-    'adjunct.executionStatus.copy4': 'CPU simulation is active',
+      'Stories and files stay available; nothing will be generated for you.',
+    'adjunct.executionStatus.copy4': 'Simulation is on',
     'adjunct.executionStatus.copy5':
       'This only validates upload, queuing and result handling. Artifacts carry a SIMULATION watermark and do not represent real quality or speed.',
     'adjunct.executionStatus.copy6': 'Real generation task channel is enabled',
     'adjunct.executionStatus.copy7':
-      'GPU capacity, wait time and cost depend on this preflight and task status. Enabled does not mean every configuration has been verified.',
+      'Wait time and cost depend on this check and the task status. Enabled does not mean every configuration has been verified.',
     'adjunct.inputUsage.copy8': 'Image',
     'adjunct.inputUsage.copy9': 'Video',
     'adjunct.inputUsage.copy10': 'Audio',
@@ -768,7 +760,7 @@ export const adjunctCatalogs = {
     'adjunct.serviceStatus.copy125':
       '读取原job进度与产物；结果保持提交时的镜头归属。下载接口需鉴权，不长期保存存储签名链接。',
     'adjunct.serviceStatus.copy126':
-      'recipe ID是本服务的配方，不是上游model ID。Key 由你显式创建，完整值只显示一次。公开的“给 AI 的使用说明”无需登录，但作品和任务接口仍需授权。',
+      'Key 由你自己创建，完整值只显示一次。公开的“给 AI 的使用说明”无需登录，但作品和任务接口仍需授权。',
     'adjunct.serviceStatus.copy127': '参考限制尚未读取，不能据此认为任意数量或时长都可运行。',
     'adjunct.serviceStatus.copy128': '当前镜头输入用量',
     'adjunct.serviceStatus.copy129': '当前参考用量 · 以服务预检为准',
@@ -788,7 +780,6 @@ export const adjunctCatalogs = {
     'adjunct.serviceStatus.copy143': '；{v0}份时长尚未读取，不能当作通过',
     'adjunct.serviceStatus.copy144': '。锚点另需完整放入输出时长。',
     'adjunct.serviceStatus.copy145': '单个上传上限 ',
-    'adjunct.serviceStatus.copy146': ' MiB；允许上传不代表模型可直接使用整段。',
     'adjunct.serviceStatus.copy147': '先处理这些输入',
     'adjunct.serviceStatus.copy148':
       '在“参考素材与有效片段”解除多余关联或保存选段；快速创作页使用“复用已有素材 · 设置视频 / 音频选段”。',
@@ -868,9 +859,6 @@ export const adjunctCatalogs = {
     'adjunct.quickChatWorkspace.copy209': '当前账户：',
     'adjunct.quickChatWorkspace.copy210':
       '所选助手调用已启用；上游是否理解媒体，以每轮真实读取清单为准。',
-    'adjunct.quickChatWorkspace.copy211':
-      '助手尚未启用。发送会将当前文字、素材和参数直接保存为可编辑任务卡，不会调用聊天模型或自动生成视频。',
-    'adjunct.quickChatWorkspace.copy212': '这个聊天模型尚未接入',
     'adjunct.quickChatWorkspace.copy213': '图片',
     'adjunct.quickChatWorkspace.copy214': '视频',
     'adjunct.quickChatWorkspace.copy215': '音频',
@@ -954,7 +942,6 @@ export const adjunctCatalogs = {
     'adjunct.storyboardConnected.copy322': '全能参考',
     'adjunct.storyboardConnected.copy323': '首尾帧',
     'adjunct.storyboardConnected.copy324': ' 秒 · ',
-    'adjunct.storyboardConnected.copy325': ' 步',
     'adjunct.storyboardConnected.copy326': '实际提示词与输入',
     'adjunct.storyboardConnected.copy327': '发送',
     'adjunct.storyboardConnected.copy328': '不发送',
@@ -964,7 +951,6 @@ export const adjunctCatalogs = {
     'adjunct.storyboardConnected.copy332': '确认生成 {v0} 个镜头',
     'adjunct.storyboardConnected.copy333': '修改未完成，原记录保留。',
     'adjunct.storyboardConnected.copy334': '镜头不存在。',
-    'adjunct.storyboardConnected.copy335': '当前模型档案尚未连接；不会换成另一精度替代。',
     'adjunct.storyboardConnected.copy336': '原操作仍在处理中。',
     'adjunct.storyboardConnected.copy337': '先登录并保存为云项目，再生成真实视频。',
     'adjunct.storyboardConnected.copy338':
@@ -979,15 +965,15 @@ export const adjunctCatalogs = {
     'adjunct.storyboardConnected.copy346': '开头画面',
     'adjunct.storyboardConnected.copy347': '结尾画面',
     'adjunct.executionStatus.copy0': '执行能力尚未读取',
-    'adjunct.executionStatus.copy1': '先检查云服务连接。能登录或编辑，不代表生成容量已可用。',
+    'adjunct.executionStatus.copy1': '先检查网络连接。能登录或编辑，不代表现在可以生成。',
     'adjunct.executionStatus.copy2': '真实生成尚未启用',
-    'adjunct.executionStatus.copy3': '项目、素材与预检可继续使用；不会为你创建模型生成任务。',
-    'adjunct.executionStatus.copy4': '当前为 CPU 模拟生成',
+    'adjunct.executionStatus.copy3': '故事和素材可继续使用；不会为你创建生成任务。',
+    'adjunct.executionStatus.copy4': '当前为模拟生成',
     'adjunct.executionStatus.copy5':
       '只验证上传、排队与回填流程，产物带 SIMULATION 水印，不代表真实画质或速度。',
     'adjunct.executionStatus.copy6': '真实生成任务通道已启用',
     'adjunct.executionStatus.copy7':
-      '具体GPU容量、等待时间与费用以本次服务预检和任务状态为准；启用不等于已验证所有配置。',
+      '等待时间与费用以本次核对和任务状态为准；启用不等于已验证所有配置。',
     'adjunct.inputUsage.copy8': '图片',
     'adjunct.inputUsage.copy9': '视频',
     'adjunct.inputUsage.copy10': '音频',

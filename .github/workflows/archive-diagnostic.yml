@@ -40,7 +40,7 @@ jobs:
           mkdir archive-fixture
           printf 'synthetic public fixture\n' > archive-fixture/marker
           printf 'FROM scratch\nCOPY marker /marker\nLABEL org.opencontainers.image.revision="%s"\n' "$GITHUB_SHA" > archive-fixture/Dockerfile
-          docker build -t "sixnine-platform:$GITHUB_SHA" archive-fixture
+          docker build -t "inkseq-platform:$GITHUB_SHA" archive-fixture
           python tools/build_platform_release.py "$GITHUB_SHA" archive-release
           python - "$GITHUB_SHA" <<'PY'
           import importlib.util,json,sys,tarfile

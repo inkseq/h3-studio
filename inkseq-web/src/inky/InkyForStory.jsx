@@ -55,8 +55,8 @@ const demoItems = (shots) =>
       : [],
   );
 
-export function InkyForStory() {
-  const { state, adapter } = useStoryboardUI();
+export function InkyForStory({ selectedShot }) {
+  const { state, dispatch, adapter } = useStoryboardUI();
   const demo = demoOn(),
     read = adapter.readInkySuggestions,
     refresh = adapter.refreshInky;
@@ -84,7 +84,12 @@ export function InkyForStory() {
       items={items}
       shotIds={shotIds}
       shotNumber={shotNumber}
+      selectedShot={selectedShot}
       onIgnore={(item) => adapter.ignoreInkySuggestion?.(item.id)}
+      onRewrite={adapter.rewriteInkySuggestion}
+      onSend={adapter.sendInkyMessage}
+      onUndoSend={adapter.undoInkyMessage}
+      onApply={(id, prompt) => dispatch({ type: 'update', id, patch: { prompt } })}
     />
   );
 }

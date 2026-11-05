@@ -5,41 +5,42 @@ export const ROLE_LABELS = {
   last_frame: '尾帧',
   guide: '时间锚点',
 };
-export const CONTROL_LABELS = {
-  duration: '生成时长（秒）',
-  resolution: '原生分辨率',
-  aspect_ratio: '画幅',
-  generate_audio: '导出生成声音',
-  seed: '随机种子',
-  steps: '采样步数',
-  sampler_name: '采样器',
-  scheduler: '采样日程',
-  denoise: '去噪日程范围',
-  ref_image_size: '参考图细节',
-  shift_video: '视频 sigma shift',
-  shift_audio: '音频 sigma shift',
-  video_decode: '视频 VAE 解码',
-  audio_decode: '音频 VAE 解码',
-  encoder_device: '编码器设备',
-  video_tile_size: '空间块大小',
-  video_overlap: '空间重叠',
-  video_temporal_size: '时间块大小',
-  video_temporal_overlap: '时间重叠',
-  audio_tile_size: '音频分块大小',
-  audio_overlap: '音频分块重叠',
-  width: '自定义宽度',
-  height: '自定义高度',
-  export_crf: '导出压缩 CRF',
-};
-Object.assign(CONTROL_LABELS, {
-  video_conditioning: '视频参与方式',
-  audio_conditioning: '声音参与方式',
-  image_refs_relative_size: '参考图相对大小（%）',
-  audio_refinement: '音频细化',
-  mask_mode: '控制视频遮罩',
-  video_excerpts: '视频参考摘录',
-  audio_excerpts: '视频原声参考摘录',
-});
+// Control names the interface has its own label for (catalog key adjunct.control.<name>).
+export const CONTROL_LABELS = Object.fromEntries(
+  [
+    'duration',
+    'resolution',
+    'aspect_ratio',
+    'generate_audio',
+    'seed',
+    'steps',
+    'sampler_name',
+    'scheduler',
+    'denoise',
+    'ref_image_size',
+    'shift_video',
+    'shift_audio',
+    'video_decode',
+    'audio_decode',
+    'encoder_device',
+    'video_tile_size',
+    'video_overlap',
+    'video_temporal_size',
+    'video_temporal_overlap',
+    'audio_tile_size',
+    'audio_overlap',
+    'width',
+    'height',
+    'export_crf',
+    'video_conditioning',
+    'audio_conditioning',
+    'image_refs_relative_size',
+    'audio_refinement',
+    'mask_mode',
+    'video_excerpts',
+    'audio_excerpts',
+  ].map((name) => [name, true]),
+);
 export const CONTROL_GROUPS = [
   ['常用设置', ['duration', 'resolution', 'aspect_ratio', 'generate_audio']],
   [
@@ -443,18 +444,14 @@ function controlProblem(field, value, item) {
   )
     return null;
   if (item.available === false)
-    return value !== item.default
-      ? item.reason || `${CONTROL_LABELS[field] || field}不可用。`
-      : null;
+    return value !== item.default ? item.reason || '这项设置不可用。' : null;
   if (field === 'seed')
     return typeof value !== 'string' ||
       !/^\d{1,20}$/.test(value) ||
       BigInt(value) > 18446744073709551615n
-      ? '随机种子须为完整 64 位十进制字符串。'
+      ? '这项设置须为完整的十进制数字。'
       : null;
-  return validControlValue(value, item)
-    ? null
-    : `${CONTROL_LABELS[field] || field}超出服务声明的类型或范围。`;
+  return validControlValue(value, item) ? null : '这项设置超出了允许的范围。';
 }
 // A custom canvas: multiples of 32, within the area and aspect-ratio limits.
 function customCanvasValid({ width, height }, recipe) {

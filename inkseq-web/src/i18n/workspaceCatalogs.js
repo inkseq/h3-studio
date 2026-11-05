@@ -145,8 +145,6 @@ export const workspaceCatalogs = {
       'Use an image as the first frame and describe what happens next. Add a last frame if needed.',
     'workspace.copy124':
       'Choose multimodal references and add character images, movement clips, and audio.',
-    'workspace.copy125':
-      'Creating a project only saves it; no model request is submitted. Local work remains in the story workspace.',
     'workspace.copy126':
       'This project has no shots yet. Add one in the story workspace or start a new quick creation.',
     'workspace.copy127':
@@ -165,12 +163,8 @@ export const workspaceCatalogs = {
       'Confirming may incur execution costs. Closing this dialog does not submit.',
     'workspace.copy134':
       'Start generation checks inputs and execution conditions before confirmation. Opening the page, uploading, discussing, and saving cards do not start a GPU.',
-    'workspace.copy135':
-      'These examples do not restrict combinations. Supported inputs and settings depend on the model, execution policy, and server preflight.',
     'workspace.copy136':
       'Choose each material’s role, clip, original audio, and time anchor. The current recipe constrains anchors; removing a reference does not delete the original.',
-    'workspace.copy137':
-      'Denoise is not reference strength. The current Base model has no separate CFG or negative prompt control.',
     'workspace.copy138':
       'Cloud defaults apply unless explicitly overridden. Preflight explains unsupported ranges. Audio chunking is unavailable.',
     'workspace.copy139':
@@ -215,8 +209,6 @@ export const workspaceCatalogs = {
     'workspace.status36': ' · Discussion only',
     'workspace.status37': 'This turn is saved and waiting for the assistant.',
     'workspace.status38': 'The assistant is processing the original request…',
-    'workspace.status39':
-      'The assistant did not finish this turn. Original inputs are saved; the model was not changed.',
     'workspace.status40':
       'The assistant result is unknown and may have used credit. It will not be resent automatically.',
     'workspace.status41': "This turn's text is saved.",
@@ -245,8 +237,6 @@ export const workspaceCatalogs = {
       'Not signed in. Text and pending files remain local. Sign in to save them in the cloud.',
     'workspace.status64':
       'Video submission is enabled. Live preflight checks whether execution is currently available.',
-    'workspace.status65':
-      'Video generation is unavailable. You can save materials, text, and cards and run preflight without renting a GPU.',
     'workspace.status66': 'Open creation history',
     'workspace.status67': 'Return to story workspace',
     'workspace.status68': 'Name this creation',
@@ -271,7 +261,6 @@ export const workspaceCatalogs = {
     'workspace.accessible7': 'Your idea',
     'workspace.accessible8':
       'Describe your scene, or continue with “Move closer, keep everything else”…',
-    'workspace.accessible9': 'Chat model',
     'workspace.accessible10': 'Dismiss notification',
     'workspace.accessible11': 'Live service status',
     'workspace.accessible12': 'Select the clip for this turn',
@@ -300,7 +289,6 @@ export const workspaceCatalogs = {
     'workspace.detail17': 'Awaiting confirmation',
     'workspace.detail18': ' · View history',
     'workspace.detail19': ' · Parameters',
-    'workspace.detail20': 'Model follows the recipe',
     'workspace.detail21': ' · Current',
     'workspace.detail22': 'Not admitted',
     'workspace.detail23': '16:9 landscape',
@@ -352,7 +340,6 @@ export const workspaceCatalogs = {
     'workspace.detail66': 'Confirm {copies} videos',
     'workspace.detail67':
       'Process copy {copy} only, with its original inputs and settings. Successful copies will not be regenerated.',
-    'workspace.detail68': 'Model sampling {width}×{height} · {frames} frames · {seconds} s',
     'workspace.confirmWord': 'Confirm',
     'workspace.agentDetail1': 'Unknown',
     'workspace.agentDetail2': 'View creations',
@@ -460,8 +447,6 @@ export const workspaceCatalogs = {
     'workspace.deferred5': 'Prepare project structure backup (no media)',
     'workspace.deferred6': 'Download project structure backup (no media)',
     'workspace.deferred7': 'Loading this for the first time. Your work is unchanged.',
-    'workspace.estimate.mock':
-      'Simulation does not call a model and costs $0.00. Actual inference pricing is not yet verified.',
     'workspace.estimate.included':
       'This rough cut currently has no separate charge; server resources still have running costs.',
     'workspace.estimate.reserve':
@@ -632,7 +617,6 @@ export const workspaceCatalogs = {
     'workspace.copy122': '选择文生视频，写清主体与动作。没有参考也能先预检。',
     'workspace.copy123': '图片放首帧，描述接下来发生什么；尾帧按需添加。',
     'workspace.copy124': '选择全能参考，分别放角色图、动作片段和音频。',
-    'workspace.copy125': '新建只保存项目，不提交模型请求。本机作品保留在短剧工作台。',
     'workspace.copy126': '当前项目还没有镜头。可回短剧工作台添加，或新建快速创作项目。',
     'workspace.copy127': '正在单镜编辑短剧项目。章节结构、其他镜头与已选用的各条都会保留。',
     'workspace.copy128': '结果不会自动替换你的选择。先看效果，再明确保留什么、只改什么。',
@@ -643,11 +627,8 @@ export const workspaceCatalogs = {
     'workspace.copy133': '确认后可能产生执行费用；关闭窗口不会提交。',
     'workspace.copy134':
       '任务卡的开始生成会检查输入与执行条件，通过后再确认提交。打开网页、上传素材、讨论和保存卡片不启动 GPU。',
-    'workspace.copy135':
-      '这些示例不限制可选组合。可用输入与参数以模型支持范围、当前执行策略和后台预检为准。',
     'workspace.copy136':
       '在每份素材上选择用途、原片选段、视频原声与时间锚点。当前配方单独约束锚点；删除引用不会删除原件。',
-    'workspace.copy137': 'denoise不是参考强度。当前Base没有独立CFG或负面提示词入口。',
     'workspace.copy138': '默认沿用云端预设；显式选择保留，范围不匹配时预检解释。音频分块不可用。',
     'workspace.copy139':
       '说明含一次性凭据，只交给你信任的 Agent。连接成功后这里自动收起；关闭窗口后无法重新显示。',
@@ -691,7 +672,6 @@ export const workspaceCatalogs = {
     'workspace.status36': ' · 仅讨论',
     'workspace.status37': '这一轮已保存，等待助手处理。',
     'workspace.status38': '助手正在处理原请求…',
-    'workspace.status39': '助手未完成本轮；原输入已保存，未切换模型。',
     'workspace.status40': '助手调用结果未知，可能已消费额度；不会自动重发。',
     'workspace.status41': '这一轮文字已保存。',
     'workspace.status42': '这一轮记录已保存。',
@@ -717,7 +697,6 @@ export const workspaceCatalogs = {
     'workspace.status62': '连接状态待核对',
     'workspace.status63': '还未登录。文字和待上传文件保留在本地；登录后可云端保存。',
     'workspace.status64': '视频提交开关已开启；实时预检决定当前能否执行。',
-    'workspace.status65': '视频生成尚未启用。可保存素材、文字和任务卡并预检，不会租用 GPU。',
     'workspace.status66': '打开创作历史',
     'workspace.status67': '返回短剧工作台',
     'workspace.status68': '给这次创作起个名字',
@@ -738,7 +717,6 @@ export const workspaceCatalogs = {
     'workspace.accessible6': '创作对话与生成结果',
     'workspace.accessible7': '创作想法',
     'workspace.accessible8': '描述你想要的画面，也可以继续说「镜头近一点，其他不变」…',
-    'workspace.accessible9': '聊天模型',
     'workspace.accessible10': '关闭提示',
     'workspace.accessible11': '真实服务状态',
     'workspace.accessible12': '选择本轮使用的片段',
@@ -766,7 +744,6 @@ export const workspaceCatalogs = {
     'workspace.detail17': '待确认',
     'workspace.detail18': ' · 查看历史',
     'workspace.detail19': ' · 参数记录',
-    'workspace.detail20': '模型以配方为准',
     'workspace.detail21': ' · 当前',
     'workspace.detail22': '尚未准入',
     'workspace.detail23': '16:9 横屏',
@@ -816,7 +793,6 @@ export const workspaceCatalogs = {
     'workspace.detail65': '生成 {copies} 份视频，使用版本 {version} 的输入与参数。',
     'workspace.detail66': '确认生成 {copies} 份',
     'workspace.detail67': '只处理第 {copy} 份，沿用原输入与参数；成功份不会重新生成。',
-    'workspace.detail68': '模型采样 {width}×{height} · {frames} 帧 · {seconds} 秒',
     'workspace.confirmWord': '确认',
     'workspace.agentDetail1': '未知',
     'workspace.agentDetail2': '查看创作',
@@ -914,7 +890,6 @@ export const workspaceCatalogs = {
     'workspace.deferred5': '准备项目结构备份（不含媒体）',
     'workspace.deferred6': '下载项目结构备份（不含媒体）',
     'workspace.deferred7': '第一次打开要加载一下，作品没有变化。',
-    'workspace.estimate.mock': '模拟测试不调用模型，费用为 $0.00；真实推理价格尚未验证。',
     'workspace.estimate.included': '此项粗剪当前不单独计费；服务器资源仍有运行成本。',
     'workspace.estimate.reserve':
       '预算预留 {amount} {currency}；这是运营配置的额度占用，实际费用待核对，不是最终账单。',

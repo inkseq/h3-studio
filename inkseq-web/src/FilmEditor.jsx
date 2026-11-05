@@ -8,14 +8,12 @@ import React, {
   useSyncExternalStore,
   useEffectEvent,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { Player } from '@remotion/player';
 import { AbsoluteFill, Html5Audio, Html5Video, Sequence } from 'remotion';
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Clapperboard, Eye, EyeOff, Gauge, Unlink, Volume2, VolumeX, X } from 'lucide-react';
-import ReportProblem from './ReportProblem.jsx';
+import { Clapperboard, Eye, EyeOff, Gauge, Unlink, Volume2, VolumeX } from 'lucide-react';
 import { store } from './store.js';
 import { useStoryboardMediaUrl } from './StoryboardMedia.jsx';
 import { cutFps } from './video-cut-model.js';
@@ -45,7 +43,6 @@ import {
 } from './film-audio-model.js';
 import FilmAudioLane, { timeScale } from './FilmAudioLane.jsx';
 import TrimBar from './TrimBar.jsx';
-import { CloudSaveStatus } from './CloudAutosave.jsx';
 import { cloudController } from './cloud-controller.js';
 import './film-editor.css';
 import { Note } from './ui/Note.jsx';
@@ -281,7 +278,13 @@ function TimelineClip({ clip, pps, selected, playing, busy, sound, onSelect }) {
   );
 }
 
-export default function FilmEditor({ chapterId, initialTrim = null, onClose, onUploadAudio }) {
+export default function FilmEditor({
+  chapterId,
+  chapterPicker = null,
+  initialTrim = null,
+  onClose,
+  onUploadAudio,
+}) {
   const { t } = useI18n();
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     project = s.project;
@@ -480,18 +483,16 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
   const selectedSource =
     selected?.playable && sources[selected.asset.id] ? sources[selected.asset.id] : null;
   const selectedSound = selected ? clipSound(project, chapterId, selected.id) : null;
-  // Portal to <body>: the editor opens from inside the sticky toolbar, whose stacking context
-  // would otherwise let the shot panel draw on top of it.
-  return createPortal(
-    <div
-      className="film-editor"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t('editor.title', { chapter: chapter?.title || '' })}
-    >
+  const title = t('editor.title', { chapter: chapter?.title || '' });
+  // A page of its own under the story's top bar, which keeps the steps, save status and report.
+  return (
+    <section className="film-editor" aria-label={title}>
       <header className="film-editor-head">
         <div>
-          <h2>{t('editor.title', { chapter: chapter?.title || '' })}</h2>
+          <div className="film-editor-title">
+            <h2>{chapterPicker ? t('editor.open') : title}</h2>
+            {chapterPicker}
+          </div>
           <small className="muted">
             {t('editor.total', { seconds: seconds.toFixed(1), count: included.length })}
           </small>
@@ -506,7 +507,6 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
             {t('editor.captions', { count: cues.length })}
           </label>
         )}
-        <CloudSaveStatus />
         {/* #232 (#31): export from where the cut is made; the film dialog keeps its own confirm. */}
         <Button
           variant="primary"
@@ -518,16 +518,6 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
         >
           <Clapperboard size={14} />
           {t('film.open')}
-        </Button>
-        <ReportProblem account={s.workspace?.mode === 'cloud' ? s.workspace.account : ''} />
-        <Button
-          variant="ghost"
-          className="round"
-          aria-label={t('editor.close')}
-          title={t('editor.close')}
-          onClick={onClose}
-        >
-          <X size={18} />
         </Button>
       </header>
       {assets.map((clip) => (
@@ -833,7 +823,6 @@ export default function FilmEditor({ chapterId, initialTrim = null, onClose, onU
           </footer>
         </>
       )}
-    </div>,
-    document.body,
+    </section>
   );
 }

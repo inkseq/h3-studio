@@ -10,7 +10,32 @@ const STATIC_IMPORT =
 const DYNAMIC_IMPORT = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
 // A quoted key, or the fixed start of a key built at run time ('a.' + b, `a.${b}`).
 const KEY_TOKEN = /['"`]([A-Za-z][\w-]*(?:\.[\w-]+)*\.?)(['"`]\s*\+|\$\{|['"`])/g;
-const OPS_PAGES = ['P4OperatorConsole.jsx', 'AdminHome.jsx'];
+const OPS_PAGES = [
+  'P4OperatorConsole.jsx',
+  'AdminHome.jsx',
+  'OperatorBudgetPanel.jsx',
+  'SpendingBreakdown.jsx',
+  'GenerationFailure.jsx',
+  'p4-operator-client.js',
+];
+// Words only admins see, though the pages that hold them load for everyone. They load with the
+// operator words; an admin who reaches one first fetches them and redraws (#1020).
+const OPS_WORDS = new RegExp(
+  '^(' +
+    [
+      'errors\\.dstack_',
+      'client\\.(dstackState|machineId|auditIdentity)',
+      'availability\\.console',
+      'adjunct\\.control\\.(?!duration$|resolution$|aspect_ratio$|generate_audio$|width$|height$)',
+      'adjunct\\.failureDetails\\.',
+      'adjunct\\.recipeExecutionStatus\\.',
+      'workspace\\.(preparation|sharedDetail)',
+      'takes\\.lockedSeed$',
+      'workbench\\.seed$',
+      'settings\\.(testTask|testDaily|hourly|fleetHourly|runtime|adminHelp|costMachines|costAllocation|invoice)',
+    ].join('|') +
+    ')',
+);
 
 const isCatalog = (file) => /Catalogs\.js$|[\\/]i18n[\\/]catalogs\.js$/.test(file);
 
@@ -60,7 +85,9 @@ export function partitionKeys(srcDir, keys) {
   const signedIn = referencedKeys(reachable(main, { dynamic: true, stop: OPS_PAGES }), keys);
   const tiers = { shell: [], app: [], ops: [] };
   for (const key of keys)
-    tiers[shell.has(key) ? 'shell' : signedIn.has(key) ? 'app' : 'ops'].push(key);
+    tiers[
+      OPS_WORDS.test(key) ? 'ops' : shell.has(key) ? 'shell' : signedIn.has(key) ? 'app' : 'ops'
+    ].push(key);
   return tiers;
 }
 
