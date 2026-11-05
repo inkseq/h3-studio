@@ -222,21 +222,13 @@
 }
 
 .inky-perch {
-  position: fixed;
   z-index: 41;
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  pointer-events: none;
-}
-.inky-perch.side-left {
   flex-direction: row-reverse;
-}
-.inky-perch {
+  align-items: flex-end;
+  gap: 4px;
   max-width: 300px;
-}
-.inky-perch.side-left .inky-mark {
-  transform: scaleX(-1);
+  pointer-events: none;
 }
 .inky-flyer {
   flex: none;

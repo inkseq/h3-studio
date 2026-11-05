@@ -39,14 +39,3 @@ export function cornerState({ count, typing, seen }) {
   if (count > seen) return 'notify';
   return 'idle';
 }
-
-// Where Inky perches beside a field, level with its top: to its right when Inky and its bubble
-// fit, else to its left, never over the field. A left perch is anchored by `right` (distance from
-// the viewport's right edge) so it grows away from the field.
-export function perchPoint(rect, viewport, width = 300, gap = 10) {
-  const right = rect.right + gap + width <= viewport.width;
-  const y = Math.min(Math.max(gap, rect.top), viewport.height - 120);
-  return right
-    ? { side: 'right', left: rect.right + gap, top: y }
-    : { side: 'left', right: Math.max(gap, viewport.width - rect.left + gap), top: y };
-}

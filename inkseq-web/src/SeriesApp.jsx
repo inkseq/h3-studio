@@ -334,6 +334,7 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
         inert={preview ? true : undefined}
       >
         <header className="wbar">
+          <div className="wbar-stages" />
           <Button
             variant="ghost"
             className="back story-home-back"

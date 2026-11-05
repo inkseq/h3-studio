@@ -18,7 +18,7 @@ class BundleTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.commit = "e" * 40
-        self.image = "sixnine-platform:" + self.commit
+        self.image = "inkseq-platform:" + self.commit
         config_value = {
             "os": "linux",
             "architecture": "amd64",
