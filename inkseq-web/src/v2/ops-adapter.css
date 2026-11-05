@@ -720,6 +720,16 @@
 .ops-adapter .settings-page .spanel {
   min-width: 0;
 }
+/* The page title stays whole: content scrolls under it, never halfway through it. */
+.ops-adapter .settings-page .spanel > .row.tight:first-child {
+  position: sticky;
+  top: -34px;
+  z-index: 2;
+  margin-top: -34px;
+  padding: 34px 0 12px;
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+  backdrop-filter: blur(12px);
+}
 .ops-adapter .settings-page .limits {
   background: var(--surface);
   color: var(--ink);
@@ -762,6 +772,12 @@
     position: static;
     flex-direction: row;
     overflow-x: auto;
+  }
+  .ops-adapter .settings-page .spanel > .row.tight:first-child {
+    position: static;
+    margin-top: 0;
+    padding: 0;
+    background: none;
   }
   .ops-adapter .trash-row {
     grid-template-columns: 20px 32px minmax(0, 1fr) auto;

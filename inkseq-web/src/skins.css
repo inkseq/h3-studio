@@ -90,7 +90,7 @@ html[data-skin='taisho'] .home-main::before {
 html[data-skin='taisho'] .home-main {
   position: relative;
 }
-html[data-skin='taisho'] .home-main > * {
+html[data-skin='taisho'] .home-main > :not(.visually-hidden) {
   position: relative;
 }
 html[data-skin='taisho'] .page-title {
