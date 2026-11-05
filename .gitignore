@@ -68,6 +68,9 @@ inventory.json
 # Reviewed multi-worker business API; runtime data remains denied by default.
 !platform_app.py
 !studio_platform/
+!studio_platform/prompts/
+!studio_platform/prompts/*.md
+!studio_platform/prompt_files.py
 !studio_platform/__init__.py
 !studio_platform/modal_credentials.py
 !studio_platform/worker_boot.py
@@ -974,6 +977,8 @@ inventory.json
 !studio_platform/inky_budget.py
 !studio_platform/inky_continuity.py
 !tests/test_inky_continuity.py
+!tests/test_prompt_files.py
+!docs/AI-FLOWS.zh-CN.md
 !tests/test_inky_budget.py
 !studio_platform/inky_source.py
 !studio_platform/inky_uploads.py

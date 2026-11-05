@@ -8,6 +8,41 @@ REVISION = "inky-v3-20261027"
 FIELDS = {"needs_keyframe": "frames", "upload_card": "cast"}
 
 
+def shot_cards(project, shot):
+    """The character, place and prop cards a shot uses; cast inheritance matches compile_draft."""
+    lookup = {e["id"]: e for e in project.get("entities", [])}
+    scene = lookup.get(shot.get("parentId"), {})
+    data, scene_data = shot.get("data", {}), scene.get("data", {})
+    board = data.get("storyboard", {})
+    cast = []
+    for binding in data.get("cast", scene_data.get("cast", [])):
+        character = lookup.get(
+            binding if isinstance(binding, str) else binding.get("characterId"), {}
+        )
+        if character.get("type") != "character":
+            raise ValueError("inky_context_invalid")
+        cast.append(character)
+    if "place" in board:
+        place_id = (board["place"] or {}).get("locationId")
+    else:
+        place_id = data.get("locationId") or scene_data.get("locationId")
+    props = []
+    for ident in board.get("propIds", []):
+        prop = lookup.get(ident, {})
+        if prop.get("type") != "prop":
+            raise ValueError("inky_context_invalid")
+        props.append(prop)
+    for link in project.get("links", []):
+        entity = lookup.get(link.get("source"), {})
+        if link.get("target") == shot["id"] and entity.get("type") == "prop":
+            props.append(entity)
+    return cast, lookup.get(place_id, {}), props
+
+
+def _titles(cards):
+    return list(dict.fromkeys(card.get("title") for card in cards))
+
+
 def shot_source(project, shot):
     """Never send accepted requests, account settings, URLs, media or model controls.
 
@@ -16,45 +51,20 @@ def shot_source(project, shot):
     Oversized or malformed creator context is unavailable, never silently cut
     into a different claim about the story.
     """
-    lookup = {e["id"]: e for e in project.get("entities", [])}
-    scene = lookup.get(shot.get("parentId"), {})
-    data, scene_data = shot.get("data", {}), scene.get("data", {})
-    board = data.get("storyboard", {})
-    bindings = data.get("cast", scene_data.get("cast", []))
-    characters = []
-    for binding in bindings:
-        character = lookup.get(
-            binding if isinstance(binding, str) else binding.get("characterId"), {}
-        )
-        if character.get("type") != "character":
-            raise ValueError("inky_context_invalid")
-        if character.get("title") not in characters:
-            characters.append(character.get("title"))
-    if "place" in board:
-        place_id = (board["place"] or {}).get("locationId")
-    else:
-        place_id = data.get("locationId") or scene_data.get("locationId")
-    place = lookup.get(place_id, {})
-    props = []
-    for ident in board.get("propIds", []):
-        prop = lookup.get(ident, {})
-        if prop.get("type") != "prop":
-            raise ValueError("inky_context_invalid")
-        if prop.get("title") not in props:
-            props.append(prop.get("title"))
-    for link in project.get("links", []):
-        entity = lookup.get(link.get("source"), {})
-        if link.get("target") == shot["id"] and entity.get("type") == "prop":
-            if entity.get("title") not in props:
-                props.append(entity.get("title"))
+    data = shot.get("data", {})
+    cast, place, props = shot_cards(project, shot)
+    scene = next(
+        (e for e in project.get("entities", []) if e["id"] == shot.get("parentId")), {}
+    )
+    scene_data = scene.get("data", {})
     action = data.get("prompt", shot.get("description", ""))
     value = context(
         {
             "shot_action": action,
             "scene_script": scene_data.get("script", ""),
-            "characters": characters,
+            "characters": _titles(cast),
             "place": place.get("title", ""),
-            "props": props,
+            "props": _titles(props),
             "lang": language(action),
             "seconds": data.get("seconds", 5),
         }

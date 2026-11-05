@@ -12,11 +12,16 @@ from PIL import Image
 
 from studio_platform.api import create_app
 from studio_platform.settings import Settings
+from studio_platform.google_chat import ORIGIN
 from studio_platform.story_chat_images import (
+    GeminiImageClient,
     ImageError,
     attach_actions,
-    prompt_for,
+    input_hash,
+    load_pictures,
     older_settings_in_use,
+    prompt_for,
+    reference_cards,
     shot_storyboard,
 )
 from test_story_chat import CAST, ScriptedModel
@@ -67,8 +72,9 @@ class FakeImages:
     def __init__(self):
         self.calls, self.fail, self.during = [], None, None
 
-    def generate(self, prompt, aspect="1:1"):
+    def generate(self, prompt, aspect="1:1", pictures=()):
         self.calls.append((prompt, aspect))
+        self.pictures = pictures
         if self.during:
             hook, self.during = self.during, None
             hook()
@@ -750,6 +756,141 @@ class StoryChatImageTests(unittest.TestCase):
             actions[1]["patch"]["data"]["looks"][0]["imageIds"], ["image-x"]
         )
         self.assertIn(zib["title"], prompt_for(project, zib))
+
+    def first_frame_project(self):
+        def entity(ident, kind, title, description="", data=None):
+            return {
+                "id": ident,
+                "type": kind,
+                "title": title,
+                "description": description,
+                "parentId": None,
+                "data": data or {},
+                "version": 1,
+            }
+
+        return {
+            "entities": [
+                entity("pic-ma", "image", "ma", data={"cloudAssetId": "asset-ma"}),
+                entity(
+                    "ma",
+                    "character",
+                    "Lin",
+                    "Silver braid, red glasses.",
+                    {"imageIds": ["pic-ma"]},
+                ),
+                entity("bo", "character", "Dino", "Green hoodie."),
+                entity("st", "location", "Stall", "Rainy noodle stall."),
+                entity("ca", "prop", "Cage", "Brass birdcage."),
+                entity(
+                    "s1",
+                    "shot",
+                    "s1",
+                    data={
+                        "prompt": "Lin slams the cage down.",
+                        "cast": ["ma", "bo"],
+                        "storyboard": {
+                            "place": {"locationId": "st"},
+                            "propIds": ["ca"],
+                        },
+                    },
+                ),
+                entity("s2", "shot", "s2", data={"prompt": "Rain.", "cast": []}),
+            ],
+            "links": [],
+            "journey": {},
+        }
+
+    def test_first_frame_is_told_what_each_card_looks_like(self):
+        project = self.first_frame_project()
+        shot = project["entities"][-2]
+        prompt = prompt_for(project, shot)
+        self.assertIn("Lin (Silver braid, red glasses.); Dino (Green hoodie.)", prompt)
+        self.assertIn("Stall (Rainy noodle stall.)", prompt)
+        self.assertIn("Cage (Brass birdcage.)", prompt)
+        self.assertIn("No extra people", prompt)
+        self.assertNotIn("Picture 1", prompt)
+
+    def test_first_frame_numbers_only_the_pictures_it_attaches(self):
+        project = self.first_frame_project()
+        shot = project["entities"][-2]
+        rows = reference_cards(project, shot)
+        self.assertEqual([r["asset_id"] for r in rows], ["asset-ma", None, None, None])
+        pictures = [{"row": rows[0], "jpeg": b"x"}]
+        prompt = prompt_for(project, shot, "", pictures)
+        self.assertIn("Picture 1 is Lin", prompt)
+        self.assertNotIn("Picture 2", prompt)
+
+    def test_first_frame_with_no_cast_names_no_one(self):
+        project = self.first_frame_project()
+        prompt = prompt_for(project, project["entities"][-1])
+        self.assertNotIn("Characters:", prompt)
+        self.assertNotIn("No extra people", prompt)
+
+    def test_a_changed_card_changes_what_was_agreed(self):
+        project = self.first_frame_project()
+        shot = project["entities"][-2]
+        before = input_hash(project, shot, "")
+        project["entities"][1]["description"] = "Now in a blue coat."
+        self.assertNotEqual(before, input_hash(project, shot, ""))
+
+    def test_an_unreadable_picture_leaves_the_others(self):
+        rows = [
+            {"asset_id": None},
+            {"asset_id": "gone"},
+            {"asset_id": "fine"},
+        ]
+        with patch(
+            "studio_platform.inky_uploads.preview",
+            side_effect=lambda _a, _p, _i, up: (
+                b"jpeg"
+                if up["image"]["asset_id"] == "fine"
+                else (_ for _ in ()).throw(ValueError("gone"))
+            ),
+        ):
+            pictures = load_pictures(None, None, "p", rows)
+        self.assertEqual(pictures, [{"row": rows[2], "jpeg": b"jpeg"}])
+
+    def test_the_request_carries_the_pictures(self):
+        import base64
+
+        import httpx
+
+        seen = {}
+
+        def answer(request):
+            seen.update(json.loads(request.content))
+            return httpx.Response(
+                200,
+                json={
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "inlineData": {
+                                            "mimeType": "image/jpeg",
+                                            "data": base64.b64encode(b"out").decode(),
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+            )
+
+        config = type("C", (), {"base_url": ORIGIN, "api_key": "k"})
+        client = GeminiImageClient(
+            lambda: config, transport=httpx.MockTransport(answer)
+        )
+        client.generate("draw", "16:9", [{"jpeg": b"abc"}])
+        parts = seen["contents"][0]["parts"]
+        self.assertEqual(parts[0], {"text": "draw"})
+        self.assertEqual(
+            parts[1]["inlineData"],
+            {"mimeType": "image/jpeg", "data": base64.b64encode(b"abc").decode()},
+        )
 
     def test_another_account_cannot_draw(self):
         zib = self.story["cards"]["characters"][0]["id"]
