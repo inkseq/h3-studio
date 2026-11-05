@@ -1,22 +1,13 @@
 // Admin panels for /admin (h3-studio#304, #537): users, pricing and the audit log.
 // The backend enforces require_admin on every route; a panel whose endpoint is not deployed
 // yet says so instead of failing.
-import React, { useEffect, useMemo, useState, useEffectEvent } from 'react';
+import React, { useEffect, useState, useEffectEvent } from 'react';
 import { Button } from './ui/Button.jsx';
 import { ChevronDown, History } from 'lucide-react';
-import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { apiDate, formatCredits } from './credits.js';
 import { rememberSupportView } from './support-view.js';
 import './admin.css';
-
-export function useClient(account) {
-  return useMemo(() => {
-    const client = createCloudClient();
-    client.setAccount(account);
-    return client;
-  }, [account]);
-}
 
 // Reads a cursor-paged list; 404 means the endpoint is not deployed on this server yet.
 function usePaged(api, path, active) {

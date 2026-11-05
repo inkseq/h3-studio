@@ -129,6 +129,19 @@ RETAINED_DSTACK_HELPER_PAIRS.update({
     '4bfe4d04b3a3702e4623dc1fa9c9f9b50b453c27': ('66aee8e0d35fd2fd92a156da8e037c3668e48d23af6a774fd5ff5632d5072b4d', '0a65590df8c07ecf233ba13d78b24354479bb857fcfe573ffc48fa7df046eea1'),
     'ff027f33079cfff153cb78cf5c23c92739c428ba': ('66aee8e0d35fd2fd92a156da8e037c3668e48d23af6a774fd5ff5632d5072b4d', '0a65590df8c07ecf233ba13d78b24354479bb857fcfe573ffc48fa7df046eea1'),
 })
+# #849 exact source/candidate pairs, independently checked through Git.
+# These are not observed live current/previous or deployment acceptance claims.
+# Host adoption must still compare its actual retained commits and helper bytes.
+RETAINED_DSTACK_HELPER_PAIRS.update({
+    '2c19a2215541ee68b8349f73b2b156a2be1edc56': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+    '5246dc43b232d1fcfa8f39c36eb3e4a07f06cdc7': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+    'beec2d64c3d13662994258d5f50146aed2a29b38': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+    '3b557e4cd9e14f1429ce145aacf47e8f791c170b': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+    '9e14499986c421b7b8866491a53dac55c98a54ad': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+    'b59c96674d41b523b6213ac9b17ee962065bfa48': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+    'f9377740174c4e3c1abf11f846182ea8e2d22bea': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+    'cd57ae8c4f65166089bbe157323402cfffc2b5f5': ('27a6706087c96872ae602c8f7d1543326783d2144f1d460305a25fd5ba665172', '7637e94ae163db83779051b9f3799cc9113096a8d74aeb3a9ca1626d406ee6c9'),
+})
 LEGACY_HELPER_PAIRS.update(RETAINED_DSTACK_HELPER_PAIRS)
 # Closed stock tuples: current build and the exact retained rollback only.
 DSTACK_STOCK = {'0.22.3': ('009e2916e335d4c9e02d961bc68f704951f5db20', 'dstackai/dstack:0.22.3@sha256:ce0e567675360ba91a6867a0399dccc1682dc2169075c6210d2ec873146f1ad8', '731ee908299af3f4592b3bfd1542e8f00fa59bb3fc24506a9f32d73a5fc274ba'), '0.22.5': ('e59a6caa6d3d76f8b8c3430b7e8eeb7271138065', 'dstackai/dstack:0.22.5@sha256:8dc2c8a5ee348789b1ed1621bc75b31c156adf31d849fded29508cfc21b279e4', 'b12e1157da5a13102899132e41c4a7950b3a2dfad4a0a5b52960e1cd86078c5e')}
@@ -298,12 +311,13 @@ def manifest(directory, commit, *, platform_manifest_sha256=None):
                         "migration_platform_binding_changed")
     dispatch = value["dispatch"]
     release.require(type(dispatch) is dict and set(dispatch) == {"image", "image_id"}
-        and dispatch["image"] == "sixnine-dispatch:" + commit and type(dispatch["image_id"]) is str
+        and dispatch["image"] in ("sixnine-dispatch:" + commit, "inkseq-dispatch:" + commit)
+        and type(dispatch["image_id"]) is str
         and re.fullmatch(r"sha256:[0-9a-f]{64}", dispatch["image_id"]), "migration_dispatch_binding_invalid")
     if "dstack" in value:
         server = value["dstack"]
         release.require(type(server) is dict and set(server) == {"image", "image_id", "provenance_sha256"}
-            and server["image"] == "sixnine-dstack:" + commit
+            and server["image"] in ("sixnine-dstack:" + commit, "inkseq-dstack:" + commit)
             and type(server["image_id"]) is str and re.fullmatch(r"sha256:[0-9a-f]{64}", server["image_id"])
             and server["provenance_sha256"] == value["files"]["dstack-native-provenance.json"],
             "migration_dstack_binding_invalid")

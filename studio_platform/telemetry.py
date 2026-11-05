@@ -901,7 +901,7 @@ def controller_resource_config(config):
     }.get(origin or legacy)
     with _CONTROLLER_IMAGE_FILE.open('r', encoding='ascii') as stream:
         reference = stream.read(129)
-    version = re.fullmatch(r'sixnine-platform:([0-9a-f]{40})\n?', reference)
+    version = re.fullmatch(r'(?:sixnine|inkseq)-platform:([0-9a-f]{40})\n?', reference)
     if environment is None or version is None:
         raise ValueError('telemetry_controller_identity_invalid')
     return replace(

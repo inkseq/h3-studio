@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import StudioHeader from './StudioHeader.jsx';
 import { navigateApp } from './app-navigation.js';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 
 const StoryChat = React.lazy(() => import('./StoryChat.jsx'));
 

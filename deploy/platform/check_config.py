@@ -89,7 +89,7 @@ def validate(config, *, deployment_directory=None, compose_version=None, target=
         require(set(service) <= common_fields | extra_fields[name], "Unreviewed container option is present")
         image = service.get("image", "")
         require(bool(re.fullmatch(r"[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}", image)
-                     or (name in {"app", "db-init"} and re.fullmatch(r"sixnine-platform:[0-9a-f]{40}", image))),
+                     or (name in {"app", "db-init"} and re.fullmatch(r"(?:sixnine|inkseq)-platform:[0-9a-f]{40}", image))),
                 "Images must be reviewed immutable references")
         require(service.get("pull_policy") == "never" and not service.get("build"), "Release must reuse tested local images")
         require(service.get("read_only") is True and service.get("privileged", False) is False, "Container filesystem/privilege policy differs")

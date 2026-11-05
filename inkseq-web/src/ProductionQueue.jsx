@@ -5,7 +5,8 @@ import React, { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
-import { useCloud, JobList } from './CloudStudio.jsx';
+import { JobList } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import OperatorBudgetPanel from './OperatorBudgetPanel.jsx';
 import { estimateLabel, capacityWaitMessage } from './cloud-model.js';
 import {

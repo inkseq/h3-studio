@@ -43,7 +43,7 @@ e.dispose()
 def payment_command(plan, commit, image_id, *arguments, snapshot=False):
     """The same network-none copy and socket, with immutable image identity."""
     release.require(re.fullmatch(r'sha256:[0-9a-f]{64}', image_id or ''), 'rehearsal_payment_image_unpinned')
-    prefix = plan['migrate'][:plan['migrate'].index('sixnine-platform:'+commit)]
+    prefix = plan['migrate'][:image_index(plan, commit)]
     tail = ['python', '-c', PAYMENT_ROWS] if snapshot else [
         'python', '-m', 'studio_platform.schema_baseline', *arguments]
     return [*prefix, '--env', 'INKSEQ_STRIPE_MODE=off', image_id, *tail]
@@ -79,11 +79,22 @@ def payment_copy(plan, commit, image_id, readers, environment):
         'business_rows': rows, 'repeat': 'already_adopted'}
 
 
-def commands(commit, postgres_image, nonce):
+def image_index(plan, commit):
+    positions = [index for index, value in enumerate(plan['migrate'])
+        if value in ('sixnine-platform:'+commit, 'inkseq-platform:'+commit)]
+    if len(positions) != 1:
+        raise ValueError('rehearsal_image_differs')
+    return positions[0]
+
+
+def commands(commit, postgres_image, nonce, *, image=None):
     release.require(release.SHA.fullmatch(commit) and len(nonce) == 32 and all(c in '0123456789abcdef' for c in nonce),
         'rehearsal_identity_invalid')
     release.require(isinstance(postgres_image, str) and re.fullmatch(r'[A-Za-z0-9./:_-]+@sha256:[0-9a-f]{64}', postgres_image),
         'rehearsal_postgres_unpinned')
+    image = 'sixnine-platform:'+commit if image is None else image
+    release.require(image in ('sixnine-platform:'+commit, 'inkseq-platform:'+commit),
+        'rehearsal_image_differs')
     name = 'inkseq-rehearsal-'+nonce
     data, socket = name+'-data', name+'-socket'
     return {
@@ -108,16 +119,16 @@ def commands(commit, postgres_image, nonce):
             '--env', 'SIXNINE_DATABASE_URL=postgresql+psycopg://postgres@/rehearsal?host=/var/run/postgresql',
             '--env', 'SIXNINE_DATA=/data', '--env', 'SIXNINE_GENERATION_ENABLED=0',
             '--env', 'SIXNINE_EXECUTION_BACKEND=disabled', '--env', 'SIXNINE_STORAGE_PROVIDER=local',
-            'sixnine-platform:'+commit, 'python', '-m', 'studio_platform.manage', 'init-db'],
+            image, 'python', '-m', 'studio_platform.manage', 'init-db'],
     }
 
 
 def workflow_restore_command(plan, directory, commit):
     command = list(plan['migrate'])
-    image_index = command.index('sixnine-platform:'+commit)
-    command[image_index:image_index] = ['--user','0:0','--mount',
+    position = image_index(plan, commit)
+    command[position:position] = ['--user','0:0','--mount',
         'type=bind,src='+str(directory)+',dst=/backup,readonly']
-    command[image_index+5:] = ['python','-m','studio_platform.workflow_backup',
+    command[position+5:] = ['python','-m','studio_platform.workflow_backup',
         'restore-rehearsal','--directory','/backup']
     return command
 
@@ -173,7 +184,8 @@ def _run(commit, *, root, payment_readers=None):
     info = release.regular(source, root_owned=True, maximum=8*1024**3)
     release.require(stat.S_IMODE(info.st_mode) == 0o600, 'rehearsal_private_dump_required')
     original = release.checksum(source)
-    plan = commands(commit, environment['SIXNINE_POSTGRES_IMAGE'], uuid.uuid4().hex)
+    plan = commands(commit, environment['SIXNINE_POSTGRES_IMAGE'], uuid.uuid4().hex,
+        image=manifest['image'])
     companions = [source.parent/'workflow-state.json', source.parent/'workflow-manifest.json']
     workflow = None
     if not payment_readers and any(p.exists() or p.is_symlink() for p in companions):

@@ -3,7 +3,7 @@ import { Button } from './ui/Button.jsx';
 import { AlertTriangle, Check, Loader2 } from 'lucide-react';
 import { store } from './store.js';
 import { cloudController as cloud } from './cloud-controller.js';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
 
 const DELAY_MS = 2000,

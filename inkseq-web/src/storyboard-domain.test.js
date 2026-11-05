@@ -676,8 +676,15 @@ test('submit hints: video or many references, and audio without written lines', 
     ),
     ['hint.focusRefs'],
   );
-  assert.deepEqual(submitHints({ prompt: 'she sings' }, [item('声音')], t), ['hint.writeLines']);
-  assert.deepEqual(submitHints({ prompt: '她说：“我们走吧”' }, [item('声音')], t), []);
+  const picture = item('图片');
+  assert.deepEqual(submitHints({ prompt: 'she sings' }, [item('声音'), picture], t), [
+    'hint.writeLines',
+  ]);
+  assert.deepEqual(submitHints({ prompt: '她说：“我们走吧”' }, [item('声音'), picture], t), []);
+  // A voice with nothing to look at is refused by the model, so the person hears about it first.
+  assert.deepEqual(submitHints({ prompt: '她说：“我们走吧”' }, [item('声音')], t), [
+    'hint.audioNeedsPicture',
+  ]);
 });
 
 test('an enhance job joins the shot takes as an enhanced copy; the original stays enhanceable', () => {

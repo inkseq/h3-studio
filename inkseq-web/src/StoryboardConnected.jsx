@@ -18,7 +18,7 @@ import React, {
 } from 'react';
 import { StoryboardWorkspace } from './StoryboardWorkspace.jsx';
 import { store } from './store.js';
-import { useCloud } from './CloudStudio.jsx';
+import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { createP4OperatorClient } from './p4-operator-client.js';
 import { storyboardView, expandStoryboard, storyboardDrop } from './storyboard-domain.js';
@@ -680,6 +680,7 @@ export default function StoryboardConnected({
     readInkySuggestions: cloud.readInkySuggestions && (() => cloud.readInkySuggestions()),
     refreshInky: cloud.refreshInky,
     readVoices: cloud.readVoices,
+    speakLine: cloud.speakLine,
     readShotReadiness: cloud.readShotReadiness && (() => cloud.readShotReadiness()),
     ignoreInkySuggestion: (id) => cloud.ignoreInkySuggestion?.(id),
     saveTakeReview: (shot, artifact, body, key) => cloud.saveTakeReview(shot, artifact, body, key),

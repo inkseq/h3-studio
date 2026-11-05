@@ -449,7 +449,7 @@ export default function LibraryView({
                     (openKey === libraryKey(row.target) ? ' open' : '') +
                     (selected.length ? ' selecting' : '')
                   }
-                  role="button"
+                  role="group"
                   aria-label={displayName(row, t)}
                   data-ui-surface="card"
                   tabIndex={0}

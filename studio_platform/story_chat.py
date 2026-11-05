@@ -23,13 +23,15 @@ MAX_TEXT_CHARS = 4000
 MAX_SCRIPT_CHARS = 20000
 SCRIPT_NOTE = (
     "This message is the person's own script. Turn it into characters, places, props and "
-    "shots that follow it faithfully, in order, keeping its dialogue. Then ask them to "
+    "shots that follow it faithfully, in order, keeping its dialogue. Use at most 60 shots and 40 cards. If it needs more, cover it from the beginning and say where you stopped. Then ask them to "
     "check the shots. Do not offer to generate anything yet.\n\n"
 )
 MAX_TURNS = 200
 HISTORY_MESSAGES = 24
 HISTORY_CHARS = 1500
 MAX_ACTIONS = 40
+# A script becomes one plan: every shot and card it may hold, in a single turn.
+MAX_SCRIPT_ACTIONS = 120
 MAX_SHOTS = 60
 MAX_CARDS = 60
 SECONDS = (2, 10)
@@ -374,7 +376,7 @@ def cards(project, chat):
     return result
 
 
-def _parse(text):
+def _parse(text, *, max_actions=MAX_ACTIONS):
     """The model's JSON plan; tolerate a code fence, nothing else."""
     raw = text.strip()
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", raw, re.S)
@@ -396,7 +398,7 @@ def _parse(text):
         or not isinstance(chips, list)
     ):
         raise StoryChatError("story_chat_plan_invalid", 502)
-    if len(actions) > MAX_ACTIONS:
+    if len(actions) > max_actions:
         raise StoryChatError("story_chat_plan_too_large", 502)
     return {
         "reply": reply.strip()[:MAX_TEXT_CHARS],

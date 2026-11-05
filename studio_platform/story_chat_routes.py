@@ -16,6 +16,7 @@ from .repository import Conflict
 from .story_chat import (
     INSTRUCTION,
     LANGUAGES,
+    MAX_SCRIPT_ACTIONS,
     MAX_SCRIPT_CHARS,
     MAX_TEXT_CHARS,
     SCRIPT_NOTE,
@@ -494,7 +495,11 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     max_tokens=16384 if is_script else 4096,
                     json_mode=True,
                 )
-                plan = _parse(result["text"])
+                plan = (
+                    _parse(result["text"], max_actions=MAX_SCRIPT_ACTIONS)
+                    if is_script
+                    else _parse(result["text"])
+                )
             except ChatError as error:
                 # Nothing was written; the person can simply send again.
                 _fail(

@@ -1,3 +1,4 @@
+import './app-styles.js';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
@@ -6,14 +7,6 @@ import { installAccountScope, queryClient } from './data/query.js';
 import { cloudController } from './cloud-controller.js';
 import videoCacheWorkerURL from './video-cache-worker.js?worker&url';
 import { installVideoCache } from './video-cache-client.js';
-import './ui/tokens.css';
-import './ui/controls.css';
-import './ui/density.css';
-import './ui/feedback.css';
-import './demo-v2.css';
-import './v2/page-bridge.css';
-import './ui/dialog.css';
-import './skins.css';
 import { startSkin } from './skins.js';
 import { installMonitoring, reactErrorHandler } from './monitoring.js';
 import { installAnalytics } from './analytics.js';
@@ -36,6 +29,19 @@ createRoot(
   <QueryClientProvider client={queryClient}>
     <App />
   </QueryClientProvider>,
+);
+
+// The Chinese font stylesheet is about 120 kB (Inter ships with the first CSS), so it waits for the
+// first paint instead of sharing a slow line with the first script. Chinese text shows in the
+// system font until then, as display=swap does anyway.
+requestAnimationFrame(() =>
+  setTimeout(() => {
+    const fonts = document.createElement('link');
+    fonts.rel = 'stylesheet';
+    fonts.href =
+      'https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&display=swap';
+    document.head.append(fonts);
+  }),
 );
 
 if (import.meta.env.PROD) {

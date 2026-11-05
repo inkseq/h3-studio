@@ -41,7 +41,7 @@ def application_commit(image):
     """Never silently select a historical image for a final release check."""
     if image == IMAGES[0]:
         return None
-    match = re.fullmatch(r"sixnine-platform:([0-9a-f]{40})", image or "")
+    match = re.fullmatch(r"(?:sixnine|inkseq)-platform:([0-9a-f]{40})", image or "")
     require(match is not None, "explicit_reviewed_platform_image_required")
     return match[1]
 
@@ -450,7 +450,7 @@ class DockerDrill:
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--child", choices=("configure", "provision", "audit", "scenario", "second-source"), help=argparse.SUPPRESS)
-    parser.add_argument("--image", help="Required existing sixnine-platform:<40hex commit>, or explicit historical captions-precommit-20261004 tag")
+    parser.add_argument("--image", help="Required existing inkseq-platform:<40hex commit> (legacy sixnine-platform accepted), or explicit historical captions-precommit-20261004 tag")
     parser.add_argument("--report", type=Path, help="Optional NEW non-secret JSON result path")
     args = parser.parse_args(argv)
     if args.child:

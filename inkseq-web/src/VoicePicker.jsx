@@ -6,7 +6,80 @@ import { useQuery } from '@tanstack/react-query';
 import { Pause, Play } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
+import { Segmented } from './ui/Segmented.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
+
+const DIRECTIONS = ['calm', 'angry', 'sad', 'happy'],
+  MAX_LINE = 500;
+const newRequest = () => 'line-' + crypto.randomUUID().replaceAll('-', '').slice(0, 24);
+
+// Say a line in this character's voice. The clip joins the character's voices, ready to use as a
+// shot's audio reference. A retry after an unknown outcome reuses the id, so it never speaks twice.
+function VoiceLine({ profile, language }) {
+  const { t } = useI18n();
+  const { adapter, dispatch } = useStore();
+  const [text, setText] = useState(''),
+    [direction, setDirection] = useState('calm'),
+    [busy, setBusy] = useState(false),
+    [failed, setFailed] = useState(false);
+  const request = useRef(null);
+  const speak = async () => {
+    setBusy(true);
+    setFailed(false);
+    request.current ||= newRequest();
+    try {
+      const clip = await adapter.speakLine({
+        request_id: request.current,
+        text: text.trim(),
+        voice_id: profile.voiceId,
+        direction,
+        language,
+      });
+      request.current = null;
+      setText('');
+      // A voice sample needs 3 s; a shorter line stays in the story's files, ready to use elsewhere.
+      await Promise.resolve(
+        dispatch({ type: 'addVoice', pid: profile.id, asset: clip.entity_id }),
+      ).catch(() => setFailed('short'));
+    } catch (error) {
+      if (error?.detail?.detail?.nothing_charged === true) request.current = null;
+      setFailed('failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="voice-line">
+      <label className="field">
+        <span>{t('voice.line')}</span>
+        <textarea
+          rows={2}
+          maxLength={MAX_LINE}
+          value={text}
+          placeholder={t('voice.linePlaceholder')}
+          onChange={(event) => setText(event.target.value)}
+        />
+      </label>
+      <div className="voice-line-row">
+        <Segmented
+          label={t('voice.direction')}
+          options={DIRECTIONS.map((value) => ({ value, label: t('voice.direction.' + value) }))}
+          value={direction}
+          onChange={setDirection}
+        />
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={busy || !text.trim()}
+          onClick={() => void speak()}
+        >
+          {t(busy ? 'voice.speaking' : 'voice.speak')}
+        </Button>
+      </div>
+      {failed && <p role="alert">{t(failed === 'short' ? 'voice.tooShort' : 'voice.failed')}</p>}
+    </div>
+  );
+}
 
 const sampleOf = (voice, lang) => voice.samples?.[lang] || voice.samples?.en;
 
@@ -78,6 +151,7 @@ export function VoicePicker({ profile }) {
           );
         })}
       </ul>
+      {profile.voiceId && adapter?.speakLine && <VoiceLine profile={profile} language={language} />}
     </section>
   );
 }
