@@ -274,7 +274,8 @@ def input_hash(project, card, instruction):
         # Everything else the prompt reads, so an edit to the cast, place or props is noticed.
         context = shot_context(project, card)
         value["context"] = {
-            key: context.get(key) for key in ("shot_action", "characters", "place", "props")
+            key: context.get(key)
+            for key in ("shot_action", "characters", "place", "props")
         }
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()

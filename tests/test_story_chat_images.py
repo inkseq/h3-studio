@@ -212,7 +212,10 @@ class StoryChatImageTests(unittest.TestCase):
                             "type": "shot",
                             "parentId": shot["parentId"],
                             "title": "Older shot",
-                            "data": {"seconds": 5, "prompt": "She turns to the window."},
+                            "data": {
+                                "seconds": 5,
+                                "prompt": "She turns to the window.",
+                            },
                         },
                     }
                 ],
