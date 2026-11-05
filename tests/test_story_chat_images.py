@@ -11,7 +11,12 @@ from PIL import Image
 
 from studio_platform.api import create_app
 from studio_platform.settings import Settings
-from studio_platform.story_chat_images import ImageError, attach_actions, prompt_for
+from studio_platform.story_chat_images import (
+    ImageError,
+    attach_actions,
+    prompt_for,
+    shot_storyboard,
+)
 from test_story_chat import CAST, ScriptedModel
 
 
@@ -189,6 +194,51 @@ class StoryChatImageTests(unittest.TestCase):
         )
         files = {e["id"] for e in self.project()["entities"] if e["type"] == "image"}
         self.assertLessEqual({"image-pic-shot-001", "image-pic-shot-002"}, files)
+
+    def test_older_shot_without_settings_gets_a_valid_first_frame(self):
+        shot = self.shot()
+        project_id = self.path.split("/")[3]
+        project = self.client.get("/v1/projects/" + project_id).json()
+        created = self.client.post(
+            f"/v1/projects/{project_id}/actions",
+            json={
+                "expected_version": project["version"],
+                "actions": [
+                    {
+                        "op": "entity.create",
+                        "entity": {
+                            "id": "older-shot",
+                            "type": "shot",
+                            "parentId": shot["parentId"],
+                            "title": "Older shot",
+                            "data": {"seconds": 5, "prompt": "She turns to the window."},
+                        },
+                    }
+                ],
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        reply = self.draw("older-shot", "pic-older-001")
+        self.assertEqual(reply.status_code, 200, reply.text)
+        entity = next(e for e in self.project()["entities"] if e["id"] == "older-shot")
+        self.assertEqual(
+            entity["data"]["storyboard"],
+            {
+                "version": 1,
+                "mode": "fl",
+                "firstFrameId": "image-pic-older-001",
+                "continuePrevious": False,
+            },
+        )
+        self.assertEqual(len(self.images.calls), 1)
+
+    def test_older_shot_keeps_the_mode_the_editor_shows(self):
+        self.assertEqual(
+            shot_storyboard({"h3": {"inputMode": "ref"}}), {"version": 1, "mode": "ref"}
+        )
+        self.assertEqual(shot_storyboard({}), {"version": 1, "mode": "fl"})
+        kept = {"version": 1, "mode": "ref", "quality": "final"}
+        self.assertEqual(shot_storyboard({"storyboard": kept}), kept)
 
     def test_opening_hidden_keeps_the_story_out_of_quick_create(self):
         story = self.client.post("/v1/projects", json={"title": "Plain story"}).json()

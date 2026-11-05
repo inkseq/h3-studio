@@ -44,14 +44,19 @@ def aspect_for(card):
     return ASPECT.get(card["type"], "16:9")
 
 
-def shot_prompt(project, card, style, instruction):
-    """The first moment of a shot (#1039), from the same bounded context Inky reads."""
+def shot_context(project, card):
+    """What a shot's picture is drawn from: the same bounded context Inky reads."""
     from .inky_source import shot_source
 
     try:
-        context = shot_source(project, card)["context"]
+        return shot_source(project, card)["context"]
     except (ValueError, TypeError, AttributeError, KeyError):
-        context = {"shot_action": card.get("description") or card.get("title") or ""}
+        return {"shot_action": card.get("description") or card.get("title") or ""}
+
+
+def shot_prompt(project, card, style, instruction):
+    """The first moment of a shot (#1039)."""
+    context = shot_context(project, card)
     parts = [
         "A single still frame from an animated short film: the first moment of this "
         "shot, cinematic composition, natural light.",
@@ -211,7 +216,7 @@ def attach_actions(project, card, asset_id, image_entity_id):
         # The newest picture is the shot's first frame; earlier ones stay in the story's files.
         patch = {
             "storyboard": {
-                **(data.get("storyboard") or {}),
+                **shot_storyboard(data),
                 "firstFrameId": image_entity_id,
                 "continuePrevious": False,
             }
@@ -240,6 +245,17 @@ RELEASE_REASON = {
 }
 
 
+def shot_storyboard(data):
+    """A shot's generation settings. An older shot may have none: it gets the mode the editor
+    already shows for it (storyboard-domain.js), because a stored block must be complete."""
+    current = data.get("storyboard")
+    if current:
+        return current
+    h3 = data.get("h3")
+    mode = h3.get("inputMode") if isinstance(h3, dict) else None
+    return {"version": 1, "mode": mode if mode in {"fl", "ref"} else "fl"}
+
+
 def input_hash(project, card, instruction):
     """What a picture was drawn from; a replay with different material conflicts."""
     import hashlib
@@ -255,6 +271,11 @@ def input_hash(project, card, instruction):
     if card.get("type") == "shot":
         action = (card.get("data") or {}).get("prompt", "")
         value["action"] = " ".join(str(action).split())
+        # Everything else the prompt reads, so an edit to the cast, place or props is noticed.
+        context = shot_context(project, card)
+        value["context"] = {
+            key: context.get(key) for key in ("shot_action", "characters", "place", "props")
+        }
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
