@@ -5,9 +5,11 @@ adapted, how long a render may take before the job moves on, and its list
 price, which only orders a chain; the cost recorded is the vendor's own. The
 owner's decisions of 2026-11-01 set the rows: models that refused faces or IP
 characters in the #929 moderation round are not here at all, and chains are
-ordered by price within what a shot needs. Limits, resolutions and plain
-prices come from the vendor's GET /v1/render/models (2026-11-01); omni prices
-are measured (#929), since the vendor table covers plain renders only. The
+ordered by price within what a shot needs. Limits and resolutions come from the
+vendor's GET /v1/render/models; prices are its `listPricesUsd` of 2026-11-06,
+after the vendor's 2026-11-05 rise. Pika's omni prices are its
+`referencePrices` credits at USD 0.002 each; H3 Max fast and Vivix charge one
+price for every mode. Free quotes on 2026-11-06 matched all of them. The
 real charge comes from the free POST /render/quote and the render itself, but
 quote does not validate the mode, so modes are gated here. The vendor has no
 cancel: a submitted render runs to completion and settles. This module never
@@ -69,9 +71,9 @@ MODELS = {
             0,
             True,
             {
-                ("480P", "plain"): 0.038,
-                ("768P", "plain"): 0.06,
-                ("1080P", "plain"): 0.12,
+                ("480P", "plain"): 0.126,
+                ("768P", "plain"): 0.2,
+                ("1080P", "plain"): 0.4,
             },
             300,
         ),
@@ -86,13 +88,13 @@ MODELS = {
             3,
             False,  # Pika does not cut on its own.
             {
-                ("480P", "plain"): 0.058,
-                ("768P", "plain"): 0.118,
-                ("1080P", "plain"): 0.206,
-                ("2K", "plain"): 0.236,
-                ("480P", "references"): 0.176,
-                ("768P", "references"): 0.354,
-                ("1080P", "references"): 0.558,
+                ("480P", "plain"): 0.05,
+                ("768P", "plain"): 0.1,
+                ("1080P", "plain"): 0.176,
+                ("2K", "plain"): 0.2,
+                ("480P", "references"): 0.15,
+                ("768P", "references"): 0.3,
+                ("1080P", "references"): 0.476,
             },
             300,
             max_prompt=8000,
@@ -108,12 +110,12 @@ MODELS = {
             3,
             True,
             {
-                ("480P", "plain"): 0.076,
-                ("768P", "plain"): 0.12,
-                ("1080P", "plain"): 0.24,
-                ("480P", "references"): 0.15,
-                ("768P", "references"): 0.24,
-                ("1080P", "references"): 0.48,
+                ("480P", "plain"): 0.25,
+                ("768P", "plain"): 0.4,
+                ("1080P", "plain"): 0.8,
+                ("480P", "references"): 0.25,
+                ("768P", "references"): 0.4,
+                ("1080P", "references"): 0.8,
             },
             300,
         ),
@@ -125,13 +127,13 @@ MODELS = {
             PLAIN | {"omni"},
             frozenset({"768P"}),  # The economy tier is always 768P (owner 11-02).
             # 4:5 comes back as 3:4, which crops cleanly; 21:9 comes back as 16:9
-            # and would lose a quarter of its height, so it goes to turbo.
+            # and would lose a quarter of its height, so it goes to the next model.
             frozenset({"16:9", "9:16", "1:1", "4:5"}),
             5,
             0,
             3,
             False,
-            {("768P", "plain"): 0.01, ("768P", "references"): 0.01},
+            {("768P", "plain"): 0.016, ("768P", "references"): 0.016},
             1800,
             vendor_resolution="720p",
             concurrency=1,
@@ -139,12 +141,16 @@ MODELS = {
     )
 }
 CONFIGURATIONS = {model.configuration_id: model.id for model in MODELS.values()}
-# Ordering per need (owner, 2026-11-01); chain() also filters by capability.
+# Cheapest first per need (owner, 2026-11-01); chain() also filters by
+# capability and sorts by price(). Since the 2026-11-05 rise Pika is the
+# cheapest plain and reference model, and the cheaper economy fallback.
 CHAINS = {
-    "plain": ("h3-max-turbo", "pika-h3-flex", "h3-max-fast"),
-    "references": ("h3-max-fast", "pika-h3-flex"),
+    "plain": ("pika-h3-flex", "h3-max-turbo", "h3-max-fast"),
+    "references": ("pika-h3-flex", "h3-max-fast"),
     "2k": ("pika-h3-flex",),
-    "economy": ("vivix-w1", "h3-max-turbo"),
+    # Economy earns only on Vivix since the 2026-11-05 rise (owner 2026-11-07):
+    # a take Vivix cannot render waits for our own machines.
+    "economy": ("vivix-w1",),
 }
 
 
@@ -211,6 +217,8 @@ def catalog_changes(vendor_models):
 
     Prices only order chains, so a change never breaks a render, but the economy
     margins and the machine break-even points rest on them. A person decides.
+    The vendor's `pricesUsd` is a lower miner price; its quotes match
+    `listPricesUsd` (2026-11-06), so that is compared, or `pricesUsd` if absent.
     """
     listed = {row.get("id"): row for row in vendor_models if isinstance(row, dict)}
     changed = []
@@ -219,7 +227,7 @@ def catalog_changes(vendor_models):
         if row is None or not model.modes <= set(row.get("referenceModes") or ()):
             changed.append(model.id)
             continue
-        prices = row.get("pricesUsd") or {}
+        prices = row.get("listPricesUsd") or row.get("pricesUsd") or {}
         for (resolution, kind), usd in model.price_5s.items():
             name = model.vendor_resolution or RESOLUTIONS[resolution]
             if kind == "plain" and prices.get(name + ":5") != usd:

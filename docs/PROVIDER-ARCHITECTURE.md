@@ -260,15 +260,15 @@ The chain is ordered by the registry price for this exact request (mode × resol
 
 | Input kind | Chain (cheapest first) | Notes |
 |---|---|---|
-| text / first-frame / first-last | `h3-max-turbo` → `pika-h3-flex` → `h3-max-fast` | Turbo $0.038, Pika $0.058, fast $0.076 per 5 s at 480p |
-| reference / voice | `h3-max-fast` → `pika-h3-flex` | Turbo refuses these (400 `bad_attachment`). Pika omni is 3× its plain price and added an extra person with three references |
+| text / first-frame / first-last | `pika-h3-flex` → `h3-max-turbo` → `h3-max-fast` | Pika $0.05, turbo $0.126, fast $0.25 per 5 s at 480p (vendor list prices, 2026-11-06) |
+| reference / voice | `pika-h3-flex` → `h3-max-fast` | Turbo refuses these (400 `bad_attachment`). Pika omni $0.15 is 3× its plain price, fast $0.25 is one price for every mode. Pika added an extra person with three references |
 | 2k | `pika-h3-flex` | Native 2560×1440 |
-| draft (cheapest preview) | `vivix-w1` with a short deadline → `h3-max-turbo` | Vivix runs one render at a time across all EveryFrame customers |
+| draft (cheapest preview) | `vivix-w1` with a short deadline → `pika-h3-flex` → `h3-max-turbo` | Vivix runs one render at a time across all EveryFrame customers |
 
 - **Excluded entirely** (owner: "只要挡的都完全剔除"): all Seedance, `kling-4-0`, and `flux-3` for images.
   - They are absent from the registry, not just ranked low.
   - Re-adding one needs a new moderation round in `EXPERIMENTS.md`.
-- **Candidate behind a flag, untested:** compose the first frame of a reference shot with an image model (`nano-banana-2-1`, $0.036, takes several references), then run turbo first-frame ($0.038). That is about $0.074 against fast's $0.15. It becomes a chain entry only after a staging round passes.
+- **Candidate behind a flag, untested:** compose the first frame of a reference shot with an image model (`nano-banana-2-1`, $0.036, takes several references), then run a first-frame model. Since the vendor's 2026-11-05 rise this costs about $0.086 with Pika ($0.05) against Pika omni's $0.15, and no longer saves anything with turbo ($0.126). It becomes a chain entry only after a staging round passes.
 
 ### Fallback, deadlines and refusals
 
@@ -410,7 +410,7 @@ The dstack ledger modules (`dstack_capacity`, `dstack_operator`, `dstack_control
    - the look difference is accepted, given a reference or first frame;
    - EveryFrame models that carry traffic are chosen after a staging round through this path.
 
-   Economy (auto-queue) jobs follow [STORY-AUTO-QUEUE.md](STORY-AUTO-QUEUE.md): Vivix W1 first, then turbo, then our fleet.
+   Economy (auto-queue) jobs follow [STORY-AUTO-QUEUE.md](STORY-AUTO-QUEUE.md): Vivix W1 first, then the cheapest hosted model that can take the shot, then our fleet.
 
    Card pictures stay on Google's Nano Banana 2.1 directly. It is about $0.0336 per 1K image, and EveryFrame's resale is 7% dearer.
 6. **Production dial-out.** Then delete SSH transport.

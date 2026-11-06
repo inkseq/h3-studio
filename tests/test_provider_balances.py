@@ -34,8 +34,14 @@ def vendor_list():
             for (resolution, kind), usd in model.price_5s.items()
             if kind == "plain"
         }
+        # The vendor's lower miner price sits beside the list price we store.
         rows.append(
-            {"id": model.id, "referenceModes": sorted(model.modes), "pricesUsd": prices}
+            {
+                "id": model.id,
+                "referenceModes": sorted(model.modes),
+                "listPricesUsd": prices,
+                "pricesUsd": {key: round(usd * 0.84, 3) for key, usd in prices.items()},
+            }
         )
     return rows
 
@@ -148,11 +154,16 @@ class BalanceTests(unittest.TestCase):
 
     def test_catalog_changes_are_named_and_a_matching_list_is_quiet(self):
         self.assertEqual(catalog_changes(vendor_list()), [])
+        # Without a list price the plain price is compared.
+        rows = vendor_list()
+        for row in rows:
+            row["pricesUsd"] = row.pop("listPricesUsd")
+        self.assertEqual(catalog_changes(rows), [])
         out = self.read()
         self.assertNotIn("hosted_catalog_changed", out)
         self.assertEqual(balances.read_stored(self.settings)["catalog_changes"], [])
         rows = vendor_list()
-        rows[0]["pricesUsd"] = {key: 9.0 for key in rows[0]["pricesUsd"]}
+        rows[0]["listPricesUsd"] = {key: 9.0 for key in rows[0]["listPricesUsd"]}
         rows[1]["referenceModes"] = ["text"]
         del rows[2]
         self.vendor_models = rows

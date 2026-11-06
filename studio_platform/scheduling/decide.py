@@ -104,10 +104,11 @@ def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
 # How long past its wait limit a job may still go hosted before machines start.
 HOSTED_GRACE_SECONDS = 30
 # Hosted renders per window at which a machine of ours is cheaper: a 5090 at
-# about USD 0.65/h breaks even near 17 turbo clips an hour at USD 0.038 (#918).
+# about USD 0.65/h breaks even near 13 Pika clips an hour at USD 0.05, the
+# cheapest hosted 480P take since the vendor's 2026-11-05 rise (#918).
 HOSTED_WARMS_MACHINE_AT = 5
-# Economy shots waiting at which a machine of ours is cheaper than Vivix: each
-# clip saves about USD 0.006, so about 40 clips pay for a boot.
+# Economy shots waiting at which a machine of ours is cheaper than Vivix: at
+# USD 0.016 each 768P clip saves about USD 0.007, so about 36 pay for a boot.
 ECONOMY_WARMS_MACHINE_AT = 40
 # Below this vendor balance hosted stops; jobs stay on our machines.
 HOSTED_BALANCE_RESERVE_USD = 1.0

@@ -65,8 +65,8 @@ All figures are for a 5090 at about USD 0.65/h, 480P, 5 s, about 20 s per clip (
 |---|---|---|
 | Wait limit | fast 30 s, standard 60 s, refine 120 s | Owner's cold-start goal (#918) |
 | Machines hold back | Wait limit + 30 s | Stops a machine booting for a job about to go hosted; found on staging |
-| Clicks start a machine at | 5 hosted renders in 15 min | Against turbo (USD 0.038) a machine pays back after about 7 clips |
-| Economy starts a machine at | 40 shots waiting | Against Vivix (USD 0.01) each clip saves about USD 0.006, so about 40 clips |
+| Clicks start a machine at | 5 hosted renders in 15 min | Against Pika plain (USD 0.05, the cheapest hosted 480P since 2026-11-06) a machine pays back after about 5 clips; against turbo or any reference take, after about 2 |
+| Economy starts a machine at | 40 shots waiting | Against Vivix (USD 0.016 since 2026-11-05) a 768P clip on our machine (about USD 0.009) saves about USD 0.007, so about 36 clips |
 | Hosted deadline | 300 s; Vivix 30 min | A move pays twice, and the vendor's batch queue measured 250-290 s |
 | Hosted window | Each environment's share in `everyframe-routing.json`; shares must total 40 or less | One key, one vendor limit (owner 2026-11-01) |
 | Balance | Read every 4 h; stop under USD 1; warn under USD 10 | Owner 2026-11-01. A refusal costs nothing, so a late read is safe |
