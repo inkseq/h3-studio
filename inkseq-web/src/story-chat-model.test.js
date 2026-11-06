@@ -229,3 +229,95 @@ test('the server view marks the latest turn undoable only when it says so', asyn
   assert.equal(state.messages.find((m) => m.role === 'assistant').turnId, 't1');
   assert.equal(fromServer({ ...view, undo_turn_id: null }, {}).undoTurnId, null);
 });
+
+test('several suggested pictures are one confirm that stays confirmed after a reload', async () => {
+  const { fromServer } = await import('./story-chat-client.js');
+  const ids = ['character-0123456789abcdef', 'location-0123456789abcde1', 'prop-0123456789abcde2'];
+  const view = {
+    version: 4,
+    messages: [
+      {
+        id: 'turn-abcdef0123456789-a',
+        role: 'assistant',
+        text: 'Confirm the pictures.',
+        changes: [],
+        proposal: { kind: 'image', shot_ids: [], picture_card_ids: ids },
+      },
+    ],
+    cards: {
+      characters: [{ id: ids[0], name: 'Zib', text: '' }],
+      places: [{ id: ids[1], name: 'Field', text: '' }],
+      props: [{ id: ids[2], name: 'Pod', text: '' }],
+      shots: [],
+    },
+  };
+  const labels = { pictures: (names, count) => `${count}: ${names}`, imageCredits: 5 };
+  const [quote] = Object.values(fromServer(view, labels).quotes);
+  assert.equal(quote.status, 'open');
+  assert.equal(quote.credits, 15);
+  assert.equal(quote.label, '3: Zib、Field、Pod');
+  assert.deepEqual(quote.action.cards, ids);
+  assert.equal(new Set(quote.action.requests).size, 3);
+  for (const request of quote.action.requests) assert.match(request, /^[A-Za-z0-9_-]{8,80}$/);
+  const reloaded = fromServer({ ...view, image_requests: quote.action.requests }, labels);
+  assert.equal(reloaded.quotes[quote.id].status, 'confirmed');
+  const partly = fromServer({ ...view, image_requests: quote.action.requests.slice(0, 1) }, labels);
+  assert.equal(partly.quotes[quote.id].status, 'open');
+});
+
+test('confirmed pictures are drawn one at a time, in order', async () => {
+  const { createLiveChat, fromServer } = await import('./story-chat-client.js');
+  const ids = ['character-0123456789abcdef', 'location-0123456789abcde1'];
+  const view = {
+    version: 4,
+    project_id: 'p1',
+    messages: [
+      {
+        id: 'turn-abcdef0123456789-a',
+        role: 'assistant',
+        text: 'Confirm.',
+        changes: [],
+        proposal: { kind: 'image', shot_ids: [], picture_card_ids: ids },
+      },
+    ],
+    cards: {
+      characters: [{ id: ids[0], name: 'Zib', text: '' }],
+      places: [{ id: ids[1], name: 'Field', text: '' }],
+      props: [],
+      shots: [],
+    },
+  };
+  let active = 0,
+    most = 0;
+  const calls = [];
+  const api = {
+    async request(path, options = {}) {
+      if (!path.endsWith('/images')) return view;
+      calls.push(options.body);
+      active += 1;
+      most = Math.max(most, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return view;
+    },
+  };
+  const chat = createLiveChat({ api, projectId: 'p1', labels: {} });
+  const [quote] = Object.values(fromServer(view, {}).quotes);
+  const single = {
+    id: 'pic-manual-0123456789',
+    action: { kind: 'image', cards: [ids[0]] },
+  };
+  await Promise.all([
+    chat.settle(quote, true, [], () => {}),
+    chat.settle(single, true, [], () => {}),
+  ]);
+  assert.equal(most, 1);
+  assert.deepEqual(
+    calls.map((body) => body.card_id),
+    [ids[0], ids[1], ids[0]],
+  );
+  assert.deepEqual(
+    calls.map((body) => body.request_id),
+    [...quote.action.requests, single.id],
+  );
+});
