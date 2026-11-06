@@ -9,9 +9,11 @@ ordered by price within what a shot needs. Limits and resolutions come from the
 vendor's GET /v1/render/models; prices are its `listPricesUsd` of 2026-11-06,
 after the vendor's 2026-11-05 rise. Pika's omni prices are its
 `referencePrices` credits at USD 0.002 each; H3 Max fast and Vivix charge one
-price for every mode. Free quotes on 2026-11-06 matched all of them. The
-real charge comes from the free POST /render/quote and the render itself, but
-quote does not validate the mode, so modes are gated here. The vendor has no
+price for every mode. The list price is the provider's own and the most a
+render costs; on the API, miners may offer less (`pricesUsd`), and the quote
+shows that lower price, which is what is charged (vendor, 2026-11-07). The
+order of every chain is the same at either price. The free POST /render/quote
+does not validate the mode, so modes are gated here. The vendor has no
 cancel: a submitted render runs to completion and settles. This module never
 contacts a vendor.
 """
@@ -215,8 +217,9 @@ def catalog_changes(vendor_models):
 
     Prices only order chains, so a change never breaks a render, but the economy
     margins and the machine break-even points rest on them. A person decides.
-    The vendor's `pricesUsd` is a lower miner price; its quotes match
-    `listPricesUsd` (2026-11-06), so that is compared, or `pricesUsd` if absent.
+    `listPricesUsd` is compared: it moves only when a provider changes its
+    price. `pricesUsd` follows miners' current offers and would flag changes no
+    one needs to act on; it is used only when no list price is given.
     """
     listed = {row.get("id"): row for row in vendor_models if isinstance(row, dict)}
     changed = []
