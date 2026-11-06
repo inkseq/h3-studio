@@ -25,6 +25,7 @@ from studio_platform.repository import (
     budget_accounts,
     budget_reservations,
     instance_intents,
+    scaler_actions,
 )
 from studio_platform.worker_admission import dstack_budget_reason, managed_window_reason
 from test_platform_repository import LedgerCase
@@ -645,11 +646,13 @@ class DailyTestBudgetTests(LedgerCase):
             connection.execute(update(operator_nodes).values(runtime_state="stopped"))
             self.assertEqual(projected_cost(connection, guard, self.now), 1_812_500)
 
-    def _removed_projection_node(self, *, key="removed", cost=0.1, task="issue-267"):
+    def _removed_projection_node(
+        self, *, key="removed", cost=0.1, task="issue-267", elapsed=60
+    ):
         preview = original.DstackLifetimeTests.preview(self, test_task_id=task)
         node_id = self.start(key=key, preview=preview)["node_id"]
         self.running(node_id)
-        self.now += 60
+        self.now += elapsed
         binding = self.store.load(node_id)
         run = self.client.runs[binding["run_name"]]
         run.update(status="terminated", cost=cost)
@@ -676,6 +679,7 @@ class DailyTestBudgetTests(LedgerCase):
                 budget_reservations,
                 instance_intents,
                 operator_nodes,
+                scaler_actions,
             )
         ]
 
@@ -686,15 +690,17 @@ class DailyTestBudgetTests(LedgerCase):
         self.assertEqual(intent["state"], "destroyed")
         self.assertEqual(node["runtime_state"], "stopped")
         self.now += 86400
-        for estimate in (0, 100_000, 5_000_000):
+        for estimate, expected in (
+            (0, 1_012_500),
+            (100_000, 1_100_000),
+            (5_000_000, 6_000_000),
+        ):
             with self.subTest(estimate=estimate), self.repo.transaction() as connection:
                 payload = copy.deepcopy(node["payload"])
                 payload["dstack"]["estimated_cost_microusd"] = estimate
                 connection.execute(update(operator_nodes).values(payload=payload))
                 before = self._projection_rows(connection)
-                self.assertEqual(
-                    projected_cost(connection, guard, self.now), estimate + 1_000_000
-                )
+                self.assertEqual(projected_cost(connection, guard, self.now), expected)
                 self.assertEqual(self._projection_rows(connection), before)
                 self.assertTrue(
                     all(
@@ -708,7 +714,7 @@ class DailyTestBudgetTests(LedgerCase):
     def test_removed_projection_keeps_replacement_floor_and_settled_actual_precedence(
         self,
     ):
-        node_id = self._removed_projection_node()
+        node_id = self._removed_projection_node(cost=0, elapsed=3600)
         _, node = self.rows()
         guard = node["payload"]["lifecycle"]["test_gpu_guard"]
         with self.repo.transaction() as connection:
@@ -735,6 +741,61 @@ class DailyTestBudgetTests(LedgerCase):
                 700_000,
             )
             self.assertEqual(self._projection_rows(connection), before)
+
+    def test_removed_projection_floors_stale_estimate_at_original_one_hour_rate(self):
+        self._removed_projection_node(cost=0, elapsed=3600)
+        _, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        self.assertEqual(node["payload"]["hourly_cost_microusd"], 750_000)
+        self.now += 86400
+        for estimate, expected in (
+            (0, 1_750_000),
+            (100_000, 1_750_000),
+            (2_000_000, 3_000_000),
+        ):
+            with self.subTest(estimate=estimate), self.repo.transaction() as connection:
+                payload = copy.deepcopy(node["payload"])
+                payload["dstack"]["estimated_cost_microusd"] = estimate
+                connection.execute(update(operator_nodes).values(payload=payload))
+                before = self._projection_rows(connection)
+                self.assertEqual(projected_cost(connection, guard, self.now), expected)
+                self.assertEqual(self._projection_rows(connection), before)
+        self.assertEqual((len(self.client.applied), self.client.stopped), (1, []))
+
+    def test_removed_projection_uses_original_create_start_or_none_fallback(self):
+        self._removed_projection_node(cost=0, elapsed=3600)
+        intent, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        proof_at = node["payload"]["dstack"]["provider_removal_proof"]["observed_at"]
+        self.assertEqual((intent["created_at"], proof_at), (1000, 4600))
+        self.now += 86400
+        for started, expected in (
+            (None, 1_750_000),
+            (1600, 1_625_000),
+            (0, 1_958_334),
+            (proof_at - 1, 1_000_209),
+        ):
+            with self.subTest(started=started), self.repo.transaction() as connection:
+                connection.execute(
+                    update(scaler_actions).values(create_started_at=started)
+                )
+                before = self._projection_rows(connection)
+                self.assertEqual(projected_cost(connection, guard, self.now), expected)
+                self.assertEqual(self._projection_rows(connection), before)
+
+    def test_removed_projection_invalid_create_start_retains_commitment(self):
+        self._removed_projection_node(cost=0, elapsed=3600)
+        _, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        proof_at = node["payload"]["dstack"]["provider_removal_proof"]["observed_at"]
+        for started in (-1, proof_at + 1, float("inf"), -float("inf")):
+            with self.subTest(started=started), self.repo.transaction() as connection:
+                connection.execute(
+                    update(scaler_actions).values(create_started_at=started)
+                )
+                before = self._projection_rows(connection)
+                self.assertEqual(projected_cost(connection, guard, self.now), 1_812_500)
+                self.assertEqual(self._projection_rows(connection), before)
 
     def test_removed_projection_bad_evidence_retains_original_commitment(self):
         self._removed_projection_node()
@@ -767,6 +828,10 @@ class DailyTestBudgetTests(LedgerCase):
         changes.extend(
             ("binding", {"estimated_cost_microusd": value})
             for value in (None, -1, True, 0.5, "100000")
+        )
+        changes.extend(
+            ("payload", {"hourly_cost_microusd": value})
+            for value in (None, 0, -1, True, 0.5, "750000", {}, [])
         )
         changes.extend(
             ("payload", {"extra_reservation_microusd": value})

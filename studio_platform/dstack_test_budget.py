@@ -192,12 +192,19 @@ def _removed_estimate(row, now):
     at = proof.get("observed_at") if isinstance(proof, dict) else None
     estimate = binding.get("estimated_cost_microusd")
     extra = payload.get("extra_reservation_microusd", 0)
+    hourly = payload.get("hourly_cost_microusd")
+    started = row["create_started_at"]
+    started = row["intent_created_at"] if started is None else started
     if (
         row["instance_state"] != "destroyed"
         or row["node_runtime_state"] != "stopped"
         or not finite(at)
         or not finite(row["intent_created_at"])
         or not 0 <= row["intent_created_at"] <= at <= now
+        or not finite(started)
+        or not 0 <= started <= at
+        or type(hourly) is not int
+        or hourly <= 0
         or type(estimate) is not int
         or estimate < 0
         or type(extra) is not int
@@ -214,7 +221,12 @@ def _removed_estimate(row, now):
     }
     # Reuse the original identity/complete-inventory checks at the recorded
     # closure time. An accepted removal does not expire after thirty seconds.
-    return estimate + extra if provider_removed(binding, intent, at) else None
+    if not provider_removed(binding, intent, at):
+        return None
+    # A native cost may be zero or stop updating before physical removal.
+    # Cover the original elapsed rental at its accepted rate until that proof.
+    floor = math.ceil(hourly * (at - started) / 3600)
+    return max(estimate, floor) + extra
 
 
 def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reserved=0):
