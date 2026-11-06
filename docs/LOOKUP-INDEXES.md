@@ -22,14 +22,16 @@ importing the migration writer. Frozen older metadata remains unchanged.
 
 ## Reader floor, then separately gated adoption
 
-This source change is NOT permission to adopt staging or production. Claude owns
-staging acceptance and production promotion. Keep charging/Checkout OFF.
+Adoption is a separate operation under the current owner delivery rules; this
+source change grants no production-adoption permission. Lookup adoption preserves
+the existing Stripe mode and charging policy, including paid staging settings.
+It does not enable or disable Checkout, charging or provider access.
 
 1. Deploy and qualify the readers on unchanged 007 first. Record exact current
    and retained rollback images and their source/build bindings. **Both images
-   must contain this reader bridge before DDL.** The current base `0b3ec31` does
-   not; do not roll back to it after 008 adoption. Wait for a normal subsequent
-   release with these readers retained, not an empty/fabricated promotion.
+   must contain this reader bridge before DDL.** The original #563 base `0b3ec31`
+   lacked these readers; do not roll back to it after 008 adoption. Use actual
+   retained reader images, not an empty/fabricated promotion.
 2. Using the existing release protocol, hold host `release.lock`; prove target
    identity, zero running/nonterminal jobs and no leases, pause writers using
    the approved protocol, keep accepted work intact, and capture native 007
@@ -48,8 +50,12 @@ staging acceptance and production promotion. Keep charging/Checkout OFF.
    Ordinary CREATE INDEX is transactional: any timeout/error rolls back all new
    indexes and the revision marker together. Readers can continue while these
    locks are held; writes to those tables wait. Do not run during active jobs.
-   The fingerprint, charging-OFF and quiescence checks precede migration. CLI
-   also requires Stripe mode OFF. Generic/unverified Alembic upgrade refuses.
+   The fingerprint and quiescence checks precede migration. The exclusive account
+   gate serializes speech/image credit settlement and payment-event writes with
+   adoption; zero jobs alone does not establish that those calls are idle.
+   Lookup adoption does not require Stripe or charging OFF. Other financial
+   migrations retain their existing OFF guards. Generic/unverified Alembic
+   upgrade refuses.
 5. Read back exact008 schema/index definitions and unchanged business/financial
    fingerprints, validate both retained/current readers, resume through the
    original release protocol, and post the original operation receipt. On a
@@ -63,12 +69,13 @@ If real table growth cannot finish within the 3 s statement bound, stop and
 review a separate concurrent-index protocol; do not silently increase timeouts
 or run CREATE INDEX CONCURRENTLY outside the audited transaction.
 
-## Qualification (local evidence, not production capacity claims)
+## Original #563 qualification (historical evidence)
 
 Production read-only SSM `810fcd9b-e032-4bf4-afc8-a96c27765f6f`, SUCCESS/0:
 outbox18,031; reservations740; receipts25,118. None of the four target indexes
-exists. An earlier read-only attempt `f8ce77bb-78fb-4904-a67c-b4b475c63dd9`
-failed its deployment-seal field lookup before database access. No live DDL.
+existed at that observation. An earlier read-only attempt
+`f8ce77bb-78fb-4904-a67c-b4b475c63dd9` failed its deployment-seal field lookup
+before database access. No live DDL.
 
 Disposable local PostgreSQL17, synthetic tables with the same predicate column
 types and competing primary/account-leading indexes, 200,000/10,000/260,000 rows:
@@ -76,8 +83,9 @@ all four result sets identical, normal planner selects target indexes. Warm
 median client times respectively 8.88→0.53, 8.84→0.49, 1.02→0.43 and 10.27→0.48 ms;
 index creation134/87/9/130 ms. These are illustrative local measurements, not
 production latency promises or a true cold-cache benchmark (no OS cache eviction).
-Tests exercise the full native schema, existing alias reuse, exact drift refusal,
-charging/quiescence checks, fingerprint mismatch, unverified writer refusal,
-caller abort, lock timeout, mid-migration statement timeout, clean retry and
+The original tests exercised the full native schema, existing alias reuse, exact
+drift refusal, the then-required charging-OFF guard, quiescence checks, fingerprint
+mismatch, unverified writer refusal, caller abort, lock timeout, mid-migration
+statement timeout, clean retry and
 business-backup/restore row preservation without the writer import. The native
 test suite is included in the explicit PostgreSQL CI manifest.
