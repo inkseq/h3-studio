@@ -487,6 +487,7 @@ def read_snapshot(
             )
         ).first()
         if account:
+            _progress("budget_guard", _diagnostic_started)
             guard = (
                 validate_guard(test_guard)
                 if test_guard is not None
@@ -501,12 +502,21 @@ def read_snapshot(
                 if value["version"] == 2:
                     task_guards.setdefault(value["task_id"], value)
             if task_guards:
+                _progress("budget_settings_import", _diagnostic_started)
                 from .spending_limits import ADMIN_OWNER, read_settings
 
+                _progress("budget_settings", _diagnostic_started)
                 limits = read_settings(connection, tenant_id, ADMIN_OWNER)
                 ordered = sorted(task_guards.items())
                 costs = projected_costs(
-                    connection, [value for _, value in ordered], now
+                    connection,
+                    [value for _, value in ordered],
+                    now,
+                    _diagnostic_progress=(
+                        (lambda phase: _progress(phase, _diagnostic_started))
+                        if _diagnostic_started is not None
+                        else None
+                    ),
                 )
                 result["test_spend"] = {
                     "scope": "acceptance_task",
@@ -531,6 +541,7 @@ def read_snapshot(
                     ],
                 }
             else:
+                _progress("budget_projection", _diagnostic_started)
                 result["test_spend"] = {
                     "day": datetime.fromtimestamp(now, timezone.utc)
                     .astimezone(ZoneInfo("Australia/Sydney"))

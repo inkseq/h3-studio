@@ -2,7 +2,7 @@
 
 import copy
 import builtins
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 import io
 import json
 import runpy
@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 from sqlalchemy import event, insert, select, update
 from sqlalchemy.exc import OperationalError
 from studio_platform import alert_snapshot
+from studio_platform import dstack_test_budget, spending_limits
 from studio_platform.alert_snapshot import read_snapshot
 from studio_platform.alert_conditions import evaluate
 from studio_platform.dstack_test_budget import day_window, projected_cost
@@ -226,6 +227,172 @@ class SnapshotDiagnosticTests(unittest.TestCase):
                     json.loads(errors.getvalue()),
                     {'phase': 'close', 'elapsed_ms': expected},
                 )
+
+
+class BudgetSnapshotDiagnosticTests(unittest.TestCase):
+    def setUp(self):
+        self.case = budget_fixture.DailyTestBudgetTests('runTest')
+        self.addCleanup(self.case.doCleanups)
+        self.case.setUp()
+        self.addCleanup(self.case.tearDown)
+        self.case.history(amount=1_812_500, actual=700_000)
+
+    def ledger(self):
+        with self.case.repo.engine.connect() as connection:
+            return self.case._projection_rows(connection)
+
+    def main(self, options):
+        from studio_platform.settings import Settings
+
+        output, errors = io.StringIO(), io.StringIO()
+        with (
+            patch.object(
+                Settings,
+                'from_environment',
+                return_value=SimpleNamespace(
+                    database_url='PRIVATE_URL', tenant_id=self.case.scope.tenant_id
+                ),
+            ),
+            patch.object(alert_snapshot, 'Repository', return_value=self.case.repo),
+            patch.object(
+                alert_snapshot,
+                'read_snapshot',
+                side_effect=lambda repo, **kwargs: read_snapshot(
+                    repo, **kwargs, **options
+                ),
+            ),
+            patch.object(alert_snapshot.time, 'time', return_value=self.case.now),
+            patch.object(alert_snapshot.time, 'monotonic', return_value=10),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            status = alert_snapshot.main()
+        return status, json.loads(output.getvalue()), errors.getvalue()
+
+    def test_main_budget_phases_preserve_v2_explicit_v2_and_v1_queries_and_ledger(self):
+        _, node = self.case.rows()
+        explicit = node['payload']['lifecycle']['test_gpu_guard']
+        before = self.ledger()
+        prefix = [
+            'settings_import',
+            'settings',
+            'repository',
+            'connect',
+            'jobs',
+            'failures',
+            'guard_rows',
+            'gpu_activity',
+            'terminal_holds',
+            'budget',
+            'budget_guard',
+        ]
+        for options, scoped in (
+            ({}, True),
+            ({'test_guard': explicit}, True),
+            ({'test_guard': budget_fixture.GUARD}, False),
+        ):
+            with self.subTest(explicit=bool(options), scoped=scoped):
+                statements = []
+                listener = lambda *args: statements.append(args[2])
+                event.listen(self.case.repo.engine, 'before_cursor_execute', listener)
+                try:
+                    silent = io.StringIO()
+                    with redirect_stderr(silent):
+                        original = read_snapshot(
+                            self.case.repo,
+                            now=self.case.now,
+                            tenant_id=self.case.scope.tenant_id,
+                            **options,
+                        )
+                    self.assertEqual(silent.getvalue(), '')
+                    original_statements = list(statements)
+                    statements.clear()
+                    status, observed, errors = self.main(options)
+                    self.assertEqual((status, observed), (0, original))
+                    self.assertEqual(statements, original_statements)
+                finally:
+                    event.remove(
+                        self.case.repo.engine, 'before_cursor_execute', listener
+                    )
+                phases = [json.loads(line)['phase'] for line in errors.splitlines()]
+                self.assertEqual(
+                    phases,
+                    prefix
+                    + (
+                        ['budget_settings_import', 'budget_settings', 'budget_rows']
+                        if scoped
+                        else []
+                    )
+                    + ['budget_projection', 'connection_close', 'serialize', 'close'],
+                )
+                self.assertEqual(len(phases), len(set(phases)))
+                spend = observed['test_spend']
+                self.assertEqual(
+                    (spend['tasks'][0] if scoped else spend)['projected_microusd'],
+                    700_000,
+                )
+                self.assertNotIn('PRIVATE', errors)
+                self.assertEqual(self.ledger(), before)
+
+    def test_budget_failures_leave_the_entered_phase_before_cleanup(self):
+        original_import = builtins.__import__
+        original_rows = dstack_test_budget._reservation_rows
+
+        def fail_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == 'spending_limits' and level == 1:
+                raise ImportError('PRIVATE_SETTINGS_IMPORT')
+            return original_import(name, globals, locals, fromlist, level)
+
+        def fail_consumption(connection):
+            for row in original_rows(connection):
+                yield row
+                raise RuntimeError('PRIVATE_ROW_CONSUMPTION')
+            self.fail('expected an original reservation row')
+
+        before = self.ledger()
+        for phase in (
+            'budget_settings_import',
+            'budget_settings',
+            'budget_rows',
+            'budget_projection',
+        ):
+            with self.subTest(phase=phase), ExitStack() as stack:
+                if phase == 'budget_settings_import':
+                    stack.enter_context(
+                        patch('builtins.__import__', side_effect=fail_import)
+                    )
+                elif phase == 'budget_settings':
+                    stack.enter_context(
+                        patch.object(
+                            spending_limits,
+                            'read_settings',
+                            side_effect=RuntimeError('PRIVATE_SETTINGS_READ'),
+                        )
+                    )
+                elif phase == 'budget_rows':
+                    stack.enter_context(
+                        patch.object(
+                            dstack_test_budget,
+                            '_reservation_rows',
+                            side_effect=fail_consumption,
+                        )
+                    )
+                else:
+                    stack.enter_context(
+                        patch.object(
+                            dstack_test_budget,
+                            '_projected_rows',
+                            side_effect=RuntimeError('PRIVATE_PROJECTION'),
+                        )
+                    )
+                status, value, errors = self.main({})
+                records = [json.loads(line) for line in errors.splitlines()]
+                phases = [row['phase'] for row in records if 'phase' in row]
+                self.assertEqual((status, value['complete']), (0, False))
+                self.assertEqual(phases[-3:], [phase, 'connection_close', 'close'])
+                self.assertEqual(records[-1], {'category': 'internal', 'elapsed_ms': 0})
+                self.assertNotIn('PRIVATE', errors)
+            self.assertEqual(self.ledger(), before)
 
 
 class AlertSnapshotTests(LedgerCase):

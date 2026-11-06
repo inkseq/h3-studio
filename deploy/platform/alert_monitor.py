@@ -230,10 +230,12 @@ def snapshot_diagnostic(raw):
         return unknown
     try:
         lines = raw.splitlines()
-        require(1 <= len(lines) <= 16, 'alert_snapshot_diagnostic_invalid')
+        require(1 <= len(lines) <= 20, 'alert_snapshot_diagnostic_invalid')
         result, last_phase = dict(unknown), -1
         phases = ('imports', 'settings_import', 'settings', 'repository', 'connect', 'jobs',
                   'failures', 'guard_rows', 'gpu_activity', 'terminal_holds', 'budget',
+                  'budget_guard', 'budget_settings_import', 'budget_settings',
+                  'budget_rows', 'budget_projection',
                   'connection_close', 'serialize', 'close')
         for index, line in enumerate(lines):
             require(0 < len(line) <= 256, 'alert_snapshot_diagnostic_invalid')

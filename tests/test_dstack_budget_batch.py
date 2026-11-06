@@ -1,12 +1,15 @@
 """Snapshot batching preserves original projections and account scan scope."""
 
 import copy
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sqlalchemy import event, insert, select, update
 
+from studio_platform import dstack_test_budget
 from studio_platform.dstack_test_budget import (
     projected_cost,
     projected_costs,
@@ -116,7 +119,14 @@ class DstackBudgetBatchTests(unittest.TestCase):
             guards = [self.guard('other'), self.guard(), self.guard('absent')]
             expected = [projected_cost(connection, guard, case.now) for guard in guards]
             self.assertEqual(expected, [1_812_500, 2_450_000, 0])
-            self.assertEqual(projected_costs(connection, guards, case.now), expected)
+            progress = []
+            self.assertEqual(
+                projected_costs(
+                    connection, guards, case.now, _diagnostic_progress=progress.append
+                ),
+                expected,
+            )
+            self.assertEqual(progress, ['budget_rows', 'budget_projection'])
             self.assertEqual(case._projection_rows(connection), before)
 
     def test_batch_conflicting_attribution_fails_for_either_implicated_task(self):
@@ -144,6 +154,99 @@ class DstackBudgetBatchTests(unittest.TestCase):
                             [self.guard('unrelated'), self.guard(task)],
                             case.now,
                         )
+
+    def test_progress_brackets_consumption_once_without_changing_queries_or_values(
+        self,
+    ):
+        case = self.case
+        case.start()
+        guards = [self.guard(), self.guard('other'), self.guard()]
+        original_rows = dstack_test_budget._reservation_rows
+        original_projection = dstack_test_budget._projected_rows
+        entries = []
+
+        def rows(connection):
+            entries.append('read_entered')
+            for row in original_rows(connection):
+                entries.append('row_consumed')
+                yield row
+            entries.append('read_complete')
+
+        def project(*args, **kwargs):
+            entries.append('guard_projected')
+            return original_projection(*args, **kwargs)
+
+        with case.repo.engine.connect() as connection:
+            before = case._projection_rows(connection)
+            output, errors = io.StringIO(), io.StringIO()
+            with redirect_stdout(output), redirect_stderr(errors):
+                expected = projected_costs(connection, guards, case.now)
+            self.assertEqual((output.getvalue(), errors.getvalue()), ('', ''))
+            statements = []
+            listener = lambda *args: statements.append(args[2])
+            event.listen(connection, 'before_cursor_execute', listener)
+            try:
+                with (
+                    patch.object(dstack_test_budget, '_reservation_rows', rows),
+                    patch.object(dstack_test_budget, '_projected_rows', project),
+                ):
+                    observed = projected_costs(
+                        connection,
+                        guards,
+                        case.now,
+                        _diagnostic_progress=entries.append,
+                    )
+            finally:
+                event.remove(connection, 'before_cursor_execute', listener)
+            self.assertEqual(observed, expected)
+            self.assertEqual(account_scans(statements), 1)
+            self.assertEqual(case._projection_rows(connection), before)
+        self.assertEqual(
+            entries,
+            [
+                'budget_rows',
+                'read_entered',
+                'row_consumed',
+                'read_complete',
+                'budget_projection',
+                'guard_projected',
+                'guard_projected',
+                'guard_projected',
+            ],
+        )
+
+    def test_progress_callback_errors_cannot_change_accounting_or_business_error(self):
+        case = self.case
+        case.start()
+        guards = [self.guard(), self.guard('other'), self.guard()]
+        callback = Mock(side_effect=OSError('PRIVATE_DIAGNOSTIC_FAILURE'))
+        with case.repo.engine.connect() as connection:
+            before = case._projection_rows(connection)
+            expected = projected_costs(connection, guards, case.now)
+            self.assertEqual(
+                projected_costs(
+                    connection, guards, case.now, _diagnostic_progress=callback
+                ),
+                expected,
+            )
+            self.assertEqual(
+                [call.args for call in callback.call_args_list],
+                [('budget_rows',), ('budget_projection',)],
+            )
+            failure = BudgetExceeded('original_budget_failure')
+            callback.reset_mock()
+            with (
+                patch.object(
+                    dstack_test_budget, '_projected_rows', side_effect=failure
+                ),
+                self.assertRaises(BudgetExceeded) as caught,
+            ):
+                projected_costs(
+                    connection, guards, case.now, _diagnostic_progress=callback
+                )
+            self.assertIs(caught.exception, failure)
+            self.assertEqual(callback.call_count, 2)
+            self.assertEqual(case._projection_rows(connection), before)
 
 
 class ModalBudgetBatchTests(modal_fixture.ModalBudgetCase):
