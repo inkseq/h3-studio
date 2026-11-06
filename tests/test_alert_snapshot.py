@@ -405,6 +405,93 @@ class BudgetAlertSnapshotTests(budget_fixture.DailyTestBudgetTests):
     def snapshot(self):
         return read_snapshot(self.repo, now=self.now, tenant_id=self.scope.tenant_id)
 
+    def test_batch_snapshot_preserves_order_latest_guard_admin_cap_and_explicit_guard(
+        self,
+    ):
+        from studio_platform.repository import spending_settings
+        from studio_platform.spending_limits import ADMIN_OWNER, admin_defaults
+
+        with patch.object(
+            self.service,
+            'provider_inventory',
+            side_effect=lambda backend: {
+                'backend': backend,
+                'complete': True,
+                'observed_at': self.now,
+                'instance_ids': [],
+            },
+        ):
+            old_zeta = self._removed_projection_node(
+                key='old-zeta', task='zeta', cost=0.1
+            )
+            alpha = self._removed_projection_node(key='alpha', task='alpha', cost=0.2)
+            new_zeta = self._removed_projection_node(
+                key='new-zeta', task='zeta', cost=0.3
+            )
+        limits = admin_defaults(self.service)
+        limits['test_task_limit_microusd'] = 5_000_000
+        with self.repo.transaction() as connection:
+            for identity, limit in (
+                (old_zeta, 3_000_000),
+                (alpha, 4_000_000),
+                (new_zeta, 6_000_000),
+            ):
+                payload = copy.deepcopy(
+                    connection.execute(
+                        select(operator_nodes.c.payload).where(
+                            operator_nodes.c.intent_id == identity
+                        )
+                    ).scalar_one()
+                )
+                payload['lifecycle']['test_gpu_guard']['task_limit_microusd'] = limit
+                connection.execute(
+                    update(operator_nodes)
+                    .where(operator_nodes.c.intent_id == identity)
+                    .values(payload=payload)
+                )
+            connection.execute(
+                insert(spending_settings).values(
+                    tenant_id=self.scope.tenant_id,
+                    owner_id=ADMIN_OWNER,
+                    version=1,
+                    value=limits,
+                    updated_at=self.now,
+                    actor_id=self.owner.actor_id,
+                )
+            )
+            before = self._projection_rows(connection)
+        statements = []
+        listener = lambda *args: statements.append(args[2])
+        event.listen(self.repo.engine, 'before_cursor_execute', listener)
+        try:
+            result = self.snapshot()
+        finally:
+            event.remove(self.repo.engine, 'before_cursor_execute', listener)
+        tasks = result['test_spend']['tasks']
+        self.assertEqual([row['task_id'] for row in tasks], ['alpha', 'zeta'])
+        self.assertEqual(
+            [row['projected_microusd'] for row in tasks], [1_200_000, 2_400_000]
+        )
+        self.assertEqual(
+            [row['limit_microusd'] for row in tasks], [4_000_000, 5_000_000]
+        )
+        self.assertEqual(
+            sum(
+                'FROM platform_budget_reservations LEFT OUTER JOIN' in sql
+                for sql in statements
+            ),
+            1,
+        )
+        explicit = budget_fixture.task_guard(
+            budget_fixture.GUARD, 'alpha', limit=9_000_000, max_runtime=7200
+        )
+        override = read_snapshot(
+            self.repo, now=self.now, tenant_id=self.scope.tenant_id, test_guard=explicit
+        )['test_spend']['tasks']
+        self.assertEqual(override, [dict(tasks[0], limit_microusd=5_000_000)])
+        with self.repo.engine.connect() as connection:
+            self.assertEqual(self._projection_rows(connection), before)
+
     def test_alert_projection_uses_original_unknown_hold_once_across_sydney_midnight(
         self,
     ):

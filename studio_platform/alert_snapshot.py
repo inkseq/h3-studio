@@ -46,7 +46,13 @@ from sqlalchemy import and_, case, func, or_, select  # noqa: E402
 from sqlalchemy.exc import SQLAlchemyError  # noqa: E402
 
 from .alert_conditions import STATES, identity  # noqa: E402
-from .dstack_test_budget import ACCOUNT, projected_cost, validate_guard, guard_limit  # noqa: E402
+from .dstack_test_budget import (  # noqa: E402
+    ACCOUNT,
+    projected_cost,
+    projected_costs,
+    validate_guard,
+    guard_limit,
+)
 from .generation_diagnostics import WANGP_VALIDATION_CODES, COMMON_CODES, _WORKER_CODES  # noqa: E402
 from .inference.protocol import INFERENCE_FAILURE_CODES  # noqa: E402
 from .operator_capacity import operator_nodes  # noqa: E402
@@ -498,6 +504,10 @@ def read_snapshot(
                 from .spending_limits import ADMIN_OWNER, read_settings
 
                 limits = read_settings(connection, tenant_id, ADMIN_OWNER)
+                ordered = sorted(task_guards.items())
+                costs = projected_costs(
+                    connection, [value for _, value in ordered], now
+                )
                 result["test_spend"] = {
                     "scope": "acceptance_task",
                     "tasks": [
@@ -509,9 +519,7 @@ def read_snapshot(
                                     f"inkseq:test:{tenant_id}:{task}",
                                 )
                             ),
-                            "projected_microusd": projected_cost(
-                                connection, value, now
-                            ),
+                            "projected_microusd": cost,
                             "limit_microusd": min(
                                 guard_limit(value),
                                 limits["value"]["test_task_limit_microusd"],
@@ -519,7 +527,7 @@ def read_snapshot(
                             if limits["version"]
                             else guard_limit(value),
                         }
-                        for task, value in sorted(task_guards.items())
+                        for (task, value), cost in zip(ordered, costs, strict=True)
                     ],
                 }
             else:
