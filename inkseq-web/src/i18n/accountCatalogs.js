@@ -5,6 +5,10 @@ export const accountCatalogs = {
     'account.signOutEverywhereConfirm':
       'This signs you out on every browser and phone, this one included.',
     'account.signOutEverywhereYes': 'Sign out everywhere',
+    'account.signOutForget': 'Sign out and clear this computer',
+    'account.signOutForgetConfirm':
+      'For a shared computer: edits on this browser that are not saved to your account are removed too.',
+    'account.signOutForgetYes': 'Sign out and clear',
     'account.hostedSignIn': 'Sign in with Google, GitHub or email.',
     'account.linkTitle': 'Sign in with Google',
     'account.linkBody':
@@ -354,6 +358,9 @@ export const accountCatalogs = {
     'account.signOutEverywhere': '退出所有设备',
     'account.signOutEverywhereConfirm': '所有浏览器和手机上的登录都会退出，包括这一台。',
     'account.signOutEverywhereYes': '全部退出',
+    'account.signOutForget': '退出并清除这台电脑上的草稿',
+    'account.signOutForgetConfirm': '适合公用电脑：这个浏览器里还没保存到账户的修改也会一起删除。',
+    'account.signOutForgetYes': '退出并清除',
     'account.hostedSignIn': '用 Google、GitHub 或邮箱登录。',
     'account.linkTitle': '用 Google 登录',
     'account.linkBody':

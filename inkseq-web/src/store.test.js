@@ -569,3 +569,33 @@ test('signing out forgets drafts the server has and keeps unsaved ones', () => {
     assert.equal(map.has(kept), true, kept);
   assert.equal(s.forgetSavedCloudDrafts(''), 0);
 });
+
+test('sign-out on a shared computer forgets every draft of that account only', () => {
+  const map = new Map([
+    ['yingxu-cloud-draft-v1:sam:saved', JSON.stringify({ dirty: false })],
+    ['yingxu-cloud-draft-v1:sam:unsaved', JSON.stringify({ dirty: true })],
+    ['yingxu-cloud-pending-v1:sam:p1', '{}'],
+    ['yingxu-cloud-draft-v1:alex:unsaved', JSON.stringify({ dirty: true })],
+    ['yingxu-series-project-v1', '{}'],
+  ]);
+  const storage = {
+    get length() {
+      return map.size;
+    },
+    key: (i) => [...map.keys()][i] ?? null,
+    getItem: (key) => map.get(key) ?? null,
+    setItem: (key, value) => map.set(key, value),
+    removeItem: (key) => map.delete(key),
+  };
+  const s = createStore({ storage });
+  assert.equal(s.forgetAllCloudDrafts('sam'), 3);
+  for (const gone of [
+    'yingxu-cloud-draft-v1:sam:saved',
+    'yingxu-cloud-draft-v1:sam:unsaved',
+    'yingxu-cloud-pending-v1:sam:p1',
+  ])
+    assert.equal(map.has(gone), false, gone);
+  for (const kept of ['yingxu-cloud-draft-v1:alex:unsaved', 'yingxu-series-project-v1'])
+    assert.equal(map.has(kept), true, kept);
+  assert.equal(s.forgetAllCloudDrafts(''), 0);
+});

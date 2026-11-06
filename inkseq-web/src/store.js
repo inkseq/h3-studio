@@ -911,6 +911,28 @@ export function createStore({ storage, now = () => Date.now(), seed = legacySeed
       }
       return forgotten;
     },
+    // Sign-out on a shared computer: every draft of this account on this browser, saved or not.
+    forgetAllCloudDrafts(account) {
+      if (!storage || !account) return 0;
+      const prefixes = [
+        `yingxu-cloud-draft-v1:${encodeURIComponent(account)}:`,
+        `yingxu-cloud-pending-v1:${account}:`,
+      ];
+      for (const key of [...volatileCloudDrafts.keys()])
+        if (key.startsWith(prefixes[0])) volatileCloudDrafts.delete(key);
+      let forgotten = 0;
+      try {
+        const keys = Array.from({ length: storage.length }, (_, i) => storage.key(i));
+        for (const key of keys)
+          if (prefixes.some((prefix) => key?.startsWith(prefix))) {
+            storage.removeItem(key);
+            forgotten += 1;
+          }
+      } catch {
+        return forgotten;
+      }
+      return forgotten;
+    },
     getCloudDraft(account, id) {
       const key = cloudKey(account, id);
       if (volatileCloudDrafts.has(key)) return clone(volatileCloudDrafts.get(key));

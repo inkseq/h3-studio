@@ -2285,15 +2285,22 @@ export function createCloudController({
         },
         { blocking: true },
       ),
-    logout: () =>
+    // `forgetDrafts` is for a shared computer: unsaved edits on this browser go too.
+    logout: ({ forgetDrafts = false } = {}) =>
       action(
         async () => {
           void clearVideoCache().catch(() => {});
           const result = await api.logout();
           rememberVisit({ mode: 'local' });
           const leaving = state.account;
-          replaceIdentity(null, '已退出。未保存的云草稿仍按原账户保留，本机作品已恢复。');
-          store.forgetSavedCloudDrafts(leaving);
+          replaceIdentity(
+            null,
+            forgetDrafts
+              ? '已退出，这台电脑上未保存的修改已清除。'
+              : '已退出。未保存的云草稿仍按原账户保留，本机作品已恢复。',
+          );
+          if (forgetDrafts) store.forgetAllCloudDrafts(leaving);
+          else store.forgetSavedCloudDrafts(leaving);
           resetAnalytics();
           announceSession();
           const providerLogout = providerLogoutUrl(result);

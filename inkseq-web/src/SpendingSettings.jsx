@@ -137,6 +137,7 @@ export default function SpendingSettings({ account }) {
     [notice, setNotice] = useState(''),
     [error, setError] = useState(''),
     [everywhere, setEverywhere] = useState(false),
+    [forgetting, setForgetting] = useState(false),
     epoch = useRef(0);
   const load = async () => {
     if (!account) {
@@ -371,6 +372,31 @@ export default function SpendingSettings({ account }) {
                   ) : (
                     <Button variant="ghost" disabled={busy} onClick={() => setEverywhere(true)}>
                       {t('account.signOutEverywhere')}
+                    </Button>
+                  )}
+                </div>
+                <div className="row tight account-signout">
+                  {forgetting ? (
+                    <>
+                      <small className="muted">{t('account.signOutForgetConfirm')}</small>
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() =>
+                          void cloud
+                            .logout({ forgetDrafts: true })
+                            .catch((failure) => setError(failure.message))
+                        }
+                      >
+                        {t('account.signOutForgetYes')}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setForgetting(false)}>
+                        {t('library.cancel')}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="ghost" disabled={busy} onClick={() => setForgetting(true)}>
+                      {t('account.signOutForget')}
                     </Button>
                   )}
                 </div>
