@@ -180,6 +180,55 @@ def runtime_reason(intent, node, now, *, expected_runtime_s=0):
         return "dstack_test_guard_unconfirmed"
 
 
+def _removed_estimate(row, now):
+    """A historical physical closure bounds projection, not invoice settlement."""
+    from .capacity_watchdog import provider_removed
+
+    payload = row["payload"]
+    binding = payload.get("dstack")
+    if not isinstance(binding, dict):
+        return None
+    proof = binding.get("provider_removal_proof")
+    at = proof.get("observed_at") if isinstance(proof, dict) else None
+    estimate = binding.get("estimated_cost_microusd")
+    extra = payload.get("extra_reservation_microusd", 0)
+    hourly = payload.get("hourly_cost_microusd")
+    started = row["create_started_at"]
+    started = row["intent_created_at"] if started is None else started
+    if (
+        row["instance_state"] != "destroyed"
+        or row["node_runtime_state"] != "stopped"
+        or not finite(at)
+        or not finite(row["intent_created_at"])
+        or not 0 <= row["intent_created_at"] <= at <= now
+        or not finite(started)
+        or not 0 <= started <= at
+        or type(hourly) is not int
+        or hourly <= 0
+        or type(estimate) is not int
+        or estimate < 0
+        or type(extra) is not int
+        or extra < 0
+        or not isinstance(binding.get("backend"), str)
+        or not isinstance(binding.get("run_id"), str)
+        or not isinstance(binding.get("dstack_status"), str)
+        or not isinstance(row["provider_instance_id"], str)
+    ):
+        return None
+    intent = {
+        "provider": row["instance_provider"],
+        "provider_instance_id": row["provider_instance_id"],
+    }
+    # Reuse the original identity/complete-inventory checks at the recorded
+    # closure time. An accepted removal does not expire after thirty seconds.
+    if not provider_removed(binding, intent, at):
+        return None
+    # A native cost may be zero or stop updating before physical removal.
+    # Cover the original elapsed rental at its accepted rate until that proof.
+    floor = math.ceil(hourly * (at - started) / 3600)
+    return max(estimate, floor) + extra
+
+
 def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reserved=0):
     """Same-task settled bills and commitments; original v1 daily semantics.
 
@@ -196,6 +245,7 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
             budget_reservations,
             instance_intents.c.pool,
             instance_intents.c.provider.label("instance_provider"),
+            instance_intents.c.provider_instance_id,
             instance_intents.c.state.label("instance_state"),
             instance_intents.c.created_at.label("intent_created_at"),
             instance_intents.c.updated_at.label("intent_updated_at"),
@@ -292,8 +342,11 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
             row["instance_state"] in {"destroyed", "not_created"}
             or row["node_runtime_state"] == "stopped"
         ):
-            # Invoice unknown is still a real commitment, not a fabricated
-            # elapsed-time bill for a machine that is no longer running.
+            # Only complete original physical closure can replace commitment
+            # with an estimate. The ledger and unknown invoice stay untouched.
+            estimate = _removed_estimate(row, now)
+            if estimate is not None:
+                amount = estimate
             total += (
                 max(amount, minimum_reserved)
                 if row["reference_id"] == replacement_id
