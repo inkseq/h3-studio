@@ -342,6 +342,19 @@ function shotSupport(shot, state, { effectiveProfile, effectiveRecipe, inputMode
   };
 }
 
+// A card as "Name (description)", never "Name: description": H3 voices "Name: text" as a
+// spoken line (Geryon run, 2026-11-07). Mirrors profile_text in h3-studio storyboard.py.
+const CJK = /[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]/;
+export function profileText(name, description, variant) {
+  let detail = (description || '').trim();
+  if (variant?.desc?.trim()) {
+    const extra = profileText(variant.name || '', variant.desc);
+    detail = detail ? `${detail}；${extra}` : extra;
+  }
+  if (!name || !detail) return name || detail;
+  return CJK.test(name + detail) ? `${name}（${detail}）` : `${name} (${detail})`;
+}
+
 // The text parts of the prompt: style, place, cast, props and action.
 function describeShot(shot, state, ctx) {
   const { t, parts, warnings, profile, variant } = ctx;
@@ -354,7 +367,7 @@ function describeShot(shot, state, ctx) {
     if (shot.place.variant && !pv) warnings.push('保存的场景版本不存在，请重新选择。');
     parts.push({
       label: '场景',
-      text: `${place.name}：${place.desc}${pv?.desc?.trim() ? '；' + pv.name + '：' + pv.desc : ''}`,
+      text: profileText(place.name, place.desc, pv),
     });
   }
   const cast = shot.cast.map((c) => ({
@@ -370,11 +383,11 @@ function describeShot(shot, state, ctx) {
     if (binding.variant && !v) warnings.push(t('projection.missingLook', { name: p.name }));
     parts.push({
       label: '人物',
-      text: `${p.name}：${p.desc}${v?.desc?.trim() ? '；' + v.name + '：' + v.desc : ''}`,
+      text: profileText(p.name, p.desc, v),
     });
   });
   const props = shot.props.map(profile).filter(Boolean);
-  props.forEach((p) => parts.push({ label: '道具', text: `${p.name}：${p.desc}` }));
+  props.forEach((p) => parts.push({ label: '道具', text: profileText(p.name, p.desc) }));
   if (shot.prompt.trim()) parts.push({ label: '动作', text: shot.prompt.trim() });
   else warnings.push('还没写这一镜的动作描述。');
   return { place, pv, cast, props };
@@ -613,7 +626,7 @@ function generationKind(shot) {
 // Always-on advice before generating (owner decision on h3-studio#739): many or video
 // references are only partly used, and audio without written lines makes the model invent
 // speech. Inky adds to this; it is not the only safeguard.
-const DIALOGUE = /[“”"「」『』]|[：:]\s*\S/;
+const DIALOGUE = /<d>|[“”"「」『』]|[：:]\s*\S/i;
 export function submitHints(shot, items, t) {
   const sent = items.filter((item) => item.sent),
     hints = [];

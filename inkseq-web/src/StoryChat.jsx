@@ -603,6 +603,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
         },
         openWorks: openInWorks,
         picture: (name) => t('storyChat.livePicture', { name }),
+        pictures: (names, count) => t('storyChat.livePictures', { names, count }),
         newStory: (idea) => t('storyChat.newStoryLabel', { idea }),
         startStory: (idea) => openStory(null, idea),
       },
