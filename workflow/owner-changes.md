@@ -919,3 +919,18 @@ tenant IDs are excluded and need a separate owner-scheduled window. Do not touch
 supervan, user pricing, charging switches or #1010 cleanup. Claude owns frontend,
 AI and voice; coordinate their consumers and required releases on #849. One
 non-author Tier2 PR review and affected local tests apply to changed behavior.
+
+### 2026-11-05 — current batch promotion and voice billing
+
+The owner directs Claude to promote the current staging batch immediately after
+acceptance, independently of #1051 and voice. Codex first adopts the reviewed
+production readers for the accepted artifacts, then merges the green #1057 writer
+change without replacing the selected promotion tuple or interrupting its acceptance.
+
+For #997, Codex implements voice billing using the existing credit ledger: two
+credits per started 100 characters, at most 500 characters (ten credits), charged
+only after successful delivery. Provider-injected direction tags do not increase
+the customer's character count. Claude owns the usage-bar confirmation UI; no
+per-line price is displayed. Voice remains disabled on production until accepted;
+this implementation does not change production charging.
+Source: owner instruction in this session and #997 comments6648557855/6649303773.
