@@ -14,9 +14,7 @@ from .repository import documents, request_hash
 SPEECH_FIELDS = frozenset(
     {
         "voice_id",
-        "provider",
-        "model",
-        "provider_voice",
+        "voice_revision",
         "direction",
         "language",
         "text_sha256",
@@ -63,7 +61,7 @@ def validate_binding(binding):
     quote(speech["characters"])
     if (
         not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", speech["voice_id"])
-        or not re.fullmatch(r"[a-z0-9_-]{1,40}", speech["provider"])
+        or not re.fullmatch(r"r[0-9]{1,4}", speech["voice_revision"])
         or speech["direction"] not in {"calm", "angry", "sad", "happy"}
         or speech["language"] not in {"zh", "en"}
         or not re.fullmatch(r"[0-9a-f]{64}", speech["text_sha256"])

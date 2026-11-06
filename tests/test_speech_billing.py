@@ -147,6 +147,7 @@ class SpeechBillingTests(unittest.TestCase):
             **VOICES["v-warm"],
             "model": "future-model",
             "provider_voice": "future-voice",
+            "revision": "r2",
         }
         with patch.dict(VOICES, {"v-warm": changed}):
             again = self.speak()
