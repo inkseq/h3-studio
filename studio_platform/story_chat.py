@@ -232,6 +232,11 @@ def open_actions(project, language):
     return actions + [{"op": "journey.update", "patch": {"storyChat": chat}}]
 
 
+# One confirm draws these one at a time, so a whole new story fits (3 people, 3 places, 2 props).
+PICTURE_LIMIT = 12
+PICTURE_KINDS = {"character", "location", "prop"}
+
+
 def card_image(entity):
     data = entity.get("data", {})
     for field, default in (
@@ -734,7 +739,13 @@ def apply_plan(project, chat, plan, *, model_fresh=True):
             **(proposal or {"kind": "new_story", "shot_ids": []}),
             "new_story": new_story,
         }
-    pictures = [c for c in dict.fromkeys(pictures) if c not in removed][:4]
+    # A card made this turn without a picture blocks generation (shots need a picture
+    # per character), so offer to draw it; the person still confirms and pays (#1111).
+    for ident in refs.values():
+        entity = lookup.get(ident) or {}
+        if entity.get("type") in PICTURE_KINDS and not card_image(entity):
+            pictures.append(ident)
+    pictures = [c for c in dict.fromkeys(pictures) if c not in removed][:PICTURE_LIMIT]
     if pictures:
         # Picture proposals ride on the same advice-only proposal field.
         proposal = {
