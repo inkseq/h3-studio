@@ -236,10 +236,34 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
     apportioned without an invoice. Open runs additionally cover elapsed time
     at their approved maximum rate plus shutdown grace and transport allowance.
     """
+    return _projected_rows(
+        connection,
+        guard,
+        now,
+        _reservation_rows(connection),
+        replacement_id=replacement_id,
+        minimum_reserved=minimum_reserved,
+    )
+
+
+def projected_costs(connection, guards, now):
+    """Project one read-only snapshot's guards from the same original rows.
+
+    The caller owns the repeatable snapshot. Only the joined reservation inputs
+    are shared; guard-dependent amounts and Modal binding reads stay unchanged.
+    Admission and replacement callers continue to use their fresh single read.
+    """
+    guards = list(guards)
+    for guard in guards:
+        validate_guard(guard)
+    day_window(now)
+    rows = list(_reservation_rows(connection)) if guards else []
+    return [_projected_rows(connection, guard, now, rows) for guard in guards]
+
+
+def _reservation_rows(connection):
     from .operator_capacity import operator_nodes
 
-    validate_guard(guard)
-    start, _ = day_window(now)
     statement = (
         select(
             budget_reservations,
@@ -267,8 +291,16 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
         )
         .where(budget_reservations.c.account_id == ACCOUNT)
     )
+    yield from connection.execute(statement).mappings()
+
+
+def _projected_rows(
+    connection, guard, now, rows, *, replacement_id=None, minimum_reserved=0
+):
+    validate_guard(guard)
+    start, _ = day_window(now)
     total = 0
-    for row in connection.execute(statement).mappings():
+    for row in rows:
         if row["instance_provider"] == "modal":
             from .modal_budget import projected_reservation
 
