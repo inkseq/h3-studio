@@ -194,7 +194,8 @@ class SpeechRequest:
         self.bind(
             {
                 **self.public,
-                **{key: voice[key] for key in ("provider", "model", "provider_voice")},
+                # Only our voice revision is stored; speech_catalog.maker() names the vendor.
+                "voice_revision": voice["revision"],
             }
         )
         self.charged = charged

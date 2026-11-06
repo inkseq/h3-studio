@@ -948,7 +948,22 @@ def project(value, principal=None):
     defaults = payload.get("journey", {}).get("storyboard", {})
     if isinstance(defaults.get("defaults"), dict):
         defaults["defaults"] = selection(defaults["defaults"], principal)
+    speech = payload.get("journey", {}).get("speechRequests")
+    if isinstance(speech, dict):
+        for marker in speech.values():
+            if isinstance(marker, dict):
+                _no_voice_vendor(marker.get("speech"))
     return result
+
+
+# Voice lines made before #1097 stored the vendor; protected receipts keep it.
+VOICE_VENDOR_FIELDS = ("provider", "model", "provider_voice")
+
+
+def _no_voice_vendor(speech):
+    if isinstance(speech, dict):
+        for field in VOICE_VENDOR_FIELDS:
+            speech.pop(field, None)
 
 
 def entity(value, principal=None):
@@ -958,6 +973,8 @@ def entity(value, principal=None):
     data = result.get("data", {})
     if isinstance(data.get("h3"), dict):
         data["h3"] = selection(data["h3"], principal)
+    if isinstance(data, dict):
+        _no_voice_vendor(data.get("speech"))
     context = data.get("restoredRecipeContext", {})
     if isinstance(context.get("original_authoring_context"), dict):
         context["original_authoring_context"] = authoring_context(

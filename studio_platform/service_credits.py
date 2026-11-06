@@ -335,8 +335,11 @@ def service_hold(
     if not credits.credit_policy(connection, scope.tenant_id)["enabled"]:
         return None
     if service == "speech":
-        from .speech_credit_proof import quote as speech_quote
+        from .speech_credit_proof import is_legacy, quote as speech_quote
 
+        if is_legacy(binding):
+            # Pre-#1097 receipts only recover their original hold, never open one.
+            raise credits.CreditError("credit_service_binding_invalid", 422)
         frozen = speech_quote(binding["speech"]["characters"])
     else:
         frozen = credits_pricing.image_price(connection, scope.tenant_id)

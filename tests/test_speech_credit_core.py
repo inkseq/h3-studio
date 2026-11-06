@@ -29,9 +29,7 @@ class SpeechCreditTests(unittest.TestCase):
         self.repo, self.scope, self.now = self.f.repo, self.f.scope, self.f.now
         self.speech = dict(
             voice_id="v-warm",
-            provider="openrouter",
-            model="elevenlabs/eleven-v4",
-            provider_voice="george",
+            voice_revision="r1",
             direction="calm",
             language="zh",
             text_sha256=hashlib.sha256("a".encode()).hexdigest(),
