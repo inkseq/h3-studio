@@ -128,7 +128,7 @@ class VendorRequestTests(unittest.TestCase):
         )
         self.assertEqual(
             plan.chain(compiled(resolution="768P"), "economy"),
-            ["vivix-w1", "pika-h3-flex", "h3-max-turbo"],
+            ["vivix-w1"],
         )
         self.assertEqual(plan.chain(compiled(resolution="2K")), ["pika-h3-flex"])
         self.assertAlmostEqual(plan.price("h3-max-turbo", compiled(duration=10)), 0.252)
@@ -283,7 +283,7 @@ class BackendTests(unittest.TestCase):
                     self.assertEqual((info["width"], info["height"]), size)
                     self.assertEqual(info["avg_frame_rate"], "24/1")
 
-    def test_vivix_takes_4_5_but_sends_21_9_to_the_next_model(self):
+    def test_vivix_takes_4_5_but_leaves_21_9_on_our_machines(self):
         self.assertIsNotNone(
             plan.vendor_request(
                 compiled(resolution="768P", aspect_ratio="4:5"), "vivix-w1"
@@ -291,7 +291,7 @@ class BackendTests(unittest.TestCase):
         )
         self.assertEqual(
             plan.chain(compiled(resolution="768P", aspect_ratio="21:9"), "economy"),
-            ["pika-h3-flex", "h3-max-turbo"],
+            [],
         )
 
     def test_config_holds_only_the_key_and_never_shows_it(self):

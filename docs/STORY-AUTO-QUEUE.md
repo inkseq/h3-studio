@@ -125,13 +125,13 @@ Credits move with the state:
 | 5 | Toggle turned off mid-way | See "Turning it off" above (default keep) |
 | 6 | Not enough credits | Shots stop entering the queue; nothing fails silently. Auto-queue pauses, Inky offers a top-up, and the queue resumes by itself after the top-up while the toggle is on |
 | 7 | Jev unsure, or not representable on economy | Over 5 reference images, 21:9, over 15 s, 2K or enhance. "这条不能省积分排队", with [马上生成] or [修改] |
-| 8 | Waiting past the deadline (about 30 min) | Promote silently to the next hosted model (Pika, then turbo), then our fleet, at the same economy charge. We absorb the difference, which since 2026-11-05 is a loss on that shot. The ETA updates |
+| 8 | Waiting past the deadline (about 30 min) | Move silently to our fleet at the same economy charge. Since 2026-11-07 economy has no other hosted fallback: after the vendor's 2026-11-05 rise every one lost money (owner). The ETA updates |
 | 9 | Vendor refusal or failure | Next model in the chain, same charge. If every model fails: `failed`, hold released, Inky explains in plain words with no model names |
 | 10 | User closes the tab | The queue runs server-side. In-app notice plus the existing done notification per shot and per project |
 | 11 | Mixed tiers in one film | Economy output is normalised to the project's resolution (480P/768P), so it cuts together with normal shots. Enhance and 2K stay separate paid steps after generation |
 | 12 | ETA | Per shot: queue position × live per-clip time, never hard-coded. If the ETA passes the deadline, show [马上生成] next to it |
 | 13 | Brand / IP safety | Our own risk lint runs before queueing. Vendors don't filter |
-| 14 | Vendor balance low | The economy queue pauses at Vivix and falls through to turbo or our fleet, and the operator is alerted. Never a user-visible error |
+| 14 | Vendor balance low | The economy queue pauses at Vivix and falls through to our fleet, and the operator is alerted. Never a user-visible error |
 
 **Visibility.**
 
@@ -180,8 +180,8 @@ The scheduler (`decide()` in PROVIDER-ARCHITECTURE.md) gets a **priority class**
 
 - We keep **one Vivix render in flight** per account and hold the rest in our economy queue, in fair order.
 - Each card's ETA is its queue position × the measured Vivix time per clip, over the last 50 renders. That time already includes other customers' share.
-- **Deadline.** A shot whose ETA passes its 30 min deadline moves to turbo. A turbo failure or deadline moves it to our fleet. The fallback route still charges the economy credit price; section 2 shows the margin stays positive.
-- **Turbo fallback is capped** by a daily economy-fallback budget (start: USD 5/day). Past that, late economy shots wait for our fleet, so a backlog spike can't turn into a large vendor bill.
+- **Deadline.** A shot whose ETA passes its 30 min deadline, or that Vivix refuses or cannot render (21:9), moves to our fleet at the economy credit price. Since 2026-11-07 there is no hosted economy fallback (owner): after the 2026-11-05 vendor rise Pika and turbo both cost more than the charge.
+- **No turbo fallback** (owner 2026-11-07). Late economy shots wait for our fleet, so a backlog spike never turns into a vendor bill.
 
 **Inputs and output.**
 
@@ -190,7 +190,7 @@ The scheduler (`decide()` in PROVIDER-ARCHITECTURE.md) gets a **priority class**
 - No seed and no negative prompt. It passed the face and Demon Slayer moderation round.
 - Output is always 1264×720, 24 fps, with sound. It is scaled about 6.7% up to 768P with a crop of about 0.3%.
 
-**Swappable backend.** The Vivix price is SN117-subsidised: below Vivix's own expired $0.003/s promo. The economy tier names a chain in the rules table (`"economy": ["vivix-w1", "h3-max-turbo"]`), not a model. Another cheap model, or our own fleet, can replace it without touching the queue.
+**Swappable backend.** The Vivix price is SN117-subsidised: below Vivix's own expired $0.003/s promo. The economy tier names a chain in the rules table (`"economy": ["vivix-w1"]`), not a model. Another cheap model, or our own fleet, can replace it without touching the queue.
 
 **Credits** are the tier price on whichever route served the shot. Each take records:
 

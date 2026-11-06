@@ -148,7 +148,9 @@ CHAINS = {
     "plain": ("pika-h3-flex", "h3-max-turbo", "h3-max-fast"),
     "references": ("pika-h3-flex", "h3-max-fast"),
     "2k": ("pika-h3-flex",),
-    "economy": ("vivix-w1", "pika-h3-flex", "h3-max-turbo"),
+    # Economy earns only on Vivix since the 2026-11-05 rise (owner 2026-11-07):
+    # a take Vivix cannot render waits for our own machines.
+    "economy": ("vivix-w1",),
 }
 
 
