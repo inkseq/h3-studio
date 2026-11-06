@@ -17,7 +17,7 @@ import httpx
 from sqlalchemy import select
 
 from .google_chat import ORIGIN, ChatError
-from .prompt_files import sections as prompt_sections
+from .prompt_files import sections as prompt_sections, text as prompt_text
 
 MODEL = "gemini-nano-banana-2.1"
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
@@ -26,6 +26,7 @@ MAX_IMAGE_BYTES = 8 * 1024 * 1024
 ASPECT = {"character": "3:4", "location": "16:9", "prop": "1:1"}
 STYLE = prompt_sections("card_picture_styles")
 FIRST_FRAME = prompt_sections("first_frame")
+MATCH_STYLE = prompt_text("card_picture_match")
 MAX_CARD_TEXT = 400
 
 
@@ -83,6 +84,31 @@ def reference_cards(project, card):
                 }
             )
     return rows
+
+
+def style_card(project, card):
+    """The story's first drawn card, so a new card picture is drawn the same way (#1089)."""
+    from .story_chat import card_image
+
+    lookup = {e["id"]: e for e in project.get("entities", [])}
+    for entity in project.get("entities", []):
+        if (
+            entity.get("id") == card.get("id")
+            or entity.get("parentId") is not None
+            or entity.get("type") not in KINDS
+        ):
+            continue
+        asset_id = ((lookup.get(card_image(entity)) or {}).get("data") or {}).get(
+            "cloudAssetId"
+        )
+        if asset_id:
+            return {
+                "role": "style",
+                "name": " ".join(str(entity.get("title", "")).split())[:80],
+                "description": "",
+                "asset_id": asset_id,
+            }
+    return None
 
 
 def load_pictures(assets, principal, project_id, rows):
@@ -161,6 +187,8 @@ def prompt_for(project, card, instruction="", pictures=()):
     ]
     if style.strip():
         parts.append("Overall film style: " + style.strip()[:2000])
+    if pictures:
+        parts.append(MATCH_STYLE)
     if instruction.strip():
         parts.append("Change requested: " + instruction.strip()[:1000])
     parts.append("No text, captions, watermarks or borders.")
@@ -379,6 +407,8 @@ def input_hash(project, card, instruction):
             for key in ("shot_action", "characters", "place", "props")
         }
         value["references"] = reference_cards(project, card)
+    else:
+        value["style_reference"] = style_card(project, card)
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
