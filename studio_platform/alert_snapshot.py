@@ -10,18 +10,47 @@ import math
 import sys
 import time
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, case, func, or_, select
-from sqlalchemy.exc import SQLAlchemyError
 
-from .alert_conditions import STATES, identity
-from .dstack_test_budget import ACCOUNT, projected_cost, validate_guard, guard_limit
-from .generation_diagnostics import WANGP_VALIDATION_CODES, COMMON_CODES, _WORKER_CODES
-from .inference.protocol import INFERENCE_FAILURE_CODES
-from .operator_capacity import operator_nodes
-from .repository import (
+def _progress(phase, started):
+    if started is None:
+        return
+    try:
+        value = {
+            "phase": phase,
+            "elapsed_ms": min(60000, max(0, int((time.monotonic() - started) * 1000))),
+        }
+        print(json.dumps(value, sort_keys=True), file=sys.stderr, flush=True)
+    except Exception:
+        pass  # A failed checkpoint cannot change the original observation.
+
+
+@contextmanager
+def _snapshot_connection(repo, started):
+    _progress("connect", started)
+    with repo.engine.connect() as connection:
+        try:
+            yield connection
+        finally:
+            _progress("connection_close", started)
+
+
+_CLI_STARTED = time.monotonic() if __name__ == "__main__" else None
+_progress("imports", _CLI_STARTED)
+
+# The CLI checkpoint must precede these heavy imports; library imports stay silent.
+from sqlalchemy import and_, case, func, or_, select  # noqa: E402
+from sqlalchemy.exc import SQLAlchemyError  # noqa: E402
+
+from .alert_conditions import STATES, identity  # noqa: E402
+from .dstack_test_budget import ACCOUNT, projected_cost, validate_guard, guard_limit  # noqa: E402
+from .generation_diagnostics import WANGP_VALIDATION_CODES, COMMON_CODES, _WORKER_CODES  # noqa: E402
+from .inference.protocol import INFERENCE_FAILURE_CODES  # noqa: E402
+from .operator_capacity import operator_nodes  # noqa: E402
+from .repository import (  # noqa: E402
     Repository,
     attempts,
     budget_accounts,
@@ -90,7 +119,15 @@ def _state_age(connection, tenant_id):
     return {row.id: row.since for row in connection.execute(statement)}
 
 
-def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=1800):
+def read_snapshot(
+    repo,
+    *,
+    now,
+    tenant_id,
+    test_guard=None,
+    wake_window_seconds=1800,
+    _diagnostic_started=None,
+):
     if not finite(now) or now < 0 or not isinstance(tenant_id, str) or not tenant_id:
         raise ValueError("alert_snapshot_context_invalid")
     if type(wake_window_seconds) is not int or not 60 <= wake_window_seconds <= 86400:
@@ -105,11 +142,12 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
         "failures": [],
         "terminal_reservations": [],
     }
-    with repo.engine.connect() as connection:
+    with _snapshot_connection(repo, _diagnostic_started) as connection:
         if connection.dialect.name == "postgresql":
             connection = connection.execution_options(
                 isolation_level="REPEATABLE READ", postgresql_readonly=True
             )
+        _progress("jobs", _diagnostic_started)
         job_rows = _rows(
             connection,
             select(
@@ -161,6 +199,7 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
                 )
         # Collapse lifetime failures to the finite, closed source vocabulary in
         # SQL. One deterministic representative preserves event dedup identity.
+        _progress("failures", _diagnostic_started)
         raw_code = func.coalesce(
             func.nullif(
                 jobs.c.result["failure_diagnostic"]["reason_code"].as_string(), ""
@@ -202,6 +241,7 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
                     "at": row["updated_at"],
                 }
             )
+        _progress("guard_rows", _diagnostic_started)
         projection = [
             instance_intents.c.id,
             instance_intents.c.pool,
@@ -258,6 +298,7 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
                 ),
             ),
         )
+        _progress("gpu_activity", _diagnostic_started)
         for node in nodes:
             lifecycle = node["lifecycle"] if isinstance(node["lifecycle"], dict) else {}
             if identity(node["id"]) is None:
@@ -346,6 +387,7 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
                 }
             )
         # Closed references with still-held money, collapsed across budget layers.
+        _progress("terminal_holds", _diagnostic_started)
         terminal_events = (
             select(
                 outbox.c.aggregate_id.label("reference_id"),
@@ -431,6 +473,7 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
                 "terminal_since": since if finite(since) else None,
             }
         result["terminal_reservations"] = list(terminal_holds.values())
+        _progress("budget", _diagnostic_started)
         account = connection.execute(
             select(budget_accounts.c.id).where(
                 budget_accounts.c.id == ACCOUNT,
@@ -492,30 +535,37 @@ def read_snapshot(repo, *, now, tenant_id, test_guard=None, wake_window_seconds=
 
 
 def main():
+    # The CLI clock includes heavy imports; entries and terminal diagnostics share it.
+    progress_started = _CLI_STARTED if _CLI_STARTED is not None else time.monotonic()
+    _progress("settings_import", progress_started)
     from .settings import Settings
 
     repo = None
     now = time.time()
-    started = time.monotonic()
     category = "configuration"
     diagnostic = None
     try:
+        _progress("settings", progress_started)
         settings = Settings.from_environment()
         category = "database"
+        _progress("repository", progress_started)
         repo = Repository(settings.database_url)
         category = "internal"
-        value = read_snapshot(repo, now=now, tenant_id=settings.tenant_id)
+        value = read_snapshot(
+            repo,
+            now=now,
+            tenant_id=settings.tenant_id,
+            _diagnostic_started=progress_started,
+        )
         category = "serialization"
+        _progress("serialize", progress_started)
         output = json.dumps(value, sort_keys=True, allow_nan=False)
     except Exception as error:
         if isinstance(error, SQLAlchemyError):
             category = "database"
         elif category == "internal" and isinstance(error, (ValueError, TypeError)):
             category = "validation"
-        diagnostic = {
-            "category": category,
-            "elapsed_ms": min(60000, max(0, int((time.monotonic() - started) * 1000))),
-        }
+        diagnostic = {"category": category}
         value = {
             "version": 1,
             "observed_at": now,
@@ -529,6 +579,7 @@ def main():
     finally:
         if repo is not None:
             try:
+                _progress("close", progress_started)
                 repo.close()
             except Exception:
                 pass
@@ -536,6 +587,9 @@ def main():
     if diagnostic is not None:
         try:
             # Only closed categories and capped elapsed time cross the host boundary.
+            diagnostic["elapsed_ms"] = min(
+                60000, max(0, int((time.monotonic() - progress_started) * 1000))
+            )
             print(json.dumps(diagnostic, sort_keys=True), file=sys.stderr)
         except (OSError, ValueError):
             pass  # Diagnostics cannot change the original snapshot/exit contract.
