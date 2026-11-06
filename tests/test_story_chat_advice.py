@@ -88,6 +88,27 @@ class AdviceTests(unittest.TestCase):
         self.assertEqual(result["turn"]["proposal"]["shot_ids"], [])
         self.assertEqual(self.jobs(), 0)
 
+    def test_new_cards_without_pictures_are_offered_one_confirm(self):
+        # Quick Create used to leave every shot blocked on missing pictures (#1111).
+        chat = self.start()
+        set_pictures(self.app, True)
+        built = self.turn(chat, "story").json()
+        cards = built["cards"]
+        expected = [
+            *(c["id"] for c in cards["characters"]),
+            *(c["id"] for c in cards["places"]),
+        ]
+        proposal = built["turn"]["proposal"]
+        self.assertEqual(proposal["kind"], "image")
+        self.assertEqual(set(proposal["picture_card_ids"]) >= set(expected), True)
+        self.assertEqual(len(proposal["picture_card_ids"]), 4)
+        self.assertEqual(built["image_requests"], [])
+        again = self.turn(
+            chat, "Longer", "turn-pics-09", {"reply": "Sure", "actions": []}
+        ).json()
+        self.assertIsNone(again["turn"]["proposal"])
+        self.assertEqual(self.jobs(), 0)
+
     def test_ready_fl_proposal_survives_without_mutating_source(self):
         project = storyboard_project()
         shot = next(e for e in project["entities"] if e["id"] == "shot-one")

@@ -195,6 +195,8 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             "max_turns": MAX_TURNS,
             "messages": present_messages(chat.get("messages", []), project),
             "cards": cards(project, chat),
+            # Picture requests that already started, so a reloaded confirm stays settled.
+            "image_requests": sorted(chat.get("imageRequests", {})),
         }
 
     def present_messages(messages, project):
