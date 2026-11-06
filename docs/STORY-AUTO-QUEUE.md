@@ -74,11 +74,12 @@ The verdict is stored per card version. The existing Inky source identity covers
 
 | Route for 5 s at 768P | Cost |
 |---|---|
-| Vivix | $0.01 |
+| Vivix | $0.016 |
 | Our machine (backlog) | about $0.009 |
-| Fallback to turbo | $0.06 |
+| Fallback to Pika | $0.10 |
+| Fallback to turbo | $0.20 |
 
-Every route earns money at list credit price. Recheck if packs sell below $0.01 per credit.
+Vendor list prices of 2026-11-06. Packs net about $0.0081 to $0.0089 per credit after the payment fee, so 10 credits bring about $0.08 to $0.09. Vivix and our machine earn money; since the vendor's 2026-11-05 rise every hosted fallback costs more than the economy charge. Prices are the owner's decision.
 
 **Edited cards.** A card edited after it already has a take becomes `stale`, and it is **not** re-run by default. Each stale card offers "Generate again", plus a story-level "Generate all changed". A sub-option, "Also re-generate edited shots", defaults to off, because re-runs cost credits the user may not expect.
 
@@ -124,7 +125,7 @@ Credits move with the state:
 | 5 | Toggle turned off mid-way | See "Turning it off" above (default keep) |
 | 6 | Not enough credits | Shots stop entering the queue; nothing fails silently. Auto-queue pauses, Inky offers a top-up, and the queue resumes by itself after the top-up while the toggle is on |
 | 7 | Jev unsure, or not representable on economy | Over 5 reference images, 21:9, over 15 s, 2K or enhance. "这条不能省积分排队", with [马上生成] or [修改] |
-| 8 | Waiting past the deadline (about 30 min) | Promote silently to `h3-max-turbo`, then our fleet, at the same economy charge. We absorb the difference, and the margin stays positive. The ETA updates |
+| 8 | Waiting past the deadline (about 30 min) | Promote silently to the next hosted model (Pika, then turbo), then our fleet, at the same economy charge. We absorb the difference, which since 2026-11-05 is a loss on that shot. The ETA updates |
 | 9 | Vendor refusal or failure | Next model in the chain, same charge. If every model fails: `failed`, hold released, Inky explains in plain words with no model names |
 | 10 | User closes the tab | The queue runs server-side. In-app notice plus the existing done notification per shot and per project |
 | 11 | Mixed tiers in one film | Economy output is normalised to the project's resolution (480P/768P), so it cuts together with normal shots. Enhance and 2K stay separate paid steps after generation |
@@ -170,8 +171,8 @@ The scheduler (`decide()` in PROVIDER-ARCHITECTURE.md) gets a **priority class**
 | | `interactive` | `economy` (auto-queue) |
 |---|---|---|
 | Wait limit | Tier limit (Fast draft 30 s, Standard 60 s, Refine 120 s) | Deadline 30 min per shot; the card shows its ETA |
-| First route | Warm own slot, else the hosted chain at once (turbo → Pika → fast …) | **Vivix W1**, through our own economy queue |
-| Fallback | Next model in the chain, then our fleet | After the deadline: `h3-max-turbo`, then our fleet |
+| First route | Warm own slot, else the hosted chain at once (Pika → turbo → fast …) | **Vivix W1**, through our own economy queue |
+| Fallback | Next model in the chain, then our fleet | After the deadline: `pika-h3-flex`, `h3-max-turbo`, then our fleet |
 | Vendor rate-limit bucket (account: 40 / 15 min) | Reserved share: 25 / 15 min | Share: 15 / 15 min, plus whatever interactive left unused in the window |
 | Starting our machines | Counts as demand | Counts as demand only once its jobs fall back |
 

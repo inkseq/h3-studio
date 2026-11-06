@@ -92,7 +92,8 @@ class VendorRequestTests(unittest.TestCase):
         )
         # Turbo refuses references (400 bad_attachment), so it never gets them.
         self.assertIsNone(plan.vendor_request(value, "h3-max-turbo"))
-        self.assertEqual(plan.chain(value), ["h3-max-fast", "pika-h3-flex"])
+        # Pika omni (USD 0.15 per 5 s at 480p) is below fast's one price (0.25).
+        self.assertEqual(plan.chain(value), ["pika-h3-flex", "h3-max-fast"])
 
     def test_anything_not_exactly_representable_stays_on_our_machines(self):
         inputs = {
@@ -123,14 +124,15 @@ class VendorRequestTests(unittest.TestCase):
 
     def test_chains_follow_price_within_what_the_take_needs(self):
         self.assertEqual(
-            plan.chain(compiled()), ["h3-max-turbo", "pika-h3-flex", "h3-max-fast"]
+            plan.chain(compiled()), ["pika-h3-flex", "h3-max-turbo", "h3-max-fast"]
         )
         self.assertEqual(
             plan.chain(compiled(resolution="768P"), "economy"),
-            ["vivix-w1", "h3-max-turbo"],
+            ["vivix-w1", "pika-h3-flex", "h3-max-turbo"],
         )
         self.assertEqual(plan.chain(compiled(resolution="2K")), ["pika-h3-flex"])
-        self.assertAlmostEqual(plan.price("h3-max-turbo", compiled(duration=10)), 0.076)
+        self.assertAlmostEqual(plan.price("h3-max-turbo", compiled(duration=10)), 0.252)
+        self.assertAlmostEqual(plan.price("pika-h3-flex", compiled(duration=10)), 0.1)
         # Pika does not cut on its own, so its prompt is left alone.
         body, _ = plan.vendor_request(compiled(), "pika-h3-flex")
         self.assertNotIn(plan.NO_CUT, body["prompt"])
@@ -281,7 +283,7 @@ class BackendTests(unittest.TestCase):
                     self.assertEqual((info["width"], info["height"]), size)
                     self.assertEqual(info["avg_frame_rate"], "24/1")
 
-    def test_vivix_takes_4_5_but_sends_21_9_to_turbo(self):
+    def test_vivix_takes_4_5_but_sends_21_9_to_the_next_model(self):
         self.assertIsNotNone(
             plan.vendor_request(
                 compiled(resolution="768P", aspect_ratio="4:5"), "vivix-w1"
@@ -289,7 +291,7 @@ class BackendTests(unittest.TestCase):
         )
         self.assertEqual(
             plan.chain(compiled(resolution="768P", aspect_ratio="21:9"), "economy"),
-            ["h3-max-turbo"],
+            ["pika-h3-flex", "h3-max-turbo"],
         )
 
     def test_config_holds_only_the_key_and_never_shows_it(self):
