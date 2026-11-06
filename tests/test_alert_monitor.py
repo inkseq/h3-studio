@@ -1,13 +1,14 @@
 """Finite monitor tests: no AWS, Docker, provider or business database writes."""
 
 import copy
-from contextlib import nullcontext, redirect_stdout
+from contextlib import nullcontext, redirect_stderr, redirect_stdout
 import hashlib
 import io
 import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -25,6 +26,168 @@ SETTINGS = {
     'topic_arn': 'arn:aws:sns:ap-southeast-1:829135631045:sixnine-staging-operator-alerts',
     'thresholds': {},
 }
+
+
+class SnapshotObservationTests(unittest.TestCase):
+    def observe(
+        self,
+        *,
+        output=b'{}',
+        error=b'',
+        returncode=0,
+        failure=None,
+        stream=None,
+        elapsed=0.125,
+    ):
+        runner = Mock(
+            return_value=SimpleNamespace(
+                returncode=returncode, stdout=output, stderr=error
+            ),
+            side_effect=failure,
+        )
+        errors = stream if stream is not None else io.StringIO()
+        with (
+            patch.object(monitor.time, 'monotonic', side_effect=[10, 10 + elapsed]),
+            redirect_stderr(errors),
+        ):
+            value = monitor.observe_snapshot('PRIVATE_CONTAINER', runner=runner)
+        self.assertEqual(runner.call_count, 1)
+        self.assertEqual(
+            runner.call_args.args[0],
+            [
+                '/usr/bin/docker',
+                'exec',
+                'PRIVATE_CONTAINER',
+                'python',
+                '-B',
+                '-m',
+                'studio_platform.alert_snapshot',
+            ],
+        )
+        self.assertEqual(
+            runner.call_args.kwargs,
+            {
+                'stdin': subprocess.DEVNULL,
+                'capture_output': True,
+                'timeout': 10,
+                'env': {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'},
+            },
+        )
+        return value, errors
+
+    def test_transport_failures_emit_bounded_outcome_without_child_content(self):
+        for options, outcome in (
+            (
+                {
+                    'failure': subprocess.TimeoutExpired(
+                        'PRIVATE_COMMAND',
+                        10,
+                        output=b'PRIVATE_STDOUT',
+                        stderr=b'PRIVATE_STDERR',
+                    ),
+                    'elapsed': 10,
+                },
+                'timeout',
+            ),
+            ({'failure': OSError('PRIVATE_PATH')}, 'process_failed'),
+            (
+                {
+                    'returncode': 1,
+                    'output': b'PRIVATE_STDOUT',
+                    'error': b'PRIVATE_STDERR',
+                },
+                'process_failed',
+            ),
+            (
+                {'output': b'PRIVATE_INVALID_JSON', 'error': b'PRIVATE_STDERR'},
+                'invalid_output',
+            ),
+            ({'output': b'\xff'}, 'invalid_output'),
+            ({'output': b'X' * (monitor.MAX_BYTES + 1)}, 'invalid_output'),
+        ):
+            with self.subTest(outcome=outcome, options=list(options)):
+                value, errors = self.observe(**options)
+                self.assertIsNone(value)
+                self.assertEqual(
+                    json.loads(errors.getvalue()),
+                    {
+                        'event': 'alert_snapshot_observation',
+                        'outcome': outcome,
+                        'category': 'unknown',
+                        'snapshot_elapsed_ms': None,
+                        'elapsed_ms': 10000 if outcome == 'timeout' else 125,
+                    },
+                )
+                self.assertNotIn('PRIVATE', errors.getvalue())
+                self.assertEqual(len(errors.getvalue().splitlines()), 1)
+
+    def test_incomplete_snapshot_preserved_and_safe_failure_category_forwarded(self):
+        original = {'version': 1, 'complete': False, 'jobs': [], 'gpus': []}
+        value, errors = self.observe(
+            output=json.dumps(original).encode(),
+            error=b'{"category":"database","elapsed_ms":100}\n',
+        )
+        self.assertEqual(value, original)
+        self.assertEqual(
+            json.loads(errors.getvalue()),
+            {
+                'event': 'alert_snapshot_observation',
+                'outcome': 'incomplete',
+                'category': 'database',
+                'snapshot_elapsed_ms': 100,
+                'elapsed_ms': 125,
+            },
+        )
+
+    def test_old_images_and_untrusted_diagnostics_are_unknown_without_changing_result(
+        self,
+    ):
+        original = {'version': 1, 'complete': False}
+        for error in (
+            b'',
+            b'PRIVATE_ERROR',
+            b'\xff',
+            b'PRIVATE' * 100,
+            b'{"category":"database","elapsed_ms":1}\nPRIVATE_EXTRA',
+            b'{"category":"database","elapsed_ms":1,"PRIVATE":"SECRET"}',
+            b'{"category":"PRIVATE_CATEGORY","elapsed_ms":1}',
+            b'{"category":[],"elapsed_ms":1}',
+            b'{"category":"database","elapsed_ms":true}',
+            b'{"category":"database","elapsed_ms":-1}',
+            b'{"category":"database","elapsed_ms":60001}',
+            b'{"category":"database","elapsed_ms":1.5}',
+            b'[]',
+            b'null',
+        ):
+            with self.subTest(error=error[:60]):
+                value, errors = self.observe(
+                    output=json.dumps(original).encode(), error=error
+                )
+                self.assertEqual(value, original)
+                diagnostic = json.loads(errors.getvalue())
+                self.assertEqual(
+                    (diagnostic['category'], diagnostic['snapshot_elapsed_ms']),
+                    ('unknown', None),
+                )
+                self.assertNotIn('PRIVATE', errors.getvalue())
+
+    def test_diagnostic_does_not_add_fields_or_override_evaluator_input(self):
+        for original, outcome in (
+            ({'version': 1, 'complete': True}, 'ok'),
+            ({'complete': 'PRIVATE'}, 'invalid_output'),
+            ([], 'invalid_output'),
+        ):
+            with self.subTest(outcome=outcome):
+                value, errors = self.observe(output=json.dumps(original).encode())
+                self.assertEqual(value, original)
+                self.assertEqual(json.loads(errors.getvalue())['outcome'], outcome)
+
+    def test_diagnostic_write_failure_does_not_discard_snapshot(self):
+        stream = Mock()
+        stream.write.side_effect = OSError('PRIVATE_STDERR_FAILURE')
+        original = {'version': 1, 'complete': True}
+        value, _ = self.observe(output=json.dumps(original).encode(), stream=stream)
+        self.assertEqual(value, original)
 
 
 class MonitorTests(unittest.TestCase):

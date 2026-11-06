@@ -7,12 +7,14 @@ appear in output. The daily projection is the existing guard, not a new ledger.
 
 import json
 import math
+import sys
 import time
 import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from .alert_conditions import STATES, identity
 from .dstack_test_budget import ACCOUNT, projected_cost, validate_guard, guard_limit
@@ -494,12 +496,26 @@ def main():
 
     repo = None
     now = time.time()
+    started = time.monotonic()
+    category = "configuration"
+    diagnostic = None
     try:
         settings = Settings.from_environment()
+        category = "database"
         repo = Repository(settings.database_url)
+        category = "internal"
         value = read_snapshot(repo, now=now, tenant_id=settings.tenant_id)
+        category = "serialization"
         output = json.dumps(value, sort_keys=True, allow_nan=False)
-    except Exception:
+    except Exception as error:
+        if isinstance(error, SQLAlchemyError):
+            category = "database"
+        elif category == "internal" and isinstance(error, (ValueError, TypeError)):
+            category = "validation"
+        diagnostic = {
+            "category": category,
+            "elapsed_ms": min(60000, max(0, int((time.monotonic() - started) * 1000))),
+        }
         value = {
             "version": 1,
             "observed_at": now,
@@ -517,6 +533,12 @@ def main():
             except Exception:
                 pass
     print(output)
+    if diagnostic is not None:
+        try:
+            # Only closed categories and capped elapsed time cross the host boundary.
+            print(json.dumps(diagnostic, sort_keys=True), file=sys.stderr)
+        except (OSError, ValueError):
+            pass  # Diagnostics cannot change the original snapshot/exit contract.
     return 0
 
 
