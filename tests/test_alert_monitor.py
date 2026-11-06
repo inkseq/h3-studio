@@ -266,6 +266,88 @@ class SnapshotObservationTests(unittest.TestCase):
         )
         self.assertEqual(len(errors.getvalue().splitlines()), 1)
 
+    def test_complete_nineteen_phase_stream_accepts_optional_final_failure(self):
+        phases = (
+            'imports',
+            'settings_import',
+            'settings',
+            'repository',
+            'connect',
+            'jobs',
+            'failures',
+            'guard_rows',
+            'gpu_activity',
+            'terminal_holds',
+            'budget',
+            'budget_guard',
+            'budget_settings_import',
+            'budget_settings',
+            'budget_rows',
+            'budget_projection',
+            'connection_close',
+            'serialize',
+            'close',
+        )
+        progress = ''.join(
+            json.dumps({'phase': phase, 'elapsed_ms': index * 10}) + '\n'
+            for index, phase in enumerate(phases)
+        ).encode('utf-8')
+        for failure in (False, True):
+            with self.subTest(failure=failure):
+                records = progress
+                if failure:
+                    records += b'{"category":"database","elapsed_ms":190}\n'
+                self.assertEqual(len(records.splitlines()), 20 if failure else 19)
+                original = {'version': 1, 'complete': not failure, 'jobs': []}
+                value, errors = self.observe(
+                    output=json.dumps(original).encode(), error=records, elapsed=1
+                )
+                self.assertEqual(value, original)
+                observed = json.loads(errors.getvalue())
+                self.assertEqual(observed['outcome'], 'incomplete' if failure else 'ok')
+                self.assertEqual(
+                    (observed['phase'], observed['phase_started_ms']), ('close', 180)
+                )
+                self.assertEqual(
+                    (observed['category'], observed['snapshot_elapsed_ms']),
+                    ('database', 190) if failure else ('unknown', None),
+                )
+                self.assertEqual(len(errors.getvalue().splitlines()), 1)
+
+    def test_timeout_retains_each_closed_budget_phase(self):
+        records = b'{"phase":"budget","elapsed_ms":2377}\n'
+        phases = (
+            'budget_guard',
+            'budget_settings_import',
+            'budget_settings',
+            'budget_rows',
+            'budget_projection',
+        )
+        for index, phase in enumerate(phases, 1):
+            at = 2377 + index * 10
+            records += (json.dumps({'phase': phase, 'elapsed_ms': at}) + '\n').encode()
+            with self.subTest(phase=phase):
+                value, errors = self.observe(
+                    failure=subprocess.TimeoutExpired(
+                        'PRIVATE_COMMAND', 10, output=b'PRIVATE_STDOUT', stderr=records
+                    ),
+                    elapsed=10,
+                )
+                self.assertIsNone(value)
+                self.assertEqual(
+                    json.loads(errors.getvalue()),
+                    {
+                        'event': 'alert_snapshot_observation',
+                        'outcome': 'timeout',
+                        'elapsed_ms': 10000,
+                        'category': 'unknown',
+                        'snapshot_elapsed_ms': None,
+                        'phase': phase,
+                        'phase_started_ms': at,
+                    },
+                )
+                self.assertNotIn('PRIVATE', errors.getvalue())
+
     def test_untrusted_or_partial_phase_stream_is_wholly_unknown(self):
         prefix = b'{"phase":"imports","elapsed_ms":0}\n'
         for raw in (
@@ -287,10 +369,17 @@ class SnapshotObservationTests(unittest.TestCase):
             b'{"phase":"connect","elapsed_ms":2}\n{"phase":"jobs","elapsed_ms":1}\n',
             b'{"phase":"jobs","elapsed_ms":2}\n{"phase":"connect","elapsed_ms":3}\n',
             b'{"phase":"close","elapsed_ms":2}\n{"category":"database","elapsed_ms":1}\n',
+            b'{"phase":"budget_rows","elapsed_ms":2}\n{"phase":"budget_rows","elapsed_ms":3}\n',
+            b'{"phase":"budget_settings_import","elapsed_ms":2}\n{"phase":"budget_guard","elapsed_ms":3}\n',
+            b'{"phase":"budget","elapsed_ms":2}\n{"phase":"budget_projection","elapsed_ms":1}\n',
+            b'{"phase":"budget_projection","elapsed_ms":2}\n{"category":"database","elapsed_ms":1}\n',
+            b'{"phase":"budget_rows","phase":"budget_projection","elapsed_ms":2}\n',
+            b'{"phase":"budget_rows","elapsed_ms":2,"PRIVATE_SQL":"SECRET"}\n',
+            b'{"phase":"budget_PRIVATE","elapsed_ms":2}\n',
             b'{"category":"database","elapsed_ms":1}\n' + prefix,
             b' ' * 2049,
             b' ' * 257,
-            prefix * 17,
+            prefix * 21,
         ):
             with self.subTest(raw=repr(raw)[:60]):
                 value, errors = self.observe(
