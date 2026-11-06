@@ -25,6 +25,7 @@ from studio_platform.repository import (
     budget_accounts,
     budget_reservations,
     instance_intents,
+    scaler_actions,
 )
 from studio_platform.worker_admission import dstack_budget_reason, managed_window_reason
 from test_platform_repository import LedgerCase
@@ -644,6 +645,261 @@ class DailyTestBudgetTests(LedgerCase):
             )
             connection.execute(update(operator_nodes).values(runtime_state="stopped"))
             self.assertEqual(projected_cost(connection, guard, self.now), 1_812_500)
+
+    def _removed_projection_node(
+        self, *, key="removed", cost=0.1, task="issue-267", elapsed=60
+    ):
+        preview = original.DstackLifetimeTests.preview(self, test_task_id=task)
+        node_id = self.start(key=key, preview=preview)["node_id"]
+        self.running(node_id)
+        self.now += elapsed
+        binding = self.store.load(node_id)
+        run = self.client.runs[binding["run_name"]]
+        run.update(status="terminated", cost=cost)
+        inventory = {
+            "backend": binding["backend"],
+            "complete": True,
+            "observed_at": self.now,
+            "instance_ids": [],
+        }
+        with patch.object(
+            self.client, "provider_inventory", return_value=inventory, create=True
+        ):
+            self.capacity.observe(node_id)
+        binding = self.store.load(node_id)
+        self.assertTrue(binding["provider_removal_proof"]["absent"])
+        self.assertEqual(binding["billing_state"], "unsettled")
+        return node_id
+
+    def _projection_rows(self, connection):
+        return [
+            [dict(row) for row in connection.execute(select(table)).mappings()]
+            for table in (
+                budget_accounts,
+                budget_reservations,
+                instance_intents,
+                operator_nodes,
+                scaler_actions,
+            )
+        ]
+
+    def test_historical_removed_projection_counts_estimate_and_extra_once(self):
+        self._removed_projection_node()
+        intent, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        self.assertEqual(intent["state"], "destroyed")
+        self.assertEqual(node["runtime_state"], "stopped")
+        self.now += 86400
+        for estimate, expected in (
+            (0, 1_012_500),
+            (100_000, 1_100_000),
+            (5_000_000, 6_000_000),
+        ):
+            with self.subTest(estimate=estimate), self.repo.transaction() as connection:
+                payload = copy.deepcopy(node["payload"])
+                payload["dstack"]["estimated_cost_microusd"] = estimate
+                connection.execute(update(operator_nodes).values(payload=payload))
+                before = self._projection_rows(connection)
+                self.assertEqual(projected_cost(connection, guard, self.now), expected)
+                self.assertEqual(self._projection_rows(connection), before)
+                self.assertTrue(
+                    all(
+                        row["actual_cost_microusd"] is None
+                        and row["state"] == "invoice_pending"
+                        for row in before[1]
+                    )
+                )
+        self.assertEqual((len(self.client.applied), self.client.stopped), (1, []))
+
+    def test_removed_projection_keeps_replacement_floor_and_settled_actual_precedence(
+        self,
+    ):
+        node_id = self._removed_projection_node(cost=0, elapsed=3600)
+        _, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        with self.repo.transaction() as connection:
+            self.assertEqual(
+                projected_cost(
+                    connection,
+                    guard,
+                    self.now,
+                    replacement_id=node_id,
+                    minimum_reserved=3_000_000,
+                ),
+                3_000_000,
+            )
+            self.repo._settle(connection, "instance", node_id, 700_000)
+            before = self._projection_rows(connection)
+            self.assertEqual(
+                projected_cost(
+                    connection,
+                    guard,
+                    self.now,
+                    replacement_id=node_id,
+                    minimum_reserved=3_000_000,
+                ),
+                700_000,
+            )
+            self.assertEqual(self._projection_rows(connection), before)
+
+    def test_removed_projection_floors_stale_estimate_at_original_one_hour_rate(self):
+        self._removed_projection_node(cost=0, elapsed=3600)
+        _, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        self.assertEqual(node["payload"]["hourly_cost_microusd"], 750_000)
+        self.now += 86400
+        for estimate, expected in (
+            (0, 1_750_000),
+            (100_000, 1_750_000),
+            (2_000_000, 3_000_000),
+        ):
+            with self.subTest(estimate=estimate), self.repo.transaction() as connection:
+                payload = copy.deepcopy(node["payload"])
+                payload["dstack"]["estimated_cost_microusd"] = estimate
+                connection.execute(update(operator_nodes).values(payload=payload))
+                before = self._projection_rows(connection)
+                self.assertEqual(projected_cost(connection, guard, self.now), expected)
+                self.assertEqual(self._projection_rows(connection), before)
+        self.assertEqual((len(self.client.applied), self.client.stopped), (1, []))
+
+    def test_removed_projection_uses_original_create_start_or_none_fallback(self):
+        self._removed_projection_node(cost=0, elapsed=3600)
+        intent, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        proof_at = node["payload"]["dstack"]["provider_removal_proof"]["observed_at"]
+        self.assertEqual((intent["created_at"], proof_at), (1000, 4600))
+        self.now += 86400
+        for started, expected in (
+            (None, 1_750_000),
+            (1600, 1_625_000),
+            (0, 1_958_334),
+            (proof_at - 1, 1_000_209),
+        ):
+            with self.subTest(started=started), self.repo.transaction() as connection:
+                connection.execute(
+                    update(scaler_actions).values(create_started_at=started)
+                )
+                before = self._projection_rows(connection)
+                self.assertEqual(projected_cost(connection, guard, self.now), expected)
+                self.assertEqual(self._projection_rows(connection), before)
+
+    def test_removed_projection_invalid_create_start_retains_commitment(self):
+        self._removed_projection_node(cost=0, elapsed=3600)
+        _, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        proof_at = node["payload"]["dstack"]["provider_removal_proof"]["observed_at"]
+        for started in (-1, proof_at + 1, float("inf"), -float("inf")):
+            with self.subTest(started=started), self.repo.transaction() as connection:
+                connection.execute(
+                    update(scaler_actions).values(create_started_at=started)
+                )
+                before = self._projection_rows(connection)
+                self.assertEqual(projected_cost(connection, guard, self.now), 1_812_500)
+                self.assertEqual(self._projection_rows(connection), before)
+
+    def test_removed_projection_bad_evidence_retains_original_commitment(self):
+        self._removed_projection_node()
+        intent, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        proof = node["payload"]["dstack"]["provider_removal_proof"]
+        changes = [
+            ("binding", {"provider_removal_proof": None}),
+            ("binding", {"provider_removal_proof": {}}),
+            ("binding", {"provider_instance_id": "another-instance"}),
+            ("binding", {"run_id": str(uuid.uuid4())}),
+            ("binding", {"backend": "lium"}),
+            ("binding", {"dstack_status": []}),
+            ("binding", {"dstack_status": {}}),
+            ("binding", {"backend": {}}),
+            ("proof", {"version": True}),
+            ("proof", {"complete": False}),
+            ("proof", {"absent": False}),
+            ("proof", {"provider_instance_id": "another-instance"}),
+            ("proof", {"run_id": str(uuid.uuid4())}),
+            ("proof", {"backend": "lium"}),
+            ("proof", {"inventory_sha256": "z" * 64}),
+            ("proof", {"observed_at": self.now + 1}),
+            ("proof", {"observed_at": intent["created_at"] - 1}),
+            ("proof", {"inventory_observed_at": proof["observed_at"] - 31}),
+        ]
+        changes.extend(
+            ("binding", {"run_id": value}) for value in (None, 0, True, {}, [])
+        )
+        changes.extend(
+            ("binding", {"estimated_cost_microusd": value})
+            for value in (None, -1, True, 0.5, "100000")
+        )
+        changes.extend(
+            ("payload", {"hourly_cost_microusd": value})
+            for value in (None, 0, -1, True, 0.5, "750000", {}, [])
+        )
+        changes.extend(
+            ("payload", {"extra_reservation_microusd": value})
+            for value in (None, -1, True, 0.5, "1000000")
+        )
+        for target, change in changes:
+            with self.subTest(target=target, change=change):
+                payload = copy.deepcopy(node["payload"])
+                changed = payload if target == "payload" else payload["dstack"]
+                if target == "proof":
+                    changed = changed["provider_removal_proof"]
+                changed.update(change)
+                with self.repo.transaction() as connection:
+                    connection.execute(update(operator_nodes).values(payload=payload))
+                    before = self._projection_rows(connection)
+                    self.assertEqual(
+                        projected_cost(connection, guard, self.now), 1_812_500
+                    )
+                    self.assertEqual(self._projection_rows(connection), before)
+
+    def test_removed_projection_requires_original_intent_and_stopped_node(self):
+        self._removed_projection_node()
+        intent, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        for change in (
+            {"provider_instance_id": "another-instance"},
+            {"provider": "lium"},
+            {"state": "destroying"},
+        ):
+            with self.subTest(change=change), self.repo.transaction() as connection:
+                values = {
+                    key: intent[key]
+                    for key in ("provider_instance_id", "provider", "state")
+                }
+                connection.execute(
+                    update(instance_intents).values(**{**values, **change})
+                )
+                self.assertEqual(projected_cost(connection, guard, self.now), 1_812_500)
+        with self.repo.transaction() as connection:
+            connection.execute(update(instance_intents).values(state="destroyed"))
+            connection.execute(update(operator_nodes).values(runtime_state="ready"))
+            self.assertEqual(projected_cost(connection, guard, self.now), 1_812_500)
+
+    def test_removed_projection_accumulates_only_original_same_task(self):
+        # Admission reads its own inventory callback, captured at operator init.
+        # Keep each prior terminal fake instance absent at the next admission.
+        with patch.object(
+            self.service,
+            "provider_inventory",
+            side_effect=lambda backend: {
+                "backend": backend,
+                "complete": True,
+                "observed_at": self.now,
+                "instance_ids": [],
+            },
+        ):
+            self._removed_projection_node(key="first", cost=0.1)
+            self._removed_projection_node(key="second", cost=0.2)
+            self._removed_projection_node(key="other", cost=0.3, task="issue-285")
+        self.now += 86400
+        with self.repo.engine.connect() as connection:
+            before = self._projection_rows(connection)
+            guard = task_guard(GUARD, "issue-267", limit=20_000_000, max_runtime=7200)
+            self.assertEqual(projected_cost(connection, guard, self.now), 2_300_000)
+            other = task_guard(GUARD, "issue-285", limit=20_000_000, max_runtime=7200)
+            self.assertEqual(projected_cost(connection, other, self.now), 1_300_000)
+            self.assertEqual(self._projection_rows(connection), before)
+        self.assertEqual((len(self.client.applied), self.client.stopped), (3, []))
 
     def test_same_task_corrupt_binding_fails_closed_but_old_unattributed_hold_does_not_leak(
         self,
