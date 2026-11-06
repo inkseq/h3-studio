@@ -756,3 +756,18 @@ test('readiness hints follow the version on screen and skip what the editor alre
   assert.deepEqual(readinessHints(item, 4, t), []);
   assert.deepEqual(readinessHints(undefined, 3, t), []);
 });
+
+test('shots shorter than the video model makes are named for the fix', async () => {
+  const { shotsTooShort, SHORTEST_SHOT_SECONDS } = await import('./storyboard-domain.js');
+  const entities = [
+    { id: 'a', type: 'shot', data: { seconds: 3 } },
+    { id: 'b', type: 'shot', data: { seconds: 4 } },
+    { id: 'c', type: 'shot', data: {} },
+    { id: 'd', type: 'character', data: { seconds: 1 } },
+  ];
+  assert.equal(SHORTEST_SHOT_SECONDS, 4);
+  assert.deepEqual(
+    shotsTooShort(['a', 'b', 'c', 'd', 'a', 'missing'], entities).map((shot) => shot.id),
+    ['a'],
+  );
+});

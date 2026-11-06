@@ -3,7 +3,7 @@ import { TrashMenu } from './UniversalTrash.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
 import { Button } from './ui/Button.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import HostedSignIn from './HostedSignIn.jsx';
+import HostedSignIn, { UsernameSignIn } from './HostedSignIn.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import './i18n/workspace-language.css';
 import React, { useEffect, useState } from 'react';
@@ -75,42 +75,44 @@ export function CloudProjects({ onClose, quick = false, initialGrant = null }) {
           </>
         ) : (
           <form onSubmit={login}>
-            <label>
-              {t('account.copy76')}
-              <input
-                autoComplete="username"
-                required
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                maxLength={100}
-              />
-            </label>
-            {!['username-test', 'username-only-test'].includes(c.auth.authentication) && (
+            <HostedSignIn auth={c.auth} />
+            <UsernameSignIn auth={c.auth}>
               <label>
-                {t('account.copy77')}
+                {t('account.copy76')}
                 <input
-                  type="password"
-                  autoComplete="current-password"
+                  autoComplete="username"
                   required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  maxLength={72}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  maxLength={100}
                 />
               </label>
-            )}
-            {['username-test', 'username-only-test'].includes(c.auth.authentication) && (
-              <p className="cloud-warning">{t('account.copy78')}</p>
-            )}
-            <Button
-              variant="primary"
-              type="submit"
-              className="login-submit"
-              disabled={c.busy || c.auth.auth_ready === false}
-            >
-              {t('account.copy79')}
-            </Button>
-            {c.auth.auth_ready === false && <p role="alert">{t('account.copy80')}</p>}
-            <HostedSignIn auth={c.auth} />
+              {!['username-test', 'username-only-test'].includes(c.auth.authentication) && (
+                <label>
+                  {t('account.copy77')}
+                  <input
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    maxLength={72}
+                  />
+                </label>
+              )}
+              {['username-test', 'username-only-test'].includes(c.auth.authentication) && (
+                <p className="cloud-warning">{t('account.copy78')}</p>
+              )}
+              <Button
+                variant="primary"
+                type="submit"
+                className="login-submit"
+                disabled={c.busy || c.auth.auth_ready === false}
+              >
+                {t('account.copy79')}
+              </Button>
+              {c.auth.auth_ready === false && <p role="alert">{t('account.copy80')}</p>}
+            </UsernameSignIn>
           </form>
         )}
         <FloatingMessage tone="error" text={c.error ? c.error : null} />

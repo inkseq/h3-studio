@@ -1,7 +1,6 @@
 // Settings → Account → Appearance: pick an interface skin (per browser).
 import React, { useEffect, useState } from 'react';
 import { Button } from './ui/Button.jsx';
-import { Palette } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { SKINS, applySkin, chosenSkin, followSystem } from './skins.js';
 
@@ -40,9 +39,6 @@ export default function SkinPicker() {
   }, []);
   return (
     <div className="card-box">
-      <h4>
-        <Palette size={15} aria-hidden="true" /> {t('skin.title')}
-      </h4>
       <div className="skin-picker" role="radiogroup" aria-label={t('skin.title')}>
         <Button
           role="radio"
