@@ -115,6 +115,8 @@ class SnapshotObservationTests(unittest.TestCase):
                         'outcome': outcome,
                         'category': 'unknown',
                         'snapshot_elapsed_ms': None,
+                        'phase': 'unreported',
+                        'phase_started_ms': None,
                         'elapsed_ms': 10000 if outcome == 'timeout' else 125,
                     },
                 )
@@ -135,6 +137,8 @@ class SnapshotObservationTests(unittest.TestCase):
                 'outcome': 'incomplete',
                 'category': 'database',
                 'snapshot_elapsed_ms': 100,
+                'phase': 'unreported',
+                'phase_started_ms': None,
                 'elapsed_ms': 125,
             },
         )
@@ -188,6 +192,121 @@ class SnapshotObservationTests(unittest.TestCase):
         original = {'version': 1, 'complete': True}
         value, _ = self.observe(output=json.dumps(original).encode(), stream=stream)
         self.assertEqual(value, original)
+
+    def test_timeout_retains_captured_closed_phase_without_stdout_or_private_text(self):
+        records = b'{"phase":"imports","elapsed_ms":0}\n{"phase":"connect","elapsed_ms":40}\n{"phase":"jobs","elapsed_ms":75}\n'
+        value, errors = self.observe(
+            failure=subprocess.TimeoutExpired(
+                'PRIVATE_COMMAND', 10, output=b'PRIVATE_STDOUT', stderr=records
+            ),
+            elapsed=10,
+        )
+        self.assertIsNone(value)
+        self.assertEqual(
+            json.loads(errors.getvalue()),
+            {
+                'event': 'alert_snapshot_observation',
+                'outcome': 'timeout',
+                'elapsed_ms': 10000,
+                'category': 'unknown',
+                'snapshot_elapsed_ms': None,
+                'phase': 'jobs',
+                'phase_started_ms': 75,
+            },
+        )
+        self.assertNotIn('PRIVATE', errors.getvalue())
+
+    def test_failure_record_follows_latest_phase_cumulative_time(self):
+        original = {'complete': False, 'jobs': []}
+        records = b'{"phase":"close","elapsed_ms":2500}\n{"category":"database","elapsed_ms":2600}\n'
+        value, errors = self.observe(
+            output=json.dumps(original).encode(), error=records
+        )
+        self.assertEqual(value, original)
+        observed = json.loads(errors.getvalue())
+        self.assertEqual(
+            (observed['category'], observed['snapshot_elapsed_ms']), ('database', 2600)
+        )
+        self.assertEqual(
+            (observed['phase'], observed['phase_started_ms']), ('close', 2500)
+        )
+
+    def test_complete_fourteen_phase_stream_preserves_success(self):
+        phases = (
+            'imports',
+            'settings_import',
+            'settings',
+            'repository',
+            'connect',
+            'jobs',
+            'failures',
+            'guard_rows',
+            'gpu_activity',
+            'terminal_holds',
+            'budget',
+            'connection_close',
+            'serialize',
+            'close',
+        )
+        records = ''.join(
+            json.dumps({'phase': phase, 'elapsed_ms': index * 10}) + '\n'
+            for index, phase in enumerate(phases)
+        ).encode('utf-8')
+        original = {'version': 1, 'complete': True, 'jobs': []}
+        value, errors = self.observe(
+            output=json.dumps(original).encode(),
+            error=records,
+            elapsed=1,
+        )
+        self.assertEqual(value, original)
+        observed = json.loads(errors.getvalue())
+        self.assertEqual(observed['outcome'], 'ok')
+        self.assertEqual(
+            (observed['phase'], observed['phase_started_ms']), ('close', 130)
+        )
+        self.assertEqual(len(errors.getvalue().splitlines()), 1)
+
+    def test_untrusted_or_partial_phase_stream_is_wholly_unknown(self):
+        prefix = b'{"phase":"imports","elapsed_ms":0}\n'
+        for raw in (
+            None,
+            'PRIVATE_TEXT',
+            prefix + b'PRIVATE_STDERR',
+            prefix + b'\xff',
+            '{"phase":"connect","elapsed_ms":1}'.encode('utf-16'),
+            prefix + b'{"phase":"connect",',
+            prefix + b'{"phase":"PRIVATE","elapsed_ms":1}\n',
+            prefix + b'{"phase":"connect","elapsed_ms":true}\n',
+            prefix + b'{"phase":"connect","elapsed_ms":-1}\n',
+            prefix + b'{"phase":"connect","elapsed_ms":60001}\n',
+            prefix + b'{"phase":"connect","elapsed_ms":1,"PRIVATE":"SECRET"}\n',
+            prefix + b'{"phase":"connect","phase":"jobs","elapsed_ms":1}\n',
+            prefix + b'{"phase":"connect","elapsed_ms":1,"elapsed_ms":2}\n',
+            prefix + b'{"category":"database","category":"internal","elapsed_ms":2}\n',
+            prefix + prefix,
+            b'{"phase":"connect","elapsed_ms":2}\n{"phase":"jobs","elapsed_ms":1}\n',
+            b'{"phase":"jobs","elapsed_ms":2}\n{"phase":"connect","elapsed_ms":3}\n',
+            b'{"phase":"close","elapsed_ms":2}\n{"category":"database","elapsed_ms":1}\n',
+            b'{"category":"database","elapsed_ms":1}\n' + prefix,
+            b' ' * 2049,
+            b' ' * 257,
+            prefix * 17,
+        ):
+            with self.subTest(raw=repr(raw)[:60]):
+                value, errors = self.observe(
+                    failure=subprocess.TimeoutExpired('PRIVATE', 10, stderr=raw)
+                )
+                self.assertIsNone(value)
+                observed = json.loads(errors.getvalue())
+                self.assertEqual(
+                    (observed['phase'], observed['phase_started_ms']),
+                    ('unreported', None),
+                )
+                self.assertEqual(
+                    (observed['category'], observed['snapshot_elapsed_ms']),
+                    ('unknown', None),
+                )
+                self.assertNotIn('PRIVATE', errors.getvalue())
 
 
 class MonitorTests(unittest.TestCase):
