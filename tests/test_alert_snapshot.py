@@ -1,9 +1,11 @@
 """Read-only alerts from original events, accounting and provider obligations."""
 
 import copy
+import builtins
 from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
+import runpy
 from datetime import datetime, timezone
 from types import SimpleNamespace
 import unittest
@@ -34,6 +36,7 @@ class SnapshotDiagnosticTests(unittest.TestCase):
         settings_error=None,
         repository_error=None,
         read_error=None,
+        close_error=None,
         value=None,
         stderr=None,
     ):
@@ -42,6 +45,7 @@ class SnapshotDiagnosticTests(unittest.TestCase):
         output = io.StringIO()
         errors = stderr if stderr is not None else io.StringIO()
         repo = Mock()
+        repo.close.side_effect = close_error
         with (
             patch.object(
                 Settings,
@@ -64,7 +68,7 @@ class SnapshotDiagnosticTests(unittest.TestCase):
                 side_effect=read_error,
             ),
             patch.object(alert_snapshot.time, 'time', return_value=1000),
-            patch.object(alert_snapshot.time, 'monotonic', side_effect=[10, 11.25]),
+            patch.object(alert_snapshot.time, 'monotonic', return_value=10),
             redirect_stdout(output),
             redirect_stderr(errors),
         ):
@@ -101,12 +105,12 @@ class SnapshotDiagnosticTests(unittest.TestCase):
                         'failures': [],
                     },
                 )
-                self.assertEqual(
-                    json.loads(errors.getvalue()),
-                    {'category': category, 'elapsed_ms': 1250},
+                records = [json.loads(line) for line in errors.getvalue().splitlines()]
+                self.assertEqual(records[-1], {'category': category, 'elapsed_ms': 0})
+                self.assertTrue(
+                    all(set(row) == {'phase', 'elapsed_ms'} for row in records[:-1])
                 )
                 self.assertNotIn('PRIVATE', errors.getvalue())
-                self.assertEqual(len(errors.getvalue().splitlines()), 1)
 
     def test_success_keeps_stdout_and_emits_no_failure_diagnostic(self):
         original = {
@@ -119,21 +123,142 @@ class SnapshotDiagnosticTests(unittest.TestCase):
             'failures': [],
         }
         status, value, errors = self.invoke(value=original)
-        self.assertEqual((status, value, errors.getvalue()), (0, original, ''))
+        self.assertEqual((status, value), (0, original))
+        records = [json.loads(line) for line in errors.getvalue().splitlines()]
+        self.assertEqual(
+            [row['phase'] for row in records],
+            ['settings_import', 'settings', 'repository', 'serialize', 'close'],
+        )
+        self.assertTrue(all(set(row) == {'phase', 'elapsed_ms'} for row in records))
 
     def test_diagnostic_write_failure_does_not_change_snapshot_or_exit(self):
-        stream = Mock()
-        stream.write.side_effect = OSError('PRIVATE_STDERR_FAILURE')
-        status, value, _ = self.invoke(
-            read_error=ValueError('PRIVATE_ROW'), stderr=stream
+        for method in ('write', 'flush'):
+            with self.subTest(method=method):
+                stream = Mock()
+                getattr(stream, method).side_effect = OSError('PRIVATE_STDERR_FAILURE')
+                status, value, _ = self.invoke(
+                    read_error=ValueError('PRIVATE_ROW'), stderr=stream
+                )
+                self.assertEqual(status, 0)
+                self.assertFalse(value['complete'])
+
+    def test_cli_reports_import_entry_before_dependency_failure(self):
+        original_import = builtins.__import__
+
+        def controlled_import(name, *args, **kwargs):
+            if name == 'sqlalchemy':
+                raise ImportError('PRIVATE_IMPORT_FAILURE')
+            return original_import(name, *args, **kwargs)
+
+        errors = io.StringIO()
+        with (
+            redirect_stderr(errors),
+            patch('builtins.__import__', side_effect=controlled_import),
+            self.assertRaisesRegex(ImportError, 'PRIVATE_IMPORT_FAILURE'),
+        ):
+            runpy.run_path(alert_snapshot.__file__, run_name='__main__')
+        records = [json.loads(line) for line in errors.getvalue().splitlines()]
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]['phase'], 'imports')
+        self.assertEqual(set(records[0]), {'phase', 'elapsed_ms'})
+        self.assertNotIn('PRIVATE', errors.getvalue())
+
+    def test_library_import_remains_silent(self):
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            runpy.run_path(
+                alert_snapshot.__file__,
+                run_name='studio_platform._diagnostic_import_probe',
+            )
+        self.assertEqual(errors.getvalue(), '')
+
+    def test_connection_and_first_query_have_distinct_entry_markers(self):
+        for failed in ('connect', 'jobs'):
+            with self.subTest(failed=failed):
+                repo, connection = Mock(), Mock()
+                connection.dialect.name = 'sqlite'
+                if failed == 'connect':
+                    repo.engine.connect.side_effect = RuntimeError('PRIVATE_CONNECT')
+                else:
+                    context = repo.engine.connect.return_value
+                    context.__enter__ = Mock(return_value=connection)
+                    context.__exit__ = Mock(return_value=False)
+                    connection.execute.side_effect = RuntimeError('PRIVATE_QUERY')
+                errors = io.StringIO()
+                with (
+                    redirect_stderr(errors),
+                    patch.object(alert_snapshot.time, 'monotonic', return_value=11),
+                    self.assertRaises(RuntimeError),
+                ):
+                    read_snapshot(
+                        repo, now=1000, tenant_id='synthetic', _diagnostic_started=10
+                    )
+                records = [json.loads(line) for line in errors.getvalue().splitlines()]
+                self.assertEqual(
+                    [row['phase'] for row in records],
+                    ['connect']
+                    if failed == 'connect'
+                    else ['connect', 'jobs', 'connection_close'],
+                )
+                self.assertTrue(all(row['elapsed_ms'] == 1000 for row in records))
+                self.assertNotIn('PRIVATE', errors.getvalue())
+
+    def test_close_checkpoint_preserves_swallowed_close_failure(self):
+        original = {'complete': True}
+        status, value, errors = self.invoke(
+            value=original, close_error=RuntimeError('PRIVATE_CLOSE')
         )
-        self.assertEqual(status, 0)
-        self.assertFalse(value['complete'])
+        self.assertEqual((status, value), (0, original))
+        records = [json.loads(line) for line in errors.getvalue().splitlines()]
+        self.assertEqual(records[-1]['phase'], 'close')
+        self.assertNotIn('PRIVATE', errors.getvalue())
+
+    def test_phase_time_is_capped_cumulative_entry_time(self):
+        for now, expected in ((9, 0), (11.25, 1250), (100, 60000)):
+            with self.subTest(now=now):
+                errors = io.StringIO()
+                with (
+                    redirect_stderr(errors),
+                    patch.object(alert_snapshot.time, 'monotonic', return_value=now),
+                ):
+                    alert_snapshot._progress('close', 10)
+                self.assertEqual(
+                    json.loads(errors.getvalue()),
+                    {'phase': 'close', 'elapsed_ms': expected},
+                )
 
 
 class AlertSnapshotTests(LedgerCase):
     def snapshot(self):
         return read_snapshot(self.repo, now=self.now, tenant_id=self.scope.tenant_id)
+
+    def test_fixed_query_markers_do_not_change_original_snapshot(self):
+        original = self.snapshot()
+        errors = io.StringIO()
+        with (
+            redirect_stderr(errors),
+            patch.object(alert_snapshot.time, 'monotonic', return_value=11),
+        ):
+            observed = read_snapshot(
+                self.repo,
+                now=self.now,
+                tenant_id=self.scope.tenant_id,
+                _diagnostic_started=10,
+            )
+        self.assertEqual(observed, original)
+        self.assertEqual(
+            [json.loads(line)['phase'] for line in errors.getvalue().splitlines()],
+            [
+                'connect',
+                'jobs',
+                'failures',
+                'guard_rows',
+                'gpu_activity',
+                'terminal_holds',
+                'budget',
+                'connection_close',
+            ],
+        )
 
     def transition(self, job, status, event_type):
         with self.repo.transaction() as c:
