@@ -18,7 +18,16 @@ import AccountPassword from './AccountPassword.jsx';
 import AccountGoogleLink from './AccountGoogleLink.jsx';
 import { CreditsPanel, useCredits } from './CreditsUI.jsx';
 import SkinPicker from './SkinPicker.jsx';
-import { UserRound, SlidersHorizontal, Bot, Wallet, Coins, LogOut, RefreshCw } from 'lucide-react';
+import {
+  UserRound,
+  Palette,
+  SlidersHorizontal,
+  Bot,
+  Wallet,
+  Coins,
+  LogOut,
+  RefreshCw,
+} from 'lucide-react';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useAppLocation, usePageActive } from './AppRouteCache.jsx';
 import { navigateApp } from './app-navigation.js';
@@ -49,6 +58,7 @@ const settingsSection = (search) => {
   return (
     {
       account: 'account',
+      appearance: 'appearance',
       defaults: 'defaults',
       gen: 'defaults',
       assistants: 'assistants',
@@ -127,6 +137,7 @@ export default function SpendingSettings({ account }) {
     [notice, setNotice] = useState(''),
     [error, setError] = useState(''),
     [everywhere, setEverywhere] = useState(false),
+    [forgetting, setForgetting] = useState(false),
     epoch = useRef(0);
   const load = async () => {
     if (!account) {
@@ -253,6 +264,7 @@ export default function SpendingSettings({ account }) {
         <SideNav as="aside" className="snav" aria-label={t('settings.title')}>
           {[
             ['account', 'settings.account', UserRound],
+            ['appearance', 'settings.appearance', Palette],
             ['defaults', 'settings.defaults', SlidersHorizontal],
             ['assistants', 'assistants.title', Bot],
             ...(tabs.credits || section === 'credits'
@@ -320,7 +332,6 @@ export default function SpendingSettings({ account }) {
                 </div>
               </div>
             </div>
-            <SkinPicker />
             {account && (
               <>
                 <AccountGoogleLink api={api} />
@@ -329,7 +340,6 @@ export default function SpendingSettings({ account }) {
                     <AccountPassword inline busy={busy} />
                   </div>
                 )}
-                <VideoCacheSettings account={account} />
                 <div className="row tight account-signout">
                   <Button
                     variant="ghost-danger"
@@ -365,6 +375,31 @@ export default function SpendingSettings({ account }) {
                     </Button>
                   )}
                 </div>
+                <div className="row tight account-signout">
+                  {forgetting ? (
+                    <>
+                      <small className="muted">{t('account.signOutForgetConfirm')}</small>
+                      <Button
+                        variant="danger"
+                        disabled={busy}
+                        onClick={() =>
+                          void cloud
+                            .logout({ forgetDrafts: true })
+                            .catch((failure) => setError(failure.message))
+                        }
+                      >
+                        {t('account.signOutForgetYes')}
+                      </Button>
+                      <Button variant="ghost" onClick={() => setForgetting(false)}>
+                        {t('library.cancel')}
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="ghost" disabled={busy} onClick={() => setForgetting(true)}>
+                      {t('account.signOutForget')}
+                    </Button>
+                  )}
+                </div>
               </>
             )}
             {version && (
@@ -382,8 +417,14 @@ export default function SpendingSettings({ account }) {
               active={pageActive && section === 'defaults'}
             />
           </div>
+          {/* How the studio looks and what this device keeps: per browser, not per account. */}
+          <div className="ops-tab-panel" hidden={section !== 'appearance'}>
+            <SkinPicker />
+            {account && <VideoCacheSettings account={account} />}
+          </div>
           {(!user || !draft) &&
             section !== 'account' &&
+            section !== 'appearance' &&
             section !== 'defaults' &&
             section !== 'assistants' &&
             section !== 'credits' && (

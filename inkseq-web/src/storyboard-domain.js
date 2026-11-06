@@ -10,6 +10,20 @@ const uid = (kind) => kind + '-' + crypto.randomUUID();
 const find = (p, id) => p.entities.find((e) => e.id === id);
 const mode = (shot) => shot.data.storyboard?.mode || shot.data.h3?.inputMode || 'fl';
 const list = (value) => (Array.isArray(value) ? value : []);
+// The video model makes nothing shorter; a shorter shot is refused at the generate check.
+export const SHORTEST_SHOT_SECONDS = 4;
+
+// Shots in a refused check that are shorter than the video model can make (#1091).
+export function shotsTooShort(shotIds, entities) {
+  const byId = new Map((entities || []).map((entity) => [entity.id, entity]));
+  return [...new Set(shotIds || [])]
+    .map((id) => byId.get(id))
+    .filter((shot) => {
+      const seconds = Number(shot?.data?.seconds);
+      return shot?.type === 'shot' && Number.isFinite(seconds) && seconds < SHORTEST_SHOT_SECONDS;
+    });
+}
+
 export const storyChapters = (project) =>
   children(project, null).filter((e) => e.type === 'chapter');
 // Every shot of the story in reading order: chapter, then scene, then shot.
