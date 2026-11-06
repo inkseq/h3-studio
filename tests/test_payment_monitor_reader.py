@@ -3,6 +3,7 @@
 import ast
 import json
 import subprocess
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -66,6 +67,13 @@ class PaymentMonitorReaderTests(unittest.TestCase):
                 return_value={'app': {'id': 'fixed-app', 'ok': True}},
             ),
             patch.object(monitor, 'docker', side_effect=docker),
+            patch.object(
+                monitor,
+                'docker_result',
+                side_effect=lambda args, **kwargs: SimpleNamespace(
+                    returncode=0, stdout=docker(args, **kwargs).encode(), stderr=b''
+                ),
+            ),
         ):
             result, host, _ = monitor.observe(None, payment_window_seconds=600)
         self.assertEqual(

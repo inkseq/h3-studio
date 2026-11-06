@@ -203,11 +203,61 @@ def clients():
         for service in ('sns', 'cloudwatch'))
 
 
-def docker(arguments, *, runner=subprocess.run):
-    result = runner(['/usr/bin/docker', *arguments], stdin=subprocess.DEVNULL, capture_output=True,
+def docker_result(arguments, *, runner=subprocess.run):
+    return runner(['/usr/bin/docker', *arguments], stdin=subprocess.DEVNULL, capture_output=True,
         timeout=10, env={'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C.UTF-8'})
+
+
+def docker(arguments, *, runner=subprocess.run):
+    result = docker_result(arguments, runner=runner)
     require(result.returncode == 0 and len(result.stdout) <= MAX_BYTES, 'alert_docker_observation_failed')
     return result.stdout.decode('utf-8')
+
+
+def snapshot_diagnostic(raw):
+    # Never forward raw child stderr, even if it contains a valid diagnostic line.
+    unknown = {'category': 'unknown', 'snapshot_elapsed_ms': None}
+    if not isinstance(raw, bytes) or len(raw) > 256:
+        return unknown
+    try:
+        value = json.loads(raw)
+        require(type(value) is dict and set(value) == {'category', 'elapsed_ms'}
+            and type(value['category']) is str and value['category'] in
+            {'configuration', 'database', 'validation', 'serialization', 'internal'}
+            and type(value['elapsed_ms']) is int and 0 <= value['elapsed_ms'] <= 60000,
+            'alert_snapshot_diagnostic_invalid')
+        return {'category': value['category'], 'snapshot_elapsed_ms': value['elapsed_ms']}
+    except (ValueError, TypeError):
+        return unknown
+
+
+def observe_snapshot(app_id, *, runner=subprocess.run):
+    started = time.monotonic()
+    outcome = 'process_failed'
+    result = None
+    try:
+        result = docker_result(['exec', app_id, 'python', '-B', '-m',
+            'studio_platform.alert_snapshot'], runner=runner)
+        require(result.returncode == 0, 'alert_docker_observation_failed')
+        outcome = 'invalid_output'
+        require(len(result.stdout) <= MAX_BYTES, 'alert_docker_observation_failed')
+        value = json.loads(result.stdout.decode('utf-8'))
+        if type(value) is dict and type(value.get('complete')) is bool:
+            outcome = 'ok' if value['complete'] else 'incomplete'
+        return value  # The evaluator retains authority over schema/freshness.
+    except subprocess.TimeoutExpired:
+        outcome = 'timeout'
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        pass
+    finally:
+        diagnostic = {'event': 'alert_snapshot_observation', 'outcome': outcome,
+            'elapsed_ms': min(60000, max(0, int((time.monotonic() - started) * 1000))),
+            **snapshot_diagnostic(getattr(result, 'stderr', b''))}
+        try:
+            print(json.dumps(diagnostic, sort_keys=True), file=sys.stderr)
+        except (OSError, ValueError):
+            pass  # A failed diagnostic must not discard a successful observation.
+    return None
 
 
 def containers(*, runner=subprocess.run, target=None):
@@ -419,8 +469,7 @@ def observe(previous_cpu, *, runner=subprocess.run, proc=Path('/proc'), payment_
                 host.update(probe)
             except (OSError, subprocess.SubprocessError, ValueError):
                 host['health_ok'] = False
-            snapshot = json.loads(docker(['exec', app['id'], 'python', '-B', '-m',
-                'studio_platform.alert_snapshot'], runner=runner))
+            snapshot = observe_snapshot(app['id'], runner=runner)
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         # Unknown ledger state never fabricates a healthy observation or recovery.
         snapshot = None

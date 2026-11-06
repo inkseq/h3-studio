@@ -1,9 +1,16 @@
 """Read-only alerts from original events, accounting and provider obligations."""
 
 import copy
+from contextlib import redirect_stderr, redirect_stdout
+import io
 import json
 from datetime import datetime, timezone
+from types import SimpleNamespace
+import unittest
+from unittest.mock import Mock, patch
 from sqlalchemy import event, insert, select, update
+from sqlalchemy.exc import OperationalError
+from studio_platform import alert_snapshot
 from studio_platform.alert_snapshot import read_snapshot
 from studio_platform.alert_conditions import evaluate
 from studio_platform.dstack_test_budget import day_window, projected_cost
@@ -18,6 +25,110 @@ from studio_platform.repository import (
 )
 from test_platform_repository import LedgerCase
 import test_dstack_test_budget as budget_fixture
+
+
+class SnapshotDiagnosticTests(unittest.TestCase):
+    def invoke(
+        self,
+        *,
+        settings_error=None,
+        repository_error=None,
+        read_error=None,
+        value=None,
+        stderr=None,
+    ):
+        from studio_platform.settings import Settings
+
+        output = io.StringIO()
+        errors = stderr if stderr is not None else io.StringIO()
+        repo = Mock()
+        with (
+            patch.object(
+                Settings,
+                'from_environment',
+                return_value=SimpleNamespace(
+                    database_url='PRIVATE_URL', tenant_id='PRIVATE_TENANT'
+                ),
+                side_effect=settings_error,
+            ),
+            patch.object(
+                alert_snapshot,
+                'Repository',
+                return_value=repo,
+                side_effect=repository_error,
+            ),
+            patch.object(
+                alert_snapshot,
+                'read_snapshot',
+                return_value=value,
+                side_effect=read_error,
+            ),
+            patch.object(alert_snapshot.time, 'time', return_value=1000),
+            patch.object(alert_snapshot.time, 'monotonic', side_effect=[10, 11.25]),
+            redirect_stdout(output),
+            redirect_stderr(errors),
+        ):
+            status = alert_snapshot.main()
+        return status, json.loads(output.getvalue()), errors
+
+    def test_failures_keep_original_stdout_and_exit_and_only_log_safe_category(self):
+        database_error = OperationalError(
+            'SELECT PRIVATE_SQL',
+            {'credential': 'PRIVATE_VALUE'},
+            RuntimeError('PRIVATE_PASSWORD'),
+        )
+        for options, category in (
+            ({'settings_error': ValueError('PRIVATE_SETTING')}, 'configuration'),
+            ({'repository_error': database_error}, 'database'),
+            ({'read_error': database_error}, 'database'),
+            ({'read_error': ValueError('PRIVATE_ROW')}, 'validation'),
+            ({'read_error': TypeError('PRIVATE_ROW')}, 'validation'),
+            ({'read_error': RuntimeError('PRIVATE_DETAILS')}, 'internal'),
+            ({'value': {'PRIVATE_KEY': object()}}, 'serialization'),
+        ):
+            with self.subTest(category=category, options=list(options)):
+                status, value, errors = self.invoke(**options)
+                self.assertEqual(status, 0)
+                self.assertEqual(
+                    value,
+                    {
+                        'version': 1,
+                        'observed_at': 1000,
+                        'complete': False,
+                        'gpus': [],
+                        'jobs': [],
+                        'test_spend': None,
+                        'failures': [],
+                    },
+                )
+                self.assertEqual(
+                    json.loads(errors.getvalue()),
+                    {'category': category, 'elapsed_ms': 1250},
+                )
+                self.assertNotIn('PRIVATE', errors.getvalue())
+                self.assertEqual(len(errors.getvalue().splitlines()), 1)
+
+    def test_success_keeps_stdout_and_emits_no_failure_diagnostic(self):
+        original = {
+            'version': 1,
+            'observed_at': 1000,
+            'complete': True,
+            'gpus': [],
+            'jobs': [],
+            'test_spend': None,
+            'failures': [],
+        }
+        status, value, errors = self.invoke(value=original)
+        self.assertEqual((status, value, errors.getvalue()), (0, original, ''))
+
+    def test_diagnostic_write_failure_does_not_change_snapshot_or_exit(self):
+        stream = Mock()
+        stream.write.side_effect = OSError('PRIVATE_STDERR_FAILURE')
+        status, value, _ = self.invoke(
+            read_error=ValueError('PRIVATE_ROW'), stderr=stream
+        )
+        self.assertEqual(status, 0)
+        self.assertFalse(value['complete'])
 
 
 class AlertSnapshotTests(LedgerCase):
