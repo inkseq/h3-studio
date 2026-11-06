@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from './ui/Button.jsx';
 import { Dialog } from './ui/Dialog.jsx';
 import { LogOut } from 'lucide-react';
-import HostedSignIn from './HostedSignIn.jsx';
+import HostedSignIn, { UsernameSignIn } from './HostedSignIn.jsx';
 import { useAccountLabel } from './StudioHeader.jsx';
 import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
@@ -49,49 +49,51 @@ export function Login({ onClose, onDone, title, lead }) {
           }}
         >
           <p>{lead ?? t('workspace.copy119')}</p>
-          <label className="qc-field">
-            {t('workspace.copy3')}
-            <input
-              autoComplete="username"
-              required
-              maxLength={100}
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-            />
-          </label>
-          {!['username-test', 'username-only-test'].includes(c.auth?.authentication) && (
+          <HostedSignIn auth={c.auth} />
+          <UsernameSignIn auth={c.auth}>
             <label className="qc-field">
-              {t('workspace.copy4')}
+              {t('workspace.copy3')}
               <input
-                type="password"
-                autoComplete="current-password"
+                autoComplete="username"
                 required
-                maxLength={72}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                maxLength={100}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
               />
             </label>
-          )}
-          {['username-test', 'username-only-test'].includes(c.auth?.authentication) && (
-            <p className="qc-warning">{t('workspace.copy120')}</p>
-          )}
-          {error && (
-            <p className="qc-error" role="alert">
-              {error}
-            </p>
-          )}
-          <Button
-            type="submit"
-            variant="primary"
-            className="qc-primary login-submit"
-            disabled={c.busy || !c.auth || c.auth.auth_ready === false}
-          >
-            {t('workspace.copy5')}
-          </Button>
-          {!c.auth && (
-            <Button onClick={() => quietly(cloud.initialize())}>{t('workspace.copy6')}</Button>
-          )}
-          <HostedSignIn auth={c.auth} />
+            {!['username-test', 'username-only-test'].includes(c.auth?.authentication) && (
+              <label className="qc-field">
+                {t('workspace.copy4')}
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  maxLength={72}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </label>
+            )}
+            {['username-test', 'username-only-test'].includes(c.auth?.authentication) && (
+              <p className="qc-warning">{t('workspace.copy120')}</p>
+            )}
+            {error && (
+              <p className="qc-error" role="alert">
+                {error}
+              </p>
+            )}
+            <Button
+              type="submit"
+              variant="primary"
+              className="qc-primary login-submit"
+              disabled={c.busy || !c.auth || c.auth.auth_ready === false}
+            >
+              {t('workspace.copy5')}
+            </Button>
+            {!c.auth && (
+              <Button onClick={() => quietly(cloud.initialize())}>{t('workspace.copy6')}</Button>
+            )}
+          </UsernameSignIn>
         </form>
       )}
     </Dialog>

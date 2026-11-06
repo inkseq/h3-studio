@@ -7,6 +7,7 @@ export const settingsCatalogs = {
     'settings.testTaskHelp':
       'Use the same ID for this issue’s machines and retries. Other tasks keep their own spending records.',
     'settings.account': 'Account',
+    'settings.appearance': 'Appearance',
     'settings.defaults': 'Defaults',
     'settings.defaultsHelp':
       'Set take limits and folding below. Story and shot defaults are edited in the story.',
@@ -91,6 +92,7 @@ export const settingsCatalogs = {
     'settings.testTaskId': '验收任务编号',
     'settings.testTaskHelp': '同一项改动的机器和重试沿用同一编号；其他任务的费用记录保持独立。',
     'settings.account': '\u8d26\u6237',
+    'settings.appearance': '外观',
     'settings.defaults': '生成默认值',
     'settings.defaultsHelp': '在下面设置最多生成几条、超过几条折叠。故事和镜头的默认值在故事里改。',
     'settings.storyDefaults': '\u6253\u5f00\u6545\u4e8b\u4fee\u6539\u914d\u65b9\u9ed8\u8ba4\u503c',

@@ -259,6 +259,19 @@
   font-weight: 600;
   border-radius: 12px;
 }
+.username-sign-in {
+  margin-top: 12px;
+}
+.username-sign-in > summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  font-size: 13px;
+  text-align: center;
+  list-style: none;
+}
+.username-sign-in[open] > summary {
+  margin-bottom: 10px;
+}
 .hosted-sign-in-consent {
   text-align: center;
   line-height: 1.5;

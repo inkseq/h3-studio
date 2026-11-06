@@ -66,6 +66,9 @@ export const workbenchCatalogs = {
     'workbench.costCredits': 'Cost: {credits} credits',
     'workbench.balance': 'You have {credits} credits',
     'workbench.notEnough': 'Not enough credits for this. Top up in Settings → Credits.',
+    'workbench.tooShort':
+      '{count} shot(s) are shorter than {seconds} seconds, the shortest video the model makes. Nothing was charged.',
+    'workbench.lengthen': 'Make them {seconds} seconds',
     'workbench.blockedInput':
       "This shot can't be made with its current pictures or settings. Nothing was charged. Check the shot's references and try again.",
     'workbench.costUnknown':
@@ -166,6 +169,8 @@ export const workbenchCatalogs = {
     'workbench.costCredits': '费用：{credits} 积分',
     'workbench.balance': '你有 {credits} 积分',
     'workbench.notEnough': '积分不够，请先到 设置 → 积分 充值。',
+    'workbench.tooShort': '有 {count} 个镜头比视频最短时长 {seconds} 秒还短，没有扣费。',
+    'workbench.lengthen': '改成 {seconds} 秒',
     'workbench.blockedInput':
       '这个镜头的图片或设置暂时不能生成，没有扣费。请检查镜头的参考素材后再试。',
     'workbench.costUnknown': '暂时读不到价格。确认之前不会扣费。',

@@ -20,7 +20,13 @@ import { StoryboardWorkspace } from './StoryboardWorkspace.jsx';
 import { store } from './store.js';
 import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
-import { storyboardView, expandStoryboard, storyboardDrop } from './storyboard-domain.js';
+import {
+  storyboardView,
+  expandStoryboard,
+  storyboardDrop,
+  shotsTooShort,
+  SHORTEST_SHOT_SECONDS,
+} from './storyboard-domain.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
 import { uploadLibraryFiles } from './media-operations.js';
 import { uploadFile } from './media.js';
@@ -114,6 +120,29 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
     short = creditShortfall(cost.credits, balance),
     closed = !!receipt.closed_preflight,
     checking = !!receipt.checking;
+  // A refused check on shots shorter than the video model makes: say so and offer the fix.
+  const tooShort =
+    closed && receipt.blocked === 'invalid_generation_input'
+      ? shotsTooShort(
+          (receipt.items || []).map((item) => item.shot_id),
+          s.project.entities,
+        )
+      : [];
+  const lengthen = async () => {
+    setBusy(true);
+    try {
+      for (const shot of tooShort)
+        if (!store.updateEntity(shot.id, { data: { seconds: SHORTEST_SHOT_SECONDS } }))
+          throw Error('workbench.changed');
+      if (store.getState().workspace.mode === 'cloud') await cloud.save();
+      await cloud.workbenchAbandonClosed(receipt.id);
+      onClose();
+    } catch {
+      setError(t('workbench.requestFailed'));
+    } finally {
+      setBusy(false);
+    }
+  };
   // A closed (refused) preflight never generates; leaving the dialog clears it so the
   // next try is not blocked by "the previous operation is not confirmed".
   const dismiss = async () => {
@@ -178,8 +207,11 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
             closed
               ? receipt.blocked === 'source_changed'
                 ? 'workbench.changed'
-                : 'workbench.blockedInput'
+                : tooShort.length
+                  ? 'workbench.tooShort'
+                  : 'workbench.blockedInput'
               : 'workbench.notReady',
+            { count: tooShort.length, seconds: SHORTEST_SHOT_SECONDS },
           )}
         </p>
       )}
@@ -188,6 +220,11 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
         <Button disabled={busy} onClick={() => void dismiss()}>
           {t(closed ? 'workbench.acknowledge' : 'workbench.cancel')}
         </Button>
+        {tooShort.length > 0 && (
+          <Button variant="primary" disabled={busy} onClick={() => void lengthen()}>
+            {t('workbench.lengthen', { seconds: SHORTEST_SHOT_SECONDS })}
+          </Button>
+        )}
         {!closed && (
           <Button
             variant="primary"
