@@ -12,7 +12,7 @@ from sqlalchemy import insert
 
 from studio_platform import speech_provider, speech_settings
 from studio_platform.repository import documents
-from studio_platform.speech_catalog import LANGUAGES, VOICES, public
+from studio_platform.speech_catalog import LANGUAGES, RETIRED, VOICES, maker, public
 from studio_platform.speech_provider import (
     OpenRouterSpeech,
     Speech,
@@ -106,6 +106,37 @@ class SpeechRouteTests(unittest.TestCase):
         self.assertEqual(reply.json()["detail"]["code"], "voice_disabled")
         self.assertEqual(self.adapter.calls, [])
 
+    def test_a_voice_revision_always_names_the_same_vendor_voice(self):
+        # Clips store only (voice id, revision). If a vendor field changes here without
+        # a new revision, every old clip would quietly claim the wrong maker.
+        pinned = {
+            ("v-steady", "r1"): "sarah",
+            ("v-velvet", "r1"): "lily",
+            ("v-bright", "r1"): "jessica",
+            ("v-clear", "r1"): "alice",
+            ("v-warm", "r1"): "george",
+            ("v-deep", "r1"): "brian",
+            ("v-anchor", "r1"): "daniel",
+            ("v-young", "r1"): "liam",
+        }
+        for (ident, revision), vendor_voice in pinned.items():
+            self.assertEqual(
+                maker(ident, revision),
+                {
+                    "provider": "openrouter",
+                    "model": "elevenlabs/eleven-v4",
+                    "provider_voice": vendor_voice,
+                },
+            )
+        for ident, voice in VOICES.items():
+            self.assertTrue(
+                (ident, voice["revision"]) in pinned
+                or (ident, voice["revision"]) not in RETIRED,
+                ident,
+            )
+        self.assertIsNone(maker("v-warm", "r0"))
+        self.assertIsNone(maker("v-none", "r1"))
+
     def test_catalog_never_names_a_vendor(self):
         self.prepare(voice_enabled=True)
         reply = self.client.get("/v1/voices")
@@ -128,8 +159,12 @@ class SpeechRouteTests(unittest.TestCase):
         entity = next(e for e in project["entities"] if e["id"] == value["entity_id"])
         self.assertEqual(entity["type"], "audio")
         made = entity["data"]["speech"]
-        self.assertEqual(made["provider"], "openrouter")
-        self.assertEqual(made["provider_voice"], "george")
+        self.assertEqual((made["voice_id"], made["voice_revision"]), ("v-warm", "r1"))
+        self.assertEqual(maker("v-warm", "r1")["provider_voice"], "george")
+        # A project read never names the vendor, its model or the vendor voice (#1097).
+        raw = self.client.get("/v1/projects/story-one").text.lower()
+        for word in ("openrouter", "eleven", '"george"', "provider_voice"):
+            self.assertNotIn(word, raw)
         self.assertEqual(len(made["text_sha256"]), 64)
         self.assertEqual(self.client.get(value["content_path"]).status_code, 200)
         # Same request again: the same clip, with no second provider call.

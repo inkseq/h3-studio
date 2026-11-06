@@ -8,12 +8,34 @@ from unittest.mock import patch
 
 from sqlalchemy import delete, select, update
 
-from studio_platform import credits, service_credits, speech_provider, speech_settings
+from studio_platform import (
+    credits,
+    service_credits,
+    speech_credit_proof,
+    speech_provider,
+    speech_settings,
+)
+from studio_platform.speech_catalog import maker
+from studio_platform.speech_requests import SpeechRequest
 from studio_platform.credit_schema import entries
 from studio_platform.guided import receipts
 from studio_platform.repository import documents
 from test_speech import mp3, set_switches
 import test_story_chat_image_credits as image_fixtures
+
+
+_current_bind = SpeechRequest.bind
+
+
+def vendor_bind(request, speech):
+    """Bind like the pre-#1097 code: vendor fields instead of our voice revision."""
+    if "voice_revision" in speech:
+        revision = speech["voice_revision"]
+        speech = {
+            key: value for key, value in speech.items() if key != "voice_revision"
+        }
+        speech |= maker(speech["voice_id"], revision)
+    return _current_bind(request, speech)
 
 
 class FakeSpeech:
@@ -147,6 +169,7 @@ class SpeechBillingTests(unittest.TestCase):
             **VOICES["v-warm"],
             "model": "future-model",
             "provider_voice": "future-voice",
+            "revision": "r2",
         }
         with patch.dict(VOICES, {"v-warm": changed}):
             again = self.speak()
@@ -196,6 +219,61 @@ class SpeechBillingTests(unittest.TestCase):
         self.assertEqual(again.status_code, 200, again.text)
         self.assertEqual(self.balance(), (98, 0))
         self.assertEqual(len(self.adapter.calls), 1)
+
+    def test_pre_1097_receipt_still_recovers_its_interrupted_capture(self):
+        # Build the state the pre-#1097 code left behind: a vendor-named binding
+        # whose attachment committed but whose capture was interrupted.
+        with (
+            patch.object(SpeechRequest, "bind", vendor_bind),
+            patch.object(speech_credit_proof, "is_legacy", return_value=False),
+            patch.object(
+                service_credits,
+                "service_capture",
+                side_effect=credits.CreditError("credit_service_unavailable", 503),
+            ),
+        ):
+            first = self.speak()
+        self.assertEqual(first.status_code, 503, first.text)
+        self.assertEqual(self.balance(), (100, 2))
+        with self.repo.engine.connect() as connection:
+            stored = [
+                row["response"]
+                for row in connection.execute(select(receipts)).mappings()
+                if row["key"] == "speech-v1:attach:speech-paid-0001"
+            ]
+        entity = next(
+            e
+            for e in stored[0]["project"]["entities"]
+            if e["id"] == "speech-speech-paid-0001"
+        )
+        self.assertEqual(entity["data"]["speech"]["provider_voice"], "george")
+        # The current code replays the same request: capture, no second voice call.
+        again = self.speak()
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(self.balance(), (98, 0))
+        self.assertEqual(len(self.adapter.calls), 1)
+        self.assertEqual(
+            sorted(row["kind"] for row in self.ledger()), ["capture", "hold"]
+        )
+        # The public project read hides the old vendor fields; the receipt keeps them.
+        raw = self.client.get(f"/v1/projects/{self.project}").text.lower()
+        for word in ("openrouter", "eleven", '"george"', "provider_voice"):
+            self.assertNotIn(word, raw)
+        with self.repo.engine.connect() as connection:
+            kept = connection.execute(
+                select(receipts.c.response).where(
+                    receipts.c.key == "speech-v1:attach:speech-paid-0001"
+                )
+            ).scalar_one()
+        self.assertEqual(kept, stored[0])
+
+    def test_a_vendor_named_binding_never_opens_a_new_hold(self):
+        with patch.object(SpeechRequest, "bind", vendor_bind):
+            response = self.speak()
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.balance(), (100, 0))
+        self.assertEqual(self.ledger(), [])
+        self.assertEqual(self.adapter.calls, [])
 
     def test_changed_arguments_never_reprice_or_generate(self):
         self.assertEqual(self.speak().status_code, 200)

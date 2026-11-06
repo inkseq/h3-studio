@@ -14,15 +14,20 @@ from .repository import documents, request_hash
 SPEECH_FIELDS = frozenset(
     {
         "voice_id",
-        "provider",
-        "model",
-        "provider_voice",
+        "voice_revision",
         "direction",
         "language",
         "text_sha256",
         "characters",
     }
 )
+# Receipts written before #1097 named the vendor instead of our voice revision.
+# They are read only to recover their original hold; new bindings never use it.
+LEGACY_SPEECH_FIELDS = SPEECH_FIELDS - {"voice_revision"} | {
+    "provider",
+    "model",
+    "provider_voice",
+}
 PRICE_REVISION = "speech-characters-v1"
 COMMON_FIELDS = frozenset(
     {"tenant", "owner", "project_id", "card_id", "request_id", "input_hash", "actor_id"}
@@ -49,9 +54,12 @@ def validate_binding(binding):
         ):
             raise CreditError("credit_service_binding_invalid", 422)
     speech = binding.get("speech")
-    if type(speech) is not dict or set(speech) != SPEECH_FIELDS:
+    if type(speech) is not dict or set(speech) not in (
+        SPEECH_FIELDS,
+        LEGACY_SPEECH_FIELDS,
+    ):
         raise CreditError("credit_service_binding_invalid", 422)
-    for key in SPEECH_FIELDS - {"characters"}:
+    for key in set(speech) - {"characters"}:
         value = speech[key]
         if (
             type(value) is not str
@@ -63,7 +71,11 @@ def validate_binding(binding):
     quote(speech["characters"])
     if (
         not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", speech["voice_id"])
-        or not re.fullmatch(r"[a-z0-9_-]{1,40}", speech["provider"])
+        or not (
+            re.fullmatch(r"r[0-9]{1,4}", speech["voice_revision"])
+            if "voice_revision" in speech
+            else re.fullmatch(r"[a-z0-9_-]{1,40}", speech["provider"])
+        )
         or speech["direction"] not in {"calm", "angry", "sad", "happy"}
         or speech["language"] not in {"zh", "en"}
         or not re.fullmatch(r"[0-9a-f]{64}", speech["text_sha256"])
@@ -73,6 +85,10 @@ def validate_binding(binding):
     ):
         raise CreditError("credit_service_binding_invalid", 422)
     return {**binding, "speech": dict(speech)}
+
+
+def is_legacy(binding):
+    return "voice_revision" not in binding["speech"]
 
 
 def binding(scope, reference_id, value):
@@ -177,14 +193,14 @@ def attachment(connection, binding, *, release=False):
     data = entities[0].get("data")
     _need(type(data) is dict)
     speech = data.get("speech")
+    fields = set(binding["speech"])
     _need(
         type(speech) is dict
-        and set(speech)
-        == SPEECH_FIELDS | {"request_id", "input_hash", "provider_characters"}
+        and set(speech) == fields | {"request_id", "input_hash", "provider_characters"}
         and all(
             type(speech[field]) is type(binding["speech"][field])
             and speech[field] == binding["speech"][field]
-            for field in SPEECH_FIELDS
+            for field in fields
         )
         and speech["request_id"] == binding["request_id"]
         and speech["input_hash"] == binding["input_hash"]
