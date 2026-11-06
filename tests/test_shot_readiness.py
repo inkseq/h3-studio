@@ -59,6 +59,7 @@ class ShotReadinessTests(unittest.TestCase):
             ("米娅穿过玉米地，无对白。", []),
             ("米娅：我们走吧。", []),
             ("米娅说「走吧」。", []),
+            ("左头大声呵斥 (S1) <d>[Chinese] 今天吃牛。</d>", []),
         ):
             with self.subTest(prompt=prompt):
                 value = shot(prompt)

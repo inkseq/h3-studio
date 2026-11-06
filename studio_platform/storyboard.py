@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 
 
 SHOT_FIELDS = {
@@ -43,6 +44,27 @@ CAMERAS = {
     "handheld": "Gentle handheld camera.",
     "orbit": "The camera slowly circles the subject.",
 }
+
+
+CJK = re.compile(r"[　-〿㐀-鿿＀-￯]")
+
+
+def profile_text(name, description, variant=None):
+    """A card as "Name (description)", never "Name: description".
+
+    H3 voices "Name: text" as a spoken line: the Geryon run on staging
+    (2026-11-07) read location and character cards aloud and dropped the
+    written dialogue. The frontend preview mirrors this in storyboard-domain.js.
+    """
+    detail = (description or "").strip()
+    if variant and variant.get("description", "").strip():
+        extra = profile_text(variant.get("name", ""), variant["description"])
+        detail = f"{detail}；{extra}" if detail else extra
+    if not name or not detail:
+        return name or detail
+    if CJK.search(name + detail):
+        return f"{name}（{detail}）"
+    return f"{name} ({detail})"
 
 
 def contract():
@@ -543,20 +565,14 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         else None
     )
     if location:
-        description = location["description"]
-        if location_version and location_version.get("description", "").strip():
-            description += (
-                "；"
-                + location_version["name"]
-                + "："
-                + location_version.get("description", "")
-            )
         parts.append(
             {
                 "kind": "place",
                 "label": "场景",
                 "entity_id": location["id"],
-                "text": location["title"] + "：" + description,
+                "text": profile_text(
+                    location["title"], location["description"], location_version
+                ),
             }
         )
     cast = []
@@ -572,9 +588,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             "looks",
             "defaultLookId",
         )
-        text = character["title"] + "：" + character["description"]
-        if look and look.get("description", "").strip():
-            text += "；" + look["name"] + "：" + look.get("description", "")
+        text = profile_text(character["title"], character["description"], look)
         parts.append(
             {"kind": "cast", "label": "人物", "entity_id": ident, "text": text}
         )
@@ -586,7 +600,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
                 "kind": "prop",
                 "label": "道具",
                 "entity_id": ident,
-                "text": prop["title"] + "：" + prop["description"],
+                "text": profile_text(prop["title"], prop["description"]),
             }
         )
     action = shot["data"].get("prompt", shot.get("description", ""))

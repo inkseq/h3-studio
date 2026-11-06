@@ -12,7 +12,7 @@ from studio_platform.guided import delete_entity
 from studio_platform.project_validation import validate_project
 from studio_platform.repository import jobs
 from studio_platform.source_snapshot import source_snapshot
-from studio_platform.storyboard import contract
+from studio_platform.storyboard import contract, profile_text
 from test_platform_api import project
 import test_platform_generation_draft as draft_fixtures
 
@@ -224,6 +224,20 @@ class StoryboardPureTests(unittest.TestCase):
             target["data"]["storyboard"][field] = "other"
             with self.assertRaises(ValueError):
                 validate_project(broken)
+
+    def test_cards_never_read_as_a_name_colon_spoken_line(self):
+        # H3 voiced "Name：text" cards as dialogue on the 2026-11-07 Geryon run.
+        draft, _ = read_draft(self.project, "shot-one", capabilities=cap())
+        for part in draft["storyboard"]["prompt_parts"]:
+            if part["kind"] in ("place", "cast", "prop"):
+                with self.subTest(kind=part["kind"]):
+                    self.assertNotRegex(part["text"], r"^[^（(：:]{1,40}[：:]")
+        self.assertEqual(
+            profile_text("草地", "夕阳下的荒野", {"name": "夜", "description": "月光"}),
+            "草地（夕阳下的荒野；夜（月光））",
+        )
+        self.assertEqual(profile_text("Mia", "a tall woman"), "Mia (a tall woman)")
+        self.assertEqual(profile_text("Mia", " "), "Mia")
 
     def test_default_override_prompt_order_priority_and_dynamic_limits(self):
         before = copy.deepcopy(self.project)

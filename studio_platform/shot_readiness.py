@@ -9,8 +9,9 @@ gets a prompt from these findings; the economy auto-queue requires none.
 
 import re
 
-# Same signal as the frontend's submitHints: quoted lines or "Name: line".
-DIALOGUE = re.compile(r"[“”\"「」『』]|[：:]\s*\S")
+# Same signal as the frontend's submitHints: H3 speech tags (what Quick Create
+# writes), quoted lines or "Name: line".
+DIALOGUE = re.compile(r"<d>|[“”\"「」『』]|[：:]\s*\S", re.IGNORECASE)
 NO_DIALOGUE = re.compile(
     r"no dialogue|no speech|without speech|silent|无对白|没有对白|无台词|没有台词|不说话|静音",
     re.IGNORECASE,
