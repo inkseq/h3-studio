@@ -246,7 +246,7 @@ def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reser
     )
 
 
-def projected_costs(connection, guards, now):
+def projected_costs(connection, guards, now, *, _diagnostic_progress=None):
     """Project one read-only snapshot's guards from the same original rows.
 
     The caller owns the repeatable snapshot. Only the joined reservation inputs
@@ -257,7 +257,17 @@ def projected_costs(connection, guards, now):
     for guard in guards:
         validate_guard(guard)
     day_window(now)
+
+    def checkpoint(phase):
+        if _diagnostic_progress is not None:
+            try:
+                _diagnostic_progress(phase)
+            except Exception:
+                pass  # Diagnostics cannot change the original projection.
+
+    checkpoint("budget_rows")
     rows = list(_reservation_rows(connection)) if guards else []
+    checkpoint("budget_projection")
     return [_projected_rows(connection, guard, now, rows) for guard in guards]
 
 
