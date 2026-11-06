@@ -197,7 +197,7 @@ class NextPlanTests(unittest.TestCase):
         primary = {"pool": "own", "backend": "wangp-worker", "expected_runtime_s": 60}
         job = {
             "request": self.compiled(),
-            "execution_plan": hosted_plan(primary, "h3-max-turbo", 1),
+            "execution_plan": hosted_plan(primary, "pika-h3-flex", 1),
         }
         seen = []
         for _ in range(3):
@@ -208,7 +208,7 @@ class NextPlanTests(unittest.TestCase):
         self.assertEqual(
             seen,
             [
-                MODELS["pika-h3-flex"].configuration_id,
+                MODELS["h3-max-turbo"].configuration_id,
                 MODELS["h3-max-fast"].configuration_id,
                 "wangp-worker",
             ],
@@ -216,7 +216,7 @@ class NextPlanTests(unittest.TestCase):
         self.assertEqual(job["execution_plan"]["pool"], "own")
         self.assertEqual(
             job["execution_plan"]["hosted_tried"],
-            ["h3-max-turbo", "pika-h3-flex", "h3-max-fast"],
+            ["pika-h3-flex", "h3-max-turbo", "h3-max-fast"],
         )
 
     def test_a_plan_without_an_original_route_just_fails(self):
