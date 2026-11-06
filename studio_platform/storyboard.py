@@ -46,7 +46,7 @@ CAMERAS = {
 }
 
 
-CJK = re.compile(r"[　-〿㐀-鿿＀-￯]")
+CJK = re.compile(r"[\u3000-\u303f\u3400-\u9fff\uff00-\uffef]")
 
 
 def profile_text(name, description, variant=None):
