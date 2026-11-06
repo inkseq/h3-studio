@@ -214,19 +214,47 @@ def docker(arguments, *, runner=subprocess.run):
     return result.stdout.decode('utf-8')
 
 
+def diagnostic_fields(pairs):
+    value = {}
+    for key, item in pairs:
+        require(key not in value, 'alert_snapshot_diagnostic_duplicate_key')
+        value[key] = item
+    return value
+
+
 def snapshot_diagnostic(raw):
-    # Never forward raw child stderr, even if it contains a valid diagnostic line.
-    unknown = {'category': 'unknown', 'snapshot_elapsed_ms': None}
-    if not isinstance(raw, bytes) or len(raw) > 256:
+    # Accept only a bounded, entirely closed stream; never forward child stderr.
+    unknown = {'category': 'unknown', 'snapshot_elapsed_ms': None,
+               'phase': 'unreported', 'phase_started_ms': None}
+    if not isinstance(raw, bytes) or not raw or len(raw) > 2048:
         return unknown
     try:
-        value = json.loads(raw)
-        require(type(value) is dict and set(value) == {'category', 'elapsed_ms'}
-            and type(value['category']) is str and value['category'] in
-            {'configuration', 'database', 'validation', 'serialization', 'internal'}
-            and type(value['elapsed_ms']) is int and 0 <= value['elapsed_ms'] <= 60000,
-            'alert_snapshot_diagnostic_invalid')
-        return {'category': value['category'], 'snapshot_elapsed_ms': value['elapsed_ms']}
+        lines = raw.splitlines()
+        require(1 <= len(lines) <= 16, 'alert_snapshot_diagnostic_invalid')
+        result, last_phase = dict(unknown), -1
+        phases = ('imports', 'settings_import', 'settings', 'repository', 'connect', 'jobs',
+                  'failures', 'guard_rows', 'gpu_activity', 'terminal_holds', 'budget',
+                  'connection_close', 'serialize', 'close')
+        for index, line in enumerate(lines):
+            require(0 < len(line) <= 256, 'alert_snapshot_diagnostic_invalid')
+            value = json.loads(line.decode('utf-8'), object_pairs_hook=diagnostic_fields)
+            require(type(value) is dict and type(value.get('elapsed_ms')) is int
+                and 0 <= value['elapsed_ms'] <= 60000, 'alert_snapshot_diagnostic_invalid')
+            if set(value) == {'category', 'elapsed_ms'}:
+                require(index == len(lines) - 1 and type(value['category']) is str
+                    and value['category'] in
+                    {'configuration', 'database', 'validation', 'serialization', 'internal'}
+                    and value['elapsed_ms'] >= (result['phase_started_ms'] or 0),
+                    'alert_snapshot_diagnostic_invalid')
+                result.update(category=value['category'], snapshot_elapsed_ms=value['elapsed_ms'])
+            else:
+                require(set(value) == {'phase', 'elapsed_ms'} and type(value['phase']) is str
+                    and value['phase'] in phases and phases.index(value['phase']) > last_phase
+                    and value['elapsed_ms'] >= (result['phase_started_ms'] or 0),
+                    'alert_snapshot_diagnostic_invalid')
+                last_phase = phases.index(value['phase'])
+                result.update(phase=value['phase'], phase_started_ms=value['elapsed_ms'])
+        return result
     except (ValueError, TypeError):
         return unknown
 
@@ -234,10 +262,11 @@ def snapshot_diagnostic(raw):
 def observe_snapshot(app_id, *, runner=subprocess.run):
     started = time.monotonic()
     outcome = 'process_failed'
-    result = None
+    child_stderr = b''
     try:
         result = docker_result(['exec', app_id, 'python', '-B', '-m',
             'studio_platform.alert_snapshot'], runner=runner)
+        child_stderr = getattr(result, 'stderr', b'')
         require(result.returncode == 0, 'alert_docker_observation_failed')
         outcome = 'invalid_output'
         require(len(result.stdout) <= MAX_BYTES, 'alert_docker_observation_failed')
@@ -245,14 +274,15 @@ def observe_snapshot(app_id, *, runner=subprocess.run):
         if type(value) is dict and type(value.get('complete')) is bool:
             outcome = 'ok' if value['complete'] else 'incomplete'
         return value  # The evaluator retains authority over schema/freshness.
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as error:
         outcome = 'timeout'
+        child_stderr = error.stderr
     except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
         pass
     finally:
         diagnostic = {'event': 'alert_snapshot_observation', 'outcome': outcome,
             'elapsed_ms': min(60000, max(0, int((time.monotonic() - started) * 1000))),
-            **snapshot_diagnostic(getattr(result, 'stderr', b''))}
+            **snapshot_diagnostic(child_stderr)}
         try:
             print(json.dumps(diagnostic, sort_keys=True), file=sys.stderr)
         except (OSError, ValueError):
