@@ -85,7 +85,6 @@ def adopt(connection, *, expected_fingerprint, tenant_id):
     from .schema_baseline import BaselineError, alembic_config, compare_schema
     from .schema_version import CREDIT_ADMISSION_REVISION, LOOKUP_INDEX_REVISION
     from .identity import lock_account_gate
-    from .credits import credit_policy
     from .repository import jobs
 
     if (
@@ -115,8 +114,6 @@ def adopt(connection, *, expected_fingerprint, tenant_id):
         LOOKUP_INDEX_REVISION,
     }:
         raise BaselineError("lookup_indexes_require_adopted007")
-    if credit_policy(connection, tenant_id)["enabled"]:
-        raise BaselineError("lookup_indexes_require_charging_off")
     if connection.execute(
         select(jobs.c.id)
         .where(

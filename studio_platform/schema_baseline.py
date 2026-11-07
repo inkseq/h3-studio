@@ -1073,7 +1073,10 @@ def main(argv=None):
             from .settings import Settings
 
             settings = Settings.from_environment()
-            if getattr(settings, 'stripe_mode', None) != 'off':
+            if (
+                args.command == 'adopt-credit-admission'
+                and getattr(settings, 'stripe_mode', None) != 'off'
+            ):
                 raise BaselineError('credit_admission_adoption_requires_payments_off')
         from .settings import database_url_from_environment
 

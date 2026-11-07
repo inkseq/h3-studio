@@ -1,13 +1,20 @@
 """Exact index reader, transactional adoption, rollback and local PG failures."""
 
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stderr, redirect_stdout
+import io
+import json
 import os
 from pathlib import Path
+from queue import Queue
 import subprocess
 import tempfile
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from sqlalchemy import create_engine, insert, update
+from sqlalchemy import create_engine, insert, select, text, update
 from sqlalchemy.exc import DBAPIError
 
 from studio_platform.lookup_indexes import INDEXES, adopt, plan
@@ -99,6 +106,46 @@ class LookupPostgresTests(unittest.TestCase):
             tenant_id="sixnine",
         )
 
+    def seed_paid_rows(self):
+        from studio_platform import credits
+        from studio_platform.repository import documents
+
+        with self.engine.begin() as connection:
+            self.payment_fixtures.fixtures.seed(connection)
+            self.payment_fixtures.seed_payment(connection)
+            connection.execute(
+                insert(documents).values(
+                    tenant_id="sixnine",
+                    owner_id=credits.POLICY_OWNER,
+                    project_id=credits.POLICY_PROJECT,
+                    kind=credits.POLICY_KIND,
+                    document_id=credits.POLICY_ID,
+                    version=1,
+                    updated_at=1000,
+                    payload={"enabled": True, "active_revision": "initial"},
+                )
+            )
+
+    def financial_rows(self, connection):
+        from studio_platform.assets import asset_table
+        from studio_platform.guided import receipts as edit_receipts
+
+        return {
+            **self.payment_fixtures.PaymentAdoptionPostgresTests.original_rows(
+                connection
+            ),
+            "platform_budget_reservations": original_rows(
+                connection, CREDIT_ADMISSION_REVISION
+            ),
+            **{
+                table.name: sorted(
+                    json.dumps(dict(row), sort_keys=True)
+                    for row in connection.execute(select(table)).mappings()
+                )
+                for table in (asset_table, edit_receipts)
+            },
+        }
+
     def test_adoption_reuses_alias_preserves_rows_and_reader_backup(self):
         from studio_platform.backup import _export_postgres_business_db, dump_postgres
         from test_credit_admission_reader import assert_published_rows
@@ -174,27 +221,26 @@ class LookupPostgresTests(unittest.TestCase):
             )
             self.assertTrue(all(not item["existing"] for item in plan(connection)))
 
-    def test_charging_on_and_unverified_migration_refuse(self):
+    def test_paid_adoption_and_repeat_preserve_original_money_and_policy(self):
+        self.seed_paid_rows()
+        with self.engine.connect() as connection:
+            before = self.financial_rows(connection)
+        for expected in ("adopted_lookup_indexes", "already_adopted"):
+            with self.engine.begin() as connection:
+                result = self.run_adoption(connection)
+                self.assertEqual(result["state"], expected)
+                self.assertEqual(
+                    result["after"]["recorded_revision"], LOOKUP_INDEX_REVISION
+                )
+                self.assertTrue(all(item["existing"] for item in plan(connection)))
+            with self.engine.connect() as connection:
+                self.assertEqual(self.financial_rows(connection), before)
+
+    def test_unverified_migration_still_refuses(self):
         from alembic import command
-        from studio_platform import credits
-        from studio_platform.repository import documents
         from studio_platform.schema_baseline import alembic_config
 
         with self.engine.begin() as connection:
-            connection.execute(
-                insert(documents).values(
-                    tenant_id="sixnine",
-                    owner_id=credits.POLICY_OWNER,
-                    project_id=credits.POLICY_PROJECT,
-                    kind=credits.POLICY_KIND,
-                    document_id=credits.POLICY_ID,
-                    version=1,
-                    updated_at=1000,
-                    payload={"enabled": True, "active_revision": "fixture"},
-                )
-            )
-            with self.assertRaisesRegex(BaselineError, "require_charging_off"):
-                self.run_adoption(connection)
             config = alembic_config()
             config.attributes.update(
                 verified_baseline_connection=connection,
@@ -207,6 +253,221 @@ class LookupPostgresTests(unittest.TestCase):
                 CREDIT_ADMISSION_REVISION,
             )
             self.assertTrue(all(not item["existing"] for item in plan(connection)))
+
+    def test_paid_cli_allows_lookup_but_retains_credit_admission_off_guard(self):
+        from studio_platform.schema_baseline import main
+        from studio_platform.settings import Settings
+
+        self.seed_paid_rows()
+        with self.engine.connect() as connection:
+            before = self.financial_rows(connection)
+        for mode in ("test", "live"):
+            with (
+                self.subTest(mode=mode),
+                patch.object(
+                    Settings,
+                    "from_environment",
+                    return_value=SimpleNamespace(stripe_mode=mode, tenant_id="sixnine"),
+                ),
+                patch(
+                    "studio_platform.settings.database_url_from_environment",
+                    return_value=self.engine.url.render_as_string(hide_password=False),
+                ),
+            ):
+                with self.engine.connect() as connection:
+                    fingerprint = compare_schema(connection)["schema_fingerprint"]
+                error = io.StringIO()
+                with redirect_stderr(error):
+                    self.assertEqual(
+                        main(
+                            [
+                                "adopt-credit-admission",
+                                "--expected-fingerprint",
+                                fingerprint,
+                            ]
+                        ),
+                        1,
+                    )
+                self.assertEqual(
+                    json.loads(error.getvalue())["code"],
+                    "credit_admission_adoption_requires_payments_off",
+                )
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    self.assertEqual(
+                        main(
+                            [
+                                "adopt-lookup-indexes",
+                                "--expected-fingerprint",
+                                fingerprint,
+                            ]
+                        ),
+                        0,
+                    )
+                self.assertEqual(
+                    json.loads(output.getvalue())["state"],
+                    "adopted_lookup_indexes" if mode == "test" else "already_adopted",
+                )
+                with self.engine.connect() as connection:
+                    self.assertEqual(self.financial_rows(connection), before)
+
+    def test_shared_account_gate_timeout_leaves_paid_007_unchanged(self):
+        from studio_platform.identity import lock_account_gate
+
+        self.seed_paid_rows()
+        with self.engine.connect() as connection:
+            before = self.financial_rows(connection)
+            fingerprint = compare_schema(connection)["schema_fingerprint"]
+        with self.engine.begin() as blocker:
+            lock_account_gate(blocker)
+            with self.assertRaises(DBAPIError) as raised:
+                with self.engine.begin() as connection:
+                    self.run_adoption(connection, fingerprint)
+            self.assertEqual(raised.exception.orig.sqlstate, "55P03")
+            with self.engine.connect() as connection:
+                self.assertEqual(
+                    compare_schema(connection)["recorded_revision"],
+                    CREDIT_ADMISSION_REVISION,
+                )
+                self.assertTrue(all(not item["existing"] for item in plan(connection)))
+                self.assertEqual(self.financial_rows(connection), before)
+        with self.engine.begin() as connection:
+            self.assertEqual(
+                self.run_adoption(connection)["state"], "adopted_lookup_indexes"
+            )
+            self.assertEqual(self.financial_rows(connection), before)
+
+    def test_service_capture_and_replay_wait_for_adoption_commit(self):
+        from studio_platform import credits_pricing, service_credits as service
+        from studio_platform.credit_schema import accounts, prices
+        from studio_platform.repository import Scope, documents
+        from test_service_credit_core import ServiceCreditTests
+
+        self.seed_paid_rows()
+        # Reuse attachment/receipt helpers on the already exact 007 database.
+        fixture = ServiceCreditTests()
+        fixture.now = 1000
+        fixture.repo = SimpleNamespace(
+            engine=self.engine, transaction=self.engine.begin, clock=lambda: fixture.now
+        )
+        fixture.scope = Scope(
+            "sixnine", "supervan", "lookup-project", "browser:fixture"
+        )
+        fixture.reference = "story_chat_image:lookup_request_1234"
+        fixture.binding = dict(
+            tenant=fixture.scope.tenant_id,
+            owner=fixture.scope.owner_id,
+            project_id=fixture.scope.project_id,
+            actor_id=fixture.scope.actor_id,
+            card_id="lookup-card",
+            request_id="lookup_request_1234",
+            input_hash="a" * 64,
+        )
+        fixture.project = {
+            "entities": [{"id": "lookup-card", "type": "character", "data": {}}],
+            "journey": {"storyChat": {"images": {}}},
+        }
+        with self.engine.begin() as connection:
+            connection.execute(
+                update(prices).values(
+                    configuration={
+                        **credits_pricing.DEFAULT_CONFIGURATION,
+                        "image_credits": 5,
+                    }
+                )
+            )
+            connection.execute(
+                insert(documents).values(
+                    tenant_id=fixture.scope.tenant_id,
+                    owner_id=fixture.scope.owner_id,
+                    project_id="__projects",
+                    kind="project",
+                    document_id=fixture.scope.project_id,
+                    version=1,
+                    updated_at=fixture.now,
+                    payload=fixture.project,
+                )
+            )
+        held = fixture.call(service.service_hold)
+        attached = fixture.attach()
+        captured = None
+        for expected_created in (True, False):
+            with self.engine.connect() as connection:
+                before = self.financial_rows(connection)
+            worker_pid = Queue()
+
+            def capture():
+                with self.engine.begin() as connection:
+                    connection.exec_driver_sql("SET LOCAL statement_timeout = '5s'")
+                    connection.exec_driver_sql("SET LOCAL lock_timeout = '4s'")
+                    worker_pid.put(
+                        connection.exec_driver_sql(
+                            "SELECT pg_backend_pid()"
+                        ).scalar_one()
+                    )
+                    return service.service_capture(
+                        connection,
+                        fixture.repo,
+                        fixture.scope,
+                        fixture.reference,
+                        binding=fixture.binding,
+                    )
+
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                with self.engine.begin() as adopter:
+                    adopter_pid = adopter.exec_driver_sql(
+                        "SELECT pg_backend_pid()"
+                    ).scalar_one()
+                    self.run_adoption(adopter)
+                    pending = executor.submit(capture)
+                    pid = worker_pid.get(timeout=2)
+                    deadline = time.monotonic() + 2
+                    waiting = False
+                    with self.engine.connect() as observer:
+                        while time.monotonic() < deadline and not pending.done():
+                            waiting = observer.execute(
+                                text(
+                                    "SELECT EXISTS (SELECT 1 FROM pg_locks "
+                                    "WHERE pid=:worker AND locktype='advisory' "
+                                    "AND NOT granted) "
+                                    "AND :adopter = ANY(pg_blocking_pids(:worker))"
+                                ),
+                                {"worker": pid, "adopter": adopter_pid},
+                            ).scalar_one()
+                            if waiting:
+                                break
+                            time.sleep(0.01)
+                        self.assertTrue(
+                            waiting, "capture must wait on adopter's account gate"
+                        )
+                        self.assertFalse(pending.done())
+                        self.assertEqual(self.financial_rows(observer), before)
+                result = pending.result(timeout=5)
+            self.assertEqual(result["created"], expected_created)
+            self.assertEqual(result["hold"], held["hold"])
+            if expected_created:
+                captured = result["entry"]
+                self.assertEqual(result["attachment"], attached)
+                self.assertEqual(captured["amount"], -5)
+                self.assertEqual(captured["held_delta"], -5)
+            else:
+                self.assertEqual(result["entry"], captured)
+                with self.engine.connect() as connection:
+                    self.assertEqual(self.financial_rows(connection), before)
+            with self.engine.connect() as connection:
+                after = self.financial_rows(connection)
+                for table, rows in before.items():
+                    if table not in {
+                        "platform_credit_accounts",
+                        "platform_credit_entries",
+                    }:
+                        self.assertEqual(after[table], rows)
+                self.assertEqual(
+                    connection.execute(
+                        select(accounts.c.balance, accounts.c.held)
+                    ).one(),
+                    (95, 20),
+                )
 
     def test_unknown_index_and_nonterminal_work_refuse(self):
         with self.engine.begin() as connection:
