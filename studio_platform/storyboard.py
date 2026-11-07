@@ -511,6 +511,22 @@ def _limits(capabilities, recipe, profile_id, mode):
     return result
 
 
+def _shot_limits(capabilities, recipe, profile_id, mode):
+    """Input limits for a shot, and whether its default profile takes native roles.
+
+    A shot with no saved profile runs on the default one, so it is checked against
+    that profile's inputs. The generic recipe allows one picture, which dropped every
+    place and prop picture from Quick Create shots (2026-11-07 Geryon review).
+    """
+    if profile_id is not None:
+        return _limits(capabilities, recipe, profile_id, mode), False
+    default = (capabilities or {}).get("default_deployment_profile_id")
+    limits = _limits(capabilities, recipe, default, mode) if default else None
+    if limits is None:
+        return _limits(capabilities, recipe, None, mode), False
+    return limits, limits.get("input_count_semantics") == "native_roles_v2"
+
+
 def compile_draft(project, shot, *, capabilities=None, recipes=None):
     """Return executable active inputs plus a transparent, non-mutating preview."""
     from .capabilities import RECIPES
@@ -539,22 +555,8 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         native_roles = bool(profile_id and full_controls(profile_id))
     except ValueError:
         native_roles = False  # The unresolved selected profile is reported below.
-    # A shot with no saved profile runs on the default one, so it is checked against
-    # that profile's inputs. The generic recipe allows one picture, which dropped every
-    # place and prop picture from Quick Create shots (2026-11-07 Geryon review).
-    default_profile = (capabilities or {}).get("default_deployment_profile_id")
-    limits = _limits(
-        capabilities,
-        recipe or {},
-        profile_id if profile_id is not None else default_profile,
-        mode,
-    )
-    if profile_id is None and default_profile and limits is None:
-        limits = _limits(capabilities, recipe or {}, None, mode)
-    if profile_id is None and (limits or {}).get("input_count_semantics") == (
-        "native_roles_v2"
-    ):
-        native_roles = True
+    limits, default_native = _shot_limits(capabilities, recipe or {}, profile_id, mode)
+    native_roles = native_roles or default_native
     if mode == "ref" and limits is None:
         issues.append("当前参考输入范围尚未读取，请刷新生成能力")
     style = project.get("journey", {}).get("storyboard", {}).get("style", "")
