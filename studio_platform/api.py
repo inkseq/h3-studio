@@ -578,6 +578,9 @@ def create_app(
     from .speech_routes import register_routes as register_speech_routes
 
     register_speech_routes(app)
+    from .voice_design_routes import register_routes as register_voice_design
+
+    register_voice_design(app)
     from .storyboard_versions import register_routes as register_storyboard_routes
 
     register_storyboard_routes(app)
