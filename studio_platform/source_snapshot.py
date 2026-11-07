@@ -58,6 +58,8 @@ def source_components(project, shot_id):
                 pending.append(draft["place"]["locationId"])
             pending.extend(draft.get("propIds", []))
             pending.extend(ref["entityId"] for ref in draft.get("extraRefs", []))
+            if draft.get("dialogueTrack"):
+                pending.append(draft["dialogueTrack"]["entityId"])
             pending.extend(
                 filter(None, (draft.get("firstFrameId"), draft.get("lastFrameId")))
             )

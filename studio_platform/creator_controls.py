@@ -26,6 +26,11 @@ def policy_for_profile(profile_id):
     return None
 
 
+# A storyboard shot with a finished dialogue track sends it as the soundtrack;
+# reference is the default and stays implicit.
+AUDIO_MODES = frozenset({"soundtrack"})
+
+
 def controls(profile_id, value):
     if policy_for_profile(profile_id) is None or not isinstance(value, dict):
         return copy.deepcopy(value)
@@ -33,6 +38,7 @@ def controls(profile_id, value):
         key: copy.deepcopy(item)
         for key, item in value.items()
         if key in CREATOR_CONTROLS
+        or (key == "audio_conditioning" and item in AUDIO_MODES)
     }
 
 

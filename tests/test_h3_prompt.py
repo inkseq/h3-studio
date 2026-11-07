@@ -165,6 +165,32 @@ class ProblemTests(unittest.TestCase):
         self.assertTrue(found)
 
 
+class SoundtrackTests(unittest.TestCase):
+    def test_soundtrack_needs_audio_reuse_and_carries_timing(self):
+        value = project()
+        value["entities"].append(
+            {
+                "id": "track",
+                "type": "audio",
+                "title": "台词音轨",
+                "description": "S1 0.5-1.6 S2 2.0-3.4",
+                "data": {},
+            }
+        )
+        shot_draft = draft()
+        shot_draft["controls"]["audio_conditioning"] = "soundtrack"
+        shot_draft["storyboard"]["references"][1]["entity_id"] = "track"
+        facts = h3_prompt.source(value, value["entities"][2], shot_draft)
+        self.assertTrue(facts["soundtrack"])
+        self.assertEqual(
+            facts["extra_references"][0]["timing"], "S1 0.5-1.6 S2 2.0-3.4"
+        )
+        found = h3_prompt.problems(good(), facts)
+        self.assertTrue(any(item.startswith("summary must") for item in found))
+        reused = good().replace("audio reference]", "audio reuse]")
+        self.assertEqual(h3_prompt.problems(reused, facts), [])
+
+
 class RewriteTests(unittest.TestCase):
     def setUp(self):
         h3_prompt._CACHE.clear()

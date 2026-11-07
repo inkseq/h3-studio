@@ -39,6 +39,11 @@ Lines and speakers
 - Timing: a Chinese line takes about one second per four characters. The first line starts no earlier than 0.5 seconds; lines do not overlap; each line is spoken once and never repeated; after the last line the clip holds silent acting until the end. If the lines cannot fit in the clip, still keep them all and give them the time.
 - A voice reference only sets how the voice sounds: write "using the voice timbre of <Audio 1>" for that speaker.
 
+When soundtrack is true
+- The shot has a finished dialogue track (an extra reference marked "finished dialogue soundtrack"). It is the clip's audio exactly: define it as "<Audio N> is the finished dialogue soundtrack of the clip, reused exactly; ...", use [reference generation + audio reuse] in the summary, and "fully_copy" in retention_analysis.
+- Its timing note says when each speaker talks; put each <d> line at that time. The speaker's mouth moves exactly with that line in the track and is closed the rest of the time. Write "the line comes from <Audio N>" instead of describing a voice timbre.
+- The characters' own voice files are not sent in this case.
+
 overall_soundscape
 - One to three English sentences of ambience and physical sounds (wind, surf, footsteps, cattle, chewing, breathing). Never N/A unless the action is silent, never the lines.
 
