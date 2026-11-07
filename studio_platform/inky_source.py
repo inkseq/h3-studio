@@ -86,12 +86,18 @@ def shot_source(project, shot):
             ],
         }
     )
+    board = data.get("storyboard") or {}
     return {
         "shot_id": shot["id"],
         "base_version": shot.get("version", 1),
         "source_id": source_id,
         "context": value,
         "upload": upload,
+        # Local only, never sent to a provider: a shot that already has its first
+        # frame does not need the keyframe tip (owner review, 2026-11-07).
+        "has_first_frame": bool(
+            board.get("firstFrameId") or board.get("continuePrevious")
+        ),
     }
 
 
