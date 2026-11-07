@@ -193,8 +193,10 @@ def brief(client, card, speaker, language):
             "gemini-3.8-flash",
             [{"role": "user", "text": json.dumps(source, ensure_ascii=False)}],
             instruction=BRIEF,
-            max_tokens=512,
+            # Thinking spends output tokens; 512 cut the JSON off on staging.
+            max_tokens=2048,
             json_mode=True,
+            thinking="low",
         )
         value = json.loads(response.get("text") or "")
     except Exception:
