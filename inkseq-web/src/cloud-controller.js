@@ -1945,6 +1945,35 @@ export function createCloudController({
       emit({ remoteUpdate: { id: record.id, version: record.version } });
     return clip;
   }
+  // A character's voice from words (h3-studio#1124): three previews, nothing attached yet.
+  async function designVoice(body) {
+    requireCloud();
+    const ctx = context();
+    const value = await api.request(
+      `/v1/projects/${encodeURIComponent(ctx.projectId)}/voice-designs`,
+      { method: 'POST', body, timeoutMs: 120000 },
+    );
+    guard(ctx);
+    return value;
+  }
+  // Keep one preview: the server attaches it to the story, and the page catches up first.
+  async function keepVoiceDesign(body) {
+    requireCloud();
+    const ctx = context();
+    const kept = await api.request(
+      `/v1/projects/${encodeURIComponent(ctx.projectId)}/voice-designs/keep`,
+      { method: 'POST', body, timeoutMs: 30000 },
+    );
+    guard(ctx);
+    const record = checkedProjectRecord(await api.project(ctx.projectId));
+    guard(ctx);
+    if (
+      record.version > current().workspace.serverVersion &&
+      !store.rebaseCloud(record.project, { account: ctx.account, version: record.version })
+    )
+      emit({ remoteUpdate: { id: record.id, version: record.version } });
+    return kept;
+  }
   async function readShotReadiness() {
     requireCloud();
     const ctx = context();
@@ -2223,6 +2252,8 @@ export function createCloudController({
     drawShotPicture: (shotId, requestId, language) => drawShotPicture(shotId, requestId, language),
     readVoices: () => readVoices(),
     speakLine: (body) => speakLine(body),
+    designVoice: (body) => designVoice(body),
+    keepVoiceDesign: (body) => keepVoiceDesign(body),
     readShotReadiness: () => readShotReadiness(),
     ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
     rewriteInkySuggestion: (id) => rewriteInkySuggestion(id),

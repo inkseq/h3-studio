@@ -239,6 +239,15 @@
 .voice-name {
   font-weight: 600;
 }
+.voice-design {
+  display: grid;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+.voice-design-item {
+  grid-template-columns: auto minmax(0, 1fr) 72px;
+}
 .voice-line {
   display: grid;
   gap: var(--sp-2);

@@ -1,13 +1,14 @@
 // A character's voice from our catalog (h3-studio#997). The story keeps only our voice id; which
 // provider speaks it is the server's business, and people only ever see voice names. Hidden while
 // the server has voice switched off. Choosing is a saved edit that shows at once.
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Pause, Play } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
+import { VoiceDesign, useSample } from './VoiceDesign.jsx';
 
 const DIRECTIONS = ['calm', 'angry', 'sad', 'happy'],
   MAX_LINE = 500;
@@ -83,29 +84,6 @@ function VoiceLine({ profile, language }) {
 
 const sampleOf = (voice, lang) => voice.samples?.[lang] || voice.samples?.en;
 
-// One sample plays at a time, and leaving the editor stops it.
-function useSample() {
-  const audio = useRef(null),
-    [playing, setPlaying] = useState('');
-  const stop = () => {
-    audio.current?.pause();
-    audio.current = null;
-    setPlaying('');
-  };
-  useEffect(() => () => audio.current?.pause(), []);
-  const toggle = (id, src) => {
-    const same = playing === id;
-    stop();
-    if (same || !src) return;
-    const next = new Audio(src);
-    next.onended = () => setPlaying('');
-    audio.current = next;
-    setPlaying(id);
-    next.play().catch(() => setPlaying(''));
-  };
-  return { playing, toggle };
-}
-
 export function VoicePicker({ profile }) {
   const { t, locale } = useI18n();
   const { adapter, dispatch } = useStore();
@@ -124,6 +102,7 @@ export function VoicePicker({ profile }) {
   return (
     <section className="pe-section voice-picker" aria-label={t('voice.title')}>
       <h3>{t('voice.title')}</h3>
+      {adapter?.designVoice && <VoiceDesign profile={profile} language={language} />}
       <ul className="voice-list">
         {data.voices.map((voice) => {
           const chosen = profile.voiceId === voice.id,
