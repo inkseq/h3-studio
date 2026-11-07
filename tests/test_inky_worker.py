@@ -193,6 +193,19 @@ class InkyWorkerTests(InkyStoreTests):
             )
         self.assertEqual([f["kind"] for f in findings], ["vague_action"])
 
+    def test_a_shot_with_its_first_frame_gets_no_keyframe_tip(self):
+        worker = self.worker()
+        entry, (source, _) = self.rewrite_target(self.rewrite_worker())
+        framed = {**source, "has_first_frame": True}
+        with patch(
+            "studio_platform.inky_worker.text_findings",
+            return_value=["needs_keyframe", "vague_action"],
+        ):
+            findings, _ = worker.evaluate(
+                self.principal, self.scope.project_id, framed, 0
+            )
+        self.assertEqual([f["kind"] for f in findings], ["vague_action"])
+
     def test_saved_advice_about_feelings_stays_hidden_on_a_shot_with_nobody(self):
         worker = self.rewrite_worker()
         self.refresh(worker)

@@ -138,6 +138,8 @@ class InkyWorker:
         for kind in kinds:
             if not finding_applies(kind, source["context"]):
                 continue
+            if kind == "needs_keyframe" and source.get("has_first_frame"):
+                continue
             if not self.store.eligible(principal, project_id, source, kind):
                 continue
             entry = {"kind": kind}

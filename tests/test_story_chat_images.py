@@ -917,3 +917,17 @@ class StoryChatImageTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FirstFrameSpeechTests(unittest.TestCase):
+    def test_speech_tags_never_reach_a_still_picture(self):
+        from studio_platform.story_chat_images import without_speech
+
+        self.assertEqual(
+            without_speech(
+                "左头大声呵斥 (S1) <d>[Chinese] 今天吃牛。</d>，中头回应 (S2)<d>那是阿花</d>。"
+            ),
+            "左头大声呵斥 ，中头回应 。",
+        )
+        self.assertEqual(without_speech("No lines."), "No lines.")
+        self.assertEqual(without_speech(None), "")
