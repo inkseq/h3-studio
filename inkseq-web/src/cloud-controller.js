@@ -2111,6 +2111,9 @@ export function createCloudController({
         method: ['preferences', 'copies'].includes(op.kind) ? 'PATCH' : 'POST',
         body: op.body,
         key: op.key,
+        // A preflight or batch checks every shot in turn: twelve shots took over the default
+        // 30 s on staging (2026-11-07), and the dialog never opened.
+        ...(['preflight', 'batch'].includes(op.kind) ? { timeoutMs: 180000 } : {}),
       });
       guard(ctx);
     } catch (error) {
