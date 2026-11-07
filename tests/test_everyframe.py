@@ -107,6 +107,7 @@ class VendorRequestTests(unittest.TestCase):
             {"guides": [{"frame": 1}]},
             {"video_excerpts": [{"start": 0}]},
             {"audio_excerpts": [{"start": 0}]},
+            {"audio_conditioning": "soundtrack"},
             {"video_audio": {"v1": True}},
             {"resolution": "2K"},
             {"aspect_ratio": "3:2"},

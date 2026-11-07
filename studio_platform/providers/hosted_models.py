@@ -182,6 +182,7 @@ def vendor_request(compiled, model_id):
         or request.get("guides")
         or request.get("video_excerpts")
         or request.get("audio_excerpts")
+        or request.get("audio_conditioning") == "soundtrack"  # lip-sync to a kept track
         or request.get("video_audio")
         or len(refs["images"]) > model.max_images
         or len(refs["videos"]) > model.max_videos
