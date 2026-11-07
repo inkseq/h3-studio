@@ -40,6 +40,7 @@ TASK = re.compile(r"\[([a-z +]+)\]")
 TASKS = {
     "reference generation",
     "audio reference",
+    "audio reuse",
     "keyframe completion",
     "video continuation",
 }
@@ -113,6 +114,7 @@ def source(project, shot, draft):
     ):
         return None
     lookup = _cards(project)
+    soundtrack = (draft.get("controls") or {}).get("audio_conditioning") == "soundtrack"
     cards, order = {}, []
 
     def card(kind, entity):
@@ -150,7 +152,15 @@ def source(project, shot, draft):
             extras.append({"label": f"<Video {videos}>", "use": "reference video"})
             continue
         kind, owner, role = _owner_of(lookup, ref["entity_id"])
-        if owner is None:
+        if owner is None and soundtrack and ref["slot"] == "audios":
+            extras.append(
+                {
+                    "label": label,
+                    "use": "finished dialogue soundtrack, reused exactly",
+                    "timing": (entity or {}).get("description", "")[:600],
+                }
+            )
+        elif owner is None:
             extras.append(
                 {
                     "label": label,
@@ -180,6 +190,7 @@ def source(project, shot, draft):
         "cards": [cards[ident] for ident in order],
         "extra_references": extras,
         "action": action.strip(),
+        "soundtrack": soundtrack,
         "counts": {"Picture": pictures, "Audio": audios, "Video": videos},
     }
 
@@ -215,7 +226,11 @@ def problems(value, facts):
         not kinds
         or not named <= TASKS
         or summary[kinds.end() :].lstrip().startswith("+")
-        or (facts["counts"]["Audio"] and "audio reference" not in named)
+        or (
+            facts["counts"]["Audio"]
+            and ("audio reuse" if facts.get("soundtrack") else "audio reference")
+            not in named
+        )
     ):
         found.append(
             "summary must start with the task types inside one pair of brackets, "

@@ -679,6 +679,77 @@ class StoryboardPureTests(unittest.TestCase):
         )
         self.assertNotIn("deployment_profile_id", draft)
 
+    def native(self):
+        current = cap(1, 1, 3)
+        current["default_deployment_profile_id"] = "quality:standard"
+        current["deployment_profiles"] = [
+            {
+                "id": "quality:standard",
+                "generation_support": {
+                    "ref": {
+                        "limits": {
+                            "input_count_semantics": "native_roles_v2",
+                            "max_images": 9,
+                            "max_videos": 3,
+                            "max_audios": 3,
+                            "max_total_files": 12,
+                            "max_total_audio_duration": 15,
+                            "max_total_video_duration": 15,
+                        }
+                    }
+                },
+            }
+        ]
+        return current
+
+    def test_dialogue_track_replaces_voices_as_full_length_soundtrack(self):
+        shot = self.find("shot-one")
+        shot["data"]["storyboard"].update(
+            dialogueTrack={"entityId": "voice-other"},
+            extraRefs=[{"entityId": "extra"}],
+            firstFrameId="",
+            lastFrameId="",
+        )
+        validate_project(self.project)
+        draft, issues = read_draft(self.project, "shot-one", capabilities=self.native())
+        self.assertFalse(issues)
+        self.assertEqual(draft["controls"]["audio_conditioning"], "soundtrack")
+        self.assertEqual(
+            draft["inputs"]["audios"],
+            [
+                {
+                    "asset_id": "receipt-voice-other",
+                    "source_range": {"start": 0, "end": 5},
+                }
+            ],
+        )
+        self.assertNotIn("audio_conditioning", shot["data"]["h3"]["controls"])
+        before = source_snapshot(self.project, "shot-one")
+        self.find("voice-other")["data"]["fileId"] = "changed"
+        self.assertNotEqual(before, source_snapshot(self.project, "shot-one"))
+
+    def test_dialogue_track_must_cover_the_shot_and_be_audio(self):
+        shot = self.find("shot-one")
+        shot["data"]["storyboard"].update(
+            dialogueTrack={"entityId": "voice-other"}, firstFrameId="", lastFrameId=""
+        )
+        self.find("voice-other")["data"]["metadata"]["source_duration"] = 3
+        _, issues = read_draft(self.project, "shot-one", capabilities=self.native())
+        self.assertTrue(any("台词音轨比镜头短" in issue for issue in issues))
+        shot["data"]["storyboard"]["dialogueTrack"] = {"entityId": "extra"}
+        with self.assertRaises(ValueError):
+            validate_project(self.project)
+
+    def test_creator_controls_keep_only_soundtrack_audio(self):
+        from studio_platform.creator_controls import TAOMATE_V9, controls
+
+        self.assertEqual(
+            controls(TAOMATE_V9, {"audio_conditioning": "soundtrack", "shift": 3}),
+            {"audio_conditioning": "soundtrack"},
+        )
+        for mode in ("from_video", "reference"):
+            self.assertEqual(controls(TAOMATE_V9, {"audio_conditioning": mode}), {})
+
     def test_distinct_voice_clips_from_one_source_are_not_deduplicated(self):
         other = copy.deepcopy(self.find("hero"))
         other.update(id="other-hero", title="另一个人")

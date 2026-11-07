@@ -25,6 +25,7 @@ SHOT_FIELDS = {
     "previousFrame",
     "look",
     "camera",
+    "dialogueTrack",
 }
 # A shot's look and camera move (#1043): closed lists; absent or empty is Auto, which adds nothing.
 LOOKS = {
@@ -178,6 +179,17 @@ def contract():
                             "properties": {"entityId": ident, "clipStart": start},
                         },
                     },
+                    "dialogueTrack": {
+                        "anyOf": [
+                            {"type": "null"},
+                            {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "required": ["entityId"],
+                                "properties": {"entityId": ident},
+                            },
+                        ]
+                    },
                     "previousFrame": {
                         "anyOf": [
                             {"type": "null"},
@@ -214,6 +226,7 @@ def contract():
             "For storyboard shots, present shot.data.cast is the exact override (including an empty list); only absent cast inherits the scene. Explicit storyboard.place=null clears inherited place.",
             "Empty cast lookId uses default look. Empty location versionId uses default version. Existing explicit IDs never silently select a different variant.",
             "Voice/ambient/extra video or audio uses a three-second selected source clip; server asset derivation and real inspection remain authoritative.",
+            "dialogueTrack is a finished speech track for the whole shot: on native-role profiles it replaces voice samples, location ambience and extra audio, is sent from 0 for the shot's full length, and sets audio_conditioning=soundtrack so the model keeps it exactly and moves mouths to it.",
             "Exact h3.deploymentProfileId/recipeId/controls are retained. quality is authoring intent, not permission or automatic profile/model replacement.",
             "continuePrevious requires an owned saved last-frame asset from the immediate previous selected video artifact; admission verifies the original receipt.",
             "Photo/voice/location/prop/style/previous-selection changes invalidate old preflight source identity.",
@@ -398,6 +411,11 @@ def validate(project, lookup):
                 for v in lookup[place["locationId"]]["data"].get("versions", [])
             ):
                 raise ValueError("镜头场景版本不存在")
+        if value.get("dialogueTrack") is not None:
+            track = value["dialogueTrack"]
+            _fields(track, {"entityId"}, "台词音轨")
+            _id(track.get("entityId"))
+            _reference(lookup, track["entityId"], "audio")
         extra = value.get("extraRefs", [])
         if not isinstance(extra, list) or len(extra) > 100:
             raise ValueError("附加参考列表无效")
@@ -737,6 +755,20 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             clip_seconds=seconds,
         )
 
+    def soundtrack(ident):
+        # Generated speech kept exactly; H3 moves the mouths to it (audio reuse).
+        seconds = h3.get("controls", {}).get("duration") or shot["data"].get(
+            "seconds", 5
+        )
+        metadata = lookup[ident]["data"].get("metadata", {})
+        length = metadata.get("source_duration") if isinstance(metadata, dict) else None
+        if type(length) in (int, float) and length + 0.01 < seconds:
+            issues.append("台词音轨比镜头短，请重新生成音轨或缩短镜头")
+            return
+        add(ident, "台词音轨", start=0, clip_seconds=seconds)
+        controls["audio_conditioning"] = "soundtrack"
+
+    controls = copy.deepcopy(h3.get("controls", {}))
     previous = previous_shot(project, shot)
     if mode == "fl" or native_roles:
         first = value.get("firstFrameId")
@@ -781,12 +813,18 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         ) or (value.get('extraRefs') and not native_roles):
             notes.append("全能参考的附加素材已保留，当前不发送")
     else:
+        track = (value.get("dialogueTrack") or {}).get("entityId")
+        if track and not native_roles:
+            notes.append("当前生成方式不支持台词音轨，未发送")
+            track = None
         for character, look in cast:
             images = look_images(look) if look else []
             if images:
                 add(images[0], character["title"] + " · " + look["name"])
             else:
                 notes.append(character["title"] + "没有造型主图，只使用文字描述")
+            if track:
+                continue  # The finished dialogue track carries every voice.
             voice_id = (look or {}).get("voiceId") or character["data"].get(
                 "mainVoiceId"
             )
@@ -813,8 +851,13 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             if prop["data"].get("imageIds"):
                 add(prop["data"]["imageIds"][0], "道具 · " + prop["title"])
         for ref in value.get("extraRefs", []):
+            if track and lookup[ref["entityId"]]["type"] == "audio":
+                notes.append("有台词音轨时不再发送其他声音")
+                continue
             extra_reference(ref)
-        if location and location["data"].get("ambient"):
+        if track:
+            soundtrack(track)
+        elif location and location["data"].get("ambient"):
             ambient = location["data"]["ambient"]
             add(ambient["assetId"], "场景环境声", start=ambient.get("clipStart", 0))
         if not native_roles and (
@@ -910,7 +953,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
     draft = {
         "recipe_id": recipe["id"] if recipe else chosen,
         "prompt": prompt,
-        "controls": copy.deepcopy(h3.get("controls", {})),
+        "controls": controls,
         "inputs": inputs,
         "storyboard": {
             "prompt_parts": parts,
