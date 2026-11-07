@@ -16,6 +16,8 @@ PROFILE = "gemini--user-supplied"
 # One story turn carries a whole script or all of a long story's cards: up to 20,000 + 30,000
 # characters in one message, plus the instruction and recent history.
 MAX_MESSAGE_CHARS = 60000
+# The story assistant's rules plus the script rules (#1115) run to about 6.7k characters.
+MAX_INSTRUCTION_CHARS = 9000
 MAX_TOTAL_CHARS = 100000
 MODELS = {"gemma-4-31b-it": "Gemma 4 31B IT", "gemini-3.8-flash": "Gemini 3.8 Flash"}
 DEFAULT_INSTRUCTION = prompt_text("quick_chat_default")
@@ -52,8 +54,10 @@ def payload(
         raise ChatError("model_not_allowed", "请选择已接入的两个模型之一。", 422)
     if not isinstance(messages, list) or not 1 <= len(messages) <= 40:
         raise ChatError("history_limit", "每个模型最多保留20轮，请另开一次对话。", 422)
-    if not isinstance(instruction, str) or len(instruction) > 6000:
-        raise ChatError("invalid_instruction", "助手指令不能超过6000字。", 422)
+    if not isinstance(instruction, str) or len(instruction) > MAX_INSTRUCTION_CHARS:
+        raise ChatError(
+            "invalid_instruction", f"助手指令不能超过{MAX_INSTRUCTION_CHARS}字。", 422
+        )
     if type(max_tokens) is not int or not 64 <= max_tokens <= 16384:
         raise ChatError("output_limit", "输出上限必须在64–16384 tokens之间。", 422)
     contents = []

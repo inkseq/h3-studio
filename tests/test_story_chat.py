@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from studio_platform import story_chat_advice
 from studio_platform.api import create_app
-from studio_platform.google_chat import ChatError, payload
+from studio_platform.google_chat import MAX_INSTRUCTION_CHARS, ChatError, payload
 from studio_platform.repository import jobs
 from studio_platform.settings import Settings
 from studio_platform.story_chat import INSTRUCTION
@@ -169,7 +169,7 @@ class StoryChatTests(unittest.TestCase):
     def test_the_instruction_fits_the_limit_with_pictures_on_and_off(self):
         for enabled in (True, False):
             text = story_chat_advice.instruction(INSTRUCTION, enabled)
-            self.assertLessEqual(len(text), 6000)
+            self.assertLessEqual(len(text), MAX_INSTRUCTION_CHARS)
             payload("gemini-3.8-flash", [{"role": "user", "text": "x"}], text)
 
     def test_disabled_by_default(self):
