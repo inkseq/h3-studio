@@ -106,6 +106,19 @@ class DerivationAdmissionTests(IsolatedTests):
                 self.service.derive("owner", self.parent["id"], 0, 3)
             derive.assert_not_called()
 
+    def test_an_identical_ready_excerpt_is_reused_not_cut_again(self):
+        # Every shot asks for the same 3 s voice excerpt; recutting took ~12 s each.
+        first = self.service.derive("owner", self.parent["id"], 0, 3)
+        self.assertEqual(first["status"], "ready")
+        with mock.patch.object(
+            media, "derive", side_effect=AssertionError("Cut again")
+        ) as derive:
+            again = self.service.derive("owner", self.parent["id"], 0, 3)
+            derive.assert_not_called()
+        self.assertEqual(again["id"], first["id"])
+        other = self.service.derive("owner", self.parent["id"], 1, 3)
+        self.assertNotEqual(other["id"], first["id"])
+
     def test_interrupted_derivative_is_recoverable_without_new_asset(self):
         with mock.patch.object(
             media,

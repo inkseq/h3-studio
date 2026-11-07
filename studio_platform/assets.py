@@ -1257,9 +1257,30 @@ class AssetService(AssetSourcePreparation):
         }
 
     def derive(self, owner, asset_id, start, end):
+        # The same excerpt (a character's 3 s voice sample) is asked for by every shot
+        # that uses it; each fresh cut took ~12 s on staging (2026-11-07), so twelve
+        # shots needed four minutes to preflight. A finished identical excerpt is
+        # immutable and is reused.
+        existing = self._existing_derivation(owner, asset_id, start, end)
+        if existing is not None:
+            return existing
         ident = uuid.uuid4().hex
         with self._operation(ident):
             return self._derive(ident, owner, asset_id, start, end)
+
+    def _existing_derivation(self, owner, asset_id, start, end):
+        try:
+            parent = self.get(owner, asset_id)
+        except AssetNotFound:
+            return None
+        for record in self.list(owner, parent["project_id"]):
+            if (
+                record.get("parent_id") == asset_id
+                and record.get("selection") == {"start": start, "end": end}
+                and record.get("status") == "ready"
+            ):
+                return record  # list() already returns the public, untrashed view
+        return None
 
     def artifact_frame(
         self, owner, project_id, actor_id, artifact_id, job_id, metadata, body, key
