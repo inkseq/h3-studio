@@ -74,6 +74,12 @@ export function InkyForStory({ selectedShot }) {
     if (!live || !refresh) return undefined;
     return judgeWaiting(refresh, reread);
   }, [live, refresh, reread, state.project.id]);
+  // A new first frame changes what Inky would say about that shot (the keyframe tip goes away),
+  // so read again when any shot's first frame changes (owner review 2026-11-07).
+  const frames = state.shots.map((shot) => shot.id + ':' + (shot.start || '')).join('|');
+  useEffect(() => {
+    if (live) reread();
+  }, [live, reread, frames]);
   const items = demo ? demoItems(state.shots) : query.data?.items || [];
   const shotIds = new Set(state.shots.map((shot) => shot.id));
   const shotNumber = (id) => state.shots.findIndex((shot) => shot.id === id) + 1;

@@ -1,7 +1,7 @@
 // Picture first (h3-studio#1039): make a shot's first frame and look at it before spending a clip.
 // The server holds the credits, draws, and charges only once the picture is on the shot. Shown only
 // where the server has story pictures on, and only in the place the first frame is chosen.
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ImagePlus } from 'lucide-react';
 import { CreditUsageBar, creditShortfall, useCredits } from './CreditsUI.jsx';
@@ -12,6 +12,19 @@ import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
 
 const freshId = () => 'shot-pic-' + crypto.randomUUID().replaceAll('-', '').slice(0, 24);
+
+// Shots whose first frame is being drawn, so the dialog closes at once and the card says so
+// while the server draws (owner review 2026-11-07: never wait inside a dialog).
+const drawing = new Set(),
+  listeners = new Set();
+const announce = () => listeners.forEach((listener) => listener());
+const subscribe = (listener) => {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+};
+export function useDrawingPicture(shotId) {
+  return useSyncExternalStore(subscribe, () => drawing.has(shotId));
+}
 
 export function ShotPicture({ shot, hasPicture }) {
   const { t, locale } = useI18n();
@@ -41,8 +54,11 @@ export function ShotPicture({ shot, hasPicture }) {
     setFailed('');
   };
   const start = async () => {
-    setBusy(true);
     setFailed('');
+    setOpen(false);
+    setBusy(true);
+    drawing.add(shot.id);
+    announce();
     request.current ||= freshId();
     try {
       // A shot saved the older way moves to the current settings first, the same way choosing its
@@ -52,7 +68,6 @@ export function ShotPicture({ shot, hasPicture }) {
       }
       await draw(shot.id, request.current, locale === 'en' ? 'en' : 'zh');
       request.current = null;
-      setOpen(false);
     } catch (error) {
       if (error?.detail?.detail?.nothing_charged === true) request.current = null;
       setFailed(
@@ -61,20 +76,22 @@ export function ShotPicture({ shot, hasPicture }) {
           : 'shotPicture.failed',
       );
     } finally {
+      drawing.delete(shot.id);
+      announce();
       setBusy(false);
     }
   };
   return (
     <div className="shot-picture">
-      <Button size="sm" onClick={() => setOpen(true)}>
+      <Button size="sm" disabled={busy} onClick={() => setOpen(true)}>
         <ImagePlus size={15} aria-hidden="true" />
-        {t(hasPicture ? 'shotPicture.again' : 'shotPicture.make')}
+        {t(busy ? 'shotPicture.drawing' : hasPicture ? 'shotPicture.again' : 'shotPicture.make')}
       </Button>
+      {failed && !open && <p role="alert">{t(failed)}</p>}
       {open && (
         <Dialog title={t('shotPicture.title')} onClose={close} busy={busy}>
           <p className="sb-confirm-note">{t('shotPicture.note')}</p>
           <CreditUsageBar credits={credits} balance={balance} />
-          {failed && <p role="alert">{t(failed)}</p>}
           <DialogActions>
             <Button disabled={busy} onClick={close}>
               {t('shotPicture.cancel')}

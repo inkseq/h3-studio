@@ -157,7 +157,21 @@ function InkyPerch({ perch, onClose, onRewrite, onApply }) {
 }
 
 // Typing to Inky (#1065). A reply says what changed; the latest change can be undone.
-function InkyChat({ shotNumber, selectedShot, onSend, onUndo }) {
+// The open tip for this shot, written as something to ask Inky; Tab or → fills it in.
+const ASKS = [
+  'vague_action',
+  'needs_keyframe',
+  'emotion_not_shown',
+  'multiple_camera_moves',
+  'action_too_long',
+];
+function askFor(tips, selectedShot, shotNumber, t) {
+  const tip =
+    selectedShot && tips.find((item) => item.shot_id === selectedShot && ASKS.includes(item.kind));
+  return tip ? t('inky.ask.' + tip.kind, { number: shotNumber?.(selectedShot) ?? '' }) : '';
+}
+
+function InkyChat({ tips = [], shotNumber, selectedShot, onSend, onUndo }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState(''),
     [talk, setTalk] = useState([]),
@@ -195,6 +209,7 @@ function InkyChat({ shotNumber, selectedShot, onSend, onUndo }) {
       say({ who: 'inky', text: t('inky.chat.undoFailed') });
     }
   };
+  const ask = askFor(tips, selectedShot, shotNumber, t);
   return (
     <div className="inky-chat" data-keep-open>
       {talk.length > 0 && (
@@ -229,12 +244,25 @@ function InkyChat({ shotNumber, selectedShot, onSend, onUndo }) {
           maxLength={2000}
           aria-label={t('inky.chat.label')}
           placeholder={
-            selectedShot
-              ? t('inky.chat.shotHint', { number: shotNumber?.(selectedShot) ?? '' })
-              : t('inky.chat.storyHint')
+            ask
+              ? t('inky.chat.askHint', { ask })
+              : selectedShot
+                ? t('inky.chat.shotHint', { number: shotNumber?.(selectedShot) ?? '' })
+                : t('inky.chat.storyHint')
           }
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
+            if (
+              ask &&
+              !draft &&
+              (event.key === 'Tab' || event.key === 'ArrowRight') &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault();
+              setDraft(ask);
+              return;
+            }
             if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               void send();
@@ -391,6 +419,7 @@ export function Inky({
           </ul>
           {onSend && (
             <InkyChat
+              tips={open}
               shotNumber={shotNumber}
               selectedShot={selectedShot}
               onSend={onSend}

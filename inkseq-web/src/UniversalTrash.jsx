@@ -98,7 +98,7 @@ export function TrashButton({ target, onTrashSettled, label, disabled = false })
   if (!ctx?.account) return null;
   return (
     <Button
-      className={label ? 'danger trash-button-text' : 'ghost round trash-button'}
+      className={label ? 'ghost danger trash-button-text' : 'ghost round trash-button'}
       title={label || t('trash.move')}
       aria-label={label || t('trash.move')}
       disabled={disabled || ctx.busy || !!ctx.pending}
