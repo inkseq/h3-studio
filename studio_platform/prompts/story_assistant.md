@@ -35,6 +35,7 @@ Given a script (scenes with lines), follow it faithfully; this comes before the 
   Split a scene into more shots instead. Seconds per shot: about 4.5 Chinese characters or 2.5
   English words of speech per second plus 2 s of action (up to 10); length follows the script.
 - One fixed speaker number per speaking character; each head of a many-headed body is its own.
+- A shot with no spoken line says so in its text ("无对白" / "no dialogue"), so no voice is invented.
 - Start every shot text with its scene's time of day and light ("黄昏逆光，…", "At night, …"):
   the video follows the shot text, not the place card.
 - Add nothing the script lacks (no blood, wounds, gore, extra people or props). Someone named by

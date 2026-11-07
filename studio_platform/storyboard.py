@@ -539,7 +539,22 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         native_roles = bool(profile_id and full_controls(profile_id))
     except ValueError:
         native_roles = False  # The unresolved selected profile is reported below.
-    limits = _limits(capabilities, recipe or {}, profile_id, mode)
+    # A shot with no saved profile runs on the default one, so it is checked against
+    # that profile's inputs. The generic recipe allows one picture, which dropped every
+    # place and prop picture from Quick Create shots (2026-11-07 Geryon review).
+    default_profile = (capabilities or {}).get("default_deployment_profile_id")
+    limits = _limits(
+        capabilities,
+        recipe or {},
+        profile_id if profile_id is not None else default_profile,
+        mode,
+    )
+    if profile_id is None and default_profile and limits is None:
+        limits = _limits(capabilities, recipe or {}, None, mode)
+    if profile_id is None and (limits or {}).get("input_count_semantics") == (
+        "native_roles_v2"
+    ):
+        native_roles = True
     if mode == "ref" and limits is None:
         issues.append("当前参考输入范围尚未读取，请刷新生成能力")
     style = project.get("journey", {}).get("storyboard", {}).get("style", "")

@@ -645,6 +645,40 @@ class StoryboardPureTests(unittest.TestCase):
         self.assertEqual(len(draft["inputs"]["images"]), 1)
         self.assertEqual(draft["controls"], shot["data"]["h3"]["controls"])
 
+    def test_a_shot_without_a_profile_uses_the_default_profile_inputs(self):
+        # Quick Create shots save no profile. The generic recipe allows one picture,
+        # which dropped every place and prop picture (2026-11-07 Geryon review).
+        shot = self.find("shot-one")
+        shot["data"]["h3"].pop("deploymentProfileId", None)
+        narrow = cap(1, 1, 3)
+        before, _ = read_draft(self.project, "shot-one", capabilities=narrow)
+        current = cap(1, 1, 3)
+        current["default_deployment_profile_id"] = "quality:standard"
+        current["deployment_profiles"] = [
+            {
+                "id": "quality:standard",
+                "generation_support": {
+                    "ref": {
+                        "limits": {
+                            "input_count_semantics": "native_roles_v2",
+                            "max_images": 9,
+                            "max_videos": 3,
+                            "max_audios": 3,
+                            "max_total_files": 12,
+                            "max_total_audio_duration": 15,
+                            "max_total_video_duration": 15,
+                        }
+                    }
+                },
+            }
+        ]
+        draft, issues = read_draft(self.project, "shot-one", capabilities=current)
+        self.assertFalse(issues)
+        self.assertGreater(
+            len(draft["inputs"]["images"]), len(before["inputs"]["images"])
+        )
+        self.assertNotIn("deployment_profile_id", draft)
+
     def test_distinct_voice_clips_from_one_source_are_not_deduplicated(self):
         other = copy.deepcopy(self.find("hero"))
         other.update(id="other-hero", title="另一个人")

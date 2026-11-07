@@ -144,13 +144,21 @@ def _card_lines(label, rows):
     ]
 
 
+SPEECH = re.compile(r"\(S\d+\)\s*<d>.*?</d>", re.S | re.I)
+
+
+def without_speech(text):
+    """A still picture needs no lines; speech tags in its prompt risk drawn text."""
+    return " ".join(SPEECH.sub("", text or "").split())
+
+
 def shot_prompt(project, card, style, instruction, pictures=()):
     """The first moment of a shot (#1039), composed from the shot's own cards."""
     context = shot_context(project, card)
     rows = reference_cards(project, card)
     parts = [
         FIRST_FRAME["open"],
-        f"What happens: {context['shot_action'].strip()[:2000]}",
+        f"What happens: {without_speech(context['shot_action'])[:2000]}",
     ]
     for role, label in (
         ("character", "Characters"),
