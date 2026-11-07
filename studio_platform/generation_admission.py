@@ -35,7 +35,9 @@ class GenerationAdmission:
         access,
         planning,
         capabilities_provider=None,
+        prompt_client=None,
     ):
+        self.prompt_client = prompt_client
         self.repo, self.assets, self.settings, self.policies = (
             repo,
             assets,
@@ -45,6 +47,32 @@ class GenerationAdmission:
         self.access, self.planning = access, planning
         self.capabilities_provider = capabilities_provider or (
             lambda: capabilities(self.settings)
+        )
+
+    def model_prompt(self, project, shot_id, draft, body):
+        """English full-reference prompt for our own H3 machines (h3_prompt)."""
+        if (
+            self.settings.execution_backend != "wangp-worker"
+            or not body.get("deployment_profile_id")
+            or body.get("controls", {}).get("script_window_prompts") is not None
+        ):
+            return None
+        if self.prompt_client is None:
+            from .story_chat_routes import configured_client
+
+            try:
+                self.prompt_client = configured_client(self.settings) or False
+            except Exception:
+                self.prompt_client = False
+        if not self.prompt_client:
+            return None
+        from .h3_prompt import model_prompt
+
+        return model_prompt(
+            self.prompt_client,
+            project,
+            shot_id,
+            {**draft, "controls": body.get("controls", {})},
         )
 
     def task_scope(self, principal, project_id, business_identity=None):
@@ -140,6 +168,7 @@ class GenerationAdmission:
         )
         if seed_override is not None:
             body["controls"]["seed"] = seed_override
+        written = self.model_prompt(render_project, shot_id, draft, body)
         latest = self.access.project(principal, project_id, "jobs:write")
         if expected_version is not None and latest["version"] != expected_version:
             raise Conflict("document_version_conflict")
@@ -157,7 +186,11 @@ class GenerationAdmission:
             raise Conflict("storyboard_defaults_changed")
         if defaults_version is None:
             return self.planning.create(
-                principal, body, latest["payload"], stored_selection=True
+                principal,
+                body,
+                latest["payload"],
+                stored_selection=True,
+                model_prompt=written,
             )
         import copy
 
@@ -202,6 +235,7 @@ class GenerationAdmission:
             authoring_context=context,
             defaults_version=defaults_version,
             stored_selection=True,
+            model_prompt=written,
         )
 
     def create(

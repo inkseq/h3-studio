@@ -373,6 +373,7 @@ class GenerationPlanning:
         authoring_context=None,
         defaults_version=None,
         stored_selection=False,
+        model_prompt=None,
     ):
         # Entry-point authorization is performed by GenerationAccess before
         # this call; preflight also checks the editable source around derivation.
@@ -404,6 +405,9 @@ class GenerationPlanning:
                 )
             elif body.get("controls", {}).get("script_window_prompts") is not None:
                 raise Conflict("script_windows_unconfirmed")
+        if model_prompt is not None and not split:
+            # What the model reads (h3_prompt); the authoring recipe keeps the person's words.
+            body = {**body, "prompt": model_prompt}
         compiled, fingerprint = compile_request(
             body,
             lambda asset_id: self.assets.model_snapshot(
