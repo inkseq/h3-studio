@@ -8,6 +8,7 @@ import {
   storyboardProfile,
   storyboardGenerationProfile,
   patchStoryboardShot,
+  profileText,
 } from './storyboard-domain.js';
 import { shotSnapshot, digest, mergeJobCandidate } from './cloud-model.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
@@ -681,6 +682,15 @@ test('submit hints: video or many references, and audio without written lines', 
     'hint.writeLines',
   ]);
   assert.deepEqual(submitHints({ prompt: '她说：“我们走吧”' }, [item('声音'), picture], t), []);
+  // Quick Create writes H3 speech tags; they count as written lines.
+  assert.deepEqual(
+    submitHints(
+      { prompt: '左头呵斥 (S1) <d>[Chinese] 今天吃牛。</d>' },
+      [item('声音'), picture],
+      t,
+    ),
+    [],
+  );
   // A voice with nothing to look at is refused by the model, so the person hears about it first.
   assert.deepEqual(submitHints({ prompt: '她说：“我们走吧”' }, [item('声音')], t), [
     'hint.audioNeedsPicture',
@@ -770,4 +780,13 @@ test('shots shorter than the video model makes are named for the fix', async () 
     shotsTooShort(['a', 'b', 'c', 'd', 'a', 'missing'], entities).map((shot) => shot.id),
     ['a'],
   );
+});
+
+test('cards read as a name with a description, never as a spoken "Name: line"', () => {
+  assert.equal(
+    profileText('草地', '夕阳下的荒野', { name: '夜', desc: '月光' }),
+    '草地（夕阳下的荒野；夜（月光））',
+  );
+  assert.equal(profileText('Mia', 'a tall woman'), 'Mia (a tall woman)');
+  assert.equal(profileText('Mia', ' '), 'Mia');
 });

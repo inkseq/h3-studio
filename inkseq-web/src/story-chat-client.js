@@ -63,22 +63,34 @@ function changeRows(message, messages) {
 }
 
 // The newest reply's proposals become confirm cards: pictures, a new story, generation.
-function proposalQuotes(message, { cards, labels, messages, quotes }) {
-  // Suggested card pictures: a confirm card each; the id is stable, so a replay never
-  // draws or charges twice.
-  if (labels.picturesEnabled !== false)
-    for (const card of message.proposal?.picture_card_ids || []) {
-      const id = `pic-${message.id.slice(-14)}-${card.slice(-14)}`.replace(/[^A-Za-z0-9_-]/g, '');
-      const name = cards.find((item) => item.id === card)?.name || '';
-      quotes[id] = {
-        id,
-        status: 'open',
-        action: { kind: 'image', cards: [card] },
-        credits: labels.imageCredits ?? null,
-        label: labels.picture?.(name) || name,
-      };
-      messages.push({ id, role: 'quote', quoteId: id });
-    }
+function proposalQuotes(message, { cards, labels, messages, quotes, started }) {
+  // Suggested card pictures: one confirm card for all of them, drawn one at a time so each
+  // follows the first picture's style (#1111). Each card keeps its own stable request id,
+  // so a replay never draws or charges twice, and a reload shows it as already confirmed.
+  const pictures = labels.picturesEnabled !== false ? message.proposal?.picture_card_ids || [] : [];
+  if (pictures.length) {
+    const requests = pictures.map((card) =>
+      `pic-${message.id.slice(-14)}-${card.slice(-14)}`.replace(/[^A-Za-z0-9_-]/g, ''),
+    );
+    const id = pictures.length === 1 ? requests[0] : `pics-${message.id.slice(-20)}`;
+    const names = pictures.map((card) => cards.find((item) => item.id === card)?.name || '');
+    quotes[id] = {
+      id,
+      status: requests.every((request) => started.has(request)) ? 'confirmed' : 'open',
+      action:
+        pictures.length === 1
+          ? { kind: 'image', cards: pictures }
+          : { kind: 'image', cards: pictures, requests },
+      credits: Number.isFinite(labels.imageCredits)
+        ? labels.imageCredits * pictures.length
+        : (labels.imageCredits ?? null),
+      label:
+        pictures.length === 1
+          ? labels.picture?.(names[0]) || names[0]
+          : labels.pictures?.(names.join('、'), pictures.length) || names.join('、'),
+    };
+    messages.push({ id, role: 'quote', quoteId: id });
+  }
   if (message.proposal?.new_story) {
     const id = `new-${message.id.slice(-20)}`.replace(/[^A-Za-z0-9_-]/g, '');
     quotes[id] = {
@@ -128,7 +140,14 @@ export function fromServer(view, labels = {}) {
       chips: message.chips || [],
       turnId: message.turn_id || null,
     });
-    if (message === latest) proposalQuotes(message, { cards, labels, messages, quotes });
+    if (message === latest)
+      proposalQuotes(message, {
+        cards,
+        labels,
+        messages,
+        quotes,
+        started: new Set(view.image_requests || []),
+      });
   }
   return {
     title: view.title || '',
@@ -211,6 +230,42 @@ export function createLiveChat({
     );
     return uploaded.map((item) => ({ ...item, cardName: names[item.cardId] || '' }));
   }
+  // One picture at a time: concurrent draws race on the story version and each would miss
+  // the style of the picture before it.
+  let drawing = Promise.resolve();
+  const queued = (task) => {
+    const run = drawing.then(task, task);
+    drawing = run.catch(() => {});
+    return run;
+  };
+  async function drawPicture(requestId, card, emit) {
+    emit({ type: 'card.status', id: card, status: 'generating' });
+    try {
+      const value = await api.request(`/v1/story-chats/${encodeURIComponent(project)}/images`, {
+        method: 'POST',
+        body: { request_id: requestId, card_id: card },
+        // Drawing plus storing a picture takes 15–40 s.
+        timeoutMs: 180000,
+      });
+      load(value, emit, [card]);
+    } catch (failure) {
+      const before = fromServer(view || {}, labels).cards.find((item) => item.id === card)?.image;
+      if (
+        await recovered((value) => {
+          const now = fromServer(value, labels).cards.find((item) => item.id === card)?.image;
+          return now && now !== before;
+        }, emit)
+      )
+        return;
+      emit({ type: 'card.status', id: card, status: 'draft' });
+      emit({
+        type: 'assistant.message',
+        id: requestId + '-error',
+        text: labels.failed?.(failure) || failure.message,
+        chips: [],
+      });
+    }
+  }
   return {
     live: true,
     balance: Number.NaN,
@@ -281,35 +336,15 @@ export function createLiveChat({
         labels.openWorks?.(project, quote.action.cards?.[0], { generate: true });
         return;
       }
-      // A confirmed picture: the server holds the credits, draws, and charges only when
-      // the picture is on the card (#461).
-      const card = quote.action.cards[0];
-      emit({ type: 'card.status', id: card, status: 'generating' });
-      try {
-        const value = await api.request(`/v1/story-chats/${encodeURIComponent(project)}/images`, {
-          method: 'POST',
-          body: { request_id: quote.id, card_id: card },
-          // Drawing plus storing a picture takes 15–40 s.
-          timeoutMs: 180000,
-        });
-        load(value, emit, [card]);
-      } catch (failure) {
-        const before = fromServer(view || {}, labels).cards.find((item) => item.id === card)?.image;
-        if (
-          await recovered((value) => {
-            const now = fromServer(value, labels).cards.find((item) => item.id === card)?.image;
-            return now && now !== before;
-          }, emit)
-        )
-          return;
-        emit({ type: 'card.status', id: card, status: 'draft' });
-        emit({
-          type: 'assistant.message',
-          id: quote.id + '-error',
-          text: labels.failed?.(failure) || failure.message,
-          chips: [],
-        });
-      }
+      // Confirmed pictures: the server holds the credits, draws, and charges only when the
+      // picture is on the card (#461). They queue behind any picture still drawing (#1112).
+      const requests = quote.action.requests || [quote.id];
+      // Queue the whole batch at once so it stays together, in order.
+      await Promise.all(
+        quote.action.cards.map((card, index) =>
+          queued(() => drawPicture(requests[index] || quote.id, card, emit)),
+        ),
+      );
     },
     propose(action, card, emit) {
       if (action.kind === 'generate') {

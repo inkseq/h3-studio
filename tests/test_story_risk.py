@@ -245,7 +245,10 @@ class StoryRiskHttpTests(unittest.TestCase):
 
     def test_old_turn_and_image_only_proposal_remain_without_risk_report(self):
         self.prepare()
-        self.assertIsNone(self.built["turn"]["proposal"])
+        # New cards without pictures come with a picture proposal (#1111), never a risk report.
+        built = self.built["turn"]["proposal"]
+        self.assertEqual((built["kind"], built["shot_ids"]), ("image", []))
+        self.assertNotIn("risk_review", built)
         character = self.built["cards"]["characters"][0]["id"]
         result = self.turn(
             self.chat,

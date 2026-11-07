@@ -53,6 +53,7 @@ import './story-chat.css';
 const busyCard = (card) => card.status === 'generating' || card.status === 'uploading';
 import { track } from './analytics.js';
 import { readComposerDraft, writeComposerDraft } from './chunk-reload.js';
+import { readableLines } from './speech-lines.js';
 
 // Dragged narrow, the stories list snaps to an icon rail (owner, 2026-10-25).
 const RAIL = 56,
@@ -397,7 +398,7 @@ function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
                       ? t('storyChat.status.uploading')
                       : card.status === 'generating'
                         ? t('storyChat.drawing')
-                        : card.text}
+                        : readableLines(card.text)}
                   </small>
                 </Button>
               ))}
@@ -428,7 +429,7 @@ function Board({ state, fresh, openId, onOpen, onWorks, notice }) {
                         {t('storyChat.status.' + (card.status || 'draft'))}
                       </small>
                     </span>
-                    <span className="sc-shot-text">{card.text}</span>
+                    <span className="sc-shot-text">{readableLines(card.text)}</span>
                     <span className="sc-shot-refs">
                       {(card.refs || [])
                         .map((id) => profiles[id])
@@ -603,6 +604,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
         },
         openWorks: openInWorks,
         picture: (name) => t('storyChat.livePicture', { name }),
+        pictures: (names, count) => t('storyChat.livePictures', { names, count }),
         newStory: (idea) => t('storyChat.newStoryLabel', { idea }),
         startStory: (idea) => openStory(null, idea),
       },
