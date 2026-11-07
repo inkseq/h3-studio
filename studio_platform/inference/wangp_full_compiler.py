@@ -48,15 +48,17 @@ WHOLE_WINDOW = 362
 # blank line would start a new prompt under WanGP's PG/PW prompt modes.
 FILM_FRAME = 'A cinematic film shot, 35mm movie look, shallow depth of field. '
 CLEAN_FRAME = ' Clean frame: no subtitles, captions or any on-screen text.'
-_DESCRIPTION = 'integrated_multimodal_description:'
+# The full-reference format (h3_prompt) names its body detailed_description.
+_DESCRIPTIONS = ('integrated_multimodal_description:', '\ndetailed_description:')
 _SOUNDSCAPE = '\noverall_soundscape:'
 
 
 def _description_start(prompt):
-    at = prompt.find(_DESCRIPTION)
-    if at < 0:
+    found = [(prompt.find(d), d) for d in _DESCRIPTIONS if d in prompt]
+    if not found:
         return 0
-    at += len(_DESCRIPTION)
+    at, marker = min(found)
+    at += len(marker)
     while at < len(prompt) and prompt[at] in ' \n':
         at += 1
     return at

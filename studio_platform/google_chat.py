@@ -231,7 +231,8 @@ class GoogleChatClient:
         candidates = data.get("candidates", [])
         candidate = candidates[0] if candidates else {}
         parts = candidate.get("content", {}).get("parts", [])
-        text = "\n".join(
+        # Gemini 3 splits one answer across parts mid-word; they join with nothing.
+        text = "".join(
             p["text"]
             for p in parts
             if isinstance(p.get("text"), str) and not p.get("thought")
