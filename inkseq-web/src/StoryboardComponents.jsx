@@ -80,7 +80,7 @@ import {
   queuePositions,
 } from './storyboard-ui-model.js';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
-import { ShotPicture } from './ShotPicture.jsx';
+import { ShotPicture, useDrawingPicture } from './ShotPicture.jsx';
 import { ShotLook } from './ShotLook.jsx';
 import { ShotCardPrompt } from './ShotCardPrompt.jsx';
 import { VoicePicker } from './VoicePicker.jsx';
@@ -860,7 +860,7 @@ function VoiceSection({ p }) {
       )}
     >
       <header className="pe-section-head">
-        <h3>{tr('storyboard.copy51')}</h3>
+        <h3>{tr('storyboard.voiceSamples')}</h3>
         <small className="muted">{tr('storyboard.copy52')}</small>
         <Button size="sm" onClick={() => setChoose(true)}>
           <Plus size={14} aria-hidden="true" />
@@ -1027,7 +1027,7 @@ export function ProfileEditor() {
           </Field>
           <Field label={describe} help={tr('storyboard.finish24').replace(/^\s*·\s*/, '')}>
             <textarea
-              rows={2}
+              rows={5}
               value={p.desc}
               onChange={(e) =>
                 dispatch({ type: 'profile', id: p.id, patch: { desc: e.target.value } })
@@ -1651,6 +1651,7 @@ export function ShotCard({
   const plan = item && (item.asset || item.profile) ? planDrop(shot, item, 'smart', db) : null;
   // A restored take keeps its exact prompt and references; it is only changed in the editor.
   const restored = !!shot.entity?.data.h3?.explicitReferences && !shot.entity?.data.storyboard;
+  const picturing = useDrawingPicture(shot.id);
   return (
     <div
       ref={setNodeRef}
@@ -1703,6 +1704,7 @@ export function ShotCard({
           )}
         </span>
         <span className={'card-state ' + status.tone} title={status.label} />
+        {picturing && <span className="card-drawing">{tr('shotPicture.drawing')}</span>}
         <IconButton
           size="xs"
           className="card-add"

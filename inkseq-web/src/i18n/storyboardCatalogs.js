@@ -253,7 +253,9 @@ export const storyboardCatalogs = {
       'Voice sample: All-reference uses 3 seconds of it to keep the voice consistent',
     'storyboard.copy53': 'Add audio',
     'storyboard.copy54': 'Drag audio here from your library or computer',
-    'storyboard.copy55': 'No voice sample yet. A voice is chosen when the shot is made.',
+    'storyboard.copy55':
+      'No voice sample yet. Design a voice or add one above, or the model picks a voice when the shot is made.',
+    'storyboard.voiceSamples': 'Voice samples',
     'shotPicture.make': 'Make a first frame',
     'shotPicture.again': 'Make another',
     'shotPicture.title': 'Make a first frame',
@@ -264,6 +266,7 @@ export const storyboardCatalogs = {
     'shotPicture.settingsChanged':
       "This shot's settings changed, so no picture was made and nothing was charged. Please try again.",
     'shotPicture.cancel': 'Cancel',
+    'shotPicture.drawing': 'Drawing the first frame…',
     'shotPicture.confirm': 'Make it',
     'voice.title': 'Choose a voice',
     'voice.tooShort':
@@ -903,12 +906,15 @@ export const storyboardCatalogs = {
     'storyboard.copy52': '声音样本：全能参考会用其中 3 秒，让人物声音保持一致',
     'storyboard.copy53': '添加声音',
     'storyboard.copy54': '把声音拖到这里（从素材库或电脑）',
-    'storyboard.copy55': '还没有声音样本，生成时会自动配声音。',
+    'storyboard.copy55':
+      '还没有声音样本。可以在上面生成音色或选一个声音；都没有的话，生成镜头时模型会自己配。',
+    'storyboard.voiceSamples': '声音样本',
     'shotPicture.make': '生成首帧',
     'shotPicture.again': '再来一张',
     'shotPicture.title': '生成首帧',
     'shotPicture.note': '这张图会成为这个镜头的首帧，可以先看画面，再生成视频。',
     'shotPicture.failed': '这张图没有生成成功，镜头没有变化。请再试一次。',
+    'shotPicture.drawing': '正在画首帧…',
     'shotPicture.settingsChanged':
       '这个镜头的设置刚刚变了，所以没有生成，也没有扣积分。请再试一次。',
     'shotPicture.cancel': '取消',
