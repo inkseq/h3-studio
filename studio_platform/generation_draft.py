@@ -577,6 +577,21 @@ def read_draft(project, shot_id, *, recipes=None, capabilities=None):
     return draft, list(dict.fromkeys(issues))
 
 
+def _engine_free(saved, schema):
+    """Split off soundtrack mode when the recipe is still engine-neutral.
+
+    A dialogue track sets it before the engine is chosen; the generic recipe has
+    no such control, and the chosen engine checks it later.
+    """
+    if (
+        saved.get("audio_conditioning") != "soundtrack"
+        or "audio_conditioning" in schema
+    ):
+        return saved, {}
+    rest = {k: v for k, v in saved.items() if k != "audio_conditioning"}
+    return rest, {"audio_conditioning": "soundtrack"}
+
+
 def plan_body(project, shot_id, capabilities, derive, *, validate_frame=None):
     draft, issues = read_draft(
         project, shot_id, recipes=capabilities["recipes"], capabilities=capabilities
@@ -626,6 +641,7 @@ def plan_body(project, shot_id, capabilities, derive, *, validate_frame=None):
         )
     saved = draft["controls"]
     fields(saved, control_schema(), "已保存的生成控制")
+    saved, carried = _engine_free(saved, recipe["controls"])
     # Changing engines must not silently discard a user's explicit controls.
     # Keep the draft unchanged so the caller can choose compatible settings.
     fields(saved, recipe["controls"], "当前配方不支持的已保存生成控制")
@@ -647,6 +663,7 @@ def plan_body(project, shot_id, capabilities, derive, *, validate_frame=None):
             controls[key] = shot["data"].get("seconds", 5)
         elif "default" in schema:
             controls[key] = schema["default"]
+    controls.update(carried)
     # The browser can retain null while a numeric input is cleared. Validate the
     # resolved controls, after applying the same defaults, not that UI draft.
     validate_controls_patch(controls)
