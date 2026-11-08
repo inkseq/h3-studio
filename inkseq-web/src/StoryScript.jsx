@@ -8,6 +8,8 @@ import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { fmt, totalDuration } from './storyboard-ui-model.js';
 import { DEFAULT_CHAPTER_NAMES, sceneHeading } from './story-headings.js';
 import { store } from './store.js';
+import { SceneBeats, SceneIntent } from './ScriptBeats.jsx';
+import { Disclosure } from './ui/Disclosure.jsx';
 import './story-script.css';
 
 const SAVE_AFTER_MS = 500;
@@ -128,7 +130,9 @@ function ScriptScene({ group, numbers, locked, onSaveShot, onSaveScene, onAddSho
           · {fmt(totalDuration(group.shots))}
         </small>
       </header>
-      {group.id && (
+      <SceneIntent group={group} Text={ScriptText} />
+      {/* Once a scene is in beats, its old free text stays readable but out of the way. */}
+      {group.id && !group.beats?.length && (
         <ScriptText
           id={group.id}
           value={group.script}
@@ -138,6 +142,23 @@ function ScriptScene({ group, numbers, locked, onSaveShot, onSaveScene, onAddSho
           onSave={onSaveScene}
         />
       )}
+      {group.id && group.beats?.length > 0 && group.script.trim() && (
+        <Disclosure className="script-source" summary={t('script.sourceText')}>
+          <ScriptText
+            id={group.id}
+            value={group.script}
+            label={t('script.sceneLabel')}
+            placeholder={t('script.sceneHint')}
+            max={SCENE_TEXT_MAX}
+            onSave={onSaveScene}
+          />
+        </Disclosure>
+      )}
+      <SceneBeats
+        group={{ ...group, beats: group.beats || [] }}
+        numbers={numbers}
+        Text={ScriptText}
+      />
       {group.shots.map((shot) => (
         <ScriptShot
           key={shot.id}

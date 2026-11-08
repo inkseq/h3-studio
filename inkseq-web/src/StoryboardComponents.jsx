@@ -84,6 +84,9 @@ import { ShotPicture, useDrawingPicture } from './ShotPicture.jsx';
 import { ShotLook } from './ShotLook.jsx';
 import { ShotCardPrompt } from './ShotCardPrompt.jsx';
 import { VoicePicker } from './VoicePicker.jsx';
+import { BibleDots, ProfileBible } from './ProfileBible.jsx';
+import { BibleImportExport } from './BibleImport.jsx';
+import { characterGroups } from './story-bible.js';
 import { useShotReadiness } from './shot-readiness.js';
 import { StoryboardNameDialog } from './StoryboardDialog.jsx';
 import { createStoryboardPlayback } from './storyboard-playback.js';
@@ -262,7 +265,11 @@ function ProfileCard({ p, used, onOpen, onAdd }) {
         </span>
       )}
       <div className="pcard-body">
-        <b title={p.name}>{p.name}</b>
+        <b title={p.name}>
+          {p.name}
+          {p.bible?.speaker && <span className="bible-speaker">{p.bible.speaker}</span>}
+        </b>
+        <BibleDots p={p} used={used} />
         <small>
           {p.type !== 'prop' && (
             <>
@@ -669,9 +676,10 @@ export function AssetLibrary({
                 </Button>
               </div>
             )}
-            {state.profiles
-              .filter((p) => p.type === tab && match(p.name + p.desc))
-              .map((p) => (
+            {characterGroups(
+              state.profiles.filter((p) => p.type === tab && match(p.name + p.desc)),
+            ).map(({ group, members }) => {
+              const cards = members.map((p) => (
                 <ProfileCard
                   key={p.id}
                   p={p}
@@ -679,8 +687,24 @@ export function AssetLibrary({
                   onOpen={() => dispatch({ type: 'openProfile', id: p.id })}
                   onAdd={selectedShot ? () => onPick({ profile: p.id }) : null}
                 />
-              ))}
+              ));
+              // People who always appear together (三兄弟) stay one card each, grouped.
+              return group ? (
+                <div key={'group:' + group} className="bible-group">
+                  <div className="bible-group-head">
+                    <b>{group}</b>
+                    <small className="muted">
+                      {tr('bible.groupCount', { count: members.length })}
+                    </small>
+                  </div>
+                  {cards}
+                </div>
+              ) : (
+                cards[0]
+              );
+            })}
           </div>
+          {page === 'world' && <BibleImportExport />}
           <div className="lib-tip">
             {tab === 'character'
               ? tr(page === 'world' ? 'stage.worldCharacterTip' : 'storyboard.detail18')
@@ -1237,6 +1261,8 @@ export function ProfileEditor() {
             </div>
           </section>
         )}
+
+        <ProfileBible p={p} />
 
         <section className="pe-used">
           <h3>

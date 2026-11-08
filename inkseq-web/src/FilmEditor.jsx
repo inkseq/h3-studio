@@ -54,6 +54,26 @@ const envelope = (frame, frames, fadeIn, fadeOut) =>
     Math.min(1, fadeIn > 0 ? frame / fadeIn : 1, fadeOut > 0 ? (frames - frame) / fadeOut : 1),
   );
 
+const PREMOUNT = cutFps;
+
+// The timeline's playhead line follows the player on its own, so the editor around it does
+// not re-render on every frame.
+function FilmPlayhead({ player, pps }) {
+  const [frame, setFrame] = useState(0);
+  React.useEffect(() => {
+    const node = player.current;
+    if (!node) return;
+    const onFrame = (event) => setFrame(event.detail.frame);
+    node.addEventListener('frameupdate', onFrame);
+    node.addEventListener('seeked', onFrame);
+    return () => {
+      node.removeEventListener('frameupdate', onFrame);
+      node.removeEventListener('seeked', onFrame);
+    };
+  }, [player]);
+  return <span className="film-playhead" style={{ left: (frame / cutFps) * pps }} />;
+}
+
 const SIZES = { '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [960, 960], '4:3': [960, 720] };
 
 // The whole cut as one Remotion composition: each included clip is a Sequence that plays
@@ -62,17 +82,26 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
   return (
     <AbsoluteFill style={{ background: '#000' }}>
       {clips.map((clip) => (
-        <Sequence key={clip.id} from={clip.from} durationInFrames={clip.frames}>
+        // Each clip mounts a second early, hidden, so its video has loaded when its turn comes
+        // (Remotion premounting) instead of starting to load at the cut.
+        <Sequence
+          key={clip.id}
+          from={clip.from}
+          durationInFrames={clip.frames}
+          premountFor={PREMOUNT}
+        >
           {sources[clip.asset?.id] && clip.parts ? (
             clip.parts.map((part, index) => (
               <Sequence
                 key={index}
                 from={clip.parts.slice(0, index).reduce((sum, p) => sum + p.frames, 0)}
                 durationInFrames={part.frames}
+                premountFor={PREMOUNT}
               >
                 <Html5Video
                   src={sources[clip.asset.id]}
                   trimBefore={part.startFrame}
+                  pauseWhenBuffering
                   muted
                   style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 />
@@ -83,6 +112,7 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
               src={sources[clip.asset.id]}
               trimBefore={clip.startFrame}
               playbackRate={clip.rate}
+              pauseWhenBuffering
               muted
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
@@ -103,11 +133,17 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
       {/* The film's sound is exactly the chapter's sound tracks, as in the export. */}
       {audio.map((a) =>
         sources[a.assetId] ? (
-          <Sequence key={'audio-' + a.id} from={a.from} durationInFrames={a.frames}>
+          <Sequence
+            key={'audio-' + a.id}
+            from={a.from}
+            durationInFrames={a.frames}
+            premountFor={PREMOUNT}
+          >
             <Html5Audio
               src={sources[a.assetId]}
               trimBefore={a.trimBefore}
               playbackRate={a.rate}
+              pauseWhenBuffering
               volume={(f) => a.volume * envelope(f, a.frames, a.fadeIn, a.fadeOut)}
             />
           </Sequence>
@@ -290,7 +326,7 @@ export default function FilmEditor({
     project = s.project;
   const chapter = project.entities.find((e) => e.id === chapterId);
   const clips = useMemo(() => editorClips(project, chapterId), [project, chapterId]);
-  const included = clips.filter((clip) => clip.included),
+  const included = useMemo(() => clips.filter((clip) => clip.included), [clips]),
     excluded = clips.filter((clip) => !clip.included),
     total = cutFrames(clips),
     seconds = total / cutFps;
@@ -298,14 +334,18 @@ export default function FilmEditor({
     [durations, setDurations] = useState({}),
     [error, setError] = useState(''),
     [selectedId, setSelectedId] = useState(initialTrim || clips[0]?.id || null),
-    [frame, setFrame] = useState(0),
+    [playingId, setPlayingId] = useState(null),
     [zoom, setZoom] = useState(null),
     [fitWidth, setFitWidth] = useState(800),
     [captions, setCaptions] = useState(true),
     [selectedAudio, setSelectedAudio] = useState(null);
   const player = useRef(null),
     scroller = useRef(null),
-    sourceVideo = useRef(null);
+    sourceVideo = useRef(null),
+    // The current frame lives in a ref, not state: re-rendering the whole editor on every
+    // frame starved the player, so each clip froze after a fraction of a second
+    // (owner, 2026-11-09). Only the playhead line and the playing clip's highlight follow it.
+    frameRef = useRef(0);
   const selected = clips.find((clip) => clip.id === selectedId) || clips[0] || null;
   // The overlay owns scrolling while open; the storyboard behind it must not move.
   React.useEffect(() => {
@@ -326,11 +366,15 @@ export default function FilmEditor({
         .filter((cue) => cue.text && Number.isFinite(cue.from) && cue.frames > 0),
     [project, chapterId],
   );
-  // The playhead follows the player; the timeline scrolls to keep it in view while playing.
+  const follow = (f) => {
+    frameRef.current = f;
+    const id = included.find((c) => f >= c.from && f < c.from + c.frames)?.id ?? null;
+    setPlayingId((old) => (old === id ? old : id));
+  };
   React.useEffect(() => {
     const node = player.current;
     if (!node) return;
-    const onFrame = (event) => setFrame(event.detail.frame);
+    const onFrame = (event) => follow(event.detail.frame);
     node.addEventListener('frameupdate', onFrame);
     node.addEventListener('seeked', onFrame);
     return () => {
@@ -383,13 +427,12 @@ export default function FilmEditor({
   const seekTime = (time) => {
     const f = Math.max(0, Math.min(Math.max(0, total - 1), Math.round(time * cutFps)));
     player.current?.seekTo(f);
-    setFrame(f);
+    follow(f);
   };
   const select = (clip) => {
     setSelectedId(clip.id);
     if (clip.included && Number.isInteger(clip.from)) seekTime(clip.from / cutFps);
   };
-  const playingId = included.find((c) => frame >= c.from && frame < c.from + c.frames)?.id;
   const assets = [...new Map(clips.filter((c) => c.playable).map((c) => [c.asset.id, c])).values()];
   // Sound follows the same cut timeline as the picture, so the preview matches what you see.
   const cutTimeline = included.map((c) => ({
@@ -447,9 +490,15 @@ export default function FilmEditor({
         fadeOut: Math.max(after, (fadeMax ? b.track.fade_out_s || 0 : 0) * cutFps),
       };
     });
+  // Remotion: a new inputProps object re-renders the whole composition, so keep it stable.
+  const audioKey = JSON.stringify(audio);
+  const inputProps = useMemo(
+    () => ({ clips: included, sources, cues: captions ? cues : [], audio: JSON.parse(audioKey) }),
+    [included, sources, captions, cues, audioKey],
+  );
   const x = useMemo(() => timeScale([], pps), [pps]);
   const laneWidth = Math.max(seconds * pps, 200);
-  const playhead = () => frame / cutFps;
+  const playhead = () => frameRef.current / cutFps;
   const addAudio = async (asset, file, { wholeFilm = false } = {}) => {
     let duration = asset.data.metadata?.duration ?? asset.data.metadata?.duration_s;
     if (!Number.isFinite(duration) && file) duration = await probeDuration(file);
@@ -548,7 +597,7 @@ export default function FilmEditor({
             <Player
               ref={player}
               component={Cut}
-              inputProps={{ clips: included, sources, cues: captions ? cues : [], audio }}
+              inputProps={inputProps}
               durationInFrames={Math.max(1, total)}
               fps={cutFps}
               compositionWidth={width}
@@ -781,7 +830,7 @@ export default function FilmEditor({
                   edit((p) => trimTrack(p, chapterId, id, side, delta, cutTimeline))
                 }
               />
-              <span className="film-playhead" style={{ left: (frame / cutFps) * pps }} />
+              <FilmPlayhead player={player} pps={pps} />
             </div>
           </div>
           {excluded.length > 0 && (
