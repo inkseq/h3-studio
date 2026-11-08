@@ -12,6 +12,7 @@ import {
 } from './storyboard-domain.js';
 import { applyBiblePatch, validBiblePatch } from './story-bible.js';
 import { sceneBeats, validBeats } from './script-beats.js';
+import { applyPlanPatch, validPlanPatch } from './shot-plan.js';
 
 const find = (project, id) => project.entities.find((entity) => entity.id === id);
 const list = (value) => (Array.isArray(value) ? value : []);
@@ -502,6 +503,14 @@ function claimBeatAction(project, action, _ctx) {
   }
   return { id: scene.id };
 }
+// A shot's plan, acting and continuity (shot-plan.js).
+function shotPlanAction(project, action, _ctx) {
+  const shot = find(project, action.shot);
+  if (!validPlanPatch(project, shot, action.patch)) return false;
+  applyPlanPatch(shot, action.patch);
+  mark(shot);
+  return { id: shot.id };
+}
 function moveChapterAction(project, action, _ctx) {
   const chapters = storyChapters(project),
     index = chapters.findIndex((row) => row.id === action.id),
@@ -775,6 +784,7 @@ const SHOT_AND_PAGE_ACTIONS = {
   sceneBeats: sceneBeatsAction,
   sceneIntent: sceneIntentAction,
   claimBeat: claimBeatAction,
+  shotPlan: shotPlanAction,
   moveChapter: moveChapterAction,
   update: updateGroupAction,
   drop: updateGroupAction,

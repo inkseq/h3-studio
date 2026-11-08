@@ -1,0 +1,113 @@
+/* A shot's plan, acting and continuity (shot-plan.js): editor panel and card summary. */
+.shot-plan {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface-2);
+}
+.shot-plan-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.shot-plan-count {
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.shot-plan-body {
+  display: grid;
+  gap: var(--sp-2);
+}
+.shot-plan-body .small {
+  margin: 0;
+  font-size: var(--fs-xs);
+}
+.shot-plan-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+}
+.shot-plan-label {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.shot-plan-beats {
+  margin: 0;
+  padding-left: 1.4em;
+  display: grid;
+  gap: 2px;
+  font-size: var(--fs-sm);
+}
+.shot-plan-beats li.line {
+  font-weight: 500;
+}
+.plan-timeline {
+  display: grid;
+  gap: var(--sp-1);
+}
+.plan-timeline-row {
+  display: grid;
+  grid-template-columns: 4.5em auto 4.5em auto minmax(0, 1fr) auto;
+  gap: var(--sp-1);
+  align-items: center;
+}
+.shot-plan-mouths {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+}
+.shot-plan-mouth {
+  display: inline-flex;
+  gap: var(--sp-1);
+  align-items: center;
+}
+.shot-plan-mouth.speaks {
+  font-weight: 600;
+}
+.card-plan {
+  display: grid;
+  gap: 2px;
+  font-size: var(--fs-xs);
+  min-width: 0;
+}
+.card-plan-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.card-plan-chip {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  white-space: nowrap;
+}
+.card-plan-ring {
+  margin-left: auto;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: conic-gradient(var(--good) calc(var(--v) * 1%), var(--line-2) 0);
+  mask: radial-gradient(circle, transparent 4px, var(--black) 5px);
+}
+.card-plan-purpose,
+.card-plan-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.card-plan-line {
+  color: var(--accent);
+}
+@media (max-width: 640px) {
+  .plan-timeline-row {
+    grid-template-columns: 4em auto 4em auto;
+  }
+  .plan-timeline-row > input:not([type='number']) {
+    grid-column: 1 / -1;
+  }
+}
