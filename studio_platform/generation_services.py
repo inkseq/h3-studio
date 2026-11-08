@@ -405,9 +405,12 @@ class GenerationPlanning:
                 )
             elif body.get("controls", {}).get("script_window_prompts") is not None:
                 raise Conflict("script_windows_unconfirmed")
-        if model_prompt is not None and not split:
+        written = model_prompt
+        if callable(model_prompt):
+            written = None if split else model_prompt(body)
+        if written is not None and not split:
             # What the model reads (h3_prompt); the authoring recipe keeps the person's words.
-            body = {**body, "prompt": model_prompt}
+            body = {**body, "prompt": written}
         compiled, fingerprint = compile_request(
             body,
             lambda asset_id: self.assets.model_snapshot(

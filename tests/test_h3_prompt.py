@@ -214,6 +214,35 @@ class RewriteTests(unittest.TestCase):
         self.assertIsNone(h3_prompt.rewrite(None, self.facts))
 
 
+class GateTests(unittest.TestCase):
+    def admission(self, default):
+        from types import SimpleNamespace
+
+        from studio_platform.generation_admission import GenerationAdmission
+
+        value = GenerationAdmission.__new__(GenerationAdmission)
+        value.settings = SimpleNamespace(
+            execution_backend="wangp-worker", default_deployment_profile_id=default
+        )
+        value.prompt_client = FakeClient(good())
+        return value
+
+    def test_story_without_a_profile_uses_the_h3_default(self):
+        # Quality-tier stories reach preflight with no profile; staging skipped
+        # every rewrite because of that (2026-11-08).
+        h3_prompt._CACHE.clear()
+        value = project()
+        gate = self.admission("h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9")
+        body = {"controls": {"duration": 6}}
+        self.assertEqual(gate.model_prompt(value, "shot", draft(), body), good())
+        h3_prompt._CACHE.clear()
+        self.assertIsNone(
+            self.admission("vivix-hosted").model_prompt(value, "shot", draft(), body)
+        )
+        windows = {"controls": {"script_window_prompts": ["a", "b"]}}
+        self.assertIsNone(gate.model_prompt(value, "shot", draft(), windows))
+
+
 class FramingTests(unittest.TestCase):
     def test_turbo_frame_goes_inside_detailed_description(self):
         v7 = "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
