@@ -51,9 +51,15 @@ class GenerationAdmission:
 
     def model_prompt(self, project, shot_id, draft, body):
         """English full-reference prompt for our own H3 machines (h3_prompt)."""
+        # Called by planning after the quality tier picks the engine; a plain
+        # story has no profile before that, and the server default is H3.
+        profile = (
+            body.get("deployment_profile_id")
+            or self.settings.default_deployment_profile_id
+        )
         if (
             self.settings.execution_backend != "wangp-worker"
-            or not body.get("deployment_profile_id")
+            or not str(profile or "").startswith("h3-")
             or body.get("controls", {}).get("script_window_prompts") is not None
         ):
             return None
@@ -168,7 +174,10 @@ class GenerationAdmission:
         )
         if seed_override is not None:
             body["controls"]["seed"] = seed_override
-        written = self.model_prompt(render_project, shot_id, draft, body)
+
+        def written(resolved):
+            return self.model_prompt(render_project, shot_id, draft, resolved)
+
         latest = self.access.project(principal, project_id, "jobs:write")
         if expected_version is not None and latest["version"] != expected_version:
             raise Conflict("document_version_conflict")
