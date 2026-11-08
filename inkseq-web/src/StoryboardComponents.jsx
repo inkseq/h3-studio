@@ -87,6 +87,7 @@ import { VoicePicker } from './VoicePicker.jsx';
 import { BibleDots, ProfileBible } from './ProfileBible.jsx';
 import { BibleImportExport } from './BibleImport.jsx';
 import { characterGroups } from './story-bible.js';
+import { ShotCardPlan, ShotPlanPanel } from './ShotPlan.jsx';
 import { useShotReadiness } from './shot-readiness.js';
 import { StoryboardNameDialog } from './StoryboardDialog.jsx';
 import { createStoryboardPlayback } from './storyboard-playback.js';
@@ -1771,6 +1772,7 @@ export function ShotCard({
             )}
           </span>
         </div>
+        <ShotCardPlan shot={shot} />
         {!restored && <ShotCardPrompt shot={shot} />}
         {(shot.cast.length > 0 || shot.place || shot.props.length > 0) && (
           <WhoChips shot={shot} small />
@@ -2173,6 +2175,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
         )}
       </div>
       <div className="ed-form">
+        <ShotPlanPanel shot={shot} />
         <label className="field" data-guide-field="action">
           <span>
             {tr(restoredExact ? 'workbench.restoredPrompt' : 'storyboard.copy85')}{' '}
