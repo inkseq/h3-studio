@@ -4,7 +4,7 @@
 import React, { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { Button } from './ui/Button.jsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { X } from 'lucide-react';
+import { Play, X } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { Segmented } from './ui/Segmented.jsx';
@@ -17,6 +17,7 @@ import {
   nextVerdict,
   rangeFrom,
 } from './take-review-model.js';
+import { playRanges } from './shot-segments.js';
 import './take-review.css';
 
 function useDuration(mediaRef) {
@@ -132,11 +133,12 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
   }
+  const video = () => mediaRef.current?.querySelector('video');
   const seek = (time) => {
-    const video = mediaRef.current?.querySelector('video');
-    if (!video) return;
-    video.pause();
-    video.currentTime = time;
+    const node = video();
+    if (!node) return;
+    node.pause();
+    node.currentTime = time;
   };
   const pct = (value) => (duration ? (value / duration) * 100 : 0) + '%';
   const draft = editing?.mark;
@@ -209,6 +211,15 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
             <span className="take-review-range">
               {fmtSeconds(draft.start_s)} – {fmtSeconds(draft.end_s)}
             </span>
+            {/* Play only the marked stretch (owner, 2026-11-09). */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => playRanges(video(), [{ start: draft.start_s, end: draft.end_s }])}
+            >
+              <Play size={13} />
+              {t('review.play')}
+            </Button>
             <Segmented
               label={t('review.rangeVerdict')}
               value={draft.verdict}

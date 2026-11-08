@@ -10,6 +10,8 @@ import {
   storyboardView,
   newStoryboardEntity,
 } from './storyboard-domain.js';
+import { applyBiblePatch, validBiblePatch } from './story-bible.js';
+import { sceneBeats, validBeats } from './script-beats.js';
 
 const find = (project, id) => project.entities.find((entity) => entity.id === id);
 const list = (value) => (Array.isArray(value) ? value : []);
@@ -457,6 +459,49 @@ function sceneScriptAction(project, action, _ctx) {
   scene.version++;
   return { id: scene.id };
 }
+// Beats, intent and claims (script-beats.js).
+function sceneBeatsAction(project, action, _ctx) {
+  const scene = find(project, action.id);
+  if (scene?.type !== 'scene' || !validBeats(project, action.beats)) return false;
+  const kept = new Set(action.beats.map((b) => b.id));
+  scene.data.beats = action.beats.map((b) => ({ ...b }));
+  // A removed beat is no longer claimed by any shot.
+  for (const shot of project.entities.filter((e) => e.type === 'shot' && e.parentId === scene.id)) {
+    const claimed = list(shot.data.plan?.beats);
+    if (claimed.some((id) => !kept.has(id))) {
+      shot.data.plan = { ...shot.data.plan, beats: claimed.filter((id) => kept.has(id)) };
+      shot.version++;
+    }
+  }
+  scene.version++;
+  return { id: scene.id };
+}
+function sceneIntentAction(project, action, _ctx) {
+  const scene = find(project, action.id);
+  if (scene?.type !== 'scene' || !text(action.intent, 600)) return false;
+  scene.data.intent = action.intent;
+  scene.version++;
+  return { id: scene.id };
+}
+function claimBeatAction(project, action, _ctx) {
+  const scene = find(project, action.scene);
+  if (scene?.type !== 'scene' || !sceneBeats(scene).some((b) => b.id === action.beat)) return false;
+  const shots = project.entities.filter((e) => e.type === 'shot' && e.parentId === scene.id);
+  if (action.shot !== null && !shots.some((shot) => shot.id === action.shot)) return false;
+  const order = sceneBeats(scene).map((b) => b.id);
+  for (const shot of shots) {
+    const claimed = list(shot.data.plan?.beats);
+    const next =
+      shot.id === action.shot
+        ? order.filter((id) => id === action.beat || claimed.includes(id))
+        : claimed.filter((id) => id !== action.beat);
+    if (next.length !== claimed.length || next.some((id, i) => id !== claimed[i])) {
+      shot.data.plan = { ...shot.data.plan, beats: next };
+      mark(shot);
+    }
+  }
+  return { id: scene.id };
+}
 function moveChapterAction(project, action, _ctx) {
   const chapters = storyChapters(project),
     index = chapters.findIndex((row) => row.id === action.id),
@@ -711,6 +756,13 @@ function addVoiceGroupAction(project, action, { profile }) {
   changedProfile(project, profile);
   return { id: profile.id };
 }
+// Structured story-bible fields (story-bible.js): body, expressions, speaker, anchors…
+function bibleAction(project, action, { profile }) {
+  if (!validBiblePatch(project, profile, action.patch)) return false;
+  applyBiblePatch(profile, action.patch);
+  changedProfile(project, profile);
+  return { id: profile.id };
+}
 const SHOT_AND_PAGE_ACTIONS = {
   project: projectAction,
   add: addAction,
@@ -720,6 +772,9 @@ const SHOT_AND_PAGE_ACTIONS = {
   addChapter: addChapterAction,
   renameChapter: renameChapterAction,
   sceneScript: sceneScriptAction,
+  sceneBeats: sceneBeatsAction,
+  sceneIntent: sceneIntentAction,
+  claimBeat: claimBeatAction,
   moveChapter: moveChapterAction,
   update: updateGroupAction,
   drop: updateGroupAction,
@@ -735,6 +790,7 @@ const SHOT_AND_PAGE_ACTIONS = {
 };
 const PROFILE_ACTIONS = {
   profile: profileAction,
+  bible: bibleAction,
   addVariant: addVariantAction,
   variant: variantAction,
   fileImage: fileImageGroupAction,

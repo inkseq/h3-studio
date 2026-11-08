@@ -6,6 +6,7 @@ import { modelsVisible, profileTier } from './model-visibility.js';
 /* Layout A projection of the existing v4 document. No second project store. */
 import { children } from './store.js';
 import { effectiveLimits, effectiveControlSchema, roleSupported } from './quick-chat-model.js';
+import { bibleOf } from './story-bible.js';
 const uid = (kind) => kind + '-' + crypto.randomUUID();
 const find = (p, id) => p.entities.find((e) => e.id === id);
 const mode = (shot) => shot.data.storyboard?.mode || shot.data.h3?.inputMode || 'fl';
@@ -110,6 +111,7 @@ function storyboardProfiles(project) {
         voice: list(e.data.voices).find((v) => v.id === e.data.mainVoiceId)?.assetId || '',
         voiceId: typeof e.data.voiceId === 'string' ? e.data.voiceId : '',
         voices: list(e.data.voices).map((v) => ({ asset: v.assetId, start: v.clipStart || 0 })),
+        bible: bibleOf(e),
         ambient: e.data.ambient?.assetId || '',
         ambientStart: e.data.ambient?.clipStart ?? 0,
         variants: variants.map((v) => ({

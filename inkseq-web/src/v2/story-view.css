@@ -1402,14 +1402,13 @@ body.sb-resizing-y video {
 .timeline .track.video .playhead {
   top: -12px;
   bottom: 0;
-  width: 3px;
-  /* Drawn just before its time, so at 0:00 the line sits in the gutter, off the picture. */
-  margin-left: -2px;
+  width: 2px;
+  /* Centred on its exact time, so at 0:00 it sits on the first shot's left edge and lines up
+     with the selected outline and the ruler (owner, 2026-11-09). */
+  margin-left: -1px;
   background: var(--white);
-  border-radius: 0 0 2px 2px;
-  box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.55),
-    0 0 6px rgba(0, 0, 0, 0.35);
+  border-radius: 0 0 1px 1px;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.6);
   pointer-events: auto;
   cursor: grab;
   touch-action: none;

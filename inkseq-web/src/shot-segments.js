@@ -55,3 +55,37 @@ export function clock(seconds) {
     s = seconds - m * 60;
   return m + ':' + (s < 10 ? '0' : '') + s.toFixed(s % 1 ? 1 : 0);
 }
+
+// Play stretches of a take back to back and stop on the last end. Checks every frame, not
+// on `timeupdate` (about 4 times a second), which let the playhead run past the part
+// (owner, 2026-11-09). A new call, or the viewer pausing, ends the previous run.
+export function playRanges(video, ranges) {
+  if (!video || !ranges.length) return;
+  video.stopRanges?.();
+  let index = 0,
+    frame = 0;
+  const stop = () => {
+    cancelAnimationFrame(frame);
+    video.removeEventListener('pause', stop);
+    if (video.stopRanges === stop) delete video.stopRanges;
+  };
+  const tick = () => {
+    const part = ranges[index];
+    if (video.currentTime >= part.end) {
+      index += 1;
+      if (index >= ranges.length) {
+        stop();
+        video.pause();
+        video.currentTime = part.end;
+        return;
+      }
+      video.currentTime = ranges[index].start;
+    }
+    frame = requestAnimationFrame(tick);
+  };
+  video.stopRanges = stop;
+  video.currentTime = ranges[0].start;
+  video.addEventListener('pause', stop);
+  frame = requestAnimationFrame(tick);
+  Promise.resolve(video.play()).catch(stop);
+}

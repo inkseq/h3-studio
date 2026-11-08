@@ -1,6 +1,7 @@
 import { WorkbenchBulk } from './StoryboardWorkbench.jsx';
 import { Button } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
+import { sceneBeats } from './script-beats.js';
 import { STAGES, chapterFrom, stageFrom, withStage } from './story-stage.js';
 import { DEFAULT_CHAPTER_NAMES, sceneHeading } from './story-headings.js';
 import { StoryScript } from './StoryScript.jsx';
@@ -599,6 +600,8 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       id: scene.id,
       title: scene.title,
       script: scene.data?.script || '',
+      beats: sceneBeats(scene),
+      intent: typeof scene.data?.intent === 'string' ? scene.data.intent : '',
       chapterId: scene.parentId,
       shots: shots.filter((shot) => shot.entity?.parentId === scene.id),
     }));

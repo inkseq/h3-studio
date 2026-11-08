@@ -129,3 +129,90 @@
     padding: 14px 12px 48px;
   }
 }
+/* Scene intent and beats (script-beats.js): one row per beat, the claiming shot on the right. */
+.script-intent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 4px 0 6px;
+}
+.script-intent-label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+.script-source {
+  margin: 6px 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.script-beats {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+.script-beats-sum {
+  font-size: var(--fs-xs);
+}
+.script-beat-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.script-beat {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  align-items: start;
+  padding: 6px 0 6px 8px;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
+}
+.script-beat.line {
+  border-left-color: var(--accent-soft);
+}
+.script-beat.unclaimed {
+  border-left-color: var(--warn);
+}
+.script-beat.shared {
+  border-left-color: var(--bad);
+}
+.script-beat-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.script-beat-who {
+  display: grid;
+  grid-template-columns: minmax(0, 12em) minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+}
+.script-beat.line .script-beat-body > .script-text {
+  font-weight: 500;
+}
+.script-beat-side {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.script-beats-add,
+.script-beats-start {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+@media (max-width: 640px) {
+  .script-beat {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .script-beat-who {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.script-beat-side > small {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}

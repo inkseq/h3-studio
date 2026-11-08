@@ -5,33 +5,10 @@ import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { Button } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { FloatingMessage } from './floating-notice.js';
-import { segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
+import { playRanges, segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
 import './shot-segments.css';
 
 const secs = (value) => String(Math.round(value * 10) / 10);
-
-// Play the kept parts one after another, skipping what lies between them.
-function playParts(video, parts) {
-  if (!video || !parts.length) return;
-  let index = 0;
-  const step = () => {
-    const part = parts[index];
-    if (video.currentTime < part.end) return;
-    index += 1;
-    if (index >= parts.length) {
-      video.pause();
-      video.removeEventListener('timeupdate', step);
-      return;
-    }
-    video.currentTime = parts[index].start;
-  };
-  video.currentTime = parts[0].start;
-  video.addEventListener('timeupdate', step);
-  video.addEventListener('pause', () => video.removeEventListener('timeupdate', step), {
-    once: true,
-  });
-  Promise.resolve(video.play()).catch(() => {});
-}
 
 const MIN_PART = 0.25;
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -297,7 +274,7 @@ export default function ShotSegments({ shot, getVideo, duration, trim }) {
           className="keep-label"
           hidden={!cut}
           disabled={!list.length}
-          onClick={() => playParts(getVideo(), list)}
+          onClick={() => playRanges(getVideo(), list)}
         >
           <Play size={13} />
           {t('segments.playAll')}
