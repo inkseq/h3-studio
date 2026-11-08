@@ -724,6 +724,15 @@ class StoryboardPureTests(unittest.TestCase):
             ],
         )
         self.assertNotIn("audio_conditioning", shot["data"]["h3"]["controls"])
+        # The engine is picked after this check, so the generic recipe must let
+        # soundtrack through (staging refused every track shot, 2026-11-08).
+        planned = plan_body(
+            self.project, "shot-one", self.native(), lambda a, s, e: f"{a}-{s}-{e}"
+        )
+        self.assertEqual(planned["controls"]["audio_conditioning"], "soundtrack")
+        self.assertEqual(
+            planned["inputs"]["audios"], [{"asset_id": "receipt-voice-other-0-5"}]
+        )
         before = source_snapshot(self.project, "shot-one")
         self.find("voice-other")["data"]["fileId"] = "changed"
         self.assertNotEqual(before, source_snapshot(self.project, "shot-one"))
