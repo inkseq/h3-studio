@@ -528,7 +528,11 @@ class TakeReviews:
                             raise Conflict("take_review_duplicate_mark_id")
                         value["marks"].append(
                             {
-                                **{k: item[k] for k in TakeMark.model_fields if k in item},
+                                **{
+                                    k: item[k]
+                                    for k in TakeMark.model_fields
+                                    if k in item
+                                },
                                 "id": mark_id,
                             }
                         )
