@@ -68,6 +68,7 @@ def guard(guided, settings, project, actions, plan, proposal, *, enabled, lang):
     generation_refused = bool(blocked) and bool(selected)
     if picture_refused and proposal:
         proposal.pop("picture_card_ids", None)
+        proposal.pop("picture_sources", None)
     if generation_refused and proposal:
         proposal["shot_ids"] = []
         proposal.pop("risk_review", None)

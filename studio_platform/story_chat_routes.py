@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from .google_chat import ChatError, GoogleChatClient
 from . import llm_tracing, story_chat_advice, story_chat_undo
 from .repository import Conflict
+from .story_chat_photos import with_photos
 from .story_chat import (
     INKY_DAILY_TURNS,
     INKY_FOCUS,
@@ -227,6 +228,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
 
             reject_managed(row["payload"])
         return row
+
+    def read_photos(principal, project_id, project, ids, use):
+        """Owned, ready photo previews for a turn or a picture; refuses before any write."""
+        from .story_chat_photos import PhotoError, read
+
+        try:
+            return read(app.state.assets, principal, project_id, project, ids, use)
+        except PhotoError as error:
+            _fail(
+                error.code,
+                error.status,
+                **{"nothing_written" if use == "turn" else "nothing_charged": True},
+                **error.detail,
+            )
 
     def pictures_enabled():
         from .story_chat_settings import read as read_settings
@@ -478,7 +493,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         if (
             not isinstance(body, dict)
             or not {"turn_id", "text"} <= set(body)
-            or set(body) - {"turn_id", "text", "script", "inky"}
+            or set(body) - {"turn_id", "text", "script", "inky", "photos"}
             or body.get("script", True) is not True
         ):
             _fail("story_chat_invalid", 422, field="body")
@@ -487,6 +502,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         if "inky" in body and (
             principal.machine
             or "script" in body
+            or "photos" in body
             or not isinstance(inky, dict)
             or set(inky) != {"shot_id"}
             or not (inky["shot_id"] is None or isinstance(inky["shot_id"], str))
@@ -545,6 +561,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             limit = settings.story_chat_connection_daily_turns
             if connection_turns_today(principal) >= limit:
                 _fail("story_chat_connection_daily_limit", 429, limit=limit)
+        # The person's own pictures, seen by the model as bounded previews (#726).
+        attached = read_photos(
+            principal, project_id, row["payload"], body.get("photos"), "turn"
+        )
         chat = story_chat_advice.turn_chat(chat, text)
         with llm_tracing.observe(
             "story-chat-turn",
@@ -556,16 +576,21 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 "machine": principal.machine,
                 "prompt": "story_assistant",
                 "prompt_version": llm_tracing.digest(INSTRUCTION),
+                "photos": len(attached),
             },
         ) as traced:
             try:
-                result = model_client().generate(
-                    MODEL,
+                messages = with_photos(
                     prompt_messages(
                         row["payload"],
                         chat,
                         SCRIPT_NOTE + text if is_script else note + text,
                     ),
+                    attached,
+                )
+                result = model_client().generate(
+                    MODEL,
+                    messages,
                     story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
                     # A whole script can come back as dozens of shots.
                     max_tokens=16384 if is_script else 4096,
@@ -646,6 +671,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 proposal,
                 actor=principal.actor_id if principal.machine else None,
                 via="inky" if inky is not None else None,
+                photos=[photo["id"] for photo in attached],
             )
             story_chat_undo.remember(
                 app, principal, project_id, turn_id, version, project
@@ -700,11 +726,13 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         if (
             not isinstance(body, dict)
             or not {"request_id", "card_id"} <= set(body)
-            or set(body) - {"request_id", "card_id", "instruction"}
+            or set(body) - {"request_id", "card_id", "instruction", "photo_ids"}
         ):
             _fail("story_chat_invalid", 422, field="body")
         request_id, card_id = body["request_id"], body["card_id"]
         instruction = body.get("instruction", "")
+        # Attached photos used as material for this picture (#726); part of its hash.
+        photo_ids = body.get("photo_ids") or []
         if not isinstance(request_id, str) or not REQUEST_ID.fullmatch(request_id):
             _fail("story_chat_invalid", 422, field="request_id")
         if (
@@ -772,6 +800,12 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     ref=card_id,
                     nothing_charged=True,
                 )
+        # Read the material before any hold: an unusable photo charges nothing.
+        sources = (
+            read_photos(principal, project_id, row["payload"], photo_ids, "picture")
+            if started is None and attached is None
+            else []
+        )
         reference = "story_chat_image:" + request_id
         scope = app.state.scope(principal, project_id)
         original = None
@@ -802,7 +836,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             # Same request id, same request: the incoming instruction must reproduce the
             # original hash against the IMMUTABLE start snapshot (not today's edited card).
             if (
-                input_hash(started["project"], snapshot_card, instruction)
+                input_hash(started["project"], snapshot_card, instruction, photo_ids)
                 != original["input_hash"]
             ):
                 _fail("story_chat_image_request_conflict", 409, field="instruction")
@@ -815,7 +849,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             # The material the original request froze; replays never re-derive it.
             "input_hash": original["input_hash"]
             if original
-            else input_hash(row["payload"], card or {}, instruction),
+            else input_hash(row["payload"], card or {}, instruction, photo_ids),
             "actor_id": scope.actor_id,
         }
 
@@ -925,7 +959,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                         nothing_charged=True,
                     )
                 if (
-                    input_hash(row["payload"], card, instruction)
+                    input_hash(row["payload"], card, instruction, photo_ids)
                     != binding["input_hash"]
                 ):
                     # The card changed after the price was frozen: draw nothing rather
@@ -951,9 +985,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 app.state.assets, principal, project_id, [r for r in rows if r]
             )
             mime, data = holder["image"].generate(
-                prompt_for(row["payload"], card, instruction, pictures),
+                prompt_for(row["payload"], card, instruction, pictures, sources),
                 aspect_for(card),
-                pictures,
+                [*pictures, *sources],
             )
         except ImageError as error:
             release(RELEASE_REASON.get(error.code, "provider_failed"))

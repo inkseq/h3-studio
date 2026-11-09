@@ -27,6 +27,7 @@ ASPECT = {"character": "3:4", "location": "16:9", "prop": "1:1"}
 STYLE = prompt_sections("card_picture_styles")
 FIRST_FRAME = prompt_sections("first_frame")
 MATCH_STYLE = prompt_text("card_picture_match")
+PHOTO = prompt_text("card_picture_photo")
 MAX_CARD_TEXT = 400
 
 
@@ -152,7 +153,15 @@ def without_speech(text):
     return " ".join(SPEECH.sub("", text or "").split())
 
 
-def shot_prompt(project, card, style, instruction, pictures=()):
+def photo_lines(pictures, sources):
+    """Attached photos used as material (#726), numbered after the card pictures."""
+    return [
+        PHOTO.format(number=number)
+        for number, _ in enumerate(sources, len(pictures) + 1)
+    ]
+
+
+def shot_prompt(project, card, style, instruction, pictures=(), sources=()):
     """The first moment of a shot (#1039), composed from the shot's own cards."""
     context = shot_context(project, card)
     rows = reference_cards(project, card)
@@ -176,6 +185,7 @@ def shot_prompt(project, card, style, instruction, pictures=()):
             )
             for number, item in enumerate(pictures, 1)
         ]
+    parts += photo_lines(pictures, sources)
     if style.strip():
         parts.append("Overall film style: " + style.strip()[:2000])
     if instruction.strip():
@@ -184,10 +194,10 @@ def shot_prompt(project, card, style, instruction, pictures=()):
     return "\n".join(parts)
 
 
-def prompt_for(project, card, instruction="", pictures=()):
+def prompt_for(project, card, instruction="", pictures=(), sources=()):
     style = (project.get("journey", {}).get("storyboard") or {}).get("style", "")
     if card["type"] == "shot":
-        return shot_prompt(project, card, style, instruction, pictures)
+        return shot_prompt(project, card, style, instruction, pictures, sources)
     parts = [
         STYLE[card["type"]],
         f"Subject: {card.get('title', '').strip()}.",
@@ -197,6 +207,7 @@ def prompt_for(project, card, instruction="", pictures=()):
         parts.append("Overall film style: " + style.strip()[:2000])
     if pictures:
         parts.append(MATCH_STYLE)
+    parts += photo_lines(pictures, sources)
     if instruction.strip():
         parts.append("Change requested: " + instruction.strip()[:1000])
     parts.append("No text, captions, watermarks or borders.")
@@ -392,7 +403,7 @@ def older_settings_in_use(project, card):
     return any(link.get("target") == card["id"] for link in project.get("links", []))
 
 
-def input_hash(project, card, instruction):
+def input_hash(project, card, instruction, photos=()):
     """What a picture was drawn from; a replay with different material conflicts."""
     import hashlib
     import json
@@ -417,6 +428,13 @@ def input_hash(project, card, instruction):
         value["references"] = reference_cards(project, card)
     else:
         value["style_reference"] = style_card(project, card)
+    if photos:
+        # Attached material photos (#726); absent for every older request.
+        lookup = {e["id"]: e for e in project.get("entities", [])}
+        value["photos"] = [
+            [ident, ((lookup.get(ident) or {}).get("data") or {}).get("cloudAssetId")]
+            for ident in photos
+        ]
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
