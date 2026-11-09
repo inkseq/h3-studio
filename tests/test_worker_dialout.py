@@ -305,5 +305,33 @@ class BootScriptTests(unittest.TestCase):
             )
 
 
+class TunnelRetryTests(unittest.TestCase):
+    def test_worker_tunnel_reconnects_within_seconds_after_a_server_restart(self):
+        # #1147: chisel's default backoff grows to 5 minutes after a deploy.
+        grant = {
+            "tunnel": {
+                "fingerprint": "fp=",
+                "user": "wabc",
+                "password": "secret",
+                "url": "https://staging.inkseq.com/v1/worker-tunnel",
+                "remotes": [[19001, 8199]],
+            }
+        }
+        seen = []
+
+        class Stop(Exception):
+            pass
+
+        with (
+            patch.object(dialout_boot.subprocess, "run", lambda c, **_: seen.append(c)),
+            patch.object(dialout_boot.time, "sleep", side_effect=Stop),
+        ):
+            with self.assertRaises(Stop):
+                dialout_boot.keep_tunnel(grant)
+        command = seen[0]
+        self.assertEqual(command[command.index("--max-retry-interval") + 1], "10s")
+        self.assertEqual(command[-1], "R:127.0.0.1:19001:127.0.0.1:8199")
+
+
 if __name__ == "__main__":
     unittest.main()
