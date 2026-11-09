@@ -18,6 +18,8 @@ import { store } from './store.js';
 import { useStoryboardMediaUrl } from './StoryboardMedia.jsx';
 import { cutFps } from './video-cut-model.js';
 import { captionTrack, orderedCues } from './caption-model.js';
+import { addCue, cuesFromLines, fillCuesFromLines, removeCue, setCue } from './caption-edit.js';
+import { CaptionControls, CaptionLane } from './FilmCaptionLane.jsx';
 import {
   CROSSFADES,
   clipSoundCrossfade,
@@ -338,7 +340,8 @@ export default function FilmEditor({
     [zoom, setZoom] = useState(null),
     [fitWidth, setFitWidth] = useState(800),
     [captions, setCaptions] = useState(true),
-    [selectedAudio, setSelectedAudio] = useState(null);
+    [selectedAudio, setSelectedAudio] = useState(null),
+    [selectedCue, setSelectedCue] = useState(null);
   const player = useRef(null),
     scroller = useRef(null),
     sourceVideo = useRef(null),
@@ -497,6 +500,12 @@ export default function FilmEditor({
     [included, sources, captions, cues, audioKey],
   );
   const x = useMemo(() => timeScale([], pps), [pps]);
+  // Caption cues as stored (seconds), for the editable lane.
+  const rawCues = orderedCues(captionTrack(project, chapterId).cues);
+  const hasLines = useMemo(
+    () => cuesFromLines(project, included, cutFps).length > 0,
+    [project, included],
+  );
   const laneWidth = Math.max(seconds * pps, 200);
   const playhead = () => frameRef.current / cutFps;
   const addAudio = async (asset, file, { wholeFilm = false } = {}) => {
@@ -830,6 +839,13 @@ export default function FilmEditor({
                   edit((p) => trimTrack(p, chapterId, id, side, delta, cutTimeline))
                 }
               />
+              <CaptionLane
+                cues={rawCues}
+                x={x}
+                width={laneWidth}
+                selected={selectedCue}
+                onSelect={setSelectedCue}
+              />
               <FilmPlayhead player={player} pps={pps} />
             </div>
           </div>
@@ -862,6 +878,23 @@ export default function FilmEditor({
               edit((p) => setTrackFade(p, chapterId, id, side, value, fadeMax))
             }
             onRemove={(id) => edit((p) => removeTrack(p, chapterId, id))}
+          />
+          <CaptionControls
+            cues={rawCues}
+            selected={selectedCue}
+            busy={busy}
+            hasLines={hasLines}
+            onAdd={() =>
+              edit((p) =>
+                setSelectedCue(addCue(p, chapterId, frameRef.current / cutFps, total / cutFps)),
+              )
+            }
+            onFill={() => edit((p) => fillCuesFromLines(p, chapterId, included, cutFps))}
+            onSet={(id, patch) => edit((p) => setCue(p, chapterId, id, patch, total / cutFps))}
+            onRemove={(id) => {
+              edit((p) => removeCue(p, chapterId, id));
+              setSelectedCue(null);
+            }}
           />
           <footer className="film-editor-foot muted">
             {/* Once the server exports in editor order without left-out shots (#347), say nothing. */}

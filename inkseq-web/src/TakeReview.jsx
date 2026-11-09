@@ -10,14 +10,18 @@ import { useStoryboardUI } from './storyboard-ui-context.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import {
+  CHOICES,
   TAGS,
+  choiceOf,
   fmtSeconds,
+  keptAfterCuts,
   marksBody,
   newMark,
   nextVerdict,
   rangeFrom,
+  withChoice,
 } from './take-review-model.js';
-import { playRanges } from './shot-segments.js';
+import { playRanges, segmentsAction, snapRange } from './shot-segments.js';
 import './take-review.css';
 
 function useDuration(mediaRef) {
@@ -33,9 +37,9 @@ function useDuration(mediaRef) {
   return duration;
 }
 
-export default function TakeReview({ shotId, artifactId, mediaRef }) {
+export default function TakeReview({ shotId, artifactId, mediaRef, chosen = false }) {
   const { t } = useI18n(),
-    { state, adapter } = useStoryboardUI(),
+    { state, adapter, dispatch } = useStoryboardUI(),
     client = useQueryClient(),
     duration = useDuration(mediaRef),
     bar = useRef(null);
@@ -172,14 +176,14 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
             key={mark.id}
             className={
               'take-review-mark ' +
-              mark.verdict +
+              choiceOf(mark) +
               (editing && !editing.isNew && editing.mark.id === mark.id ? ' editing' : '')
             }
             style={{ left: pct(mark.start_s), width: pct(mark.end_s - mark.start_s) }}
             aria-label={t('review.markLabel', {
               from: fmtSeconds(mark.start_s),
               to: fmtSeconds(mark.end_s),
-              verdict: t('review.range.' + mark.verdict),
+              verdict: t('review.range.' + choiceOf(mark)),
             })}
             onPointerDown={(e) => e.stopPropagation()}
             onClick={() => {
@@ -222,12 +226,11 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
             </Button>
             <Segmented
               label={t('review.rangeVerdict')}
-              value={draft.verdict}
-              onChange={(verdict) => setDraft({ verdict })}
-              options={[
-                { value: 'change', label: t('review.range.change') },
-                { value: 'keep', label: t('review.range.keep') },
-              ]}
+              value={choiceOf(draft)}
+              onChange={(choice) =>
+                setEditing((old) => ({ ...old, mark: withChoice(old.mark, choice) }))
+              }
+              options={CHOICES.map((value) => ({ value, label: t('review.range.' + value) }))}
             />
           </div>
           <div className="take-review-tags" role="group" aria-label={t('review.tags')}>
@@ -292,6 +295,28 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
         </div>
       )}
 
+      {chosen && marks.some((mark) => choiceOf(mark) === 'cut') && duration && (
+        <div className="take-review-apply">
+          <span className="muted small">{t('review.cutHelp')}</span>
+          <Button
+            size="sm"
+            onClick={async () => {
+              const parts = keptAfterCuts(duration, marks)
+                .map((part) => snapRange(part.start, part.end))
+                .filter(Boolean);
+              if (!parts.length) return setMessage(t('review.cutAll'));
+              const result = await dispatch({
+                type: 'workbenchAction',
+                action: segmentsAction(shotId, parts),
+              }).catch(() => ({ ok: false }));
+              setMessage(t(result?.ok === false ? 'review.failed' : 'review.cutApplied'));
+            }}
+          >
+            {t('review.applyCuts')}
+          </Button>
+        </div>
+      )}
+
       {marks.length > 0 && (
         <ol className="take-review-list">
           {marks.map((mark) => (
@@ -303,11 +328,11 @@ export default function TakeReview({ shotId, artifactId, mediaRef }) {
                   setEditing({ mark: { ...mark }, isNew: false });
                 }}
               >
-                <span className={'take-review-dot ' + mark.verdict} aria-hidden="true" />
+                <span className={'take-review-dot ' + choiceOf(mark)} aria-hidden="true" />
                 <span className="take-review-range">
                   {fmtSeconds(mark.start_s)} – {fmtSeconds(mark.end_s)}
                 </span>
-                <b>{t('review.range.' + mark.verdict)}</b>
+                <b>{t('review.range.' + choiceOf(mark))}</b>
                 <span className="take-review-row-tags">
                   {mark.tags.map((tag) => t('review.tag.' + tag)).join(' · ')}
                 </span>

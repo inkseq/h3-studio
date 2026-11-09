@@ -482,3 +482,51 @@ button.autosave-status {
   color: var(--white);
   text-shadow: none;
 }
+
+/* Caption lane (story redesign batch 4): cues on the cut timeline, click to edit. */
+.film-caption-lane {
+  position: relative;
+  min-width: 100%;
+  height: 30px;
+  margin-top: 6px;
+  border: 1px dashed var(--line-2, var(--line));
+  border-radius: 10px;
+}
+.film-caption-lane .film-caption-cue.film-caption-cue {
+  position: absolute;
+  top: 3px;
+  height: 22px;
+  min-height: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  justify-content: flex-start;
+}
+.film-caption-lane .film-caption-cue.film-caption-cue.on {
+  outline: 2px solid var(--accent);
+}
+.film-caption-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+.film-caption-edit {
+  display: flex;
+  flex: 1 1 320px;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.film-caption-edit .film-caption-time {
+  width: 72px;
+}
+.film-caption-edit .film-caption-text {
+  flex: 1;
+  min-width: 120px;
+}
