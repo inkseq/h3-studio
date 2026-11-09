@@ -237,12 +237,22 @@ class DstackPreview:
         now = self.repo.clock()
         with self.repo._budget_read() as connection:
             nodes = original_nodes(connection, self.settings.tenant_id)
+            excluded = set()
+            if demand_job_id is not None:
+                from .dstack_demand_start import excluded_download_machines
+
+                # Executors this job already stopped for a slow download.
+                excluded = excluded_download_machines(
+                    connection, self.settings.tenant_id, demand_job_id
+                )
 
             def denied(offer):
                 try:
                     executor = host_id(LIUM.id, offer.get("offer_id"))
                 except OperatorError:
                     return False  # Not an executor id: nothing to match a deny.
+                if executor in excluded:
+                    return True
                 policy = store.read(
                     connection, executor, nodes=nodes, now=now, provider=LIUM.id
                 )[0]
