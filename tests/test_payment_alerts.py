@@ -225,6 +225,43 @@ class PaymentAlertTests(unittest.TestCase):
         self.assertEqual(result["fulfillment"], [])
         self.assertEqual(len(result["processing"]), 1)
 
+    def test_expired_session_on_unpaid_purchase_is_not_stalled_processing(self):
+        # #1064: an expired checkout left in review has nothing to fulfil.
+        unpaid = self.payment()
+        self.signed(
+            unpaid,
+            kind="checkout.session.expired",
+            status="review",
+            obj={"payment_id": unpaid["id"], "payment_status": "unpaid"},
+        )
+        self.assertEqual(self.snapshot()["processing"], [])
+        # A paid purchase, an uncorrelated expiry and any other pending event
+        # type still alarm.
+        paid = self.payment(paid_at=620, status="paid")
+        self.signed(
+            paid,
+            kind="checkout.session.expired",
+            status="review",
+            obj={"payment_id": paid["id"], "payment_status": "unpaid"},
+        )
+        self.signed(
+            kind="checkout.session.expired",
+            status="review",
+            obj={"session_id": "cs_test_unknown", "payment_status": "unpaid"},
+        )
+        failed = self.payment()
+        self.signed(
+            failed,
+            kind="checkout.session.async_payment_failed",
+            status="review",
+            obj={"payment_id": failed["id"], "payment_status": "unpaid"},
+        )
+        ids = {item["id"] for item in self.snapshot()["processing"]}
+        self.assertEqual(len(ids), 3)
+        self.assertIn(paid["id"], ids)
+        self.assertIn(failed["id"], ids)
+        self.assertNotIn(unpaid["id"], ids)
+
     def test_uncorrelated_signed_paid_has_stable_uuid_without_raw_event_id(self):
         signed = self.signed(
             obj={"session_id": "cs_test_uncorrelated", "payment_status": "paid"}

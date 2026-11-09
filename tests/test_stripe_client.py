@@ -527,6 +527,30 @@ class StripeClientTests(unittest.TestCase):
         ):
             self.gateway.resolve_event(verified)
 
+    def test_expired_taxed_session_carries_gross_total_without_breakdown(self):
+        # #1064: this is the shape PaymentCore receives for an expired
+        # checkout with tax; the pack base (500) is not in the event.
+        expired = session(
+            url=None,
+            amount_total=550,
+            total_details={
+                "amount_tax": 50,
+                "amount_discount": 0,
+                "amount_shipping": 0,
+            },
+        )
+        verified = self.gateway.verify_event(
+            *self.signed(expired, kind="checkout.session.expired")
+        )
+        self.assertEqual(verified["object"]["amount_cents"], 550)
+        self.assertEqual(verified["object"]["payment_status"], "unpaid")
+        self.assertFalse(
+            {"base_amount_cents", "tax_amount_cents", "tax_behavior"}
+            & set(verified["object"])
+        )
+        self.assertEqual(self.gateway.resolve_event(verified), verified)
+        self.client.v1.checkout.sessions.retrieve.assert_not_called()
+
     def test_unpaid_completion_has_no_provider_fetch(self):
         verified = self.gateway.verify_event(*self.signed(session(url=None)))
         self.assertEqual(self.gateway.resolve_event(verified), verified)

@@ -226,6 +226,13 @@ def _context(value, *, event=False):
     return result
 
 
+def _unpaid_session(event):
+    """A Checkout Session event whose session was not paid moves no money."""
+    return event["type"].startswith("checkout.session.") and event["object"].get(
+        "payment_status"
+    ) in {"unpaid", "no_payment_required"}
+
+
 class PaymentCore:
     def __init__(self, repo, settings, *, terms_check=None):
         self.repo, self.settings, self.terms_check = repo, settings, terms_check
@@ -469,7 +476,14 @@ class PaymentCore:
             }
 
     @staticmethod
-    def _proof(row, obj, *, full=False):
+    def _proof(row, obj, *, full=False, unpaid_session=False):
+        """Original identity patch; a mismatch refuses the event.
+
+        ``unpaid_session``: an unpaid Checkout Session event (expired, failed
+        or completed unpaid) moves no money. Its webhook total includes any
+        tax but carries no breakdown, so a total at or above the base price
+        matches; one below it, or any other field change, does not (#1064).
+        """
         expected = {
             "payment_id": row["id"],
             "user_id": row["user_id"],
@@ -490,6 +504,12 @@ class PaymentCore:
             amount = original_price_amount(obj)
         except ValueError:
             raise PaymentError("payment_original_mismatch", 409) from None
+        untaxed_total = (
+            unpaid_session
+            and not {"base_amount_cents", "tax_amount_cents", "tax_behavior"} & set(obj)
+            and type(amount) is int
+            and amount >= row["amount_cents"]
+        )
         if (
             any(
                 key in obj and obj[key] != value
@@ -498,6 +518,7 @@ class PaymentCore:
             )
             or "amount_cents" in obj
             and amount != row["amount_cents"]
+            and not untaxed_total
         ):
             raise PaymentError("payment_original_mismatch", 409)
         columns = {
@@ -915,7 +936,12 @@ class PaymentCore:
                         "payment_verification_required",
                         row["id"],
                     )
-                patch = self._proof(row, obj, full=paid)
+                patch = self._proof(
+                    row,
+                    obj,
+                    full=paid,
+                    unpaid_session=_unpaid_session(value),
+                )
                 row.update(patch)
                 if "receipt_url" in obj:
                     row["receipt_url"] = obj["receipt_url"]

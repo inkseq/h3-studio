@@ -319,6 +319,53 @@ class PaymentTests(fixtures.CreditTests):
         self.assertEqual(self.rows(entries), [])
         self.assertEqual(self.balance()["balance"], 0)
 
+    def test_taxed_expired_and_unpaid_sessions_close_without_review(self):
+        # #1064: a session's webhook total includes tax (550 on a 500 pack)
+        # but carries no tax breakdown. The unpaid event was compared with the
+        # 500 base, went to review, left the checkout "created" and kept
+        # payment_processing_stalled on for good.
+        for kind, status in (
+            ("checkout.session.expired", "expired"),
+            ("checkout.session.async_payment_failed", "failed"),
+            ("checkout.session.completed", "created"),
+        ):
+            with self.subTest(kind=kind):
+                payment = self.purchase(key="taxed-" + kind)
+                event = self.event(
+                    payment, kind=kind, payment_status="unpaid", amount_cents=550
+                )
+                for key in ("payment_intent_id", "charge_id"):
+                    del event["object"][key]
+                self.assertEqual(self.process(event)["state"], "processed")
+                row = next(
+                    r
+                    for r in self.rows(payments)
+                    if r["id"] == payment["payment"]["id"]
+                )
+                self.assertEqual(row["status"], status)
+                self.assertIsNone(row["paid_at"])
+        self.assertEqual(self.rows(entries), [])
+
+    def test_unpaid_session_below_base_or_for_another_pack_still_reviews(self):
+        payment = self.purchase()
+        lower = self.event(
+            payment,
+            kind="checkout.session.expired",
+            payment_status="unpaid",
+            amount_cents=499,
+        )
+        result = self.process(lower)
+        self.assertEqual(result["state"], "review")
+        other = self.event(
+            payment,
+            kind="checkout.session.expired",
+            payment_status="unpaid",
+            amount_cents=550,
+            credits=900,
+        )
+        self.assertEqual(self.process(other)["state"], "review")
+        self.assertEqual(self.rows(payments)[0]["status"], "created")
+
     def test_refund_before_paid_retains_original_purchase_and_ceil_fraction(self):
         payment = self.purchase(credits_amount=101)
         self.process(self.event(payment, kind="charge.refunded", amount_refunded=2))
