@@ -377,6 +377,50 @@ class ExecutionProfileTests(unittest.TestCase):
             self.compiled("invented-profile")
         self.values.append(copy.deepcopy(self.values[0]))
         self.write()
+        # Two bindings for one tier: that tier fails closed, the other stays.
+        loaded = read_profiles(self.path)
+        self.assertNotIn((PRUNED, 'h3-base-fl2va-v1'), loaded)
+        self.assertIn((INT8, 'h3-base-fl2va-v1'), loaded)
+
+    def test_one_stale_entry_disables_only_its_own_tier_and_is_reported(self):
+        from studio_platform.execution_profiles import (
+            profile_problems,
+            validate_profiles,
+        )
+
+        self.assertEqual(validate_profiles(self.path), 2)
+        self.assertEqual(profile_problems(self.path), [])
+        compiled, fingerprint = self.compiled(INT8)
+        policies = ExecutionPolicies(self.settings, self.repo)
+        before = policies.evaluate(compiled, self.scope, fingerprint).execution
+        self.values[0]['engine_manifest_digest'] = 'sha256:' + '0' * 64
+        self.write()
+        with self.assertLogs(
+            'studio_platform.execution_profiles', level='ERROR'
+        ) as logs:
+            loaded = read_profiles(self.path)
+        self.assertEqual(list(loaded), [(INT8, 'h3-base-fl2va-v1')])
+        self.assertIn('execution_profile_entry_skipped index=0', logs.output[0])
+        self.assertEqual(
+            profile_problems(self.path),
+            [
+                {
+                    'index': 0,
+                    'profile_id': PRUNED,
+                    'recipe_id': 'h3-base-fl2va-v1',
+                    'reason': 'invalid_policy',
+                }
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, 'need a rebind: #0 '):
+            validate_profiles(self.path)
+        # The other tier's admission decision is unchanged.
+        after = policies.evaluate(compiled, self.scope, fingerprint).execution
+        self.assertEqual(after, before)
+        self.assertIsNotNone(after['policy_hash'])
+        self.assertEqual(after['deployment_profile_id'], INT8)
+        # A malformed file (not one entry) still fails as a whole.
+        self.path.write_text('{"schema_version": 1}', encoding='utf-8')
         with self.assertRaises(ValueError):
             read_profiles(self.path)
 

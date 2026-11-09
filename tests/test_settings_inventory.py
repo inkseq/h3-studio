@@ -1,5 +1,6 @@
 """Real stored reads, existing admin boundary and no inventory-driven writes."""
 
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -124,6 +125,16 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(len(envelope["file_sha256"]), 64)
         self.assertFalse(envelope["editable"])
         self.assertNotIn(str(f.profiles), str(rows))
+        # A stale entry is listed as skipped; the other entries stay.
+        document = json.loads(f.profiles.read_text(encoding="utf-8"))
+        document["policies"][0]["engine_manifest_digest"] = "sha256:" + "0" * 64
+        f.profiles.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertLogs("studio_platform.execution_profiles", level="ERROR"):
+            stale_rows, unavailable = inventory.model_items(f.settings, f.repo.clock())
+        self.assertEqual(len(unavailable), 1)
+        self.assertTrue(unavailable[0].startswith("model_limits:entry_skipped:"))
+        self.assertTrue(unavailable[0].endswith(":invalid_policy"))
+        self.assertEqual(len(stale_rows), len(rows) - 2)
 
     def test_start_rules_read_the_original_revision_without_provider_calls(self):
         import test_capacity_start_rules as rules_fixture

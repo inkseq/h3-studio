@@ -1736,6 +1736,17 @@ class MigrationGuardAndDeployment(unittest.TestCase):
                 )
             )
             verified = stack.enter_context(patch.object(maintenance, "verify_services"))
+            checked = stack.enter_context(
+                patch.object(maintenance, "profiles_check", return_value=2)
+            )
+            # A profile file that no longer validates stops before any restart.
+            checked.side_effect = release.ReleaseError(
+                "migration_execution_profiles_need_rebind"
+            )
+            with self.assertRaisesRegex(release.ReleaseError, "need_rebind"):
+                maintenance.apply_locked(self.root, COMMIT)
+            self.assertEqual((calls, writes), ([], []))
+            checked.side_effect = None
             maintenance.apply_locked(self.root, COMMIT)
             self.assertEqual(calls[0][0], ("stop", *maintenance.SHARED))
             update = next(args for args, _ in calls if "--force-recreate" in args)
@@ -1805,6 +1816,32 @@ class MigrationGuardAndDeployment(unittest.TestCase):
             self.assertEqual(
                 writes[-1]["status"], "migration_failed_needs_reconciliation"
             )
+
+    def test_profiles_check_runs_the_incoming_app_image_without_a_restart(self):
+        calls = []
+
+        def fake(base, directory, env, *args, **kwargs):
+            calls.append(args)
+            return output
+
+        with patch.object(maintenance, "compose", side_effect=fake):
+            output = b'Creating ...\n{"profiles": 4}\n'
+            self.assertEqual(maintenance.profiles_check("b", "d", {}), 4)
+            self.assertEqual(
+                calls[0][:7],
+                ("run", "--rm", "--no-deps", "-T", "--entrypoint", "python", "app"),
+            )
+            self.assertNotIn("up", calls[0])
+            for output in (b"", b'{"profiles": "4"}', b"not json"):
+                with self.assertRaisesRegex(release.ReleaseError, "need_rebind"):
+                    maintenance.profiles_check("b", "d", {})
+
+        def failing(*args, **kwargs):
+            raise release.ReleaseError("container_operation_failed_no_details_logged")
+
+        with patch.object(maintenance, "compose", side_effect=failing):
+            with self.assertRaisesRegex(release.ReleaseError, "need_rebind"):
+                maintenance.profiles_check("b", "d", {})
 
     def test_actual_stale_network_namespace_is_not_ready(self):
         app_id = "1" * 64

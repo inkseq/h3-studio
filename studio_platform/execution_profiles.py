@@ -1,10 +1,15 @@
 """Read exact operator-owned deployment bindings; no provider/runtime side effects."""
 
 import json
+import logging
 import os
 from pathlib import Path
+import re
 import stat
 import copy
+
+logger = logging.getLogger(__name__)
+_LABEL = re.compile(r"[A-Za-z0-9_.:-]{1,96}")
 
 
 def tested_envelope(profile_id, mode):
@@ -45,11 +50,49 @@ def read_profiles(path):
         meta.st_ctime_ns,
     )
     cached = _PROFILES_CACHE.get(str(path))
-    if cached is not None and cached[0] == key:
-        return copy.deepcopy(cached[1])
-    result = _read_profiles(path)
-    _PROFILES_CACHE[str(path)] = (key, result)
-    return copy.deepcopy(result)
+    if cached is None or cached[0] != key:
+        result, problems = _read_profiles(path)
+        for problem in problems:
+            # Logged once per file version; the admin settings view lists them too.
+            logger.error(
+                "execution_profile_entry_skipped index=%s profile=%s mode=%s reason=%s",
+                problem["index"],
+                problem["profile_id"],
+                problem["recipe_id"],
+                problem["reason"],
+            )
+        cached = _PROFILES_CACHE[str(path)] = (key, result, problems)
+    return copy.deepcopy(cached[1])
+
+
+def profile_problems(path):
+    """Entries skipped from the current file version; empty when all are valid."""
+    if path is None:
+        return []
+    read_profiles(path)
+    return copy.deepcopy(_PROFILES_CACHE[str(Path(path))][2])
+
+
+def validate_profiles(path):
+    """Strict deploy check: every entry must validate against this code."""
+    read_profiles(path)
+    problems = profile_problems(path)
+    if problems:
+        raise ValueError(
+            "Execution profiles need a rebind: "
+            + ", ".join(
+                f"#{p['index']} {p['profile_id']}/{p['recipe_id']} {p['reason']}"
+                for p in problems
+            )
+        )
+    return len(read_profiles(path))
+
+
+def _label(item, key):
+    value = item.get(key) if isinstance(item, dict) else None
+    if key == "recipe_ids" and isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    return value if isinstance(value, str) and _LABEL.fullmatch(value) else None
 
 
 def _read_profiles(path):
@@ -76,16 +119,38 @@ def _read_profiles(path):
             raise ValueError("Invalid execution profiles")
         from .execution_policy import validate_policy
 
-        result = {}
-        for item in value["policies"]:
-            policy = validate_policy(item)
+        result, problems, ambiguous = {}, [], set()
+
+        def skip(index, item, reason):
+            problems.append(
+                {
+                    "index": index,
+                    "profile_id": _label(item, "deployment_profile_id"),
+                    "recipe_id": _label(item, "recipe_ids"),
+                    "reason": reason,
+                }
+            )
+
+        # One stale entry (for example an old manifest digest) only disables its
+        # own tier; the others keep working and the skip is reported.
+        for index, item in enumerate(value["policies"]):
+            try:
+                policy = validate_policy(item)
+            except (ValueError, TypeError, KeyError, AttributeError):
+                skip(index, item, "invalid_policy")
+                continue
             if "deployment_profile_id" not in policy or len(policy["recipe_ids"]) != 1:
-                raise ValueError("Profile requires one explicit mode")
+                skip(index, item, "mode_not_explicit")
+                continue
             key = (policy["deployment_profile_id"], policy["recipe_ids"][0])
-            if key in result:
-                raise ValueError("Ambiguous execution profile")
+            if key in result or key in ambiguous:
+                # Two bindings for one tier: neither is trusted.
+                result.pop(key, None)
+                ambiguous.add(key)
+                skip(index, item, "ambiguous_binding")
+                continue
             result[key] = policy
-        return result
+        return result, problems
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, KeyError):
         raise ValueError("Execution profiles unavailable or invalid") from None
 

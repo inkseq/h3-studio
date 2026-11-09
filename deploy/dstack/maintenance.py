@@ -873,6 +873,30 @@ def stop_superseded_cpu(environment, *, remove=False):
             release.command(["rm", *identities], environment=environment, timeout=60)
 
 
+# Runs inside the incoming app image (never in this root helper), before any
+# restart. Older images lack validate_profiles; their read_profiles is strict.
+PROFILES_CHECK = """import json,os,pathlib
+import studio_platform.execution_profiles as profiles
+check=getattr(profiles,'validate_profiles',None) or profiles.read_profiles
+value=check(pathlib.Path(os.environ['SIXNINE_EXECUTION_PROFILES_FILE']))
+print(json.dumps({'profiles':value if type(value) is int else len(value)}))
+"""
+
+
+def profiles_check(base, directory, environment):
+    """A stale profile (for example an old manifest digest) blocks the release
+    before the app restarts, so a manifest change cannot ship without its rebind."""
+    try:
+        raw = compose(base, directory, environment, "run", "--rm", "--no-deps", "-T",
+            "--entrypoint", "python", "app", "-B", "-c", PROFILES_CHECK, timeout=120)
+        value = json.loads(raw.decode().strip().splitlines()[-1])
+    except (release.ReleaseError, ValueError, IndexError, UnicodeError):
+        raise release.ReleaseError("migration_execution_profiles_need_rebind") from None
+    release.require(type(value) is dict and set(value) == {"profiles"} and type(value["profiles"]) is int,
+                    "migration_execution_profiles_need_rebind")
+    return value["profiles"]
+
+
 def apply_locked(root, commit):
     """Caller holds existing release lock. Reconnect every shared CPU member."""
     storyboard_maintenance_fence(root)
@@ -913,6 +937,7 @@ def apply_locked(root, commit):
         if notify_layout(migration):
             stop_superseded_cpu(env, remove=True)
         return
+    profiles_check(base, directory, env)
     previous = state.get("current")
     release.write_state(root, {**state, "pending": commit, "status": "deploying_migration", "updated_at": time.time()})
     atomic(active_path, {**active, "pending": commit})
