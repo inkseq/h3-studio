@@ -128,3 +128,32 @@ flowchart TD
 ## 查真实记录
 
 配置好 Langfuse 后，每次模型调用都有记录：Jev、Terra 和出图记录发送的内容，Gemini 记录最后一条消息。快速对话这一轮还会记录 `prompt` 文件名和 `prompt_version`，这个版本号是 prompt 全文的摘要，内容一改就会变。
+
+### 记录里存了什么、存多久（#770，2026-11-10 核对）
+
+- 发出去的内容：Gemini 只记最后一条消息，Jev、Terra 和出图记发送的请求；每段最多 6000 字，超出截断。图片只记"发了几张"，不存图本身；不记凭据；用户只记成不可反推的编号（`u_` 加摘要），不记名字或邮箱。
+- 保存期限：Langfuse 项目目前**没有设置保存期限**（公开接口读到的项目信息里没有 retentionDays），记录会一直保留到手动删除。
+- 注销账号：现在**不会**删除这个人在 Langfuse 里的记录（记录按上面的编号存）。
+- 这两条要负责人决定：在 Langfuse 项目设置里定一个保存期限（可能需要付费套餐），以及注销账号时要不要按编号删掉记录（Langfuse 有删除记录的接口）。
+
+## 固定评测集
+
+改 prompt、换模型或改设置之前，先在同一批固定例子上跑一遍，结果在 Langfuse 的实验页里并排比较。
+
+| 评测集（Langfuse dataset） | 来源 | 打分 |
+|---|---|---|
+| `story-chat-conversations` | [`tests/fixtures/story-chat/eval-conversations.json`](../tests/fixtures/story-chat/eval-conversations.json)，#756 的 20 段对话 | 计划能否套用、总时长是否接近要求、镜头数、每轮耗时 |
+| `inky-text-cases` | [`tests/fixtures/inky/eval-cases.json`](../tests/fixtures/inky/eval-cases.json) 的文字题，#687 | Jev 的判断和人工标注是否一致、期望分 |
+
+```
+python tools/langfuse_evals.py upload                 # 把评测集放进 Langfuse，重复运行只更新同一批
+python tools/langfuse_evals.py run story-chat --limit 2 --run-name 改了什么
+python tools/langfuse_evals.py run inky --dry-run     # 只列出会跑哪些，不调用模型
+```
+
+- 走的是和线上一样的代码（同一份 prompt、解析和卡片规则），每次运行是 Langfuse 的一个实验，模型调用记在对应例子下面。
+- 凭据只从中央目录读：Langfuse 用 `langfuse--inkseq`，模型用应用自己的 Gemini 和 TypeSafe 配置，不用 OpenRouter。
+- 默认只跑 2 个例子；跑全集要明确加 `--limit`。
+- 评测集只放编出来的例子，不放用户的故事或图片。
+- 需要 `langfuse` 包（requirements.lock 里有，WSL 和应用环境都装了）。
+- 上传图片的题（upload_card）还留在单元测试里，没有放进 Langfuse。
