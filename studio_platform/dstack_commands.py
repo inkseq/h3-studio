@@ -71,6 +71,11 @@ class DstackCommands:
         )
         actor = _actor(self.settings.tenant_id, owner)
         digest = request_hash({"kind": "dstack_start", "body": body})
+        # Provider reads first, with no lock or connection held (#1148). The
+        # locked transaction below uses them only while the committed facts
+        # they depend on are unchanged; otherwise it reads live under the lock
+        # as before, so a concurrent start still sees the same refusal.
+        preread = self._start_preread(actor, body["preview_id"])
         with self.repo.transaction() as connection:
             if demand_job_id is not None:
                 from .identity import lock_account_gate
@@ -91,11 +96,16 @@ class DstackCommands:
                 connection, owner, actor, body["preview_id"], demand_job_id
             )
             now, capacity_snapshot, usage = self._admit_start_capacity(
-                connection, owner, value, profile
+                connection, owner, value, profile, preread=preread["capacity"]
             )
             original = require_preview_ram(value["request"], profile)
             host_selection = self._validate_start_hosts(
-                connection, profile, original, now, demand_job_id
+                connection,
+                profile,
+                original,
+                now,
+                demand_job_id,
+                hosts=preread["hosts"],
             )
             intent, continuing = self._reserve_start_intent(
                 connection,
@@ -195,12 +205,73 @@ class DstackCommands:
         profile = value["profile"]
         return value, demand, profile
 
-    def _admit_start_capacity(self, connection, owner, value, profile):
+    def _admit_start_capacity(self, connection, owner, value, profile, preread=None):
         from .capacity_lookahead_runtime import admit_capacity
 
-        return admit_capacity(self, connection, owner, value, profile)
+        return admit_capacity(self, connection, owner, value, profile, preread)
 
-    def _validate_start_hosts(self, connection, profile, original, now, demand_job_id):
+    def _start_preread(self, actor, preview_id):
+        """Provider reads one start needs, taken before its capacity lock (#1148).
+
+        Grants nothing: the locked transaction still validates the preview,
+        and uses a read only for the same request and unchanged node facts.
+        A provider error is kept and raised at its original place under the
+        lock, so a refused start keeps its original reason.
+        """
+        hosts = None
+        with self.repo.engine.connect() as connection:
+            preview = (
+                connection.execute(
+                    select(operator_previews.c.payload).where(
+                        operator_previews.c.id == preview_id,
+                        operator_previews.c.actor == actor,
+                    )
+                )
+                .scalars()
+                .first()
+            )
+        try:
+            original = preview["request"]
+            if (
+                preview["profile"]["backend"] == VASTAI.id
+                and original.get("host_selection") is not None
+            ):
+                approved = {
+                    r["offer_id"]: r["machine_id"]
+                    for r in original["host_selection"]["offers"]
+                }
+                request = request_from_document(original)
+                hosts = {"request": request_hash(original), "approved": approved}
+                client = self.capacity.client
+                try:
+                    fresh = client.vast_offer_mapping(request, clock=self.repo.clock)
+                    hosts["fresh"] = (fresh, None)
+                except Exception as error:  # Raised again under the lock.
+                    hosts["fresh"] = (None, error)
+                try:
+                    hosts["reusable"] = (
+                        client.reusable_hosts_confirmed(approved),
+                        None,
+                    )
+                except Exception as error:  # Raised again under the lock.
+                    hosts["reusable"] = (None, error)
+        except (KeyError, TypeError, AttributeError, ValueError):
+            hosts = None  # Not a usable Vast preview: the lock path decides.
+        return {"capacity": self.capacity_preread(), "hosts": hosts}
+
+    @staticmethod
+    def _preread_host(hosts, original, name):
+        """The unlocked read for this exact request, re-raising its error."""
+        if hosts is None or hosts["request"] != request_hash(original):
+            return False, None
+        value, error = hosts[name]
+        if error is not None:
+            raise error
+        return True, value
+
+    def _validate_start_hosts(
+        self, connection, profile, original, now, demand_job_id, hosts=None
+    ):
         """Re-read exact Vast offer identities before reserving the original intent."""
         host_selection = original.get("host_selection")
         if profile["backend"] == VASTAI.id:
@@ -218,9 +289,11 @@ class DstackCommands:
             # Re-read exact offer identities before any reservation. Stock
             # presence isn't allocation proof; a missing/changed mapping
             # refuses this new intent, without changing old paid runs.
-            fresh = self.capacity.client.vast_offer_mapping(
-                request_from_document(original), clock=self.repo.clock
-            )
+            known, fresh = self._preread_host(hosts, original, "fresh")
+            if not known:
+                fresh = self.capacity.client.vast_offer_mapping(
+                    request_from_document(original), clock=self.repo.clock
+                )
             current = {
                 r['offer_id']: r['machine_id']
                 for r in fresh['offers']
@@ -243,9 +316,15 @@ class DstackCommands:
                 ),
                 "host_offer_identity_changed",
             )
-            self.capacity.client.reusable_hosts_confirmed(
-                {r["offer_id"]: r["machine_id"] for r in host_selection["offers"]}
-            )
+            approved = {
+                r["offer_id"]: r["machine_id"] for r in host_selection["offers"]
+            }
+            if not (
+                hosts is not None
+                and hosts["approved"] == approved
+                and self._preread_host(hosts, original, "reusable")[0]
+            ):
+                self.capacity.client.reusable_hosts_confirmed(approved)
             selection(host_selection, now=self.repo.clock())
         return host_selection
 

@@ -177,11 +177,6 @@ SCENARIOS = [
         hours=5,
         test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 3600},
         jobs=[JobBatch(0, 10)],
-        expected_failure=(
-            "the 1800 s allowance closes admission at created+1500 s, so both "
-            "machines idle out with 18 minutes of window and 4 jobs left "
-            "(dstack_test_budget.py:174; #1148 item 3)"
-        ),
     ),
     Scenario(
         "two_owner_profiles",
@@ -255,13 +250,6 @@ SCENARIOS = [
         prepare_seconds=30,
         observation_fresh_seconds=30,
         jobs=[JobBatch(0, 12, actual_runtime_s=300)],
-        expected_failure=(
-            'observation_fresh_seconds 30 is shorter than tick gap plus '
-            'claim-to-POST time, so every claim defers as '
-            'managed_dstack_readiness_unconfirmed while the queued work keeps both '
-            'machines billed (worker_admission.py:272-289; staging config moved to '
-            '120, the code caps it at 120: dstack_operator.py:142)'
-        ),
     ),
     Scenario(
         "provider_reads_hold_capacity_lock",
@@ -275,12 +263,6 @@ SCENARIOS = [
         prepare_seconds=30,
         observation_fresh_seconds=120,
         jobs=[JobBatch(0, 30, actual_runtime_s=300)],
-        expected_failure=(
-            'demand start holds the global capacity lock across its provider '
-            'reads, so worker claims and submit checks wait behind them '
-            '(dstack_demand_start.py:308,455; native_capacity_inventory.py:205; '
-            'postgres_dispatch.py:24; #1148 item 1)'
-        ),
     ),
     Scenario(
         "test_window_typical_fl",
@@ -290,12 +272,6 @@ SCENARIOS = [
         test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 7200},
         default_machine=MachineScript(download_seconds=900),
         jobs=[JobBatch(0, 30, actual_runtime_s=240)],
-        expected_failure=(
-            'admission uses the 1800 s FL reservation as the job runtime, so a '
-            'test machine stops admitting at created+5100 s and idles out with '
-            'part of its window and the queue left '
-            '(dstack_test_budget.py:174, worker_admission.py:196; #1148 item 3)'
-        ),
     ),
     Scenario(
         "budget_row_malformed",
@@ -307,12 +283,6 @@ SCENARIOS = [
         events=[
             Event(20 * 60, "corrupt_reservation", {"pool": "inkseq-staging-v9-fl"})
         ],
-        expected_failure=(
-            'one unreadable reservation row makes the whole task projection '
-            'dstack_test_budget_unconfirmed: every running test machine drains '
-            'and every start is refused (dstack_test_budget.py:351-372,584; '
-            'dstack_controller.py:836-853; #1148 item 4)'
-        ),
     ),
     Scenario(
         "slow_ticks_fresh_120",

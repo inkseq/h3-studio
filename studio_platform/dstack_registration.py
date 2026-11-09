@@ -142,14 +142,21 @@ class DstackRegistration:
         }
 
     def _limits(
-        self, connection, hourly, *, profile=None, request=None, capacity_snapshot=None
+        self,
+        connection,
+        hourly,
+        *,
+        profile=None,
+        request=None,
+        capacity_snapshot=None,
+        preread=None,
     ):
         from .control import (
             registration_capacity_projection,
             check_registration_capacity,
         )
 
-        usage = self.prelaunch_capacity_usage(connection)
+        usage = self.prelaunch_capacity_usage(connection, preread=preread, reread=True)
         limits = self.prelaunch_capacity_limits(
             connection,
             profile=profile,
@@ -164,11 +171,21 @@ class DstackRegistration:
         )
         return usage
 
-    def prelaunch_capacity_usage(self, connection):
-        """Use the same global overlay as registration under the capacity lock."""
+    def prelaunch_capacity_usage(self, connection, preread=None, *, reread=False):
+        """Use the same global overlay as registration under the capacity lock.
+
+        ``preread`` comes from ``capacity_preread`` before the lock; then only
+        committed facts are rechecked here and no provider is called (#1148).
+        """
         from .native_capacity_inventory import prelaunch_usage
 
-        return prelaunch_usage(self, connection)
+        return prelaunch_usage(self, connection, preread=preread, reread=reread)
+
+    def capacity_preread(self):
+        """Provider reads for ``prelaunch_capacity_usage``; call without a lock."""
+        from .native_capacity_inventory import capacity_preread
+
+        return capacity_preread(self)
 
     def _registration_resource_overlay(
         self, connection, nodes, intents, usage, observed_runs
@@ -315,7 +332,7 @@ class DstackRegistration:
             "unconfirmed_allocation_ids": tuple(unconfirmed_allocations),
         }
 
-    def registration_capacity_usage(self, connection, spec):
+    def registration_capacity_usage(self, connection, spec, preread=None):
         """Overlay proven dstack inactivity on ALL original global resources.
 
         WorkerControl holds the original capacity lock while this read runs.
@@ -367,7 +384,9 @@ class DstackRegistration:
             and len(spec.physical_gpu_ids) == 1,
             "dstack_registration_binding_invalid",
         )
-        usage, observed_runs = self._observed_registration_usage(nodes)
+        from .native_capacity_inventory import observed_usage
+
+        usage, observed_runs = observed_usage(self, nodes, preread, reread=True)
         current = next(
             observation
             for observation in usage["observations"]

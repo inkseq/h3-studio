@@ -292,7 +292,12 @@ def vast_share(policy, queued, work, now, machines):
     return vast_share(Rules.from_modal_first(policy), queued, work, now, machines)
 
 
-def _claim(service):
+# _claim returns this instead of a claim when a new allocation needs the live
+# provider reads; start_once takes them outside the capacity lock (#1148).
+NEEDS_PROVIDER_READ = object()
+
+
+def _claim(service, preread=None):
     from .dstack_demand import (
         _nodes,
         demand_configuration,
@@ -452,7 +457,25 @@ def _claim(service):
                 continue
             # Original commands and durable backoff are read before any live
             # provider GET. Only a genuinely new allocation needs capacity.
-            usage = service.prelaunch_capacity_usage(connection)
+            # The GETs never run under this lock: the first pass stops here,
+            # start_once reads the providers, and the second pass rechecks
+            # that the committed node facts they depend on are unchanged.
+            if preread is None:
+                return None, NEEDS_PROVIDER_READ
+            from .native_capacity_inventory import PREREAD_CHANGED
+            from .repository import BudgetExceeded
+
+            try:
+                usage = service.prelaunch_capacity_usage(connection, preread=preread)
+            except BudgetExceeded as error:
+                if error.args[:1] != (PREREAD_CHANGED,):
+                    raise
+                # Fail closed: nothing starts on this decision; no journal
+                # backoff either, so the next tick reads again.
+                return dict(
+                    _result('blocked', 'allocation_uncertain'),
+                    detail_code=PREREAD_CHANGED,
+                ), None
             counted = {
                 item['intent_id']: item
                 for item in usage['observations']
@@ -570,6 +593,10 @@ def _reason(error):
         return code
     if code in {'dstack_capacity_limit_exceeded', 'global_capacity_exceeded'}:
         return 'capacity_limit'
+    if code == 'dstack_capacity_read_changed':
+        # Capacity moved between the unlocked provider read and the locked
+        # recheck (#1148); nothing was reserved, the next decision reads again.
+        return 'allocation_uncertain'
     if 'budget' in code or 'spend' in code or 'limit_reached' in code:
         return 'budget_limit'
     if 'authority' in code or 'disabled' in code or 'demand_policy' in code:
@@ -636,7 +663,11 @@ def start_once(service):
             everyframe_balance=balance_observation(service.settings),
         )
     result, claim = _claim(service)
-    if claim is None:
+    if claim is NEEDS_PROVIDER_READ:
+        # dstack and provider GETs (30 s timeouts, retries) outside the global
+        # capacity lock that worker claims and submit checks also need.
+        result, claim = _claim(service, preread=service.capacity_preread())
+    if claim is None or claim is NEEDS_PROVIDER_READ:
         return result
     profile, job_id = claim['profile'], claim['job_id']
     try:

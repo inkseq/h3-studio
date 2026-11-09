@@ -1282,6 +1282,10 @@ class World(LedgerCase):
     def _consume(self, machine, worker_id):
         from studio_platform.postgres_dispatch import record_consumer
 
+        def live_readiness():
+            # The slot runner's own native readiness read (WanGPBackend).
+            return self.runtime.readiness(self.store.load(machine.intent_id), None)
+
         try:
             record_consumer(
                 self.repo,
@@ -1290,8 +1294,10 @@ class World(LedgerCase):
                     kind="wangp-worker",
                     slot_key=machine.intent_id,
                     expected_incarnation=machine.incarnation(),
+                    live_readiness=live_readiness,
                 ),
                 worker_id,
+                probe=True,
             )
         except (ValueError, Conflict):
             self.reasons["consumer:binding_changed"] += 1

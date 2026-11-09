@@ -228,8 +228,12 @@ def enforce(service, connection, value, profile, usage, now):
     )
 
 
-def admit_capacity(service, connection, owner, value, profile):
-    """Original admission gates, with lookahead rechecked before reservation."""
+def admit_capacity(service, connection, owner, value, profile, preread=None):
+    """Original admission gates, with lookahead rechecked before reservation.
+
+    ``preread`` holds the provider reads taken before the capacity lock
+    (#1148); under the lock only committed facts are rechecked.
+    """
     from .operator_capacity import OperatorError
     from .supplier_spending import admit as admit_supplier_spending
 
@@ -257,8 +261,11 @@ def admit_capacity(service, connection, owner, value, profile):
             "dstack_test_task_required",
             422,
         )
+        # An unreadable historical row counts at its reserved amount and is
+        # reported; it no longer refuses every start (#1148 item 4).
         require(
-            projected_cost(connection, guard, now) + value["reservation_microusd"]
+            projected_cost(connection, guard, now, contained={})
+            + value["reservation_microusd"]
             < guard_limit(guard),
             limit_reason(guard),
         )
@@ -277,6 +284,7 @@ def admit_capacity(service, connection, owner, value, profile):
         profile=profile,
         request=value["request"],
         capacity_snapshot=capacity_snapshot,
+        preread=preread,
     )
     enforce(service, connection, value, profile, usage, now)
     return now, capacity_snapshot, usage

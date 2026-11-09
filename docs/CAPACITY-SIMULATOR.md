@@ -35,8 +35,8 @@ Fake, in `tests/capacity_sim.py`:
 - `SimRuntime.readiness`: native boot progress (download, model load, failure,
   ready/busy) as `DstackError` codes with preparation receipts or `HostReadiness`.
 - `SimSlots` and `World.work/submit`: the DBOS slot and the worker loop
-  (consumer proof, heartbeat, claim, window check before the POST, progress,
-  collection). Media evidence validation is skipped; completion uses one fixed
+  (consumer proof with the slot's own native readiness read, heartbeat, claim,
+  window check before the POST, progress, collection). Media evidence validation is skipped; completion uses one fixed
   artifact.
 - The clock: one controller tick, then workers claim 2 s later and check the
   window `prepare_seconds` later. Ticks are 60 s, or random within
