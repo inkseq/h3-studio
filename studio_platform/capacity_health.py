@@ -272,7 +272,21 @@ def evaluate(
             # became ready; that lane then cools down alone (scheduling.health).
             from .scheduling.health import lane
 
-            empty_cycles.append((cycle[1], node["intent_id"], lane(node, now)))
+            ready_at = binding.get("first_runtime_ready_at")
+            # A machine that became ready after the queue drained, and idled
+            # out, is a start overshoot, not a broken dispatch loop. Count it
+            # only if matching work that was already waiting when it became
+            # ready is still waiting now (staging 2026-11-09, paused demand).
+            overshoot = finite(ready_at, now) and not any(
+                matching(node, job)
+                and finite(
+                    since := queue_ages.get(job["id"], job.get("created_at")), now
+                )
+                and since <= ready_at
+                for job in queued
+            )
+            if not overshoot:
+                empty_cycles.append((cycle[1], node["intent_id"], lane(node, now)))
         if (
             node["desired_state"] != "running"
             or binding.get("apply_started") is not True
