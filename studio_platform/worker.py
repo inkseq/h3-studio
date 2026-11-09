@@ -414,18 +414,6 @@ class WorkerRunner:
         from .capacity_reasons import submission_open
 
         return submission_open(self.control, job)
-        reason = "window_closed"
-        try:
-            if callable(getattr(type(self.control), "submission_block_reason", None)):
-                reason = self.control.submission_block_reason(job) or reason
-        except Exception as error:
-            reason = "check_failed_" + type(error).__name__
-        # The deferral itself still says worker_window_closed; keep the why.
-        count("defer", reason)
-        logging.getLogger(__name__).info(
-            "worker_submission_deferred job=%s reason=%s", job["id"][:8], reason
-        )
-        return False
 
     def _submission_blocked(self, job, lease):
         if not self._submission_allowed(job):
