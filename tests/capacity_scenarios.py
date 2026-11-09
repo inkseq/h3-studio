@@ -7,7 +7,7 @@ so the suite stays green while the bug stays visible. Fix the rule, and the
 scenario reports ``unexpected_pass``: then delete its ``expected_failure``.
 """
 
-from capacity_sim import Event, JobBatch, MachineScript, Scenario
+from capacity_sim import Event, JobBatch, MachineScript, Scenario, incident_scenarios
 
 # Boot of a healthy machine: 60 s allocation + 30 s runtime + 300 s download
 # + 60 s model load, about 7.5 minutes before the first claim.
@@ -294,3 +294,6 @@ SCENARIOS = [
         jobs=[JobBatch(0, 12, actual_runtime_s=300)],
     ),
 ]
+# Exported incidents (tests/fixtures/capacity_sim/incident_*.json) replay as
+# scenarios too: python tools/export_capacity_incident.py <intent_id>.
+SCENARIOS += incident_scenarios()

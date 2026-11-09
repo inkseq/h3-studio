@@ -126,6 +126,8 @@ def sanitized_event(event, hint=None):
                 "capacity_queue_age",
                 "capacity_demand_start_loop",
                 "capacity_controller_stale",
+                "capacity_download_overdue",
+                "capacity_start_blocked",
             }
             or type(tags.get("diagnosis")) is not str
             or tags["diagnosis"]
@@ -136,7 +138,17 @@ def sanitized_event(event, hint=None):
                 "queue_age",
                 "unserved_start_stop_loop",
                 "controller_stale",
+                "worker_unreachable",
+                "download_stalled",
+                "download_slow",
+                "download_unobserved",
+                "start_blocked",
             }
+            or "detail" in tags
+            and (
+                type(tags["detail"]) is not str
+                or re.fullmatch(r"[a-z][a-z0-9_:]{0,99}", tags["detail"]) is None
+            )
             or not isinstance(event.get("event_id"), str)
             or re.fullmatch(r"[0-9a-f]{32}", event["event_id"]) is None
         ):
@@ -146,7 +158,9 @@ def sanitized_event(event, hint=None):
             "level": "warning",
             "message": "capacity_health_alert",
             "event_id": event["event_id"],
-            "tags": {key: tags[key] for key in ("code", "diagnosis")},
+            "tags": {
+                key: tags[key] for key in ("code", "diagnosis", "detail") if key in tags
+            },
         }
         if event.get("environment") in ("staging", "production"):
             clean["environment"] = event["environment"]
@@ -210,12 +224,17 @@ def report_capacity_reclaim(client, receipt):
 def report_capacity_health(client, value):
     import uuid
 
+    tags = {"code": value["code"], "diagnosis": value["diagnosis"]}
+    # The exact reason code (blocker or top claim refusal); never free text.
+    detail = value.get("detail")
+    if isinstance(detail, str) and re.fullmatch(r"[a-z][a-z0-9_:]{0,99}", detail):
+        tags["detail"] = detail
     return client.capture_event(
         {
             "message": "capacity_health_alert",
             "level": "warning",
             "event_id": uuid.UUID(value["event_id"]).hex,
-            "tags": {"code": value["code"], "diagnosis": value["diagnosis"]},
+            "tags": tags,
         }
     )
 

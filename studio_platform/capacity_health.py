@@ -34,6 +34,41 @@ STOP_DIAGNOSES = {"host_runtime", "worker_unreachable"}
 # restarts the app and, with it, the tunnel the worker dials (#1140); chisel retries
 # with backoff, so give it a few minutes rather than stopping on the first miss.
 WORKER_LOST_GRACE_SECONDS = 600
+# A model download still running this long past the floor-rate time is overdue.
+DOWNLOAD_OVERDUE_SLACK_SECONDS = 300
+# Queued work, no live machine and demand start refusing: alert after 30 min.
+START_BLOCKED_SECONDS = 1800
+
+
+def download_overdue(binding, now):
+    """(started, diagnosis) for a download past its expected time, else None.
+
+    Expected time is the whole model at the owner's floor rate plus slack. The
+    controller stops a measured slow or stalled host itself; this catches the
+    case where it cannot, for example when readiness reads stop answering.
+    """
+    from .dstack_preparation import MIN_DOWNLOAD_BYTES_PER_SECOND
+
+    progress = binding.get("download_progress")
+    if not isinstance(progress, dict) or progress.get("valid") is not True:
+        return None
+    started, total = progress.get("started_at"), progress.get("bytes_total")
+    if (
+        progress.get("completed_at") is not None
+        or not finite(started, now)
+        or type(total) is not int
+        or total <= 0
+    ):
+        return None
+    expected = total / MIN_DOWNLOAD_BYTES_PER_SECOND + DOWNLOAD_OVERDUE_SLACK_SECONDS
+    if now - started <= expected:
+        return None
+    observed, last = progress.get("last_observed_at"), progress.get("last_progress_at")
+    if not finite(observed, now) or now - observed > 300:
+        return started, "download_unobserved"
+    if not finite(last, now) or now - last >= 300:
+        return started, "download_stalled"
+    return started, "download_slow"
 
 
 def worker_unreachable(binding, workers, now):
@@ -67,8 +102,10 @@ def finite(value, now):
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= now
 
 
-def finding(code, resource, since, diagnosis, *, node_ids=(), stop_replace=False):
-    return {
+def finding(
+    code, resource, since, diagnosis, *, node_ids=(), stop_replace=False, detail=None
+):
+    value = {
         "version": 1,
         "code": code,
         "resource_id": resource,
@@ -80,6 +117,10 @@ def finding(code, resource, since, diagnosis, *, node_ids=(), stop_replace=False
             {"code": code, "resource_id": resource, "since": since}
         ),
     }
+    if detail:
+        # The exact underlying reason code (blocker, top claim refusal).
+        value["detail"] = detail
+    return value
 
 
 def matching(node, job):
@@ -237,6 +278,17 @@ def evaluate(
             or binding.get("apply_started") is not True
         ):
             continue
+        overdue = download_overdue(binding, now)
+        if overdue is not None:
+            result.append(
+                finding(
+                    "capacity_download_overdue",
+                    node["intent_id"],
+                    overdue[0],
+                    overdue[1],
+                    node_ids=(node["intent_id"],),
+                )
+            )
         capable = binding.get("first_runtime_ready_at")
         if not finite(capable, now):
             capable = (
@@ -407,7 +459,76 @@ def snapshot(service, connection, now):
         demand_enabled=enabled,
         demand_enabled_since=policy["updated_at"] if policy else None,
     )
+    blocked = start_blocked(connection, tenant, nodes, job_rows, now)
+    if blocked is not None:
+        findings.append(blocked)
+    for value in findings:
+        if value["code"] == "capacity_paid_idle_queue":
+            reason = top_refusal(connection, value["resource_id"], now)
+            if reason:
+                value["detail"] = reason
     return findings, policy
+
+
+def start_blocked(connection, tenant, nodes, job_rows, now):
+    """Queued demand work, no live machine and starts refused for 30 minutes.
+
+    The demand timeline (capacity_timeline.py) holds the exact blocker code and
+    since when the queue has had no machine; this only reads its latest entry.
+    """
+    from .capacity_timeline import EVENT, demand_key
+
+    if any(node["desired_state"] == "running" for node in nodes) or not any(
+        job["status"] in QUEUED
+        and isinstance(job.get("execution_plan"), dict)
+        and job["execution_plan"].get("demand_start")
+        for job in job_rows
+    ):
+        return None
+    latest = connection.execute(
+        select(outbox.c.payload)
+        .where(
+            outbox.c.event_type == EVENT,
+            outbox.c.aggregate_id == demand_key(tenant),
+        )
+        .order_by(outbox.c.created_at.desc())
+        .limit(1)
+    ).scalar()
+    value = latest.get("value") if isinstance(latest, dict) else None
+    if not isinstance(value, dict) or value.get("stalled") is not True:
+        return None
+    since = value.get("stalled_since")
+    if not finite(since, now) or now - since <= START_BLOCKED_SECONDS:
+        return None
+    blocker = value.get("detail_code") or value.get("reason_code") or value.get("state")
+    return finding(
+        "capacity_start_blocked",
+        demand_key(tenant),
+        since,
+        "start_blocked",
+        detail=blocker if isinstance(blocker, str) else "unknown",
+    )
+
+
+def top_refusal(connection, intent_id, now):
+    """The most frequent claim refusal on a machine in the last 15 minutes."""
+    from .capacity_timeline import EVENT
+
+    for payload in connection.execute(
+        select(outbox.c.payload)
+        .where(
+            outbox.c.event_type == EVENT,
+            outbox.c.aggregate_id == intent_id,
+            outbox.c.created_at >= now - 900,
+        )
+        .order_by(outbox.c.created_at.desc())
+        .limit(50)
+    ).scalars():
+        if isinstance(payload, dict) and payload.get("code") == "claim_refused":
+            reasons = payload.get("detail", {}).get("reasons") or {}
+            if reasons:
+                return max(sorted(reasons), key=lambda name: reasons[name])
+    return None
 
 
 def observe_registered(service):
@@ -519,6 +640,18 @@ def record(service, value, *, policy_version=None):
                 },
             )
             return payload
+        if code == "capacity_start_blocked":
+            # One alert per blocked episode; the resource is the demand stream.
+            previous = connection.execute(
+                select(outbox.c.id)
+                .where(
+                    outbox.c.event_type == "capacity.health_alert",
+                    outbox.c.aggregate_id == value["resource_id"],
+                    outbox.c.payload["episode"].as_string() == value["episode"],
+                )
+                .limit(1)
+            ).first()
+            return None if previous else _event(connection, tenant, value, now)
         table, key = (
             (jobs, jobs.c.id)
             if code == "capacity_queue_age"
