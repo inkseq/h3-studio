@@ -778,7 +778,10 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
   // #232 (#6): dragged to its narrowest, the library is the same icon rail as collapsed.
   // World and Library are the same panel as a whole page: its people and places, or its files.
   const libraryPage = stage === 'world' ? 'world' : stage === 'library' ? 'files' : null,
-    wholePage = stage !== 'storyboard';
+    wholePage = stage !== 'storyboard',
+    // The shot panel belongs to the storyboard. Other steps keep the choice, so going back to
+    // the storyboard opens the same shot again.
+    shotPanel = selected && stage === 'storyboard';
   // The chapter Edit opens on: the one chosen, or else the one this story is on.
   const liveChapter = (id) => (chapters.some((chapter) => chapter.id === id) ? id : null),
     editChapterId =
@@ -813,9 +816,9 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         <StoryboardSplitter panel={library} label={t('storyboard.copy17')} />
       )}
       <div
-        className={'col' + (selected && !expanded ? ' with-drawer' : '')}
+        className={'col' + (shotPanel && !expanded ? ' with-drawer' : '')}
         ref={column}
-        style={selected && !expanded ? { '--drawer-w': drawer.size + 'px' } : undefined}
+        style={shotPanel && !expanded ? { '--drawer-w': drawer.size + 'px' } : undefined}
       >
         <main
           className="main"
@@ -1293,7 +1296,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       {/* Saving redraws this page. The script page is for typing, so the storyboard behind it waits
           for idle moments and keeps its place for the way back. */}
       <Activity mode={stage === 'script' ? 'hidden' : 'visible'}>{behindScript}</Activity>
-      {selected && stage !== 'script' && (
+      {shotPanel && (
         <aside
           hidden={theater}
           className={'drawer' + (expanded ? ' wide workbench-expanded' : '')}
