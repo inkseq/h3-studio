@@ -243,7 +243,10 @@ class StripeClientTests(unittest.TestCase):
         self.client.v1.checkout.sessions.create.assert_not_called()
         self.client.v1.prices.retrieve.return_value["livemode"] = False
         with self.assertRaisesRegex(StripeGatewayError, "price_mismatch"):
-            gateway.checkout(self.live_payment(), idempotency_key="wrong-price-mode")
+            # A fresh process has no verified-price memory.
+            self.live_gateway().checkout(
+                self.live_payment(), idempotency_key="wrong-price-mode"
+            )
 
     def test_live_off_preserves_signed_events_and_refuses_cross_mode_objects(self):
         gateway = self.live_gateway(mode="off")
@@ -716,6 +719,63 @@ class StripeClientTests(unittest.TestCase):
             StripeGatewayError, "billing_provider_response_invalid"
         ):
             self.gateway.checkout(payment(), idempotency_key="original")
+
+    def test_verified_price_is_reused_per_revision_until_ttl(self):
+        now = [1000.0]
+        gateway = StripeGateway(
+            self.settings, client_factory=self.factory, clock=lambda: now[0]
+        )
+        retrieve = self.client.v1.prices.retrieve
+        gateway.checkout(payment(), idempotency_key="first")
+        gateway.checkout(payment(), idempotency_key="second")
+        self.assertEqual(retrieve.call_count, 1)
+        self.assertEqual(self.client.v1.checkout.sessions.create.call_count, 2)
+        # A pack edit (new revision or amount) is checked again at once.
+        gateway.checkout({**payment(), "pack_revision": "r2"}, idempotency_key="r2")
+        self.assertEqual(retrieve.call_count, 2)
+        now[0] += 301
+        gateway.checkout(payment(), idempotency_key="after-ttl")
+        self.assertEqual(retrieve.call_count, 3)
+        # A mismatch is never remembered.
+        retrieve.return_value["active"] = False
+        now[0] += 301
+        for key in ("archived-1", "archived-2"):
+            with self.assertRaisesRegex(StripeGatewayError, "price_mismatch"):
+                gateway.checkout(payment(), idempotency_key=key)
+        self.assertEqual(retrieve.call_count, 5)
+
+    def test_failed_session_create_forgets_the_verified_price(self):
+        gateway = StripeGateway(self.settings, client_factory=self.factory)
+        retrieve = self.client.v1.prices.retrieve
+        gateway.checkout(payment(), idempotency_key="first")
+        self.client.v1.checkout.sessions.create.side_effect = (
+            stripe.InvalidRequestError("price archived", "line_items")
+        )
+        with self.assertRaisesRegex(StripeGatewayError, "billing_checkout_unknown"):
+            gateway.checkout(payment(), idempotency_key="second")
+        self.assertEqual(retrieve.call_count, 1)
+        self.client.v1.checkout.sessions.create.side_effect = None
+        gateway.checkout(payment(), idempotency_key="third")
+        self.assertEqual(retrieve.call_count, 2)
+
+    def test_one_client_per_process_and_credential(self):
+        factory = Mock(side_effect=lambda _config: self.client)
+        for _ in range(3):
+            StripeGateway(self.settings, client_factory=factory).checkout(
+                payment(), idempotency_key="reuse"
+            )
+        self.assertEqual(factory.call_count, 1)
+        self.client._requestor._client.close.assert_not_called()
+        # A rotated key builds a new client and closes the old one.
+        self.path.write_text(
+            json.dumps({**CONFIG, "secret_key": "sk_test_" + "r" * 32})
+        )
+        self.path.chmod(0o600)
+        StripeGateway(self.settings, client_factory=factory).checkout(
+            payment(), idempotency_key="rotated"
+        )
+        self.assertEqual(factory.call_count, 2)
+        self.client._requestor._client.close.assert_called_once_with()
 
     def test_sdk_factory_pins_api_version_and_fixed_endpoint(self):
         from studio_platform.stripe_client import _default_client
