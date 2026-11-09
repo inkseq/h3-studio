@@ -119,11 +119,14 @@ flowchart TD
   G -->|不通过| H[发原来的提示词]
 ```
 
-检查：六段齐全且顺序对；台词标签外没有中文；每句台词一字不差、顺序不变、说话人编号还在；每张发出去的图和每段声音都被引用，没有引用没发的。同样的输入只改写一次，结果留在内存里。
+首尾帧模式（只挂首帧、尾帧或纯文字，没有别的参考）的镜头也改写（#1086），用官方首尾帧格式的三段：`integrated_multimodal_description`、`overall_soundscape`、`non_diegetic_music`。首帧编号成 `<Picture 1>`，有尾帧时接着编号；人物、场景、道具都写成英文的通用身份（"the old ferryman"），不写卡片上的中文名字。
+
+检查：六段（首尾帧是三段）齐全且顺序对；台词标签外没有中文；每句台词一字不差、顺序不变、说话人编号还在；每张发出去的图和每段声音都被引用，没有引用没发的。同样的输入只改写一次，结果留在内存里。
 
 | 情况 | prompt 文件 |
 |---|---|
 | 把镜头改写成 H3 全参考格式 | [`h3_reference_prompt.md`](../studio_platform/prompts/h3_reference_prompt.md) |
+| 首尾帧镜头改写成 H3 官方首尾帧格式 | [`h3_frame_prompt.md`](../studio_platform/prompts/h3_frame_prompt.md) |
 
 ## 查真实记录
 
