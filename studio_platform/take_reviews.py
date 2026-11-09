@@ -45,11 +45,19 @@ class TakeMark(BaseModel):
         Literal["performance", "camera", "consistency", "subtitles", "quality", "other"]
     ] = Field(max_length=6)
     verdict: Literal["keep", "change"]
+    # What to do with a change range: trim it in the edit, fix it in post, or
+    # reshoot. Optional; only a change mark may carry one.
+    disposition: Literal["cut", "fix", "reshoot"] | None = None
     note: StrictStr = Field(max_length=500)
 
     @model_validator(mode="after")
     def bounds(self):
-        if self.start_s >= self.end_s or len(set(self.tags)) != len(self.tags):
+        if (
+            self.start_s >= self.end_s
+            or len(set(self.tags)) != len(self.tags)
+            or self.disposition is not None
+            and self.verdict != "change"
+        ):
             raise ValueError("take_review_mark_invalid")
         return self
 
@@ -143,7 +151,8 @@ def contract():
             ],
         },
         "semantics": "At least verdict or marks; omitted field is preserved. verdict:null retracts whole-take evaluation; marks:[] clears ranges. Marks replace the list, max50, unique IDs; notes max500; finite seconds inside immutable video duration; overlap allowed. Tags: "
-        + ", ".join(TAGS),
+        + ", ".join(TAGS)
+        + ". Optional disposition on a change mark: cut (trim in the edit), fix (fix in post) or reshoot.",
         "identity": "Scoped accepted artifact and original shot (verified migration aliases allowed), independent of selection/star. No imported or unproven take. No automatic verdict from marks, picks, stars, export or suggestions.",
         "recovery": "CAS409 does not mutate. Same key/body replays the small receipt; changed body409. GET full marks; replay still checks trash/purge fences. actor_kind is human/agent from authentication.",
         "privacy": "Notes only in current product review, no immutable receipt/analytics text. Explicit artifact/project purge redacts marks; no generation, charging or provider call.",
@@ -519,7 +528,7 @@ class TakeReviews:
                             raise Conflict("take_review_duplicate_mark_id")
                         value["marks"].append(
                             {
-                                **{k: item[k] for k in TakeMark.model_fields},
+                                **{k: item[k] for k in TakeMark.model_fields if k in item},
                                 "id": mark_id,
                             }
                         )
