@@ -8,8 +8,25 @@ from dataclasses import replace
 import hashlib
 
 from sqlalchemy import inspect, select, text
+from sqlalchemy.exc import OperationalError
 
 from .identity_schema import users, admin_audit
+
+# New admission waits at most this long for the account gate (#450). An
+# exclusive holder is account maintenance; a waiter gets a retryable refusal
+# instead of holding an API connection indefinitely.
+ADMISSION_GATE_WAIT_SECONDS = 5.0
+LOCK_NOT_AVAILABLE = "55P03"
+
+
+class AccountGateBusy(Exception):
+    """Account maintenance holds the gate; nothing was written. Retry later."""
+
+    code = "maintenance_try_again"
+    retry_after = 5
+
+    def __init__(self):
+        super().__init__(self.code)
 
 
 def _schema_state(connection):
@@ -30,7 +47,7 @@ def _schema_state(connection):
     return "partial" if revision in IDENTITY_REVISIONS else "legacy"
 
 
-def lock_account_gate(connection, tenant=None, *, exclusive=False):
+def lock_account_gate(connection, tenant=None, *, exclusive=False, wait_seconds=None):
     """Serialize future status writes with admission before any job/worker locks.
 
     This uses PostgreSQL's existing transaction lock facility; it creates no
@@ -51,7 +68,31 @@ def lock_account_gate(connection, tenant=None, *, exclusive=False):
         function = (
             "pg_advisory_xact_lock" if exclusive else "pg_advisory_xact_lock_shared"
         )
-        connection.execute(text("SELECT " + function + "(:key)"), {"key": key})
+        statement = text("SELECT " + function + "(:key)")
+        if wait_seconds is None:
+            connection.execute(statement, {"key": key})
+            return True
+        # Bound only this wait, on the caller's own transaction; the role and
+        # later row locks keep their configured timeouts.
+        previous = connection.execute(
+            text("SELECT current_setting('lock_timeout')")
+        ).scalar_one()
+        milliseconds = max(1, int(wait_seconds * 1000))
+        connection.execute(
+            text("SELECT set_config('lock_timeout', :value, true)"),
+            {"value": f"{milliseconds}ms"},
+        )
+        try:
+            connection.execute(statement, {"key": key})
+        except OperationalError as error:
+            if getattr(error.orig, "sqlstate", None) == LOCK_NOT_AVAILABLE:
+                # The transaction is aborted; the caller's rollback discards it.
+                raise AccountGateBusy() from None
+            raise
+        connection.execute(
+            text("SELECT set_config('lock_timeout', :value, true)"),
+            {"value": previous},
+        )
     return True
 
 

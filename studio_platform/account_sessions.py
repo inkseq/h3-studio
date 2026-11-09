@@ -17,7 +17,11 @@ from .auth import (
     _workos_session_shape,
     sessions,
 )
-from .identity import lock_account_gate
+from .identity import (
+    ADMISSION_GATE_WAIT_SECONDS,
+    AccountGateBusy,
+    lock_account_gate,
+)
 from .identity_schema import users
 from .repository import documents, request_hash
 from .session_authority import advance, read, write
@@ -155,8 +159,15 @@ class AccountSessions:
                 raise SessionUnavailable()
         except Exception:
             raise SessionUnavailable() from None
+        try:
+            return self._confirm_check(token_hash, row, binding, live, fingerprint)
+        except AccountGateBusy:
+            # Account maintenance: a bounded wait, then 503 + Retry-After.
+            raise SessionUnavailable() from None
+
+    def _confirm_check(self, token_hash, row, binding, live, fingerprint):
         with self.repo.transaction() as conn:
-            lock_account_gate(conn)
+            lock_account_gate(conn, wait_seconds=ADMISSION_GATE_WAIT_SECONDS)
             current = (
                 conn.execute(
                     select(sessions).where(

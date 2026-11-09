@@ -30,7 +30,7 @@
   "platform -> billing": 27,
   "platform -> capacity": 27,
   "platform -> creation": 39,
-  "platform -> identity": 33,
+  "platform -> identity": 34,
   "platform -> jobs": 30,
   "platform -> media": 33
  },
@@ -119,6 +119,7 @@
   "api_errors -> assets",
   "api_errors -> generation_diagnostics",
   "api_errors -> guided_schema",
+  "api_errors -> identity",
   "api_errors -> media",
   "api_errors -> quality_http",
   "api_errors -> quality_tiers",
