@@ -411,10 +411,9 @@ class WorkerRunner:
         """
         if isinstance(self.backend, MockBackend) or self.control is None:
             return True
-        try:
-            return self.control.submission_allowed(job) is True
-        except Exception:
-            return False
+        from .capacity_reasons import submission_open
+
+        return submission_open(self.control, job)
 
     def _submission_blocked(self, job, lease):
         if not self._submission_allowed(job):

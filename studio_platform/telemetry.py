@@ -80,6 +80,7 @@ ERROR_CODES = (
             "capacity_startup_timeout",
             "capacity_provider_removed",
             "capacity_dispatch_unavailable",
+            "capacity_worker_lost",
             "capacity_paid_idle_queue",
             "capacity_queue_age",
             "capacity_demand_start_loop",

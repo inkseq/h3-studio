@@ -703,10 +703,16 @@ def start_once(service):
         if isinstance(error, (OperatorError, BudgetExceeded)):
             changes.update(phase='backoff', preview_id=None)
         _finish(service, claim, **changes)
-        return _result(
+        result = _result(
             'blocked',
             reason
             if claim['action'] == 'plan'
             or isinstance(error, (OperatorError, BudgetExceeded))
             else 'allocation_uncertain',
         )
+        # Keep the exact refusal next to its group (budget_limit/capacity_limit
+        # cover several causes), so a blocked start says which one (#1140 item 4).
+        raw = getattr(error, 'code', None) or (error.args[0] if error.args else None)
+        if isinstance(raw, str) and raw and raw != result.get('reason_code'):
+            result['detail_code'] = raw[:80]
+        return result

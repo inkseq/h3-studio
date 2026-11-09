@@ -30,6 +30,10 @@ HOST_FAULTS = {"runtime_process_exited", "runtime_readiness_timeout", "CUDAUnava
 
 # Paid-idle diagnoses that may stop the machine so demand can replace it.
 STOP_DIAGNOSES = {"host_runtime", "worker_unreachable"}
+# How long a lost worker gets to come back before its machine is stopped (10 min). A deploy
+# restarts the app and, with it, the tunnel the worker dials (#1140); chisel retries
+# with backoff, so give it a few minutes rather than stopping on the first miss.
+WORKER_LOST_GRACE_SECONDS = 600
 
 
 def worker_unreachable(binding, workers, now):
@@ -41,19 +45,22 @@ def worker_unreachable(binding, workers, now):
     """
     if not finite(binding.get("first_runtime_ready_at"), now):
         return False
-    if any(
-        worker.get("state") in {"ready", "busy"}
-        and type(worker.get("expires_at")) in (int, float)
-        and worker["expires_at"] > now
-        for worker in workers
-    ):
+    lost_since = []
+    for worker in workers:
+        expires = worker.get("expires_at")
+        if type(expires) not in (int, float):
+            continue
+        if worker.get("state") in {"ready", "busy"} and expires > now:
+            return False
+        lost_since.append(min(expires, now))
+    # Only a runtime the controller read and could not confirm counts as lost.
+    # A "ready" binding that is merely old means nobody looked (for example the
+    # controller itself was down), never that the worker is gone.
+    if binding.get("state") in {"ready", "busy"}:
         return False
-    observed = binding.get("observed_at")
-    return not (
-        binding.get("state") in {"ready", "busy"}
-        and finite(observed, now)
-        and now - observed <= 120
-    )
+    # Stop only once the last sign of life is older than the grace window.
+    last = max(lost_since, default=None)
+    return last is None or now - last >= WORKER_LOST_GRACE_SECONDS
 
 
 def finite(value, now):
@@ -204,9 +211,16 @@ def evaluate(
             if finite(attempt.get("submission_started_at"), now)
         ]
         cycle = unserved_stop(node, related, now)
+        # A start the provider never allocated keeps demand start's own
+        # no-allocation backoff; it is not a start/stop loop (#1034
+        # two_no_capacity_starts paused demand for the whole tenant).
+        allocated = node.get("provider_instance_id") or binding.get(
+            "provider_instance_id"
+        )
         if (
             demand_enabled
             and cycle is not None
+            and (allocated or finite(binding.get("first_runtime_ready_at"), now))
             and now - loop_window_seconds <= cycle[0]
             and (
                 not finite(demand_enabled_since, now)

@@ -774,7 +774,9 @@ class DstackController:
                 return {
                     "node_id": intent_id,
                     "state": result["state"],
-                    "code": recovery["reason"],
+                    # A replayed stop (desired already stopped) has no new reason.
+                    "code": recovery.get("reason")
+                    or fenced["payload"].get("stop_reason_code"),
                 }
         return None
 
@@ -1244,7 +1246,15 @@ class DstackController:
             "health_check": self._health_check(force=closed_since_health),
             "demand_start": self._demand_start(),
             "invoice_check": self._invoice_check(),
+            # Claim and submission refusals by exact reason since the last tick.
+            "refusals": self._refusals(),
         }
+
+    @staticmethod
+    def _refusals():
+        from .capacity_reasons import drain
+
+        return drain()
 
     def _demand_start(self):
         """One decision through the original service, after existing idle cleanup.
@@ -1267,7 +1277,7 @@ class DstackController:
                 "observing",
             }:
                 raise ValueError("dstack_demand_start_result_invalid")
-            fields = ("state", "reason_code", "command_id", "node_id")
+            fields = ("state", "reason_code", "detail_code", "command_id", "node_id")
             value = {key: result[key] for key in fields if result.get(key) is not None}
             if any(
                 not isinstance(item, str) or not 1 <= len(item) <= 200

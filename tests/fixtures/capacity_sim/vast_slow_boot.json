@@ -1,0 +1,18 @@
+{
+  "description": "Shape of a slow Vast boot (synthetic values): 4 min allocation, 15 min download, 3 min load. Replace or add files with recorded fields; keep identifiers synthetic.",
+  "machine": {
+    "allocate_after": 240,
+    "running_after": 60,
+    "download_seconds": 900,
+    "load_seconds": 180,
+    "price": 0.62
+  },
+  "run": {
+    "latest_job_submission": {
+      "job_provisioning_data": {
+        "region": "us-west",
+        "price": 0.62
+      }
+    }
+  }
+}
