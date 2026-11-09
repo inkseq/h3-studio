@@ -56,6 +56,9 @@ inventory.json
 !tests/fixtures/inky/images/*.jpg
 !tools/
 !tools/ci_media_tools.py
+!tools/secret_scan.py
+!tools/rotate_key.py
+!tools/key-rotation.example.json
 !tools/ci_test_shards.py
 !tools/simulate_capacity.py
 !tools/ci_test_timings.json
@@ -1188,3 +1191,4 @@ inventory.json
 !studio_platform/speech_requests.py
 !tests/test_speech_credit_core.py
 !tests/test_speech_billing.py
+!.gitleaks.toml

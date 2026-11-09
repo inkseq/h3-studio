@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "targets": {
+    "example-provider": {
+      "service": "example-service",
+      "profile_prefix": "example-service--inkseq",
+      "env_field": "EXAMPLE_API_KEY",
+      "console_url": "https://provider.example/settings/api-keys",
+      "base_url": "https://api.provider.example/v1",
+      "parameter": {
+        "region": "ap-southeast-1",
+        "name": "/inkseq/staging/example",
+        "json_field": "api_key"
+      },
+      "hosts": {
+        "staging": {
+          "instance_id": "i-0123456789abcdef0",
+          "install": ".local/key-rotation/example-install.sh",
+          "verify": ".local/key-rotation/example-verify.sh"
+        }
+      }
+    }
+  }
+}
