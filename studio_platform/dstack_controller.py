@@ -546,7 +546,9 @@ class DstackController:
                 .mappings()
                 .one()
             )
-            for job in matching_dstack_queued_jobs(connection, intent, node):
+            for job in matching_dstack_queued_jobs(
+                connection, intent, node, admittable_at=self.repo.clock()
+            ):
                 by_id.setdefault(job["id"], job)
             # Expired, fenced, never-submitted queue history is not work on
             # this stopped host. Keep it queued for another matching worker.
@@ -597,7 +599,9 @@ class DstackController:
                             instance_intents.c.id == node["intent_id"]
                         ),
                     )
-                    if matching_dstack_queued_jobs(connection, intent, current):
+                    if matching_dstack_queued_jobs(
+                        connection, intent, current, admittable_at=self.repo.clock()
+                    ):
                         return False
                 elif reason_code in DOWNLOAD_STOP_CHECKS:
                     intent = self.repo._locked(

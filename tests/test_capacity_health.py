@@ -68,18 +68,52 @@ class CapacityHealthTests(unittest.TestCase):
                 "engine_manifest_digest": "digest",
             },
         }
+        self.worker = {
+            "id": "dstack-" + "a" * 32,
+            "provider": "vast",
+            "instance_id": "123",
+            "state": "ready",
+            "expires_at": 10**6,
+            "current_job_id": None,
+        }
 
     def evaluate(
-        self, *, now=1000, nodes=None, jobs=None, attempts=(), workers=(), **kwargs
+        self, *, now=1000, nodes=None, jobs=None, attempts=(), workers=None, **kwargs
     ):
         return evaluate(
             nodes or [self.node],
             jobs or [self.job],
             attempts,
-            workers,
+            [self.worker] if workers is None else workers,
             now=now,
             **kwargs,
         )
+
+    def test_served_machine_without_a_live_worker_is_stopped_and_replaced(self):
+        # #1140: after a deploy the dial-out worker never re-registered and the
+        # paid machine sat idle with work queued.
+        self.node["payload"]["dstack"].update(
+            state="runtime_unconfirmed", observed_at=1
+        )
+        expired = {**self.worker, "expires_at": 900}
+        for workers in ([], [expired], [{**self.worker, "state": "retired"}]):
+            with self.subTest(workers=workers):
+                finding = self.evaluate(workers=workers)[0]
+                self.assertEqual(
+                    (finding["diagnosis"], finding["stop_replace"]),
+                    ("worker_unreachable", True),
+                )
+        # A live registration, or a fresh ready runtime, is not unreachable.
+        finding = self.evaluate()[0]
+        self.assertEqual(finding["diagnosis"], "dispatch_unobserved")
+        self.assertFalse(finding["stop_replace"])
+        self.node["payload"]["dstack"].update(state="ready", observed_at=990)
+        self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
+        # A machine that never became ready is the startup watchdog's case.
+        self.node["payload"]["dstack"].update(
+            state="runtime_unconfirmed", observed_at=1, first_runtime_ready_at=None
+        )
+        self.assertEqual(self.evaluate(workers=[]), [])
 
     def test_queue_age_uses_original_episode_not_refreshed_updated_at(self):
         findings = self.evaluate(now=2001, queue_ages={"job": 100})

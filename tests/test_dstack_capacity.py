@@ -1947,6 +1947,46 @@ class DstackLiveUsageTests(unittest.TestCase):
             "dstack_terminal_provider_unconfirmed",
         )
 
+    def test_recorded_removal_proof_frees_capacity_without_a_live_reread(self):
+        proof = {
+            "version": 1,
+            "backend": "vastai",
+            "run_id": RUN,
+            "provider_instance_id": "1234567",
+            "observed_at": 5.0,
+            "inventory_observed_at": 4.0,
+            "complete": True,
+            "absent": True,
+            "inventory_sha256": "0" * 64,
+        }
+        self.binding.update(
+            state="stopped", dstack_status="terminated", provider_removal_proof=proof
+        )
+        self.inventory.return_value = None  # A slow or failed inventory read.
+        result = self.usage()
+        self.assertEqual(result["instances"], 0)
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_provider_removal_proven"
+        )
+        self.client.get.assert_not_called()
+        self.inventory.assert_not_called()
+        for key, value in (
+            ("run_id", "b3333333-3333-4333-8333-333333333333"),
+            ("provider_instance_id", "7654321"),
+            ("backend", "runpod"),
+            ("complete", False),
+            ("absent", False),
+        ):
+            with self.subTest(key=key):
+                self.binding["provider_removal_proof"] = {**proof, key: value}
+                self.assertEqual(self.usage()["instances"], 1)
+        self.binding["provider_removal_proof"] = proof
+        self.node["desired_state"] = "running"
+        self.assertEqual(self.usage()["instances"], 1)
+        self.node["desired_state"] = "stopped"
+        self.binding["state"] = "running"
+        self.assertEqual(self.usage()["instances"], 1)
+
     def test_unknown_or_unowned_run_never_frees_reserved_capacity(self):
         original = copy.deepcopy(self.run)
         for bad in (

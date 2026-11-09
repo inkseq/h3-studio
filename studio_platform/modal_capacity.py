@@ -20,6 +20,8 @@ CONFIRMED = {
     'dstack_never_applied',
     'dstack_terminal_no_allocation',
     'dstack_terminal_provider_absent',
+    # Complete absence recorded by the original writer (#1140 item 6).
+    'dstack_provider_removal_proven',
     'dstack_terminal_provider_accounted',
     # A node from another dstack control plane (#848) that the provider account
     # shows absent holds no capacity; 'dstack_foreign_unconfirmed' still refuses.

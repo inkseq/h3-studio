@@ -206,7 +206,7 @@ def fenced_node_stop(connection, node, intent, *, now=None):
         if not removed:
             return False
     elif marker["reason"] == "capacity_dispatch_unavailable":
-        from .capacity_health import HOST_FAULTS
+        from .capacity_health import HOST_FAULTS, worker_unreachable
         from .worker_admission import matching_dstack_queued_jobs
 
         health = (
@@ -216,15 +216,21 @@ def fenced_node_stop(connection, node, intent, *, now=None):
         )
         binding = node["payload"].get("dstack", {})
         observed = binding.get("observed_at")
+        diagnosis = health.get("diagnosis")
         if (
             health.get("event_id") != marker.get("health_event_id")
-            or health.get("diagnosis") != "host_runtime"
+            or diagnosis not in {"host_runtime", "worker_unreachable"}
             or not _number(health.get("since"))
             or not _number(decision_at)
             or decision_at - health["since"] <= 600
-            or binding.get("reason_code") not in HOST_FAULTS
-            or not _number(observed)
-            or not 0 <= decision_at - observed <= 120
+            or diagnosis == "host_runtime"
+            and (
+                binding.get("reason_code") not in HOST_FAULTS
+                or not _number(observed)
+                or not 0 <= decision_at - observed <= 120
+            )
+            or diagnosis == "worker_unreachable"
+            and not worker_unreachable(binding, workers, decision_at)
             or node["desired_state"] == "running"
             and not matching_dstack_queued_jobs(connection, intent, node)
         ):

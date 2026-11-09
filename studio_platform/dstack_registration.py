@@ -191,7 +191,8 @@ class DstackRegistration:
             ):
                 continue
             if (
-                observation["reason_code"] == "dstack_terminal_provider_absent"
+                observation["reason_code"]
+                in {"dstack_terminal_provider_absent", "dstack_provider_removal_proven"}
                 and original.get("provider_instance_id")
                 == intent["provider_instance_id"]
             ):
