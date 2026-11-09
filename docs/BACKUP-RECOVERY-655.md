@@ -365,3 +365,59 @@ This allows only a later normal daily-preserve to take its own fresh snapshot.
 It cannot rerun either failed date, produce `completed.json`, enable cleanup or
 prove a successful backup. Report October 27 as failed/preserved/reconciled,
 and report the next real S3 completion or exact refusal separately on #655.
+
+## Recovery objectives for a lost CPU host (#816)
+
+Production's site, controller and dstack server share one CPU host; since the
+2026-11-04 cutover its database is Amazon RDS for PostgreSQL (first natural
+automated backup confirmed that day). Values below are **targets** or
+**provider-documented behaviour**, not measurements. Nothing here has been drilled.
+
+| Part | Where it lives | RPO | RTO |
+|---|---|---|---|
+| Business database | RDS, off the CPU host | Host loss: none for committed transactions. Database loss: RDS point-in-time restore; AWS uploads transaction logs every 5 minutes, so expect up to about 5 minutes | Not measured. A point-in-time restore creates a **new** instance (new endpoint), so the deployment target's database host must change too |
+| Second database copy | Daily business backup to the versioned S3 backup bucket (16:30 UTC) | Up to about 26 hours (the 18:30 UTC missing-copy alarm above) | Not measured; restores to an isolated target only |
+| Media | Encrypted root EBS volume under `/srv/sixnine` (`DeleteOnTermination=false`) unless the R2 cutover in `STORAGE-MIGRATION.md` has been applied; **confirm which store production uses** | Host failure with the volume intact: none. Volume loss: the last daily business backup | Not measured |
+| CPU host | One EC2 instance, rebuilt from `deploy/platform/ec2/` | No unique state beyond the volume above | **Proposed target, owner to confirm:** 30 minutes for a stop/start on the same volume, 4 hours for a new host. Unmeasured until the staging drill |
+| Paid GPUs | Vast, RunPod and Lium rentals through dstack | n/a | Spend exposure: the `MonitorHeartbeat` alarm delay, plus about a minute of health checks, plus the provider calls |
+
+**RDS settings to read back and record here** (they are not in this repository):
+the backup retention period (AWS defaults: 7 days when created in the console,
+1 day through the API/CLI; 0 disables automated backups and PITR), the backup
+window, Multi-AZ, deletion protection, and the final-snapshot setting.
+[RDS backup retention](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_WorkingWithAutomatedBackups.BackupRetention.html),
+[point-in-time restore](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_PIT.html).
+
+**Rebuilding the host.** A stop/start keeps the instance and volume; at boot
+`sixnine-secrets.service` restores `/run/sixnine-secrets` from Secrets Manager
+before Docker starts Compose. A new host follows `deploy/platform/ec2/README.zh-CN.md`:
+launch from `launch-spec.json`, run `bootstrap-host.sh`, attach or restore the data
+volume, install the release helpers under `/opt/sixnine-release`, then
+`fetch_release_s3.py`, and `release.py` for the approved commit. The RDS CA file
+and database target come from `deployment_target.py`. Each step needs its own
+receipts; measure the elapsed time in the staging drill and record it here as
+measured.
+
+**GPU spend while the host is gone.** The minute alert monitor publishes
+`MonitorHeartbeat`; missing data puts the alarm into ALARM (its period and
+evaluation count are set in CloudWatch, not here: read them back). The
+off-host Lambda (`deploy/platform/host_loss_lambda.py`) then needs three failed
+`/healthz` checks 20 seconds apart before it acts on the controller's last
+published stop list:
+
+| Provider | Action | Why |
+|---|---|---|
+| Vast | stop | Reversible from the console; disk storage keeps billing |
+| RunPod | stop (`POST rest.runpod.io/v1/pods/{id}/stop`) | Releases the GPU, keeps the volume disk (still billed); reversible |
+| Lium | delete (`DELETE lium.io/api/pods/{id}`) | Lium offers renters no stop or pause. Our pods are disposable dstack workers; set `LIUM_ACTION=report` to alert instead |
+
+Only rentals of a known owner other than supervan are listed, and only
+dstack-rented ones (RunPod Serverless jobs end on their own execution timeout).
+The list is republished at least every 5 minutes and refused when older than
+10 minutes, so a rental started in the last minutes before the loss may be
+missing from it. Anything not confirmed (a non-2xx answer, a timeout, a missing
+key, a Lium pod name that no longer resolves) is mailed as **NOT confirmed** and
+the Lambda fails so it retries; the owner then stops it in the provider console.
+
+Remaining for #816: the staging recovery drill (rebuild time, database restore
+time, stopper end to end), and the read-backs marked above.
