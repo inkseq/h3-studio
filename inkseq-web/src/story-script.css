@@ -33,6 +33,7 @@
 }
 .script-scene {
   margin-top: 20px;
+  scroll-margin-top: 12px;
 }
 .script-scene-head {
   display: flex;
@@ -41,7 +42,7 @@
   gap: 2px 10px;
   margin-bottom: 2px;
 }
-.script-scene-head h3 {
+.script-scene-head :is(h2, h3) {
   margin: 0;
   font-size: var(--fs-lg);
 }
@@ -103,7 +104,10 @@
 .script-text:focus {
   border-color: var(--line-3);
   background: var(--fill);
-  outline: none;
+}
+/* The shared focus ring, drawn inside the box so it never covers the label beside it. */
+.script-text:focus-visible {
+  outline-offset: -1px;
 }
 .script-empty {
   margin: 8px 0 0;
@@ -192,17 +196,40 @@
 .script-beat.line .script-beat-body > .script-text {
   font-weight: 500;
 }
+/* Seconds and shot on one row, the beat's tools under them, so the text keeps its width. */
 .script-beat-side {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 7.5em);
   align-items: center;
-  gap: 6px;
+  gap: 2px 6px;
 }
 .script-beats-add,
-.script-beats-start {
+.script-beats-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 4px;
+}
+.script-beats-start {
+  display: grid;
+  gap: 2px;
+}
+.script-beats-why {
+  font-size: var(--fs-xs);
+}
+.script-beats-sum {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+}
+.script-beat-kept {
+  font-size: var(--fs-xs);
+}
+.script-beat-tools {
+  grid-column: 1 / -1;
+  justify-self: end;
+  display: inline-flex;
 }
 @media (max-width: 640px) {
   .script-beat {

@@ -5,10 +5,16 @@ import {
   bibleOf,
   characterGroups,
   exportBible,
+  importActions,
   importPlan,
   nextSpeaker,
+  peopleInProfile,
   profileChecklist,
+  speakingPlaces,
+  splitActions,
+  splitBase,
   validBiblePatch,
+  voiceGaps,
 } from './story-bible.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
 
@@ -160,7 +166,7 @@ test('a cast/art design imports as candidates and exports back', () => {
   );
   assert.equal(plan[0].patch.profile.personality, '急、护短');
   assert.deepEqual(plan[1].patch.anchors, ['石墙：北边低矮的干砌石墙']);
-  assert.deepEqual(plan[1].lights, ['黄昏']);
+  assert.deepEqual(plan[1].lights, [{ name: '黄昏', desc: '' }]);
   assert.equal(plan[2].patch.scale, 'hand');
   assert.deepEqual(plan[2].patch.states, [{ name: '拉满', imageId: '' }]);
   assert.deepEqual(importPlan(profiles, { nothing: true }), []);
@@ -170,4 +176,219 @@ test('a cast/art design imports as candidates and exports back', () => {
   ]);
   assert.equal(out.format, 'inkseq.story-bible/1');
   assert.equal(out.characters[0].speaker, 'S1');
+});
+
+// A profile view built from a stored entity, as storyboard-domain does.
+const viewOf = (e) =>
+  view({
+    id: e.id,
+    type: e.type,
+    name: e.title,
+    desc: e.description || '',
+    voiceId: e.data.voiceId || '',
+    variants: (e.data.looks || [{ id: 'main', name: '主图', imageIds: e.data.imageIds }]).map(
+      (v) => ({ id: v.id, name: v.name, desc: v.description || '', images: v.imageIds || [] }),
+    ),
+    def: e.data.defaultLookId || 'main',
+    bible: bibleOf(e),
+  });
+
+test('one card holding several people is recognised from body, name or description', () => {
+  const people = (over, others = []) => peopleInProfile(view(over), others);
+  assert.equal(people({ name: '儿子（三兄弟）' }), 3);
+  assert.equal(people({ name: 'The twins' }), 2);
+  assert.equal(people({ name: 'Giant', desc: 'a two-headed giant' }), 2);
+  assert.equal(people({ name: '怪', desc: '一个身体三个头' }), 3);
+  assert.equal(people({ bible: bibleOf({ data: { body: { heads: 3 } } }) }), 3);
+  assert.equal(people({ name: '阿妈', desc: '她有两个儿子，个子矮小' }), 0);
+  assert.equal(people({ name: '老大', desc: '他有两个弟弟' }), 0);
+  // A member of a group that already has several cards is one person.
+  const member = (id) => view({ id, bible: bibleOf({ data: { groupId: '三兄弟' } }) });
+  assert.equal(peopleInProfile(member('1'), [member('1'), member('2')]), 0);
+  assert.equal(peopleInProfile(member('1'), [member('1')]), 3);
+  assert.equal(peopleInProfile(view({ type: 'prop', name: '三兄弟的弓' })), 0);
+  assert.equal(splitBase('儿子（三兄弟）'), '儿子');
+  assert.equal(splitBase('Ann'), 'Ann');
+});
+
+test('speaking places come from line beats, the speaker number and unclaimed lines in a shot', () => {
+  const sons = view({ id: 'sons', name: '儿子（三兄弟）' });
+  const mum = view({ id: 'mum', name: '阿妈', bible: bibleOf({ data: { speaker: 'S4' } }) });
+  const lion = view({ id: 'lion', name: '狮皮人' });
+  const profiles = [sons, mum, lion];
+  const shots = [
+    { prompt: '老大喊道(S1) <d>[Chinese] 今天吃牛。</d>', cast: [{ id: 'sons' }] },
+    { prompt: '阿妈说(S4) <d>[Chinese] 别去。</d>', cast: [{ id: 'mum' }, { id: 'sons' }] },
+    { prompt: '狮皮人射箭，无对白。', cast: [{ id: 'lion' }] },
+  ];
+  const scenes = [{ data: { beats: [{ id: 'beat-1', kind: 'line', speaker: 'lion' }] } }];
+  const at = (p) => speakingPlaces(p, { scenes, shots, profiles });
+  assert.equal(at(sons), 1);
+  assert.equal(at(mum), 1);
+  assert.equal(at(lion), 1);
+  assert.deepEqual(voiceGaps(sons, at(sons)), ['speaker', 'voice']);
+  assert.deepEqual(voiceGaps(mum, at(mum)), ['voice']);
+  assert.deepEqual(voiceGaps(view({ voiceId: 'v1' }), 0), []);
+});
+
+test('splitting makes one card per person in a group, all at once, and keeps the old card', () => {
+  const project = story();
+  project.entities.push({
+    id: 'sons',
+    type: 'character',
+    title: '儿子（三兄弟）',
+    description: '三个独立的年轻男子',
+    version: 1,
+    data: {
+      looks: [{ id: 'main', name: '默认造型', description: '棕袍', imageIds: [] }],
+      defaultLookId: 'main',
+      anchors: ['满脸黑胡'],
+      body: { heads: 3, arms: 6, legs: 6, line: '三个人肩并肩' },
+    },
+  });
+  const views = project.entities.filter((e) => e.type === 'character').map(viewOf);
+  const sons = views.find((p) => p.id === 'sons');
+  assert.equal(splitActions(sons, views, { names: ['大儿子', '大儿子'] }), null);
+  assert.equal(splitActions(sons, views, { names: ['大儿子'] }), null);
+  assert.equal(splitActions(sons, views, { names: ['大儿子', ' '] }), null);
+  const before = project.entities.length;
+  const actions = splitActions(sons, views, {
+    names: ['大儿子', '二儿子', '小儿子'],
+    lookName: 'Default look',
+  });
+  const receipt = applyStoryboardAction(project, { type: 'batch', actions });
+  assert.equal(receipt.ok, true);
+  assert.equal(project.entities.length, before + 3);
+  const members = project.entities.slice(before);
+  assert.deepEqual(
+    members.map((e) => [e.type, e.title]),
+    [
+      ['character', '大儿子'],
+      ['character', '二儿子'],
+      ['character', '小儿子'],
+    ],
+  );
+  // S1 is already 老大's (entity a), so the members get S2, S3, S4.
+  assert.deepEqual(
+    members.map((e) => e.data.speaker),
+    ['S2', 'S3', 'S4'],
+  );
+  for (const e of members) {
+    assert.equal(e.data.groupId, '儿子');
+    assert.equal(e.description, '三个独立的年轻男子');
+    assert.equal(e.data.looks[0].name, 'Default look');
+    assert.equal(e.data.looks[0].description, '棕袍');
+    assert.deepEqual(e.data.anchors, ['满脸黑胡']);
+    assert.deepEqual(e.data.body, { heads: 1, arms: 2, legs: 2, line: '三个人肩并肩' });
+  }
+  assert.equal(entity(project, 'sons').title, '儿子（三兄弟）');
+});
+
+test('a batch is refused as a whole when any step is refused', () => {
+  const project = story();
+  const before = project.entities.length;
+  const draft = structuredClone(project);
+  const receipt = applyStoryboardAction(draft, {
+    type: 'batch',
+    actions: [
+      { type: 'newProfile', ptype: 'character', name: '新人' },
+      { type: 'bible', pid: { $ref: 0 }, patch: { speaker: 'S1' } },
+    ],
+  });
+  // The caller's edit runs on a copy (store.editProject) and drops it on false.
+  assert.equal(receipt, false);
+  assert.equal(project.entities.length, before);
+  assert.equal(applyStoryboardAction(draft, { type: 'batch', actions: [] }), false);
+  assert.equal(
+    applyStoryboardAction(draft, { type: 'batch', actions: [{ type: 'batch', actions: [] }] }),
+    false,
+  );
+  assert.equal(
+    applyStoryboardAction(draft, {
+      type: 'batch',
+      actions: [{ type: 'bible', pid: { $ref: 3 }, patch: { anchors: [] } }],
+    }),
+    false,
+  );
+});
+
+test('export keeps voice, anchors, body, expressions, prop states and speaker; import applies them', () => {
+  const source = story();
+  const a = entity(source, 'a');
+  a.data.voiceId = 'v-warm';
+  applyBiblePatch(a, {
+    anchors: ['thick black beard'],
+    body: { heads: 1, arms: 2, legs: 2, line: 'one man' },
+    expressions: { pain: 'img-1' },
+    voiceNote: 'low and slow',
+    groupId: 'brothers',
+  });
+  const bow = entity(source, 'bow');
+  applyBiblePatch(bow, {
+    states: [{ name: 'drawn', imageId: 'img-1' }],
+    fixedLine: 'a short bow in his left hand',
+    carriedBy: 'a',
+  });
+  const json = JSON.parse(
+    JSON.stringify(
+      exportBible(
+        source.entities.filter((e) => ['character', 'prop'].includes(e.type)).map(viewOf),
+        {
+          assetName: (id) => (id === 'img-1' ? 'face.png' : ''),
+        },
+      ),
+    ),
+  );
+  assert.deepEqual(json.characters[0].voice, { id: 'v-warm', note: 'low and slow' });
+  assert.deepEqual(json.characters[0].expressions, { pain: { id: 'img-1', name: 'face.png' } });
+  assert.deepEqual(json.props[0].states, [
+    { state: 'drawn', image: { id: 'img-1', name: 'face.png' } },
+  ]);
+
+  // Into a story with the same picture and no cards: everything comes back.
+  const target = {
+    entities: [{ id: 'img-1', type: 'image', version: 1, data: {} }],
+    links: [],
+  };
+  const plan = importPlan([], json, { images: new Set(['img-1']) });
+  const first = plan.find((item) => item.name === '老大');
+  for (const key of ['anchors', 'body', 'expressions', 'speaker', 'groupId', 'voice'])
+    assert.ok(first.changes.includes(key), key);
+  const keep = new Set(plan.map((_, i) => i));
+  const receipt = applyStoryboardAction(target, {
+    type: 'batch',
+    actions: importActions(plan, keep, { profiles: [], lookName: 'Default look' }),
+  });
+  assert.equal(receipt.ok, true);
+  const hero = target.entities.find((e) => e.title === '老大');
+  assert.equal(hero.data.speaker, 'S1');
+  assert.equal(hero.data.voiceId, 'v-warm');
+  assert.equal(hero.data.voiceNote, 'low and slow');
+  assert.equal(hero.data.groupId, 'brothers');
+  assert.deepEqual(hero.data.anchors, ['thick black beard']);
+  assert.deepEqual(hero.data.body, { heads: 1, arms: 2, legs: 2, line: 'one man' });
+  assert.equal(hero.data.expressions.pain, 'img-1');
+  const prop = target.entities.find((e) => e.title === '弓');
+  assert.deepEqual(prop.data.states, [{ name: 'drawn', imageId: 'img-1' }]);
+  assert.equal(prop.data.carriedBy, hero.id);
+  assert.equal(prop.data.fixedLine, 'a short bow in his left hand');
+
+  // A picture that is not in the story is counted and left out; a taken number is left out.
+  const elsewhere = importPlan(
+    [view({ id: 'x', bible: bibleOf({ data: { speaker: 'S1' } }) })],
+    json,
+  );
+  assert.equal(elsewhere[0].missing, 1);
+  assert.equal(elsewhere[0].patch.expressions, undefined);
+  assert.deepEqual(elsewhere[0].skipped, ['speaker']);
+  // Importing the same file again into the filled story changes nothing.
+  const again = importPlan(
+    target.entities.filter((e) => ['character', 'prop'].includes(e.type)).map(viewOf),
+    json,
+    { images: new Set(['img-1']) },
+  );
+  assert.deepEqual(
+    again.filter((item) => item.type === 'character').map((item) => item.changes),
+    [[], []],
+  );
 });

@@ -197,3 +197,33 @@
   justify-content: space-between;
   flex-wrap: wrap;
 }
+
+/* Keyboard marking (audit 2026-11-09): the bar takes focus, a pending in–out range and the
+   playhead show on it, and the take's video stays in view while marking. */
+.take-review-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.take-review-mark.draft.pending {
+  background: color-mix(in srgb, var(--accent) 45%, transparent);
+}
+.take-review-playhead {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--ink);
+  box-shadow: 0 0 0 1px var(--media-scrim);
+  pointer-events: none;
+  z-index: var(--z-raised);
+}
+.take-review-keys {
+  font-size: var(--fs-2xs);
+}
+.editor:has(.take-review.marking, .take-review-bar:focus) .ed-preview {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
+}

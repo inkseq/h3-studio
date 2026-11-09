@@ -26,6 +26,7 @@ import {
   Upload,
   Pencil,
   CircleHelp,
+  GripVertical,
 } from 'lucide-react';
 import { Segmented } from './ui/Segmented.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
@@ -49,6 +50,12 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { useOptimisticChoice } from './optimistic-choice.js';
+import { useQuery } from '@tanstack/react-query';
+import { openKey, useCardGrid } from './card-grid.js';
+import { assetLabel, secondsLabel, shotName } from './storyboard-a11y.js';
+import { sceneBeats } from './script-beats.js';
+import { planChecklist, planOf } from './shot-plan.js';
+import { highlightGuideField } from './guide.js';
 import { store } from './store.js';
 import { cutFps, videoCut } from './video-cut-model.js';
 import { trimClip } from './film-edit-model.js';
@@ -92,9 +99,6 @@ import { useShotReadiness } from './shot-readiness.js';
 import { StoryboardNameDialog } from './StoryboardDialog.jsx';
 import { createStoryboardPlayback } from './storyboard-playback.js';
 
-// A draggable card that holds buttons of its own is a group, not one big button.
-const CARD_WITH_BUTTONS = { role: 'group' };
-
 function displayLabels(tr) {
   return {
     TYPE_LABEL: {
@@ -137,34 +141,44 @@ export function AssetThumb({ asset, size = 36 }) {
   );
 }
 
-function Tile({ asset, used, onClick, onZoom, dragId, children }) {
+// A library file. Enter or Space opens its preview; the mouse drags it onto a shot or profile
+// (the full-page library has nothing to drop on, so it does not drag there).
+function Tile({ asset, used, onClick, onZoom, dragId, draggable = true, gridCard, children }) {
   const { state, dispatch } = useStore();
   const [renaming, setRenaming] = useState(false);
   const { t: tr } = useI18n();
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
-    id: dragId || 'asset:' + asset.id,
-    attributes: CARD_WITH_BUTTONS,
-  });
+  const drag = useDraggable({ id: dragId || 'asset:' + asset.id, disabled: !draggable });
+  const label = assetLabel(asset, tr, { full: true }),
+    length = secondsLabel(asset.seconds, tr);
   return (
     <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      className={'tile' + (isDragging ? ' dragging' : '') + (used ? ' used' : '')}
+      ref={drag.setNodeRef}
+      onPointerDown={draggable ? drag.listeners?.onPointerDown : undefined}
+      role="group"
+      aria-label={label}
+      tabIndex={0}
+      data-grid-card={gridCard ? asset.id : undefined}
+      className={
+        'tile' +
+        (drag.isDragging ? ' dragging' : '') +
+        (used ? ' used' : '') +
+        (draggable ? '' : ' still')
+      }
       onClick={onClick}
-      title={tr('storyboard.mixed1', { p0: asset.name })}
+      onKeyDown={onZoom ? (event) => openKey(event, () => onZoom(asset)) : undefined}
+      title={draggable ? tr('storyboard.mixed1', { p0: label }) : label}
     >
       {asset.kind === 'audio' ? (
         <div className="tile-audio">
           <Music size={22} />
-          <small>{asset.seconds}s</small>
+          {length && <small>{length}</small>}
         </div>
       ) : (
         <StoryboardAssetImage asset={asset} />
       )}
-      {asset.kind === 'video' && (
+      {asset.kind === 'video' && length && (
         <span className="tile-badge">
-          <Play size={11} /> {asset.seconds}s
+          <Play size={11} /> {length}
         </span>
       )}
       {asset.kind === 'audio' && (
@@ -173,13 +187,15 @@ function Tile({ asset, used, onClick, onZoom, dragId, children }) {
         </span>
       )}
       {asset.source === 'ai' && <span className="tile-badge ai">AI</span>}
-      {asset.source === 'frame' && <span className="tile-badge">{tr('storyboard.copy37')}</span>}
+      {['frame', 'artifact_frame'].includes(asset.source) && !asset.use && (
+        <span className="tile-badge">{tr('storyboard.copy37')}</span>
+      )}
       {used && (
         <span className="tile-used">
           <Check size={12} />
         </span>
       )}
-      <span className="tile-name">{asset.name}</span>
+      <span className="tile-name">{assetLabel(asset, tr)}</span>
       {onZoom && asset.kind !== 'audio' && (
         <Button
           className="tile-zoom"
@@ -216,10 +232,16 @@ function Tile({ asset, used, onClick, onZoom, dragId, children }) {
   );
 }
 
-function ProfileCard({ p, used, onOpen, onAdd }) {
+// A person, place or prop. Enter or Space opens it; it drags onto a shot from its handle only.
+function ProfileCard({ p, used, onOpen, onAdd, draggable = true }) {
   const { t: tr } = useI18n();
+  const { TYPE_LABEL } = displayLabels(tr);
   const { db, state } = useStore();
-  const drag = useDraggable({ id: 'profile:' + p.id, attributes: CARD_WITH_BUTTONS });
+  const drag = useDraggable({
+    id: 'profile:' + p.id,
+    disabled: !draggable,
+    attributes: { roleDescription: tr('dnd.roleDescription') },
+  });
   const drop = useDroppable({ id: 'pdrop:' + p.id });
   const cover = coverOf(db, p, p.def);
   const count = p.variants.reduce((n, v) => n + v.images.length, 0);
@@ -245,8 +267,10 @@ function ProfileCard({ p, used, onOpen, onAdd }) {
         drag.setNodeRef(n);
         drop.setNodeRef(n);
       }}
-      {...drag.listeners}
-      {...drag.attributes}
+      role="group"
+      aria-label={tr('library.profileCard', { type: TYPE_LABEL[p.type], name: p.name })}
+      data-grid-card={p.id}
+      onKeyDown={(event) => openKey(event, onOpen)}
       className={
         'pcard ' +
         p.type +
@@ -301,21 +325,41 @@ function ProfileCard({ p, used, onOpen, onAdd }) {
         </small>
         <small className="muted clip">{p.desc}</small>
       </div>
-      {onAdd && (
-        <Button
-          className="pcard-open"
-          aria-label={
-            used ? tr('storyboard.mixed7', { p0: p.name }) : tr('storyboard.mixed8', { p0: p.name })
-          }
-          title={used ? tr('storyboard.detail7') : tr('storyboard.detail8')}
-          onPointerDown={(e) => e.stopPropagation()}
-          onClick={(e) => {
-            e.stopPropagation();
-            onAdd();
-          }}
-        >
-          {used ? <Check size={14} /> : <Plus size={14} />}
-        </Button>
+      {(draggable || onAdd) && (
+        <span className="pcard-actions">
+          {draggable && (
+            <IconButton
+              size="xs"
+              className="pcard-grip"
+              data-drag-handle
+              ref={drag.setActivatorNodeRef}
+              {...drag.attributes}
+              {...drag.listeners}
+              label={tr('dnd.dragProfile', { name: p.name })}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <GripVertical size={14} aria-hidden="true" />
+            </IconButton>
+          )}
+          {onAdd && (
+            <Button
+              className="pcard-open"
+              aria-label={
+                used
+                  ? tr('storyboard.mixed7', { p0: p.name })
+                  : tr('storyboard.mixed8', { p0: p.name })
+              }
+              title={used ? tr('storyboard.detail7') : tr('storyboard.detail8')}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                onAdd();
+              }}
+            >
+              {used ? <Check size={14} /> : <Plus size={14} />}
+            </Button>
+          )}
+        </span>
       )}
       <TrashMenu
         target={{ kind: 'entity', project_id: state.project.id, id: p.id }}
@@ -432,8 +476,8 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
             {list.map((a) => (
               <div key={a.id} className="pe-row">
                 <PlayButton asset={a} />
-                <span className="pe-grow clip">{a.name}</span>
-                <small className="muted">{a.seconds}s</small>
+                <span className="pe-grow clip">{assetLabel(a, tr)}</span>
+                <small className="muted">{secondsLabel(a.seconds, tr)}</small>
                 <Button size="sm" onClick={() => onPick(a.id)}>
                   {tr('storyboard.copy40')}
                 </Button>
@@ -472,7 +516,7 @@ export function AssetLibrary({
     ['location', tr('storyboard.detail11'), MapPin],
     ['prop', tr('storyboard.copy88'), Box],
     ['image', tr('storyboard.detail9'), ImageIcon],
-    ['video', tr('storyboard.detail12'), Film],
+    ['video', tr('library.tab.video'), Film],
     ['audio', tr('storyboard.copy51'), Music],
     ['inbox', tr('storyboard.detail13'), Inbox],
   ];
@@ -493,6 +537,9 @@ export function AssetLibrary({
     [zoom, setZoom] = useState(null),
     [newProfileType, setNewProfileType] = useState(null);
   const uploadInput = useRef();
+  // Arrow keys between profile cards and between files (card-grid.js).
+  const profileGrid = useCardGrid('.pcard[data-grid-card]'),
+    fileGrid = useCardGrid('.tile[data-grid-card]');
   const inbox = state.assets.filter((a) => a.inbox);
   const count = (k) =>
     k === 'inbox'
@@ -659,6 +706,7 @@ export function AssetLibrary({
         <>
           <div
             className="plist"
+            ref={profileGrid}
             onContextMenu={(event) => {
               // Right-click empty list space: create one of this category (a shortcut to "+").
               if (event.target.closest('.pcard') || state.busy) return;
@@ -684,6 +732,7 @@ export function AssetLibrary({
                 <ProfileCard
                   key={p.id}
                   p={p}
+                  draggable={!page}
                   used={usedP.has(p.id)}
                   onOpen={() => dispatch({ type: 'openProfile', id: p.id })}
                   onAdd={selectedShot ? () => onPick({ profile: p.id }) : null}
@@ -718,22 +767,25 @@ export function AssetLibrary({
       )}
 
       {['image', 'video', 'audio'].includes(tab) && (
-        <div className="grid">
+        <div className="grid" ref={fileGrid}>
           {state.assets
-            .filter((a) => a.kind === tab && !a.inbox && match(a.name))
+            .filter((a) => a.kind === tab && !a.inbox && match(a.name + ' ' + assetLabel(a, tr)))
+            // Files a shot uses come in shot and take order; the rest keep their own order.
+            .sort(
+              (a, b) =>
+                (a.use?.shot ?? Infinity) - (b.use?.shot ?? Infinity) ||
+                (a.use?.take ?? 0) - (b.use?.take ?? 0),
+            )
             .map((a) => (
               <Tile
                 key={a.id}
                 asset={a}
+                gridCard
+                // The full-page library has no shot or profile to drop on (audit 2026-11-09).
+                draggable={!page}
                 used={usedA.has(a.id)}
                 // On its own page there is no shot to add to: a click just looks at the file.
-                onClick={
-                  page
-                    ? a.kind === 'audio'
-                      ? undefined
-                      : () => setZoom(a)
-                    : () => onPick?.({ asset: a.id })
-                }
+                onClick={page ? () => setZoom(a) : () => onPick?.({ asset: a.id })}
                 onZoom={setZoom}
               />
             ))}
@@ -755,20 +807,40 @@ export function AssetLibrary({
         </div>
       )}
       {zoom && (
-        <div
-          className="zoom"
-          role="dialog"
-          aria-label={tr('storyboard.detail74')}
-          onClick={() => setZoom(null)}
+        // A real dialog: Escape or a click outside closes it and focus goes back to the file.
+        <Dialog
+          title={assetLabel(zoom, tr, { full: true })}
+          eyebrow={tr('storyboard.detail74')}
+          onClose={() => setZoom(null)}
+          portal
+          wide
+          className="sb-portal density-compact lib-preview"
         >
-          {zoom.kind === 'video' ? (
-            <StoryboardVideo asset={zoom} controls />
-          ) : (
-            <StoryboardAssetImage asset={zoom} />
+          <div className="lib-preview-media">
+            {zoom.kind === 'video' ? (
+              <StoryboardVideo asset={zoom} controls />
+            ) : zoom.kind === 'audio' ? (
+              <PlayButton asset={zoom} label={tr('library.play')} />
+            ) : (
+              <StoryboardAssetImage asset={zoom} />
+            )}
+          </div>
+          {selectedShot && onPick && (
+            <DialogActions>
+              <Button
+                variant="primary"
+                onClick={() => {
+                  onPick({ asset: zoom.id });
+                  setZoom(null);
+                }}
+              >
+                {tr('library.addToShot', {
+                  shot: shotName(selectedShot, state.shots.indexOf(selectedShot), tr),
+                })}
+              </Button>
+            </DialogActions>
           )}
-          <b>{zoom.name}</b>
-          <small>{tr('storyboard.copy46')}</small>
-        </div>
+        </Dialog>
       )}
       {newProfileType && (
         <StoryboardNameDialog
@@ -788,57 +860,64 @@ function InboxRow({ a }) {
   const { state, dispatch, db } = useStore();
   const sug = a.suggest && db.profile(a.suggest.pid || a.suggest.id);
   const [target, setTarget] = useState(sug ? `${sug.id}|${a.suggest.vid || sug.def}` : '');
+  // Only pictures and loose sounds can be filed to a profile; a video or a shot's dialogue
+  // track gets no picker and no grey "File" button (audit 2026-11-09).
+  const fileable = a.kind === 'image' || (a.kind === 'audio' && !a.use);
   return (
     <div className="inrow">
       <Tile asset={a} />
       <div className="inrow-body">
-        <small className="clip">{a.name}</small>
-        {sug ? (
+        <small className="clip">{assetLabel(a, tr, { full: true })}</small>
+        {!fileable ? null : sug ? (
           <small className="sug">{tr('storyboard.finish15', { name: sug.name })}</small>
         ) : (
           <small className="muted">{tr('storyboard.copy47')}</small>
         )}
-        <select
-          className="field-sm"
-          aria-label={a.name + tr('storyboard.detail21')}
-          value={target}
-          onChange={(e) => setTarget(e.target.value)}
-        >
-          <option value="">{tr('storyboard.copy48')}</option>
-          {state.profiles
-            .filter(
-              (p) =>
-                a.kind === 'image' ||
-                (a.kind === 'audio' && ['character', 'location'].includes(p.type)),
-            )
-            .map((p) => (
-              <optgroup key={p.id} label={`${TYPE_LABEL[p.type]} · ${p.name}`}>
-                {p.variants.map((v) => (
-                  <option key={v.id} value={`${p.id}|${v.id}`}>
-                    {p.name} · {v.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-        </select>
-        <div className="row tight">
-          <Button
-            variant="primary"
-            size="sm"
-            disabled={!target || !['image', 'audio'].includes(a.kind)}
-            onClick={() => {
-              const [pid, vid] = target.split('|');
-              dispatch(
-                a.kind === 'audio'
-                  ? db.profile(pid)?.type === 'character'
-                    ? { type: 'addVoice', asset: a.id, pid }
-                    : { type: 'profile', id: pid, patch: { ambient: a.id } }
-                  : { type: 'fileImage', asset: a.id, pid, vid },
-              );
-            }}
+        {fileable && (
+          <select
+            className="field-sm"
+            aria-label={a.name + tr('storyboard.detail21')}
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
           >
-            {tr('storyboard.copy49')}
-          </Button>
+            <option value="">{tr('storyboard.copy48')}</option>
+            {state.profiles
+              .filter(
+                (p) =>
+                  a.kind === 'image' ||
+                  (a.kind === 'audio' && ['character', 'location'].includes(p.type)),
+              )
+              .map((p) => (
+                <optgroup key={p.id} label={`${TYPE_LABEL[p.type]} · ${p.name}`}>
+                  {p.variants.map((v) => (
+                    <option key={v.id} value={`${p.id}|${v.id}`}>
+                      {p.name} · {v.name}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+          </select>
+        )}
+        <div className="row tight">
+          {fileable && (
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!target}
+              onClick={() => {
+                const [pid, vid] = target.split('|');
+                dispatch(
+                  a.kind === 'audio'
+                    ? db.profile(pid)?.type === 'character'
+                      ? { type: 'addVoice', asset: a.id, pid }
+                      : { type: 'profile', id: pid, patch: { ambient: a.id } }
+                    : { type: 'fileImage', asset: a.id, pid, vid },
+                );
+              }}
+            >
+              {tr('storyboard.copy49')}
+            </Button>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -1222,8 +1301,7 @@ export function ProfileEditor() {
           )}
         </section>
 
-        {p.type === 'character' && <VoicePicker profile={p} />}
-        {p.type === 'character' && <VoiceSection p={p} />}
+        {p.type === 'character' && <VoicePicker profile={p} samples={<VoiceSection p={p} />} />}
         {p.type === 'location' && (
           <section className="pe-section">
             <header className="pe-section-head">
@@ -1382,7 +1460,9 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
   const profiles = state.profiles.filter(
     (p) => ok(p.type) && (!q || (p.name + p.desc).includes(q)),
   );
-  const files = state.assets.filter((a) => !a.inbox && ok(a.kind) && (!q || a.name.includes(q)));
+  const files = state.assets.filter(
+    (a) => !a.inbox && ok(a.kind) && (!q || (a.name + ' ' + assetLabel(a, tr)).includes(q)),
+  );
   const results = [...profiles.map((p) => ({ profile: p })), ...files.map((a) => ({ asset: a }))];
   const multi = slot !== 'start' && slot !== 'end';
   const pick = async (item) => {
@@ -1444,7 +1524,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
     >
       <div className="picker-head" {...handle}>
         <b>{SLOT_TITLE[slot]}</b>
-        <small>「{shot.title}」</small>
+        <small>{shotName(shot, state.shots.indexOf(shot), tr)}</small>
         <IconButton size="xs" onClick={onClose} label={tr('storyboard.copy58')}>
           <X size={14} />
         </IconButton>
@@ -1504,14 +1584,14 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
             {a.kind === 'audio' ? (
               <div className="tile-audio">
                 <Music size={22} />
-                <small>{a.seconds}s</small>
+                <small>{secondsLabel(a.seconds, tr)}</small>
               </div>
             ) : (
               <StoryboardAssetImage asset={a} />
             )}
-            {a.kind === 'video' && (
+            {a.kind === 'video' && secondsLabel(a.seconds, tr) && (
               <span className="tile-badge">
-                <Play size={11} /> {a.seconds}s
+                <Play size={11} /> {secondsLabel(a.seconds, tr)}
               </span>
             )}
             {usedA.has(a.id) && (
@@ -1519,7 +1599,7 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
                 <Check size={12} />
               </span>
             )}
-            <span className="tile-name">{a.name}</span>
+            <span className="tile-name">{assetLabel(a, tr)}</span>
           </Button>
         ))}
       </div>
@@ -1534,8 +1614,8 @@ export function AssetPicker({ shotId, slot, x, y, onClose }) {
 
 /* ---------- shot card ---------- */
 
-export function useShotSortable(id) {
-  const s = useSortable({ id: 'shot:' + id, attributes: CARD_WITH_BUTTONS });
+export function useShotSortable(id, roleDescription) {
+  const s = useSortable({ id: 'shot:' + id, attributes: { roleDescription } });
   return {
     ...s,
     style: {
@@ -1665,9 +1745,23 @@ export function ShotCard({
 }) {
   const { t: tr, locale } = useI18n();
   const { QUALITY_LABEL } = displayLabels(tr);
-  const { state, db, dispatch } = useStore();
+  const { state, db, dispatch, adapter } = useStore();
   const [picker, setPicker] = useState(null);
-  const { setNodeRef, attributes, listeners, style, isOver, active } = useShotSortable(shot.id);
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, style, isOver, active } =
+    useShotSortable(shot.id, tr('dnd.roleDescription'));
+  // Takes marked "needs a redo", from the review summaries the shot editor already read; the
+  // card never reads them itself.
+  const reviews = useQuery({
+    queryKey: ['take-review-summaries', state.contextId, shot.id],
+    queryFn: () => adapter.readTakeReviewSummaries(shot.id),
+    enabled: false,
+  });
+  const redo = (Array.isArray(reviews.data) ? reviews.data : []).filter(
+    (row) => row.verdict === 'redo',
+  ).length;
+  const title = String(shot.title || '').trim(),
+    name = shotName(shot, index, tr),
+    number = String(index + 1).padStart(2, '0');
   const info = expand(shot, db, locale);
   const missing = useShotReadiness(shot, tr);
   const warnings = [...info.warnings, ...missing];
@@ -1683,9 +1777,15 @@ export function ShotCard({
     <div
       ref={setNodeRef}
       style={style}
-      {...attributes}
-      {...listeners}
+      role="group"
+      aria-label={tr(title ? 'shotCard.label' : 'shotCard.labelUntitled', {
+        n: number,
+        title,
+        status: status.label,
+      })}
       data-shot-card={shot.id}
+      data-grid-card={shot.id}
+      onKeyDown={(event) => openKey(event, (e) => onOpen(shot.id, e))}
       className={
         'card' +
         (selected ? ' selected' : '') +
@@ -1721,7 +1821,21 @@ export function ShotCard({
           </Button>
         )}
         <ShotThumb shot={shot} />
-        <span className="card-no">{String(index + 1).padStart(2, '0')}</span>
+        <span className="card-no">{number}</span>
+        {/* Dragging starts here only, so Enter and Space on the card open it (audit 2026-11-09). */}
+        <IconButton
+          size="xs"
+          variant="on-media"
+          className="card-grip"
+          data-drag-handle
+          ref={setActivatorNodeRef}
+          {...attributes}
+          {...listeners}
+          label={tr('dnd.dragShot', { shot: name })}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <GripVertical size={14} aria-hidden="true" />
+        </IconButton>
         <span className="card-dur">
           {fmt(
             // #232 (#27): show the real length, never 0:00 for a short kept cut.
@@ -1750,10 +1864,15 @@ export function ShotCard({
       <div className="card-body">
         {/* One line: title, who made it, then mode / tier only when this shot differs from the
             story's usual (#232 #12); the card grows only for cast chips (owner, 2026-10-26). */}
-        <div className="card-title" title={shot.title}>
-          <span className="card-title-text">{shot.title}</span>
+        <div className="card-title" title={name}>
+          <span className={'card-title-text' + (title ? '' : ' muted')}>{name}</span>
           <AssistantBadge createdBy={shot.created_by} />
           <span className="card-meta">
+            {redo > 0 && (
+              <span className="card-redo" title={tr('shotCard.redoHelp', { count: redo })}>
+                {tr('shotCard.redo', { count: redo })}
+              </span>
+            )}
             {info.mode !== usual.mode && <ModeChip info={info} />}
             {shot.quality !== usual.quality && (
               <span className="q">{QUALITY_LABEL[shot.quality]}</span>
@@ -1932,6 +2051,98 @@ function TakeReviewSlot(props) {
   return adapter?.readTakeReview ? <TakeReview {...props} /> : null;
 }
 
+// The plan checklist (shot-plan.js) for one shot: the beats it claims and who speaks in them.
+function usePlanChecklist(shot) {
+  const { state } = useStore();
+  const plan = planOf(shot.entity);
+  const scene = (state.scenes || []).find((s) => s.id === shot.entity?.parentId),
+    claimed = new Set(plan.beats);
+  const beats = sceneBeats(scene).filter((b) => claimed.has(b.id));
+  const speakers = [
+    ...new Set(beats.filter((b) => b.kind === 'line' && b.speaker).map((b) => b.speaker)),
+  ];
+  const characters = state.profiles.filter((p) => p.type === 'character');
+  return { items: planChecklist(shot, { speakers, characters }), speakers, characters };
+}
+
+// Which plan tab (ShotPlan.jsx) holds each checklist item, and the label of its field.
+const PLAN_FIELDS = {
+  purpose: ['plan', 'plan.purpose'],
+  beats: ['plan', null],
+  size: ['plan', 'plan.sizeLabel'],
+  emotion: ['acting', 'plan.emotionFrom'],
+  timeline: ['acting', null],
+  continuity: ['continuity', 'plan.entry'],
+};
+const PLAN_TABS = ['plan', 'acting', 'continuity'];
+
+// Open the item's tab, then focus and pulse its field.
+function focusPlanField(root, key, tr) {
+  const panel = root?.querySelector('.shot-plan'),
+    [tab, label] = PLAN_FIELDS[key] || [];
+  if (!panel || !tab) return;
+  const button = panel.querySelectorAll('[role="tab"]')[PLAN_TABS.indexOf(tab)];
+  if (button && button.getAttribute('aria-selected') !== 'true') button.click();
+  requestAnimationFrame(() => {
+    const field = label
+      ? [...panel.querySelectorAll('.ui-field')].find(
+          (node) => node.querySelector('.ui-field-label')?.textContent === tr(label),
+        )
+      : key === 'timeline'
+        ? panel.querySelector('.plan-timeline')
+        : panel.querySelector('.shot-plan-body');
+    const input = field?.querySelector('input, textarea, select, button') || button;
+    (field || panel).scrollIntoView({ block: 'center' });
+    input?.focus({ preventScroll: true });
+    const glow = field || panel;
+    glow.classList.remove('guide-highlight');
+    void glow.offsetWidth;
+    glow.classList.add('guide-highlight');
+    setTimeout(() => glow.classList.remove('guide-highlight'), 1600);
+  });
+}
+
+// Next to Generate: what the plan still lacks, each a link to its field. It only informs;
+// generating is never blocked by it (audit 2026-11-09). One line, so nothing moves as items
+// get done.
+function PlanMissing({ shot, editorRef }) {
+  const { t: tr } = useI18n();
+  const { dispatch } = useStore();
+  const { items, speakers, characters } = usePlanChecklist(shot);
+  const open = items.filter((item) => !item.done);
+  const go = (item) => {
+    if (item.key === 'firstFrame') {
+      highlightGuideField(document, 'frames');
+      return;
+    }
+    if (item.key === 'expressions') {
+      const who = speakers
+        .map((id) => characters.find((c) => c.id === id))
+        .find((c) => {
+          const sheet = c?.bible?.expressions;
+          return !sheet || Object.values(sheet).filter(Boolean).length < 6;
+        });
+      if (who) dispatch({ type: 'openProfile', id: who.id });
+      return;
+    }
+    focusPlanField(editorRef.current, item.key, tr);
+  };
+  return (
+    <div className="ed-missing" role="group" aria-label={tr('plan.missingLabel')}>
+      <span className="ed-missing-head">
+        {open.length
+          ? tr('plan.missing', { done: items.length - open.length, total: items.length })
+          : tr('plan.allDone')}
+      </span>
+      {open.map((item) => (
+        <Button key={item.key} variant="link" size="sm" onClick={() => go(item)}>
+          {tr('plan.check.' + item.key)}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
 export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { t: tr, locale } = useI18n();
   const { MODE_LABEL, QUALITY_LABEL } = displayLabels(tr);
@@ -2020,6 +2231,10 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   return (
     <section
       ref={editorRef}
+      // Opening a shot moves focus here (StoryboardWorkspace); Escape in a field stops at the field.
+      tabIndex={-1}
+      data-shot-editor={shot.id}
+      aria-label={tr('storyboard.editorLabel', { shot: shotName(shot, index, tr) })}
       className={'editor' + (inline ? ' inline' : '') + (wide ? ' wide' : '')}
       onInput={(event) => event.target.tagName === 'TEXTAREA' && growTextarea(event.target, true)}
     >
@@ -2031,6 +2246,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               className="ed-title"
               aria-label={tr('storyboard.finish10')}
               value={shot.title}
+              placeholder={tr('shot.untitled', { n: index + 1 })}
               size={Math.max(4, Math.min(28, [...(shot.title || '')].length + 1))}
               onChange={(e) => upd({ title: e.target.value })}
               onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
@@ -2441,7 +2657,9 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                       })
                     }
                   />
-                  {tr('storyboard.finish21', { title: state.shots[index - 1].title })}
+                  {tr('storyboard.finish21', {
+                    title: shotName(state.shots[index - 1], index - 1, tr),
+                  })}
                 </label>
               )}
               <label className="field inline-num">
@@ -2611,6 +2829,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
               {hint}
             </p>
           ))}
+          <PlanMissing shot={shot} editorRef={editorRef} />
           <div className="ed-actions">
             {/* After a take: another version (new seed, same settings) or the same in HD. */}
             {made && (
@@ -2813,17 +3032,18 @@ function Segment({
   const { state } = useStore();
   const status = shotStatus(seg.shot, queuePositions(state.shots)[seg.shot.id], locale);
   // Drag a segment onto another to reorder the story; a plain click still opens the shot.
+  // Only the mouse drags it: Enter opens the shot (cards reorder from their handle).
   const drag = useDraggable({ id: 'seg:' + seg.shot.id }),
     drop = useDroppable({ id: 'segto:' + seg.shot.id });
+  const name = shotName(seg.shot, index, tr);
   return (
     <Button
       ref={(node) => {
         drag.setNodeRef(node);
         drop.setNodeRef(node);
       }}
-      {...drag.attributes}
-      {...drag.listeners}
-      aria-label={tr('storyboard.detail71') + seg.shot.title}
+      onPointerDown={drag.listeners?.onPointerDown}
+      aria-label={tr('storyboard.detail71') + name}
       // Placed on true time so the ruler, playhead and selection always agree.
       style={{
         left: `${total ? (seg.start / total) * 100 : 0}%`,
@@ -2838,7 +3058,7 @@ function Segment({
         (drop.isOver && !drag.isDragging ? ' drop-target' : '')
       }
       onClick={(event) => onPick(seg, event)}
-      title={`${String(index + 1).padStart(2, '0')} · ${seg.shot.title} · ${fmt(seg.dur)} · ${status.label}`}
+      title={`${String(index + 1).padStart(2, '0')} · ${name} · ${fmt(seg.dur)} · ${status.label}`}
     >
       {compact ? (
         // Too many shots for pictures: a coloured square per shot, number when it fits.
@@ -2856,7 +3076,7 @@ function Segment({
             <div className="tseg-empty" />
           )}
           <span className="tseg-title">
-            <b>{String(index + 1).padStart(2, '0')}</b> {seg.shot.title}
+            <b>{String(index + 1).padStart(2, '0')}</b> {String(seg.shot.title || '').trim()}
           </span>
           <span className={'tseg-dot ' + status.tone} />
         </>

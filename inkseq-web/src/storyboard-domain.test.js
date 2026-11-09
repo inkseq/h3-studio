@@ -790,3 +790,47 @@ test('cards read as a name with a description, never as a spoken "Name: line"', 
   assert.equal(profileText('Mia', 'a tall woman'), 'Mia (a tall woman)');
   assert.equal(profileText('Mia', ' '), 'Mia');
 });
+
+test('library files each file by what it is; only unattached uploads wait in the inbox', () => {
+  const p = fixture();
+  const shot = shotOf(p);
+  const take = { ...video('take-a'), title: 'Generated result' };
+  take.data.source = 'generation';
+  take.data.metadata = { duration_s: 6.04 };
+  const takeSound = entity('take-sound', 'audio', {
+    cloudArtifactId: 'sound-art',
+    source: 'generation',
+    metadata: { duration_s: 6 },
+  });
+  const line = { ...audio('line'), title: '台词音轨 · 镜头1' };
+  const frame = image('saved-frame');
+  frame.data.source = 'artifact_frame';
+  frame.data.storyboardInbox = true;
+  p.entities.push(take, takeSound, line, image('first'), image('loose'), frame);
+  shot.data.candidateIds = ['take-a'];
+  shot.data.storyboard.firstFrameId = 'first';
+  shot.data.storyboard.dialogueTrack = { entityId: 'line' };
+  const jobs = [
+    {
+      id: 'job-1',
+      status: 'succeeded',
+      created_at: 1,
+      client_ref: { shot_id: 'shot' },
+      artifacts: [
+        { id: 'take-a', kind: 'video', metadata: { duration_s: 6.04 } },
+        { id: 'sound-art', kind: 'audio' },
+      ],
+    },
+  ];
+  const state = storyboardView(p, { chapterId: 'chapter', capabilities: capabilities(), jobs });
+  const assets = new Map(state.assets.map((a) => [a.id, a]));
+  assert.deepEqual(assets.get('take-a').use, { shot: 1, shotId: 'shot', take: 1, role: 'take' });
+  assert.equal(assets.get('take-a').seconds, 6.04);
+  assert.equal(assets.get('take-sound').use.role, 'takeAudio');
+  assert.equal(assets.get('line').use.role, 'dialogue');
+  assert.equal(assets.get('first').use.role, 'firstFrame');
+  for (const id of ['take-a', 'take-sound', 'line', 'first'])
+    assert.equal(assets.get(id).inbox, false, id + ' is filed, not in the inbox');
+  assert.equal(assets.get('loose').inbox, true);
+  assert.equal(assets.get('saved-frame').inbox, true);
+});

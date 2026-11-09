@@ -568,16 +568,19 @@ function newProfileAction(project, action, _ctx) {
   if (
     !['character', 'location', 'prop'].includes(action.ptype) ||
     !text(action.name, 160) ||
-    !action.name.trim()
+    !action.name.trim() ||
+    (owns(action, 'lookName') && (!text(action.lookName, 160) || !action.lookName.trim()))
   )
     return false;
+  // The first look or version is named in the person's language (bible.defaultLook.*).
+  const first = action.lookName?.trim();
   const data =
     action.ptype === 'character'
       ? {
           looks: [
             {
               id: 'main',
-              name: '默认造型',
+              name: first || '默认造型',
               description: '',
               gallery: {},
               imageIds: [],
@@ -590,7 +593,9 @@ function newProfileAction(project, action, _ctx) {
         }
       : action.ptype === 'location'
         ? {
-            versions: [{ id: 'main', name: '默认', description: '', imageIds: [], version: 1 }],
+            versions: [
+              { id: 'main', name: first || '默认', description: '', imageIds: [], version: 1 },
+            ],
             defaultVersionId: 'main',
             ambient: null,
           }
@@ -811,8 +816,39 @@ const PROFILE_ACTIONS = {
   voice: addVoiceGroupAction,
 };
 
+// Several profile edits as one: each later action may name a profile or version made by an
+// earlier one as { $ref: index }. The caller's edit runs on a copy, so one refused action
+// leaves the story as it was (an import or a split never lands half done).
+const BATCHABLE = new Set(['newProfile', 'profile', 'variant', 'addVariant', 'bible']);
+const MAX_BATCH = 2000;
+function batchAction(project, action, ctx) {
+  const actions = action.actions;
+  if (!Array.isArray(actions) || !actions.length || actions.length > MAX_BATCH) return false;
+  const ids = [];
+  const resolve = (value) => {
+    if (!plain(value) || !owns(value, '$ref')) return value;
+    return Number.isInteger(value.$ref) && value.$ref >= 0 && value.$ref < ids.length
+      ? ids[value.$ref]
+      : undefined;
+  };
+  for (const raw of actions) {
+    if (!plain(raw) || !BATCHABLE.has(raw.type)) return false;
+    const step = { ...raw };
+    for (const key of ['id', 'pid', 'vid']) if (owns(step, key)) step[key] = resolve(step[key]);
+    if (plain(step.patch) && owns(step.patch, 'carriedBy'))
+      step.patch = { ...step.patch, carriedBy: resolve(step.patch.carriedBy) };
+    if (['id', 'pid', 'vid'].some((key) => owns(step, key) && typeof step[key] !== 'string'))
+      return false;
+    const receipt = applyStoryboardAction(project, step, ctx);
+    if (receipt === false) return false;
+    ids.push(receipt?.id || '');
+  }
+  return { ok: true, ids };
+}
+
 export function applyStoryboardAction(project, action, { chapterId, view } = {}) {
   if (!plain(action) || typeof action.type !== 'string') return false;
+  if (action.type === 'batch') return batchAction(project, action, { chapterId, view });
   const shot = find(project, action.shot || action.id),
     profile = find(project, action.pid || action.id);
   if (Object.hasOwn(SHOT_AND_PAGE_ACTIONS, action.type))

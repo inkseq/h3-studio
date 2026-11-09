@@ -75,6 +75,11 @@
 .parts-bar {
   outline: none;
 }
+.parts-bar:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
 .parts-bar-track {
   position: relative;
   height: 34px;
@@ -235,4 +240,17 @@
 }
 .shot-segments-wrap > .shot-segments {
   margin-top: 0;
+}
+
+/* Keyboard keeping (audit 2026-11-09): the in–out range waiting for Enter, and the keys. */
+.parts-bar-pending {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+  pointer-events: none;
+}
+.parts-bar-keys {
+  font-size: var(--fs-2xs);
 }

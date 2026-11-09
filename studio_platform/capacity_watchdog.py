@@ -128,6 +128,7 @@ def fenced_node_stop(connection, node, intent, *, now=None):
     if type(marker.get("reason")) is not str or marker["reason"] not in {
         "capacity_no_progress",
         "capacity_runtime_exceeded",
+        "capacity_collection_failed",
         "capacity_owner_recovery",
         "capacity_startup_timeout",
         "capacity_startup_failed",
@@ -578,6 +579,15 @@ def reclaim_node(service, node, intent):
             )
             for row in related
         }
+        from .capacity_collect import collecting, collection_due, output_stored
+
+        # Output already outside the host is never regenerated (DB read only).
+        stored = {
+            row["id"]
+            for row in related
+            if collecting(originals[row["job_id"]], row)
+            and output_stored(connection, row["job_id"], row["id"])
+        }
     receipts = []
     queue = TaskQueue(repo)
     binding = node["payload"].get("dstack", {})
@@ -591,23 +601,30 @@ def reclaim_node(service, node, intent):
                 if item.get("attempt_id") == attempt["id"]
             )
             continue
-        if job["current_attempt_id"] != attempt["id"] or job["status"] not in {
+        if collecting(job, attempt):
+            # A finished run whose output its host can no longer deliver
+            # (staging 27b6213f): reclaim unless the output is already stored.
+            due = collection_due(
+                job, attempt, now, removed=removed, stored=attempt["id"] in stored
+            )
+        elif job["current_attempt_id"] != attempt["id"] or job["status"] not in {
             "submitting",
             "running",
             "submission_unknown",
         }:
             continue
-        due = (
-            ("capacity_provider_removed", None)
-            if removed
-            else timeout_reason(
-                job,
-                attempt,
-                now,
-                no_progress_seconds=silence,
-                runtime_floor_seconds=floor,
+        else:
+            due = (
+                ("capacity_provider_removed", None)
+                if removed
+                else timeout_reason(
+                    job,
+                    attempt,
+                    now,
+                    no_progress_seconds=silence,
+                    runtime_floor_seconds=floor,
+                )
             )
-        )
         if due:
             reason, last = due
             evidence = request_hash(

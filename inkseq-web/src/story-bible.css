@@ -86,28 +86,35 @@
   height: 100%;
   object-fit: cover;
 }
+/* A floor on the height lets the popover flip above the slot instead of shrinking to a sliver
+   near the bottom of the screen (it scrolls inside when even that is too tall). */
 .bible-picker {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: var(--z-raised);
-  width: min(320px, 80vw);
-  max-height: 260px;
-  overflow: auto;
+  width: min(340px, calc(100vw - 16px));
+  min-height: min(240px, calc(100vh - 32px));
+}
+.bible-picker-head > .seg {
+  display: flex;
+  flex: 1 1 100%;
+}
+.bible-picker-head > .seg > * {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.bible-picker-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.bible-picker-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--sp-1);
-  padding: var(--sp-2);
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r);
-  box-shadow: var(--shadow);
 }
-.bible-picker > small,
-.bible-picker > :not(.bible-picker-item) {
-  grid-column: 1 / -1;
-}
-.bible .bible-picker > .bible-picker-item.bible-picker-item.bible-picker-item {
+/* Beats the dialog's fit-content button rule (ui/dialog.css); the popover sits in the dialog. */
+.bible-picker-grid > .bible-picker-item.bible-picker-item.bible-picker-item.bible-picker-item {
   width: 100%;
   height: auto;
   min-height: 0;
@@ -115,6 +122,10 @@
   aspect-ratio: 1;
   overflow: hidden;
   border-radius: var(--r-sm);
+}
+.bible-picker-item[aria-pressed='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .bible-picker-item img {
   width: 100%;
@@ -150,6 +161,13 @@
 }
 .bible-dots i.on {
   background: var(--good);
+}
+/* Has lines but no speaker number or voice: a small warning mark after the dots. */
+.bible-dots i.gap {
+  width: 3px;
+  height: 9px;
+  border-radius: 1px;
+  background: var(--warn);
 }
 .bible-group {
   display: grid;
@@ -188,8 +206,66 @@
   gap: var(--sp-2);
   align-items: baseline;
 }
+.bible-import-main {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.bible-import-title {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+.bible-import-warn {
+  color: var(--warn);
+}
+/* One line kept for a failure message, so the buttons below never move. */
+.bible-import-status,
+.bible-split-status {
+  min-height: 1.5em;
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.bible-import-status,
+.bible-split-status.warn {
+  color: var(--warn);
+}
 .bible-inline {
   display: flex;
   gap: var(--sp-2);
   align-items: center;
+}
+
+/* The one "Voice" section (VoicePicker.jsx): speaker number, note, catalog and samples. */
+.voice-all .small {
+  font-size: var(--fs-xs);
+  margin: 0;
+}
+.voice-catalog {
+  display: grid;
+  gap: var(--sp-2);
+}
+.voice-catalog h4,
+.voice-all > .pe-section h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+.voice-all > .pe-section {
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line);
+}
+.bible-split-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+.bible-split {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
 }

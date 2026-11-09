@@ -1,5 +1,7 @@
-// Bring a design that Inky made with the film skills (cast.json / art.json shaped JSON)
-// into the story as candidates, and hand the story's bible back out in the same shape.
+// Bring a design that Inky made with the film skills (cast.json / art.json shaped JSON, or an
+// export from here) into the story as candidates, and hand the story's bible back out in the
+// same shape. The preview lists what each card would change; applying is one batch, so a
+// refused field leaves the story as it was instead of half imported.
 import React, { useRef, useState } from 'react';
 import { Download, Upload } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -7,27 +9,30 @@ import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
 import { Button } from './ui/Button.jsx';
 import { Dialog, DialogActions } from './ui/Dialog.jsx';
 import { Badge, Note } from './ui/Note.jsx';
-import { exportBible, importPlan } from './story-bible.js';
+import { exportBible, importActions, importPlan } from './story-bible.js';
 
 const MAX_BYTES = 2_000_000;
 
 export function BibleImportExport() {
   const { t } = useI18n();
-  const { state, dispatch } = useStore();
+  const { state, dispatch, db } = useStore();
   const input = useRef(null);
   const [plan, setPlan] = useState(null),
     [keep, setKeep] = useState(new Set()),
     [error, setError] = useState(''),
     [applying, setApplying] = useState(false);
+  // A default name only when the words are loaded; the store keeps its own otherwise.
+  const word = (key) => (t(key) === key ? '' : t(key));
 
   async function read(file) {
     setError('');
     try {
       if (!file || file.size > MAX_BYTES) throw Error('size');
-      const items = importPlan(state.profiles, JSON.parse(await file.text()));
+      const images = new Set(state.assets.filter((a) => a.kind === 'image').map((a) => a.id));
+      const items = importPlan(state.profiles, JSON.parse(await file.text()), { images });
       if (!items.length) throw Error('empty');
       setPlan(items);
-      setKeep(new Set(items.map((_, i) => i)));
+      setKeep(new Set(items.flatMap((item, i) => (item.changes.length ? [i] : []))));
     } catch {
       setError(t('bible.importInvalid'));
     }
@@ -36,53 +41,24 @@ export function BibleImportExport() {
   async function apply() {
     setApplying(true);
     setError('');
-    try {
-      for (const [index, item] of plan.entries()) {
-        if (!keep.has(index)) continue;
-        let id = item.existing;
-        if (!id) {
-          const made = await dispatch({ type: 'newProfile', ptype: item.type, name: item.name });
-          id = made?.id;
-          if (!id) throw Error('create');
-          if (item.desc) await dispatch({ type: 'profile', id, patch: { desc: item.desc } });
-          // A new place gets one version per light state from the design.
-          if (item.type === 'location' && item.lights?.length) {
-            await dispatch({
-              type: 'variant',
-              pid: id,
-              vid: 'main',
-              patch: { name: item.lights[0] },
-            });
-            for (const name of item.lights.slice(1))
-              await dispatch({ type: 'addVariant', pid: id, name });
-          }
-        }
-        const patch = Object.fromEntries(
-          Object.entries(item.patch).filter(([, value]) =>
-            Array.isArray(value)
-              ? value.length
-              : typeof value === 'object'
-                ? Object.values(value).some(Boolean)
-                : !!value,
-          ),
-        );
-        if (Object.keys(patch).length) {
-          const result = await dispatch({ type: 'bible', pid: id, patch });
-          if (result?.ok === false) throw Error('patch');
-        }
-      }
-      setPlan(null);
-    } catch {
-      setError(t('bible.importFailed'));
-    } finally {
-      setApplying(false);
-    }
+    const actions = importActions(plan, keep, {
+      profiles: state.profiles,
+      lookName: word('bible.defaultLook.character'),
+      placeName: word('bible.defaultLook.location'),
+    });
+    // Everything is checked and written together: nothing lands unless all of it does.
+    const result = actions.length ? await dispatch({ type: 'batch', actions }) : { ok: true };
+    setApplying(false);
+    if (result?.ok === false) setError(t('bible.importFailed'));
+    else setPlan(null);
   }
 
   function download() {
-    const blob = new Blob([JSON.stringify(exportBible(state.profiles), null, 2)], {
-      type: 'application/json',
-    });
+    const name = (id) => db.asset(id)?.name || '';
+    const blob = new Blob(
+      [JSON.stringify(exportBible(state.profiles, { assetName: name }), null, 2)],
+      { type: 'application/json' },
+    );
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -90,6 +66,9 @@ export function BibleImportExport() {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+
+  const fields = (item) =>
+    item.changes.map((key) => t('bible.field.' + key)).join(t('bible.listSep'));
 
   return (
     <div className="bible-io">
@@ -113,7 +92,7 @@ export function BibleImportExport() {
       />
       {error && !plan && <Note tone="warn">{error}</Note>}
       {plan && (
-        <Dialog title={t('bible.importTitle')} onClose={() => !applying && setPlan(null)} wide>
+        <Dialog title={t('bible.importTitle')} onClose={() => setPlan(null)} busy={applying} wide>
           <p className="muted">{t('bible.importHelp')}</p>
           <div className="bible-import-list">
             {plan.map((item, index) => (
@@ -121,6 +100,7 @@ export function BibleImportExport() {
                 <input
                   type="checkbox"
                   checked={keep.has(index)}
+                  disabled={!item.changes.length}
                   onChange={(e) => {
                     const next = new Set(keep);
                     if (e.target.checked) next.add(index);
@@ -128,15 +108,34 @@ export function BibleImportExport() {
                     setKeep(next);
                   }}
                 />
-                <Badge>{t('bible.kind.' + item.type)}</Badge>
-                <b>{item.name}</b>
-                <small className="muted">
-                  {t(item.existing ? 'bible.importFill' : 'bible.importNew')}
-                </small>
+                <span className="bible-import-main">
+                  <span className="bible-import-title">
+                    <Badge>{t('bible.kind.' + item.type)}</Badge>
+                    <b>{item.name}</b>
+                    <small className="muted">
+                      {t(item.existing ? 'bible.importFill' : 'bible.importNew')}
+                    </small>
+                  </span>
+                  <small className="muted">
+                    {item.changes.length
+                      ? t('bible.importChanges', { fields: fields(item) })
+                      : t('bible.importNoChange')}
+                  </small>
+                  {item.missing > 0 && (
+                    <small className="bible-import-warn">
+                      {t('bible.importMissing', { count: item.missing })}
+                    </small>
+                  )}
+                  {item.skipped?.includes('speaker') && (
+                    <small className="bible-import-warn">{t('bible.importSpeakerTaken')}</small>
+                  )}
+                </span>
               </label>
             ))}
           </div>
-          {error && <Note tone="warn">{error}</Note>}
+          <p className="bible-import-status" role="alert">
+            {error}
+          </p>
           <DialogActions>
             <Button disabled={applying} onClick={() => setPlan(null)}>
               {t('bible.cancel')}

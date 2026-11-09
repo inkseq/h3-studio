@@ -1,6 +1,14 @@
 // The Script step (h3-studio#1062): the whole story's text in one place, to read from top to bottom
 // and change in place. It only edits text, so nothing here can start a generation or spend credits.
-import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ArrowUpRight, Plus } from 'lucide-react';
 import { Button, IconButton } from './ui/Button.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -10,6 +18,7 @@ import { DEFAULT_CHAPTER_NAMES, sceneHeading } from './story-headings.js';
 import { store } from './store.js';
 import { SceneBeats, SceneIntent } from './ScriptBeats.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
+import { hasModelLines, readablePrompt, speakerNames } from './prompt-display.js';
 import './story-script.css';
 
 const SAVE_AFTER_MS = 500;
@@ -24,8 +33,20 @@ const textRows = (text) =>
 // One piece of text. Typing stays in this box and reaches the story after a short pause, or on
 // leaving the box: saving redraws the whole story page, far too much to do on every key. The text
 // on screen is always what was typed, and a pause is one step of the top bar's undo.
-const ScriptText = memo(function ScriptText({ id, value, label, placeholder, max, onSave }) {
+// `display` (optional) turns the stored text into what a person reads while the box is not being
+// edited (the video model's line markup, prompt-display.js); editing always shows the stored text.
+const ScriptText = memo(function ScriptText({
+  id,
+  value,
+  label,
+  placeholder,
+  max,
+  onSave,
+  part,
+  display,
+}) {
   const [draft, setDraft] = useState(null),
+    [editing, setEditing] = useState(false),
     unsaved = useRef(null),
     timer = useRef(0),
     composing = useRef(false),
@@ -60,14 +81,18 @@ const ScriptText = memo(function ScriptText({ id, value, label, placeholder, max
       now();
     };
   }, []);
+  const stored = draft ?? value;
+  const shown = !editing && display ? display(stored) : stored;
   return (
     <textarea
       className="script-text"
-      rows={textRows(draft ?? value)}
+      data-part={part}
+      rows={textRows(shown)}
       maxLength={max}
-      value={draft ?? value}
+      value={shown}
       aria-label={label}
       placeholder={placeholder}
+      onFocus={() => setEditing(true)}
       onChange={(event) => {
         unsaved.current = event.target.value;
         setDraft(event.target.value);
@@ -82,13 +107,24 @@ const ScriptText = memo(function ScriptText({ id, value, label, placeholder, max
         composing.current = false;
         later();
       }}
-      onBlur={() => save.current()}
+      onBlur={() => {
+        setEditing(false);
+        save.current();
+      }}
     />
   );
 });
 
 // Every value here is plain text or a stable callback, so a saved edit redraws only its own row.
-const ScriptShot = memo(function ScriptShot({ id, number, title, prompt, onSave, onOpen }) {
+const ScriptShot = memo(function ScriptShot({
+  id,
+  number,
+  title,
+  prompt,
+  display,
+  onSave,
+  onOpen,
+}) {
   const { t } = useI18n();
   const no = String(number).padStart(2, '0');
   return (
@@ -102,6 +138,7 @@ const ScriptShot = memo(function ScriptShot({ id, number, title, prompt, onSave,
           label={t('shotCard.prompt')}
           placeholder={t('script.shotHint')}
           max={SHOT_TEXT_MAX}
+          display={display}
           onSave={onSave}
         />
       </div>
@@ -117,12 +154,23 @@ const ScriptShot = memo(function ScriptShot({ id, number, title, prompt, onSave,
   );
 });
 
-function ScriptScene({ group, numbers, locked, onSaveShot, onSaveScene, onAddShot, onOpenShot }) {
+function ScriptScene({
+  group,
+  numbers,
+  locked,
+  display,
+  level,
+  onSaveShot,
+  onSaveScene,
+  onAddShot,
+  onOpenShot,
+}) {
   const { t } = useI18n();
+  const Heading = level;
   return (
-    <section className="script-scene">
+    <section className="script-scene" data-script-scene={group.id || undefined}>
       <header className="script-scene-head">
-        <h3>{sceneHeading(group.title, t)}</h3>
+        <Heading>{sceneHeading(group.title, t)}</Heading>
         <small className="muted">
           {t(group.shots.length === 1 ? 'storyboard.sceneOneShot' : 'storyboard.sceneShots', {
             count: group.shots.length,
@@ -166,6 +214,7 @@ function ScriptScene({ group, numbers, locked, onSaveShot, onSaveScene, onAddSho
           number={numbers.get(shot.id)}
           title={shot.title}
           prompt={shot.prompt}
+          display={display}
           onSave={onSaveShot}
           onOpen={onOpenShot}
         />
@@ -185,6 +234,35 @@ function ScriptScene({ group, numbers, locked, onSaveShot, onSaveScene, onAddSho
       )}
     </section>
   );
+}
+
+// A scene the page should show next (the flow's "next step"), until it is on screen.
+let wantedScene = null;
+function landOnScene() {
+  if (wantedScene && wantedScene.until < Date.now()) wantedScene = null;
+  if (!wantedScene) return false;
+  const section = document.querySelector(
+    `.script-page [data-script-scene="${CSS.escape(wantedScene.id)}"]`,
+  );
+  if (!section) return false;
+  wantedScene = null;
+  const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  section.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+  section
+    .querySelector('textarea, select, input, button:not(:disabled), [tabindex="0"]')
+    ?.focus({ preventScroll: true });
+  return true;
+}
+
+/**
+ * Scroll the Script step to a scene and focus its first control: what the flow's next step
+ * `{ stage: 'script', id }` should do. Works before the Script step is drawn too: the page
+ * lands there as soon as the scene is on screen (within a few seconds).
+ */
+export function showScriptScene(id) {
+  if (!id) return;
+  wantedScene = { id, until: Date.now() + 4000 };
+  requestAnimationFrame(() => landOnScene());
 }
 
 // The same layout as the page, so nothing moves when the story arrives.
@@ -239,6 +317,16 @@ export function StoryScript({ chapters, groups, shots, onNewScene, onOpenShot })
     added.current = false;
     document.querySelector(`[data-script-shot="${state.lastAdded}"] textarea`)?.focus();
   }, [state.lastAdded]);
+  // The video model's line markup reads as "名字：台词" until the box is edited.
+  const profiles = state.profiles;
+  const display = useMemo(() => {
+    const names = speakerNames(profiles);
+    return (text) => (hasModelLines(text) ? readablePrompt(text, names) : text);
+  }, [profiles]);
+  // The flow's "next step" may name a scene (showScriptScene): land there once it is drawn.
+  useEffect(() => {
+    landOnScene();
+  });
   if (state.placeholder) return <ScriptWaiting title={state.project.title} />;
   const locked = state.busy || !!state.workbenchPending;
   const addShot = (sceneId) => {
@@ -252,6 +340,7 @@ export function StoryScript({ chapters, groups, shots, onNewScene, onOpenShot })
   };
   // The same numbers as the cards on the storyboard.
   const numbers = new Map(state.shots.map((shot, index) => [shot.id, index + 1]));
+  const several = chapters.length > 1;
   const scene = (group) => (
     <ScriptScene
       key={group.id || 'unparented'}
@@ -262,9 +351,10 @@ export function StoryScript({ chapters, groups, shots, onNewScene, onOpenShot })
       onSaveScene={saveScene}
       onAddShot={addShot}
       onOpenShot={openShot}
+      display={display}
+      level={several ? 'h3' : 'h2'}
     />
   );
-  const several = chapters.length > 1;
   return (
     <section className="script-page" aria-label={t('stage.script')}>
       <div className="script-sheet">

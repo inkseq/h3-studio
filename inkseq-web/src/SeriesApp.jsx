@@ -560,10 +560,13 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
           onNewScene={() => add('scene')}
         />
       </div>
+      {/* Opened by the import menu item only; never a Tab stop of its own (audit 2026-11-09). */}
       <input
         ref={importRef}
         className="visually-hidden"
         type="file"
+        tabIndex={-1}
+        aria-hidden="true"
         accept=".zip,.json"
         aria-label={t('story.copy69')}
         onChange={(e) => importFile(e.target.files[0])}

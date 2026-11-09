@@ -1,27 +1,56 @@
-/* Film editor (#347): preview on top, the selected clip's trim bar, then a timeline with a
-   ruler, the picture track and the sound lane sharing one scale and one playhead. It is the Edit
-   step of the story page (#1062), so it fills the page under the top bar. */
+/* Film editor (#347): the preview with the selected clip beside it, then a timeline with a
+   ruler, the picture track, the sound lane and the caption lane sharing one scale and one
+   playhead. It is the Edit step of the story page (#1062), so it fills the page under the top
+   bar. The timeline and the bars under it always keep their full height; the preview takes
+   what is left and the page scrolls only below its minimum (story audit 2026-11-09: the old
+   fixed rows squeezed the timeline to 47 px at 1440 x 900 and 10 px at 1024 x 768). */
 .film-editor {
   grid-column: 1 / -1;
   grid-row: 1;
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(160px, 1fr) auto auto auto auto auto auto auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 28%);
+  grid-template-rows: auto minmax(180px, 1fr) auto auto auto auto auto;
+  grid-template-areas:
+    'head head'
+    'monitor inspector'
+    'tools tools'
+    'timeline timeline'
+    'audio audio'
+    'captions captions'
+    'foot foot';
+  gap: var(--sp-2) var(--sp-3);
   padding: 12px 18px 14px;
   background: var(--bg);
   color: var(--ink);
   overflow: auto;
 }
+.film-editor > * {
+  min-width: 0;
+}
 .film-editor-head {
+  grid-area: head;
   display: flex;
   align-items: center;
   gap: 12px;
 }
 .film-editor-head > div:first-child {
   min-width: 0;
-  margin-inline-end: auto;
+}
+/* Takes the free space in the head row whether or not there is a message. */
+.film-editor-error {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-sm);
+  text-align: end;
+}
+.film-editor-error:empty {
+  visibility: hidden;
 }
 .film-editor-title {
   display: flex;
@@ -44,6 +73,13 @@
   font-size: 12px;
   color: var(--muted);
 }
+.film-monitor {
+  grid-area: monitor;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: var(--sp-1);
+}
 .film-editor-stage {
   min-height: 0;
   display: grid;
@@ -52,43 +88,93 @@
   border-radius: var(--r, 12px);
   overflow: hidden;
 }
+/* The editor's own transport under the preview (FilmTransport.jsx). */
+.film-transport {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.film-transport-time {
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.film-transport-rate {
+  min-width: 3em;
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+.film-transport-spacer {
+  flex: 1;
+}
+.film-keys {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-2) var(--sp-4);
+  margin: 0;
+  font-size: var(--fs-md);
+}
+.film-keys dt {
+  white-space: nowrap;
+}
+.film-keys dd {
+  margin: 0;
+}
+.film-keys kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--line-2, var(--line));
+  border-radius: 4px;
+  background: var(--surface-2, var(--surface));
+  font: inherit;
+  font-size: var(--fs-sm);
+}
 .film-editor-empty {
   align-self: center;
   justify-self: center;
 }
-/* Selected clip: small source view + always-visible trim bar. */
+/* Selected clip, beside the preview: name, actions, its source and the always-visible trim
+   bar. The panel keeps its place and size whatever is selected; it scrolls inside itself on a
+   short screen. */
 .film-inspector {
+  grid-area: inspector;
+  min-height: 0;
   display: grid;
-  gap: 8px;
-  padding: 10px 12px;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(72px, 1fr) auto auto;
+  align-content: start;
+  gap: var(--sp-2);
+  padding: 8px 12px 10px;
   border: 1px solid var(--line-2, var(--line));
   border-radius: 12px;
   background: var(--surface);
+  overflow: auto;
+  /* Start at the clip's name: a video loading below must not scroll the panel. */
+  overflow-anchor: none;
 }
 .film-inspector-head {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  gap: var(--sp-1);
+  min-width: 0;
 }
 .film-inspector-head b {
-  margin-inline-end: auto;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
   font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.film-inspector-head button,
+.film-speed,
 .film-excluded .excluded-clip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
 }
-.film-inspector-body {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  gap: 12px;
-  align-items: center;
-}
 .film-source {
-  aspect-ratio: 16 / 9;
+  min-height: 72px;
   display: grid;
   place-items: center;
   background: var(--black);
@@ -100,6 +186,7 @@
   cursor: pointer;
   width: 100%;
   height: 100%;
+  max-height: 100%;
   object-fit: contain;
 }
 .film-inspector-empty {
@@ -108,9 +195,11 @@
 }
 /* Timeline */
 .film-zoom {
+  grid-area: tools;
   display: flex;
   align-items: center;
   gap: 10px;
+  min-height: var(--h-sm, 28px);
   font-size: 12px;
 }
 .film-zoom-spacer {
@@ -126,6 +215,9 @@
   width: 140px;
 }
 .film-timeline {
+  grid-area: timeline;
+  /* A scroll container may shrink to nothing in a grid row; the timeline never does. */
+  min-height: max-content;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 12px 8px;
@@ -237,6 +329,7 @@
   z-index: 4;
 }
 .film-editor-foot {
+  grid-area: foot;
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
@@ -268,19 +361,25 @@ button.autosave-status {
   cursor: pointer;
   text-decoration: underline;
 }
+/* Narrow screens: the selected clip goes under the preview and the page scrolls. */
+@media (max-width: 900px) {
+  .film-editor {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(200px, 40vh) auto auto auto auto auto auto;
+    grid-template-areas: 'head' 'monitor' 'inspector' 'tools' 'timeline' 'audio' 'captions' 'foot';
+  }
+  .film-inspector {
+    grid-template-rows: auto auto auto auto auto;
+    overflow: visible;
+  }
+  .film-source {
+    max-width: 260px;
+    aspect-ratio: 16 / 9;
+  }
+}
 @media (max-width: 760px) {
   .film-editor {
     padding: 10px;
-    grid-template-rows: auto minmax(180px, 40vh) auto auto auto auto auto auto auto;
-  }
-  .film-inspector-body {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .film-source {
-    max-width: 220px;
-  }
-  .film-zoom small {
-    display: none;
   }
 }
 
@@ -354,11 +453,13 @@ button.autosave-status {
   cursor: grab;
 }
 .film-audio-bar {
+  grid-area: audio;
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 8px 14px;
-  margin-top: 8px;
+  /* One row as tall as the picked sound's controls (volume, fades) whether or not a sound is
+     picked, so nothing above or below moves. */
+  min-height: 36px;
   font-size: 12px;
 }
 .film-audio-add > button,
@@ -369,9 +470,21 @@ button.autosave-status {
 }
 .film-audio-controls {
   display: flex;
-  flex-wrap: wrap;
+  flex: 1;
   align-items: center;
   gap: 8px 12px;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.film-audio-controls > b {
+  max-width: 14em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.film-audio:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 .film-audio-controls label {
   display: inline-flex;
@@ -387,22 +500,9 @@ button.autosave-status {
   }
 }
 
-/* Speed and detached sound (render v5, #408): full-width rows under the source and trim bar. */
-.film-speed,
-.film-detach {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-.film-speed > span {
-  margin-right: 4px;
-  font-size: 12px;
+/* Speed (render v5, #408): a compact choice in the selected clip's action row. */
+.film-speed {
   color: var(--ink-2);
-}
-.film-speed small {
-  flex-basis: 100%;
 }
 .film-tclip-rate {
   position: absolute;
@@ -435,40 +535,36 @@ button.autosave-status {
 .film-tclip.selected {
   border-radius: 4px;
 }
-/* #232 (#28): a smaller preview by default, drag its bottom-right corner to resize; the
-   timeline below gets the room. */
-.film-editor {
-  grid-template-rows: auto auto auto auto auto auto auto auto auto;
-}
-.film-editor-stage {
-  height: 36vh;
-  min-height: 140px;
-  max-height: 75vh;
-  resize: vertical;
-}
-.film-speed select {
+/* #232 (#28) asked for a small preview so the timeline gets the room; the preview now takes
+   whatever the timeline leaves, so it needs no resize handle. */
+.film-speed .field-sm {
   width: auto;
   min-width: 72px;
 }
-/* #232 (#17): left-out clips read as removed — hatched, struck through — right under the track. */
+/* #232 (#17): left-out clips, beside the timeline tools. One click puts a clip back; the label
+   stays at full contrast (story audit 2026-11-09: the hatched, faded chips were hard to read). */
 .film-excluded {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.film-excluded > * {
+  flex: none;
 }
 .film-excluded .excluded-clip {
-  text-decoration: line-through;
-  background: repeating-linear-gradient(
-    135deg,
-    var(--surface-2, var(--surface)) 0 6px,
-    var(--surface) 6px 12px
-  );
-  opacity: 0.8;
+  max-width: 16em;
 }
-.film-excluded .excluded-clip.on {
-  opacity: 1;
+.film-excluded-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.film-tclip:focus-visible {
   outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 /* Clip labels sit on pictures or on the empty stripes, in light and dark looks alike: a
    small dark pill keeps them readable everywhere (owner review, 2026-10-26). */
@@ -483,7 +579,8 @@ button.autosave-status {
   text-shadow: none;
 }
 
-/* Caption lane (story redesign batch 4): cues on the cut timeline, click to edit. */
+/* Caption lane (story redesign batch 4): cues on the cut timeline, click to edit. A cue that
+   would stop the burn-in export is outlined in the warning colour. */
 .film-caption-lane {
   position: relative;
   min-width: 100%;
@@ -507,26 +604,81 @@ button.autosave-status {
   text-overflow: ellipsis;
   justify-content: flex-start;
 }
+.film-caption-lane .film-caption-cue.film-caption-cue.warn {
+  box-shadow: inset 0 0 0 1px var(--warn);
+}
 .film-caption-lane .film-caption-cue.film-caption-cue.on {
   outline: 2px solid var(--accent);
 }
+/* Tools, the picked caption's editor (its space is kept when nothing is picked) and the
+   confirmation, on one row. */
 .film-caption-bar {
+  grid-area: captions;
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  min-height: 60px;
+}
+.film-caption-tools,
+.film-caption-check {
+  display: flex;
+  flex: none;
   align-items: center;
   gap: var(--sp-2);
-  margin-top: var(--sp-2);
 }
 .film-caption-edit {
   display: flex;
-  flex: 1 1 320px;
+  flex: 1 1 auto;
   align-items: center;
   gap: var(--sp-2);
+  min-width: 0;
 }
 .film-caption-edit .film-caption-time {
   width: 72px;
 }
-.film-caption-edit .film-caption-text {
+.film-caption-text-box {
+  display: flex;
   flex: 1;
+  align-items: stretch;
+  gap: var(--sp-1);
   min-width: 120px;
+}
+.film-caption-text-box .film-caption-text {
+  flex: 1;
+  min-width: 0;
+  resize: none;
+  line-height: 20px;
+}
+.film-caption-count {
+  display: grid;
+  align-content: center;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+  white-space: nowrap;
+}
+.film-caption-count .over {
+  color: var(--danger);
+  font-weight: 700;
+}
+.film-caption-status {
+  min-width: 9em;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+.film-caption-status.warn {
+  color: var(--warn);
+}
+.film-caption-problems ul {
+  display: grid;
+  gap: var(--sp-1);
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.film-caption-problems p {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-sm);
 }

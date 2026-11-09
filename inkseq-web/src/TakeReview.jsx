@@ -22,6 +22,7 @@ import {
   withChoice,
 } from './take-review-model.js';
 import { playRanges, segmentsAction, snapRange } from './shot-segments.js';
+import { inOutRange, timeBarKey } from './storyboard-a11y.js';
 import './take-review.css';
 
 function useDuration(mediaRef) {
@@ -35,6 +36,23 @@ function useDuration(mediaRef) {
     return () => node.removeEventListener('loadedmetadata', read);
   });
   return duration;
+}
+
+// Where the take's video is now, for the playhead on a time bar.
+export function usePlayhead(getVideo) {
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const node = getVideo();
+    if (!node) return undefined;
+    const tick = () => setNow(node.currentTime || 0);
+    tick();
+    const names = ['timeupdate', 'seeked', 'loadedmetadata', 'play', 'pause'];
+    for (const name of names) node.addEventListener(name, tick);
+    return () => {
+      for (const name of names) node.removeEventListener(name, tick);
+    };
+  });
+  return [now, setNow];
 }
 
 export default function TakeReview({ shotId, artifactId, mediaRef, chosen = false }) {
@@ -53,7 +71,10 @@ export default function TakeReview({ shotId, artifactId, mediaRef, chosen = fals
     [drag, setDrag] = useState(null),
     [message, setMessage] = useState(''),
     // A verdict pressed while another saves waits here, and already shows as chosen (#1032).
-    [queued, setQueued] = useState(null);
+    [queued, setQueued] = useState(null),
+    // Keyboard marking (audit 2026-11-09): I and O set these at the playhead, Enter marks.
+    [inPoint, setInPoint] = useState(null),
+    [outPoint, setOutPoint] = useState(null);
   const save = useMutation({
     mutationFn: ({ body }) =>
       adapter.saveTakeReview(shotId, artifactId, body, 'take-review-' + crypto.randomUUID()),
@@ -138,17 +159,102 @@ export default function TakeReview({ shotId, artifactId, mediaRef, chosen = fals
     el.addEventListener('pointercancel', up);
   }
   const video = () => mediaRef.current?.querySelector('video');
+  const [now, setNow] = usePlayhead(video);
   const seek = (time) => {
     const node = video();
     if (!node) return;
     node.pause();
     node.currentTime = time;
+    setNow(time);
   };
+  const ids = () => new Set(marks.map((m) => m.id));
+  function saveDraft() {
+    commit({
+      marks: editing.isNew
+        ? [...marks, editing.mark]
+        : marks.map((m) => (m.id === editing.mark.id ? editing.mark : m)),
+    });
+    setEditing(null);
+  }
+  // A new mark over the in–out range (or in point to the playhead), optionally with a choice.
+  function markRange(choice) {
+    const span = inOutRange(inPoint, outPoint, now),
+      range = span && rangeFrom(span.start, span.end, duration);
+    if (!range) return false;
+    const mark = newMark(range, ids());
+    setEditing({ mark: choice ? withChoice(mark, choice) : mark, isNew: true });
+    setInPoint(null);
+    setOutPoint(null);
+    return true;
+  }
+  // The keys of review tools (timeBarKey): I/O, Enter, 1–4, arrows, J/K/L, Escape.
+  function keys(event) {
+    const action = timeBarKey(event),
+      onBar = event.target === event.currentTarget;
+    if (!action || !duration) return;
+    const node = video(),
+      clampTime = (value) => Math.max(0, Math.min(duration, value));
+    switch (action.type) {
+      case 'step':
+        seek(clampTime(now + action.by));
+        break;
+      case 'seek':
+        seek(action.to === 'start' ? 0 : duration);
+        break;
+      case 'toggle':
+        if (!onBar && event.key === ' ') return;
+        if (node?.paused) void node.play()?.catch?.(() => {});
+        else node?.pause();
+        break;
+      case 'play':
+        void node?.play()?.catch?.(() => {});
+        break;
+      case 'in':
+        setInPoint(now);
+        break;
+      case 'out':
+        // O without I marks from the start of the take.
+        setOutPoint(now);
+        if (inPoint === null) setInPoint(0);
+        break;
+      case 'enter':
+        if (!onBar) return;
+        if (editing) {
+          if (saving) return;
+          saveDraft();
+        } else if (!markRange()) return;
+        break;
+      case 'choice':
+        if (editing)
+          setEditing((old) => ({ ...old, mark: withChoice(old.mark, CHOICES[action.index]) }));
+        else if (!markRange(CHOICES[action.index])) return;
+        break;
+      case 'cancel':
+        if (editing) setEditing(null);
+        else if (inPoint !== null || outPoint !== null) {
+          setInPoint(null);
+          setOutPoint(null);
+        } else return;
+        break;
+      case 'delete':
+        if (!editing || editing.isNew || saving) return;
+        commit({ marks: marks.filter((m) => m.id !== editing.mark.id) });
+        setEditing(null);
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  }
+  const pending = inOutRange(inPoint, outPoint, now);
   const pct = (value) => (duration ? (value / duration) * 100 : 0) + '%';
   const draft = editing?.mark;
   const setDraft = (patch) => setEditing((old) => ({ ...old, mark: { ...old.mark, ...patch } }));
   return (
-    <section className="take-review" aria-label={t('review.title')}>
+    <section
+      className={'take-review' + (editing || drag || inPoint !== null ? ' marking' : '')}
+      aria-label={t('review.title')}
+    >
       <header className="take-review-head">
         <span className="take-review-title">{t('review.title')}</span>
         <div className="take-review-verdict" role="group" aria-label={t('review.verdict')}>
@@ -168,8 +274,13 @@ export default function TakeReview({ shotId, artifactId, mediaRef, chosen = fals
       <div
         ref={bar}
         className={'take-review-bar' + (duration ? '' : ' unknown')}
-        role="presentation"
+        role="group"
+        tabIndex={0}
+        aria-label={t('review.barLabel', { at: fmtSeconds(now) })}
+        aria-describedby={'take-review-keys-' + artifactId}
+        aria-keyshortcuts="I O Enter 1 2 3 4 J K L"
         onPointerDown={begin}
+        onKeyDown={keys}
       >
         {marks.map((mark) => (
           <Button
@@ -192,6 +303,20 @@ export default function TakeReview({ shotId, artifactId, mediaRef, chosen = fals
             }}
           />
         ))}
+        {/* An in point set with I (and O) shows until Enter makes it a mark. */}
+        {!drag && !editing && pending && (
+          <span
+            className="take-review-mark draft pending"
+            style={{ left: pct(pending.start), width: pct(pending.end - pending.start) }}
+          />
+        )}
+        {duration > 0 && (
+          <span
+            className="take-review-playhead"
+            aria-hidden="true"
+            style={{ left: pct(Math.max(0, Math.min(duration, now))) }}
+          />
+        )}
         {/* The range stays on the bar while it is dragged and while its note is open. */}
         {(drag || editing?.isNew) && (
           <span
@@ -207,6 +332,9 @@ export default function TakeReview({ shotId, artifactId, mediaRef, chosen = fals
         {drag
           ? fmtSeconds(drag.start_s) + ' – ' + fmtSeconds(drag.end_s)
           : t(duration ? (marks.length ? 'review.hintMore' : 'review.hint') : 'review.waiting')}
+      </small>
+      <small className="take-review-keys muted" id={'take-review-keys-' + artifactId}>
+        {t('review.keys')}
       </small>
 
       {draft && (
@@ -277,18 +405,7 @@ export default function TakeReview({ shotId, artifactId, mediaRef, chosen = fals
             <Button variant="ghost" onClick={() => setEditing(null)}>
               {t('review.cancel')}
             </Button>
-            <Button
-              variant="primary"
-              disabled={saving}
-              onClick={() => {
-                commit({
-                  marks: editing.isNew
-                    ? [...marks, draft]
-                    : marks.map((m) => (m.id === draft.id ? draft : m)),
-                });
-                setEditing(null);
-              }}
-            >
+            <Button variant="primary" disabled={saving} onClick={saveDraft}>
               {t('review.save')}
             </Button>
           </div>

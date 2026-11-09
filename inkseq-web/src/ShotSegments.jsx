@@ -6,6 +6,7 @@ import { Button } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { FloatingMessage } from './floating-notice.js';
 import { playRanges, segmentsAction, segmentsTotal, snapRange } from './shot-segments.js';
+import { inOutRange, timeBarKey } from './storyboard-a11y.js';
 import './shot-segments.css';
 
 const secs = (value) => String(Math.round(value * 10) / 10);
@@ -24,7 +25,10 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
     bar = useRef(null),
     [draft, setDraft] = useState(null),
     [selected, setSelected] = useState(null),
-    [now, setNow] = useState(0);
+    [now, setNow] = useState(0),
+    // Keyboard (same keys as take review): I and O set in and out, Enter keeps that part.
+    [inPoint, setInPoint] = useState(null),
+    [outPoint, setOutPoint] = useState(null);
   const list = draft || parts;
   const total =
     Number.isFinite(duration) && duration > 0
@@ -128,6 +132,78 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
     setSelected(null);
     onChange(parts.filter((_, i) => i !== index));
   };
+  // Keep the in–out range as a new part, trimmed to the free room around its start.
+  const keepRange = () => {
+    const span = inOutRange(inPoint, outPoint, now);
+    if (!span) return false;
+    const [lo, hi] = room(parts, span.start),
+      start = clamp(span.start, lo, hi),
+      end = clamp(span.end, start, hi);
+    if (end - start < MIN_PART) return false;
+    const next = [...parts, snapRange(start, end)]
+      .filter(Boolean)
+      .sort((a, b) => a.start - b.start);
+    setInPoint(null);
+    setOutPoint(null);
+    setSelected(null);
+    onChange(next);
+    return true;
+  };
+  function keys(event) {
+    const action = timeBarKey(event),
+      onBar = event.target === event.currentTarget,
+      video = getVideo();
+    if (!action) return;
+    switch (action.type) {
+      case 'step':
+        seek(clamp(now + action.by, 0, total));
+        break;
+      case 'seek':
+        seek(action.to === 'start' ? 0 : total);
+        break;
+      case 'toggle':
+        if (!onBar && event.key === ' ') return;
+        if (video?.paused) void video.play()?.catch?.(() => {});
+        else video?.pause();
+        break;
+      case 'play':
+        void video?.play()?.catch?.(() => {});
+        break;
+      case 'in':
+        setInPoint(now);
+        break;
+      case 'out':
+        setOutPoint(now);
+        if (inPoint === null) setInPoint(0);
+        break;
+      case 'enter':
+        if (busy || !onBar || !keepRange()) return;
+        break;
+      case 'cancel':
+        if (inPoint === null && outPoint === null && selected === null) return;
+        setInPoint(null);
+        setOutPoint(null);
+        setSelected(null);
+        break;
+      case 'delete': {
+        // The selected part, else the one under the playhead.
+        const index = selected ?? parts.findIndex((part) => now >= part.start && now <= part.end);
+        if (busy || index === null || index < 0) return;
+        remove(index);
+        break;
+      }
+      case 'choice':
+        // 1–4 pick a kept part by number here.
+        if (!parts[action.index]) return;
+        setSelected(action.index);
+        seek(parts[action.index].start);
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+  }
+  const pending = inOutRange(inPoint, outPoint, now);
   // The strip above the parts only moves the playhead (owner, 2026-10-26), so seeking never
   // fights with dragging a part.
   function scrub(event) {
@@ -151,12 +227,11 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
       ref={box}
       className={'parts-bar' + (busy ? ' busy' : '')}
       tabIndex={0}
+      role="group"
+      aria-label={t('segments.barLabel', { at: secs(now) })}
+      aria-keyshortcuts="I O Enter Delete J K L"
       title={t('segments.barHelp')}
-      onKeyDown={(event) => {
-        if (selected === null || !['Delete', 'Backspace'].includes(event.key)) return;
-        event.preventDefault();
-        remove(selected);
-      }}
+      onKeyDown={keys}
     >
       <div
         className="parts-bar-scrub"
@@ -182,6 +257,12 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
             <i className="edge end" onPointerDown={(e) => begin(e, index, 'end')} />
           </span>
         ))}
+        {pending && (
+          <span
+            className="parts-bar-pending"
+            style={{ left: pct(pending.start), width: pct(pending.end - pending.start) }}
+          />
+        )}
         <span className="parts-bar-head" style={{ left: pct(clamp(now, 0, total)) }} />
       </div>
       {/* The × sits above its part, clear of the resize edges. */}
@@ -201,6 +282,7 @@ function PartsBar({ duration, parts, getVideo, busy, onChange, t }) {
           {t(list.length ? 'segments.moreHint' : 'segments.firstHint')}
         </small>
       )}
+      <small className="parts-bar-keys muted">{t('segments.keys')}</small>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { Button } from './ui/Button.jsx';
+import { Button, IconButton } from './ui/Button.jsx';
 import React, {
   useCallback,
   useMemo,
@@ -10,16 +10,44 @@ import React, {
 } from 'react';
 import { Player } from '@remotion/player';
 import { AbsoluteFill, Html5Audio, Html5Video, Sequence } from 'remotion';
-import { DndContext, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
-import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  horizontalListSortingStrategy,
+  sortableKeyboardCoordinates,
+  useSortable,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Clapperboard, Eye, EyeOff, Gauge, Unlink, Volume2, VolumeX } from 'lucide-react';
+import { Clapperboard, EyeOff, Gauge, Undo2, Unlink, Volume2, VolumeX } from 'lucide-react';
 import { store } from './store.js';
 import { useStoryboardMediaUrl } from './StoryboardMedia.jsx';
 import { cutFps } from './video-cut-model.js';
-import { captionTrack, orderedCues } from './caption-model.js';
-import { addCue, cuesFromLines, fillCuesFromLines, removeCue, setCue } from './caption-edit.js';
+import { captionProblems, captionStatus, captionTrack, orderedCues } from './caption-model.js';
+import {
+  addCue,
+  confirmCaptions,
+  cuesFromLines,
+  fillCuesFromLines,
+  removeCue,
+  setCue,
+} from './caption-edit.js';
 import { CaptionControls, CaptionLane } from './FilmCaptionLane.jsx';
+import { FilmKeysHelp, FilmTransport } from './FilmTransport.jsx';
+import {
+  clipName,
+  cutPoints,
+  markRange,
+  shuttle,
+  stepToCut,
+  transportCommand,
+} from './film-editor-keys.js';
 import {
   CROSSFADES,
   clipSoundCrossfade,
@@ -57,6 +85,8 @@ const envelope = (frame, frames, fadeIn, fadeOut) =>
   );
 
 const PREMOUNT = cutFps;
+// Clip and cue ids go into attribute selectors.
+const CSS_ESCAPE = (id) => (globalThis.CSS?.escape ? globalThis.CSS.escape(id) : String(id));
 
 // The timeline's playhead line follows the player on its own, so the editor around it does
 // not re-render on every frame.
@@ -127,7 +157,7 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
                 fontSize: 40,
               }}
             >
-              {clip.title}
+              {clip.name}
             </AbsoluteFill>
           )}
         </Sequence>
@@ -261,15 +291,48 @@ function Ruler({ seconds, pps, onSeek }) {
 }
 
 // One included clip on the timeline: width follows its length; drag to reorder, click to select.
-function TimelineClip({ clip, pps, selected, playing, busy, sound, onSelect }) {
+// Keyboard (story audit 2026-11-09): Enter selects, Enter on the selected clip picks it up for
+// dnd-kit's keyboard drag, Alt+←/→ moves it one place, Delete leaves it out of the cut.
+function TimelineClip({
+  clip,
+  pps,
+  selected,
+  playing,
+  busy,
+  sound,
+  dragging,
+  onSelect,
+  onMove,
+  onLeaveOut,
+}) {
   const { t } = useI18n();
-  const sortable = useSortable({ id: clip.id, disabled: busy });
+  const sortable = useSortable({
+    id: clip.id,
+    disabled: busy,
+    attributes: { roleDescription: t('editor.clipRole') },
+  });
   // True length on the ruler (#232 #13): a minimum width would push every later clip off time.
-  const width = (clip.frames / cutFps) * pps;
+  const width = (clip.frames / cutFps) * pps,
+    seconds = (clip.frames / cutFps).toFixed(1);
+  const onKeyDown = (event) => {
+    if (busy || dragging.current) return;
+    if (event.key === 'Enter' && !selected) {
+      event.preventDefault();
+      onSelect(clip);
+    } else if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+      // Alt+arrow is also the browser's back/forward; the editor keeps it here.
+      event.preventDefault();
+      onMove(clip, event.key === 'ArrowLeft' ? -1 : 1);
+    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+      event.preventDefault();
+      onLeaveOut(clip);
+    } else if (event.key === 'Enter') sortable.listeners?.onKeyDown?.(event);
+  };
   return (
     <div
       ref={sortable.setNodeRef}
       data-clip-id={clip.id}
+      data-timeline-item="clip"
       className={
         'film-tclip' +
         (clip.playable ? '' : ' empty') +
@@ -282,10 +345,13 @@ function TimelineClip({ clip, pps, selected, playing, busy, sound, onSelect }) {
         transform: CSS.Translate.toString(sortable.transform),
         transition: sortable.transition,
       }}
-      title={`${clip.index + 1}. ${clip.title} · ${(clip.frames / cutFps).toFixed(1)}s`}
+      title={`${clip.index + 1}. ${clip.name} · ${seconds}s`}
       onClick={() => onSelect(clip)}
       {...sortable.attributes}
       {...sortable.listeners}
+      aria-label={t('editor.clipLabel', { n: clip.index + 1, seconds })}
+      aria-pressed={selected}
+      onKeyDown={onKeyDown}
     >
       {clip.asset && <ClipThumb asset={clip.asset} />}
       {clip.parts?.length > 1 &&
@@ -304,7 +370,7 @@ function TimelineClip({ clip, pps, selected, playing, busy, sound, onSelect }) {
         ))}
       <span className="film-tclip-label">
         <b>{clip.index + 1}</b>
-        {width >= 72 && <span>{clip.title}</span>}
+        {width >= 72 && <span>{clip.name}</span>}
       </span>
       {clip.rate !== 1 && width >= 30 && (
         <span className="film-tclip-rate">{t('editor.rate', { rate: clip.rate })}</span>
@@ -327,7 +393,14 @@ export default function FilmEditor({
   const s = useSyncExternalStore(store.subscribe, store.getState, store.getState),
     project = s.project;
   const chapter = project.entities.find((e) => e.id === chapterId);
-  const clips = useMemo(() => editorClips(project, chapterId), [project, chapterId]);
+  // Each clip carries the name it shows: its title, else its first script line, else "Shot N".
+  const clips = useMemo(() => {
+    const shots = new Map(project.entities.map((e) => [e.id, e]));
+    return editorClips(project, chapterId).map((clip) => ({
+      ...clip,
+      name: clipName(shots.get(clip.id)) || t('editor.shotN', { n: clip.index + 1 }),
+    }));
+  }, [project, chapterId, t]);
   const included = useMemo(() => clips.filter((clip) => clip.included), [clips]),
     excluded = clips.filter((clip) => !clip.included),
     total = cutFrames(clips),
@@ -335,21 +408,34 @@ export default function FilmEditor({
   const [sources, setSources] = useState({}),
     [durations, setDurations] = useState({}),
     [error, setError] = useState(''),
-    [selectedId, setSelectedId] = useState(initialTrim || clips[0]?.id || null),
+    [selectedId, setSelectedId] = useState(initialTrim),
     [playingId, setPlayingId] = useState(null),
     [zoom, setZoom] = useState(null),
     [fitWidth, setFitWidth] = useState(800),
     [captions, setCaptions] = useState(true),
     [selectedAudio, setSelectedAudio] = useState(null),
-    [selectedCue, setSelectedCue] = useState(null);
-  const player = useRef(null),
+    [selectedCue, setSelectedCue] = useState(null),
+    [rate, setRate] = useState(1),
+    [help, setHelp] = useState(false),
+    [announce, setAnnounce] = useState('');
+  const root = useRef(null),
+    player = useRef(null),
     scroller = useRef(null),
     sourceVideo = useRef(null),
+    // dnd-kit's keyboard drag owns the arrows and Enter while a clip is picked up.
+    dragging = useRef(false),
     // The current frame lives in a ref, not state: re-rendering the whole editor on every
     // frame starved the player, so each clip froze after a fraction of a second
     // (owner, 2026-11-09). Only the playhead line and the playing clip's highlight follow it.
     frameRef = useRef(0);
-  const selected = clips.find((clip) => clip.id === selectedId) || clips[0] || null;
+  // The inspector only shows a clip that is in the cut (story audit 2026-11-09); a left-out
+  // clip is put back from the list under the preview instead.
+  const selected = included.find((clip) => clip.id === selectedId) || included[0] || null;
+  // A newly selected clip shows from its name down, even on a short screen.
+  React.useEffect(() => {
+    const node = root.current?.querySelector('.film-inspector');
+    if (node) node.scrollTop = 0;
+  }, [selected?.id]);
   // The overlay owns scrolling while open; the storyboard behind it must not move.
   React.useEffect(() => {
     const old = document.body.style.overflow;
@@ -396,7 +482,14 @@ export default function FilmEditor({
   }, []);
   const fit = Math.min(MAX_PPS, Math.max(MIN_PPS, fitWidth / Math.max(1, seconds)));
   const pps = zoom ?? fit;
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // Enter picks the selected clip up, arrows move it, Enter or Space drops, Escape cancels.
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+      keyboardCodes: { start: ['Enter'], cancel: ['Escape'], end: ['Enter', 'Space'] },
+    }),
+  );
   const busy = !!s.busy;
   const aspect = project.journey?.delivery?.aspect || project.journey?.brief?.aspect || '16:9',
     [width, height] = SIZES[aspect] || SIZES['16:9'];
@@ -426,21 +519,64 @@ export default function FilmEditor({
         String(failure.message).startsWith('editor.') ? t(failure.message) : failure.message,
       );
     else if (!ok) setError(t('editor.saveFailed'));
+    return !failure && ok !== false;
   };
-  const seekTime = (time) => {
-    const f = Math.max(0, Math.min(Math.max(0, total - 1), Math.round(time * cutFps)));
+  // Keep the playhead in view when the keyboard moves it along a zoomed-in timeline.
+  const reveal = (f) => {
+    const node = scroller.current;
+    if (!node) return;
+    const left = (f / cutFps) * pps;
+    if (left < node.scrollLeft + 12 || left > node.scrollLeft + node.clientWidth - 36)
+      node.scrollLeft = Math.max(0, left - node.clientWidth / 3);
+  };
+  const seekFrame = (frame) => {
+    const f = Math.max(0, Math.min(Math.max(0, total - 1), Math.round(frame)));
     player.current?.seekTo(f);
     follow(f);
+    reveal(f);
   };
+  const seekTime = (time) => seekFrame(time * cutFps);
   const select = (clip) => {
     setSelectedId(clip.id);
     if (clip.included && Number.isInteger(clip.from)) seekTime(clip.from / cutFps);
+  };
+  const clipNode = (id) => root.current?.querySelector(`[data-clip-id="${CSS_ESCAPE(id)}"]`);
+  const focusClip = (id) => requestAnimationFrame(() => clipNode(id)?.focus());
+  // Alt+←/→: one place along the cut, past left-out clips, as the drag does (moveShot).
+  const moveClip = (clip, direction) => {
+    const at = included.findIndex((c) => c.id === clip.id),
+      next = included[at + direction];
+    if (!next) return;
+    const to = clips.findIndex((c) => c.id === next.id);
+    if (edit((p) => moveShot(p, chapterId, clip.id, to))) {
+      setSelectedId(clip.id);
+      setAnnounce(t('editor.movedTo', { at: at + direction + 1 }));
+      focusClip(clip.id);
+    }
+  };
+  // Delete leaves a clip out (Ctrl+Z puts it back); the selection moves to its neighbour.
+  const leaveOut = (clip) => {
+    const at = included.findIndex((c) => c.id === clip.id),
+      neighbour = included[at + 1] || included[at - 1];
+    if (!edit((p) => setIncluded(p, chapterId, clip.id, false))) return;
+    setAnnounce(t('editor.leftOut', { n: clip.index + 1 }));
+    if (neighbour) {
+      // The playhead goes with the selection: the next clip now starts where this one did.
+      setSelectedId(neighbour.id);
+      seekTime((neighbour === included[at + 1] ? clip.from : neighbour.from) / cutFps);
+      focusClip(neighbour.id);
+    }
+  };
+  const putBack = (clip) => {
+    if (!edit((p) => setIncluded(p, chapterId, clip.id, true))) return;
+    setSelectedId(clip.id);
+    setAnnounce(t('editor.putBackDone', { n: clip.index + 1 }));
   };
   const assets = [...new Map(clips.filter((c) => c.playable).map((c) => [c.asset.id, c])).values()];
   // Sound follows the same cut timeline as the picture, so the preview matches what you see.
   const cutTimeline = included.map((c) => ({
     id: c.id,
-    title: c.title,
+    title: c.name,
     start: c.from / cutFps,
     end: (c.from + c.frames) / cutFps,
     rate: c.rate,
@@ -506,8 +642,96 @@ export default function FilmEditor({
     () => cuesFromLines(project, included, cutFps).length > 0,
     [project, included],
   );
+  // Burn-in needs this version confirmed; any later change to captions or cut asks again.
+  const problems = useMemo(
+    () =>
+      captionTrack(project, chapterId).cues?.length ? captionProblems(project, chapterId) : [],
+    [project, chapterId],
+  );
+  const captionState = useMemo(() => {
+    const status = captionStatus(project, chapterId);
+    return status.confirmed ? 'confirmed' : status.previouslyConfirmed ? 'stale' : 'unconfirmed';
+  }, [project, chapterId]);
   const laneWidth = Math.max(seconds * pps, 200);
   const playhead = () => frameRef.current / cutFps;
+  const jumpToCue = (id) => {
+    const cue = rawCues.find((item) => item.id === id);
+    if (!cue) return;
+    setSelectedCue(id);
+    seekTime(Number(cue.start) || 0);
+    // After the problems popover has closed and handed focus back to its button.
+    setTimeout(() => {
+      root.current
+        ?.querySelector(`[data-cue-id="${CSS_ESCAPE(id)}"]`)
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      root.current?.querySelector('.film-caption-text')?.focus();
+    }, 60);
+  };
+  // I/O: the selected clip's start or end goes to the playhead.
+  const mark = (side) => {
+    if (!selected) return;
+    const range = markRange(selected, frameRef.current, cutFps, side);
+    if (range.error) return setError(t(range.error));
+    const duration = selected.sourceSeconds ?? durations[selected.asset?.id];
+    if (!Number.isFinite(duration)) return setError(t('editor.trimUnknown'));
+    edit((p) => trimClip(p, selected.id, range.start, range.end, duration));
+  };
+  const commands = {
+    toggle: () => {
+      if (player.current?.isPlaying()) player.current.pause();
+      else {
+        setRate(1);
+        player.current?.play();
+      }
+    },
+    pause: () => {
+      player.current?.pause();
+      setRate(1);
+    },
+    forward: () => {
+      setRate((old) => shuttle(old, !!player.current?.isPlaying(), 1));
+      player.current?.play();
+    },
+    reverse: () => {
+      setRate((old) => shuttle(old, !!player.current?.isPlaying(), -1));
+      player.current?.play();
+    },
+    backFrame: () => (player.current?.pause(), seekFrame(frameRef.current - 1)),
+    forwardFrame: () => (player.current?.pause(), seekFrame(frameRef.current + 1)),
+    back1s: () => (player.current?.pause(), seekFrame(frameRef.current - cutFps)),
+    forward1s: () => (player.current?.pause(), seekFrame(frameRef.current + cutFps)),
+    previousCut: () => seekFrame(stepToCut(frameRef.current, cutPoints(included), -1)),
+    nextCut: () => seekFrame(stepToCut(frameRef.current, cutPoints(included), 1)),
+    start: () => seekFrame(0),
+    end: () => seekFrame(total - 1),
+    markIn: () => mark('in'),
+    markOut: () => mark('out'),
+    help: () => setHelp(true),
+  };
+  const onKey = useEffectEvent((event) => {
+    if (dragging.current || help) return;
+    const node = root.current,
+      inEditor = !!node && (event.target === document.body || node.contains(event.target));
+    const command = transportCommand(event, { inEditor });
+    if (!command) return;
+    event.preventDefault();
+    commands[command]();
+  });
+  React.useEffect(() => {
+    // `?` is caught before the page's own help shortcut so the editor's key list opens instead.
+    const early = (event) => {
+      if (event.key !== '?') return;
+      onKey(event);
+      if (event.defaultPrevented) event.stopPropagation();
+    };
+    const late = (event) => event.key !== '?' && onKey(event);
+    window.addEventListener('keydown', early, true);
+    window.addEventListener('keydown', late);
+    return () => {
+      window.removeEventListener('keydown', early, true);
+      window.removeEventListener('keydown', late);
+    };
+  }, []);
   const addAudio = async (asset, file, { wholeFilm = false } = {}) => {
     let duration = asset.data.metadata?.duration ?? asset.data.metadata?.duration_s;
     if (!Number.isFinite(duration) && file) duration = await probeDuration(file);
@@ -542,9 +766,11 @@ export default function FilmEditor({
     selected?.playable && sources[selected.asset.id] ? sources[selected.asset.id] : null;
   const selectedSound = selected ? clipSound(project, chapterId, selected.id) : null;
   const title = t('editor.title', { chapter: chapter?.title || '' });
+  const position = (id) => included.findIndex((clip) => clip.id === id) + 1,
+    number = (id) => (clips.find((clip) => clip.id === id)?.index ?? 0) + 1;
   // A page of its own under the story's top bar, which keeps the steps, save status and report.
   return (
-    <section className="film-editor" aria-label={title}>
+    <section className="film-editor" ref={root} aria-label={title}>
       <header className="film-editor-head">
         <div>
           <div className="film-editor-title">
@@ -555,6 +781,10 @@ export default function FilmEditor({
             {t('editor.total', { seconds: seconds.toFixed(1), count: included.length })}
           </small>
         </div>
+        {/* Always present, so a message never pushes the preview and timeline down. */}
+        <p className="film-editor-error qc-error" role="alert">
+          {error}
+        </p>
         {cues.length > 0 && (
           <label className="film-editor-captions">
             <input
@@ -602,159 +832,190 @@ export default function FilmEditor({
         <p className="film-editor-empty">{t('editor.empty')}</p>
       ) : (
         <>
-          <div className="film-editor-stage">
-            <Player
-              ref={player}
-              component={Cut}
-              inputProps={inputProps}
-              durationInFrames={Math.max(1, total)}
+          <div className="film-monitor">
+            <div className="film-editor-stage">
+              <Player
+                ref={player}
+                component={Cut}
+                inputProps={inputProps}
+                durationInFrames={Math.max(1, total)}
+                fps={cutFps}
+                compositionWidth={width}
+                compositionHeight={height}
+                playbackRate={rate}
+                clickToPlay
+                doubleClickToFullscreen
+                spaceKeyToPlayOrPause={false}
+                style={{ width: '100%', height: '100%' }}
+              />
+            </div>
+            <FilmTransport
+              player={player}
+              total={total}
               fps={cutFps}
-              compositionWidth={width}
-              compositionHeight={height}
-              controls
-              style={{ width: '100%', height: '100%' }}
+              rate={rate}
+              onToggle={commands.toggle}
+              onHelp={() => setHelp(true)}
             />
           </div>
-          {selected && (
-            <section className="film-inspector" aria-label={t('editor.selectedClip')}>
-              <div className="film-inspector-head">
-                <b>
-                  {selected.index + 1}. {selected.title}
-                </b>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() =>
-                    edit((p) => setIncluded(p, chapterId, selected.id, !selected.included))
-                  }
-                >
-                  {selected.included ? <EyeOff size={13} /> : <Eye size={13} />}
-                  {t(selected.included ? 'editor.exclude' : 'editor.include')}
-                </Button>
-                <Button
-                  className={'small ghost' + (selectedSound?.state === 'on' ? ' on' : '')}
-                  disabled={
-                    busy ||
-                    !selectedSound ||
-                    selectedSound.state === 'none' ||
-                    selectedSound.state === 'detached'
-                  }
-                  title={selectedSound?.state === 'none' ? selectedSound.issue : undefined}
-                  onClick={() => edit((p) => toggleClipSound(p, chapterId, selected.id))}
-                >
-                  {selectedSound?.state === 'on' ? <Volume2 size={13} /> : <VolumeX size={13} />}
-                  {t(selectedSound?.state === 'on' ? 'editor.clipSoundOn' : 'editor.clipSoundOff')}
-                </Button>
-              </div>
-              {selected.playable ? (
-                <div className="film-inspector-body">
-                  <div className="film-source">
-                    {selectedSource ? (
-                      <video
-                        key={selected.id}
-                        ref={sourceVideo}
-                        src={selectedSource}
-                        preload="auto"
-                        playsInline
-                        title={t('editor.clickToPlay')}
-                        onClick={(event) => {
-                          const node = event.currentTarget;
-                          if (node.paused) void node.play().catch(() => {});
-                          else node.pause();
-                        }}
-                        onLoadedMetadata={(event) => {
-                          onDuration(selected.asset.id, event.currentTarget.duration);
-                          event.currentTarget.currentTime = selected.startFrame / cutFps;
-                        }}
-                      />
-                    ) : (
-                      <span className="muted">{t('editor.loading')}</span>
-                    )}
-                  </div>
-                  {selected.parts ? (
-                    <Note>{t('editor.keptParts', { count: selected.parts.length })}</Note>
-                  ) : (
-                    <TrimBar
-                      key={selected.id}
-                      duration={selected.sourceSeconds ?? durations[selected.asset.id]}
-                      start={selected.startFrame / cutFps}
-                      end={(selected.startFrame + selected.sourceFrames) / cutFps}
-                      getVideo={() => sourceVideo.current}
+          <section className="film-inspector" aria-label={t('editor.selectedClip')}>
+            {selected && (
+              <>
+                {/* One row: the clip's name and its actions as icons, so the source and the
+                    trim bar keep their room on a short screen. */}
+                <div className="film-inspector-head">
+                  <b title={selected.name}>
+                    {selected.index + 1}. {selected.name}
+                  </b>
+                  <IconButton
+                    size="sm"
+                    label={t('editor.excludeHint')}
+                    disabled={busy}
+                    onClick={() => leaveOut(selected)}
+                  >
+                    <EyeOff size={14} />
+                  </IconButton>
+                  <IconButton
+                    size="sm"
+                    className={selectedSound?.state === 'on' ? 'on' : ''}
+                    label={
+                      selectedSound?.state === 'none'
+                        ? selectedSound.issue
+                        : t(
+                            selectedSound?.state === 'on'
+                              ? 'editor.clipSoundOn'
+                              : 'editor.clipSoundOff',
+                          )
+                    }
+                    aria-pressed={selectedSound?.state === 'on'}
+                    disabled={
+                      busy ||
+                      !selectedSound ||
+                      selectedSound.state === 'none' ||
+                      selectedSound.state === 'detached'
+                    }
+                    onClick={() => edit((p) => toggleClipSound(p, chapterId, selected.id))}
+                  >
+                    {selectedSound?.state === 'on' ? <Volume2 size={14} /> : <VolumeX size={14} />}
+                  </IconButton>
+                  {canDetach && selectedSound?.track && selectedSound.state !== 'detached' && (
+                    <IconButton
+                      size="sm"
+                      label={t('editor.detachHint')}
                       disabled={busy}
-                      onCommit={(start, end, source) =>
-                        edit((p) => trimClip(p, selected.id, start, end, source))
-                      }
-                    />
+                      onClick={() => {
+                        const id = selectedSound.track.id;
+                        edit((p) => detachClipSound(p, chapterId, id, cutTimeline));
+                        setSelectedAudio(id);
+                      }}
+                    >
+                      <Unlink size={14} />
+                    </IconButton>
                   )}
-                  {rates && !selected.parts && (
-                    <div className="film-speed" role="group" aria-label={t('editor.speed')}>
+                  {selected.playable && rates && !selected.parts && (
+                    <label className="film-speed" title={t('editor.speed')}>
                       <Gauge size={14} aria-hidden="true" />
-                      <span>{t('editor.speed')}</span>
-                      {/* #232 (#29): one compact choice instead of a row of six buttons. */}
                       <select
                         className="field-sm"
                         aria-label={t('editor.speed')}
                         value={selected.rate}
                         disabled={busy}
                         onChange={(event) => {
-                          const rate = Number(event.target.value);
-                          if (selected.rate !== rate)
+                          const value = Number(event.target.value);
+                          if (selected.rate !== value)
                             edit((p) =>
                               setClipSpeed(
                                 p,
                                 selected.id,
-                                rate,
+                                value,
                                 selected.sourceSeconds ?? durations[selected.asset.id],
                               ),
                             );
                         }}
                       >
-                        {rates.map((rate) => (
-                          <option key={rate} value={rate}>
-                            {t('editor.rate', { rate })}
+                        {rates.map((value) => (
+                          <option key={value} value={value}>
+                            {t('editor.rate', { rate: value })}
                           </option>
                         ))}
                       </select>
-                      {selectedSound?.slow && selectedSound.state === 'off' && (
-                        <small className="muted">{t('editor.slowSoundMuted')}</small>
-                      )}
-                    </div>
-                  )}
-                  {canDetach && selectedSound?.track && (
-                    <div className="film-detach">
-                      {selectedSound.state === 'detached' ? (
-                        <small className="muted">{t('editor.soundIsDetached')}</small>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={busy}
-                          title={t('editor.detachHint')}
-                          onClick={() => {
-                            const id = selectedSound.track.id;
-                            edit((p) => detachClipSound(p, chapterId, id, cutTimeline));
-                            setSelectedAudio(id);
-                          }}
-                        >
-                          <Unlink size={13} />
-                          {t('editor.detachSound')}
-                        </Button>
-                      )}
-                    </div>
+                    </label>
                   )}
                 </div>
-              ) : (
-                <p className="muted film-inspector-empty">{t('editor.trimNeedsVideo')}</p>
-              )}
-            </section>
-          )}
-          {error && (
-            <p className="qc-error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="film-zoom" title={t('editor.dragHint')}>
+                {selected.playable ? (
+                  <>
+                    <div className="film-source">
+                      {selectedSource ? (
+                        <video
+                          key={selected.id}
+                          ref={sourceVideo}
+                          src={selectedSource}
+                          preload="auto"
+                          playsInline
+                          title={t('editor.clickToPlay')}
+                          onClick={(event) => {
+                            const node = event.currentTarget;
+                            if (node.paused) void node.play().catch(() => {});
+                            else node.pause();
+                          }}
+                          onLoadedMetadata={(event) => {
+                            onDuration(selected.asset.id, event.currentTarget.duration);
+                            event.currentTarget.currentTime = selected.startFrame / cutFps;
+                          }}
+                        />
+                      ) : (
+                        <span className="muted">{t('editor.loading')}</span>
+                      )}
+                    </div>
+                    {selected.parts ? (
+                      <Note>{t('editor.keptParts', { count: selected.parts.length })}</Note>
+                    ) : (
+                      <TrimBar
+                        key={selected.id}
+                        duration={selected.sourceSeconds ?? durations[selected.asset.id]}
+                        start={selected.startFrame / cutFps}
+                        end={(selected.startFrame + selected.sourceFrames) / cutFps}
+                        getVideo={() => sourceVideo.current}
+                        disabled={busy}
+                        onCommit={(start, end, source) =>
+                          edit((p) => trimClip(p, selected.id, start, end, source))
+                        }
+                      />
+                    )}
+                    {selectedSound?.slow && selectedSound.state === 'off' && (
+                      <small className="muted">{t('editor.slowSoundMuted')}</small>
+                    )}
+                    {selectedSound?.state === 'detached' && (
+                      <small className="muted">{t('editor.soundIsDetached')}</small>
+                    )}
+                  </>
+                ) : (
+                  <p className="muted film-inspector-empty">{t('editor.trimNeedsVideo')}</p>
+                )}
+              </>
+            )}
+          </section>
+          <div className="film-zoom">
+            {excluded.length > 0 && (
+              <div className="film-excluded" role="group" aria-label={t('editor.excludedList')}>
+                <small className="muted">{t('editor.excludedList')}</small>
+                {excluded.map((clip) => (
+                  <Button
+                    key={clip.id}
+                    size="sm"
+                    className="excluded-clip"
+                    disabled={busy}
+                    title={t('editor.putBack', { n: clip.index + 1 })}
+                    onClick={() => putBack(clip)}
+                  >
+                    <Undo2 size={13} aria-hidden="true" />
+                    <span className="film-excluded-name">
+                      {clip.index + 1}. {clip.name}
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            )}
             <span className="film-zoom-spacer" />
             {crossfades && (
               <label title={t('editor.crossfadeHint')}>
@@ -776,7 +1037,12 @@ export default function FilmEditor({
                 </select>
               </label>
             )}
-            <Button variant="ghost" size="sm" onClick={() => setZoom(null)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              title={t('editor.dragHint')}
+              onClick={() => setZoom(null)}
+            >
               {t('editor.fit')}
             </Button>
           </div>
@@ -800,27 +1066,48 @@ export default function FilmEditor({
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
+                accessibility={{
+                  screenReaderInstructions: { draggable: t('editor.dragInstructions') },
+                  announcements: {
+                    onDragStart: ({ active }) => t('editor.dragStart', { n: number(active.id) }),
+                    onDragOver: ({ active, over }) =>
+                      over
+                        ? t('editor.dragOver', { n: number(active.id), at: position(over.id) })
+                        : t('editor.dragOutside', { n: number(active.id) }),
+                    onDragEnd: ({ active, over }) =>
+                      over
+                        ? t('editor.dragEnd', { n: number(active.id), at: position(over.id) })
+                        : t('editor.dragCancel', { n: number(active.id) }),
+                    onDragCancel: ({ active }) => t('editor.dragCancel', { n: number(active.id) }),
+                  },
+                }}
+                onDragStart={() => (dragging.current = true)}
+                onDragCancel={() => (dragging.current = false)}
                 onDragEnd={({ active, over }) => {
+                  dragging.current = false;
                   if (!over || active.id === over.id) return;
                   const to = clips.findIndex((clip) => clip.id === over.id);
-                  edit((p) => moveShot(p, chapterId, active.id, to));
+                  if (edit((p) => moveShot(p, chapterId, active.id, to))) focusClip(active.id);
                 }}
               >
                 <SortableContext
                   items={included.map((clip) => clip.id)}
                   strategy={horizontalListSortingStrategy}
                 >
-                  <div className="film-vtrack">
+                  <div className="film-vtrack" role="group" aria-label={t('editor.pictureTrack')}>
                     {included.map((clip) => (
                       <TimelineClip
                         key={clip.id}
                         clip={clip}
                         pps={pps}
                         busy={busy}
+                        dragging={dragging}
                         selected={selected?.id === clip.id}
                         playing={playingId === clip.id}
                         sound={clipSound(project, chapterId, clip.id)}
                         onSelect={select}
+                        onMove={moveClip}
+                        onLeaveOut={leaveOut}
                       />
                     ))}
                   </div>
@@ -838,31 +1125,19 @@ export default function FilmEditor({
                 onTrim={(id, side, delta) =>
                   edit((p) => trimTrack(p, chapterId, id, side, delta, cutTimeline))
                 }
+                onRemove={(id) => edit((p) => removeTrack(p, chapterId, id))}
               />
               <CaptionLane
                 cues={rawCues}
                 x={x}
                 width={laneWidth}
                 selected={selectedCue}
+                problems={problems}
                 onSelect={setSelectedCue}
               />
               <FilmPlayhead player={player} pps={pps} />
             </div>
           </div>
-          {excluded.length > 0 && (
-            <div className="film-excluded">
-              <small className="muted">{t('editor.excludedList')}</small>
-              {excluded.map((clip) => (
-                <Button
-                  key={clip.id}
-                  className={'small ghost excluded-clip' + (selected?.id === clip.id ? ' on' : '')}
-                  onClick={() => select(clip)}
-                >
-                  {clip.index + 1}. {clip.title}
-                </Button>
-              ))}
-            </div>
-          )}
           <FilmAudioLane
             part="controls"
             blocks={blocks}
@@ -884,17 +1159,33 @@ export default function FilmEditor({
             selected={selectedCue}
             busy={busy}
             hasLines={hasLines}
-            onAdd={() =>
-              edit((p) =>
-                setSelectedCue(addCue(p, chapterId, frameRef.current / cutFps, total / cutFps)),
+            problems={problems}
+            state={captionState}
+            onAdd={() => {
+              // Type straight away: the new caption's text field takes the keyboard.
+              if (
+                edit((p) =>
+                  setSelectedCue(addCue(p, chapterId, frameRef.current / cutFps, total / cutFps)),
+                )
               )
-            }
+                requestAnimationFrame(() =>
+                  root.current?.querySelector('.film-caption-text')?.focus(),
+                );
+            }}
             onFill={() => edit((p) => fillCuesFromLines(p, chapterId, included, cutFps))}
             onSet={(id, patch) => edit((p) => setCue(p, chapterId, id, patch, total / cutFps))}
             onRemove={(id) => {
               edit((p) => removeCue(p, chapterId, id));
               setSelectedCue(null);
             }}
+            onConfirm={() => {
+              if (edit((p) => confirmCaptions(p, chapterId)))
+                setAnnounce(t('editor.captionsConfirmed'));
+            }}
+            onJump={jumpToCue}
+            onDone={(id) =>
+              root.current?.querySelector(`[data-cue-id="${CSS_ESCAPE(id)}"]`)?.focus()
+            }
           />
           <footer className="film-editor-foot muted">
             {/* Once the server exports in editor order without left-out shots (#347), say nothing. */}
@@ -905,6 +1196,10 @@ export default function FilmEditor({
           </footer>
         </>
       )}
+      <p className="visually-hidden" aria-live="polite">
+        {announce}
+      </p>
+      {help && <FilmKeysHelp onClose={() => setHelp(false)} />}
     </section>
   );
 }

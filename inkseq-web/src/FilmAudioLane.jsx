@@ -22,7 +22,12 @@ export function timeScale(segments, fallbackPx) {
   return x;
 }
 
-function Block({ block, x, selected, onSelect, onMove, onTrim, pxPerSecond }) {
+// Keyboard steps for a focused sound block (story audit 2026-11-09).
+const STEP = 0.1,
+  BIG_STEP = 1;
+const secs = (value) => (Math.round(value * 10) / 10).toFixed(1);
+
+function Block({ block, x, selected, onSelect, onMove, onTrim, onRemove, pxPerSecond }) {
   const { t } = useI18n();
   const drag = useRef(null),
     [dx, setDx] = useState({ kind: null, value: 0 });
@@ -61,6 +66,22 @@ function Block({ block, x, selected, onSelect, onMove, onTrim, pxPerSecond }) {
         : dx.kind === 'end'
           ? { left, width: Math.max(18, width + dx.value) }
           : { left, width };
+  // ←/→ move by 0.1 s (Shift: 1 s); [ and ] shorten the start or end (Alt: lengthen);
+  // Delete removes. Brackets are read by key position, so Alt and other layouts still work.
+  const onKeyDown = (event) => {
+    const step = event.shiftKey ? BIG_STEP : STEP;
+    if (event.key === 'Enter') onSelect(track.id);
+    else if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && !event.altKey)
+      onMove(track.id, placement.start + (event.key === 'ArrowLeft' ? -step : step));
+    else if (event.code === 'BracketLeft') onTrim(track.id, 'start', event.altKey ? -step : step);
+    else if (event.code === 'BracketRight') onTrim(track.id, 'end', event.altKey ? step : -step);
+    else if (event.key === 'Delete' || event.key === 'Backspace') {
+      onRemove(track.id);
+      onSelect(null);
+    } else return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
   return (
     <div
       className={
@@ -70,7 +91,18 @@ function Block({ block, x, selected, onSelect, onMove, onTrim, pxPerSecond }) {
         (selected ? ' selected' : '')
       }
       style={live}
+      role="button"
+      tabIndex={0}
+      data-timeline-item="sound"
+      aria-label={t('editor.audioBlock', {
+        name: block.title,
+        start: secs(placement.start),
+        end: secs(placement.end),
+      })}
+      aria-pressed={selected}
       title={fixed ? t('editor.followsClip') : t('editor.audioDragHint')}
+      onFocus={() => !selected && onSelect(track.id)}
+      onKeyDown={onKeyDown}
       onPointerDown={fixed ? () => onSelect(track.id) : start('move')}
       onPointerMove={move}
       onPointerUp={end}
@@ -158,6 +190,7 @@ export default function FilmAudioLane({
               onSelect={onSelect}
               onMove={onMove}
               onTrim={onTrim}
+              onRemove={onRemove}
             />
           </div>
         ))}
@@ -201,9 +234,10 @@ export default function FilmAudioLane({
           }}
         />
       </div>
+      {/* The row is always there, so picking a sound never pushes the captions down. */}
       {current ? (
         <div className="film-audio-controls">
-          <b>{current.title}</b>
+          <b title={current.title}>{current.title}</b>
           {current.generated && <small className="muted">{t('editor.followsClip')}</small>}
           {current.detached && <small className="muted">{t('editor.detachedTrack')}</small>}
           <label>
@@ -254,7 +288,11 @@ export default function FilmAudioLane({
             {t('editor.removeAudio')}
           </Button>
         </div>
-      ) : null}
+      ) : (
+        <small className="film-audio-controls muted">
+          {blocks.some((b) => b.placement) ? t('editor.audioPick') : t('editor.audioHint')}
+        </small>
+      )}
     </div>
   );
 }

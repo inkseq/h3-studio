@@ -63,6 +63,24 @@ SCENARIOS = [
         machines=[MachineScript(removed_at=900)],
     ),
     Scenario(
+        "collect_fails_then_machine_removed",
+        "Collection fails after the run finished, then the provider removes the host.",
+        # Staging job 27b6213f: collecting/collection_failed for hours, its
+        # worker unknown and its machine destroyed.
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 2, actual_runtime_s=300)],
+        machines=[MachineScript(collect_fails=True, removed_at=17 * 60)],
+    ),
+    Scenario(
+        "collect_keeps_failing",
+        "Collection keeps failing while the machine stays up and billed.",
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 2, actual_runtime_s=300)],
+        machines=[MachineScript(collect_fails=True)],
+    ),
+    Scenario(
         "run_turns_terminal",
         "The dstack run fails while idle; dstack then removes its machine.",
         hours=4,

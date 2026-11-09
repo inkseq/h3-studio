@@ -1617,16 +1617,45 @@ body.sb-resizing-y video {
   align-content: start;
   gap: 10px;
 }
-/* The flow's next step beside the steps (story-flow.js); the full text is its title. */
-.sb-stages {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* Step progress (story-flow.js): a thin bar under each step name; counts are in its tooltip. */
+.sb-stage-label {
+  position: relative;
+  display: inline-block;
 }
-.sb-stages .sb-next-step.sb-next-step {
-  max-width: 150px;
+.sb-stage-meter {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -5px;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(
+    to right,
+    var(--accent) calc(var(--share) * 100%),
+    var(--line) calc(var(--share) * 100%)
+  );
+}
+.sb-stage-meter.done {
+  background: var(--good, var(--accent));
+}
+/* The next step sits beside Inky in the right-hand controls (normal flow, never overlapping). */
+.wbar-inky {
+  align-items: center;
+  gap: 2px;
+}
+.wbar-inky .sb-next-box {
+  display: inline-flex;
+  min-width: 0;
+}
+.wbar-inky .sb-next-step.sb-next-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 240px;
+  min-width: 0;
+}
+.wbar-inky .sb-next-text {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  display: block;
 }

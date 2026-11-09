@@ -1,11 +1,14 @@
 // A shot's prompt on its own card (h3-studio#1040), saved through the same edit as the side editor.
 // `@` offers the story's characters, places and props and adds the chosen one to the shot.
-import React, { useEffect, useRef, useState } from 'react';
+// While the box is not being edited, the video model's line markup reads as "名字：台词"
+// (prompt-display.js); editing shows and saves the stored text.
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Button } from './ui/Button.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
 import { mentionAt, mentionOptions, withMention } from './shot-mention.js';
+import { hasModelLines, readablePrompt, speakerNames } from './prompt-display.js';
 
 const stop = (event) => event.stopPropagation();
 
@@ -14,7 +17,12 @@ export function ShotCardPrompt({ shot }) {
   const { state, dispatch } = useStore();
   const box = useRef(null);
   const [mention, setMention] = useState(null),
-    [active, setActive] = useState(0);
+    [active, setActive] = useState(0),
+    [editing, setEditing] = useState(false);
+  const profiles = state.profiles;
+  const names = useMemo(() => speakerNames(profiles), [profiles]);
+  const shown =
+    editing || !hasModelLines(shot.prompt) ? shot.prompt : readablePrompt(shot.prompt, names);
   const options = mention ? mentionOptions(state.profiles, mention.query) : [];
   const shut = () => setMention(null);
   useEffect(() => {
@@ -63,7 +71,7 @@ export function ShotCardPrompt({ shot }) {
         ref={box}
         className="card-prompt-input"
         rows={3}
-        value={shot.prompt}
+        value={shown}
         aria-label={t('shotCard.prompt')}
         placeholder={t('shotCard.promptHint')}
         onChange={(event) => {
@@ -71,7 +79,11 @@ export function ShotCardPrompt({ shot }) {
           read(event.target);
         }}
         onKeyDown={keys}
-        onBlur={() => setTimeout(shut, 120)}
+        onFocus={() => setEditing(true)}
+        onBlur={() => {
+          setEditing(false);
+          setTimeout(shut, 120);
+        }}
       />
       {mention &&
         options.length > 0 &&

@@ -460,3 +460,43 @@ test('a scene keeps its own text from the script page', () => {
     false,
   );
 });
+
+test('a new card names its first look in the given language; a batch saves profiles in one go', () => {
+  const project = fixture();
+  const ann = act(project, {
+    type: 'newProfile',
+    ptype: 'character',
+    name: 'Ann',
+    lookName: 'Default look',
+  });
+  assert.equal(get(project, ann.id).data.looks[0].name, 'Default look');
+  const pen = act(project, {
+    type: 'newProfile',
+    ptype: 'location',
+    name: 'Pen',
+    lookName: 'Default',
+  });
+  assert.equal(get(project, pen.id).data.versions[0].name, 'Default');
+  const bo = act(project, { type: 'newProfile', ptype: 'character', name: 'Bo' });
+  assert.equal(get(project, bo.id).data.looks[0].name, '默认造型');
+  assert.equal(
+    act(project, { type: 'newProfile', ptype: 'character', name: 'Cy', lookName: ' ' }),
+    false,
+  );
+  const batch = act(project, {
+    type: 'batch',
+    actions: [
+      { type: 'newProfile', ptype: 'character', name: 'Dee' },
+      { type: 'addVariant', pid: { $ref: 0 }, name: 'Coat' },
+      { type: 'variant', pid: { $ref: 0 }, vid: { $ref: 1 }, patch: { desc: 'Red coat' } },
+      { type: 'bible', pid: { $ref: 0 }, patch: { speaker: 'S7' } },
+    ],
+  });
+  assert.equal(batch.ok, true);
+  const dee = get(project, batch.ids[0]);
+  assert.equal(dee.data.looks[1].description, 'Red coat');
+  assert.equal(dee.data.speaker, 'S7');
+  assert.equal(validateProject(project).ok, true);
+  // Only profile edits can be batched.
+  assert.equal(act(project, { type: 'batch', actions: [{ type: 'add' }] }), false);
+});
