@@ -944,7 +944,9 @@ class StoryboardVersionTests(unittest.TestCase):
                 self.preflight(body=body)
         with self.app.state.repository.engine.connect() as conn:
             before = list(conn.execute(select(plans.c.id, plans.c.request_hash)))
-        self.assertEqual(len(before), 1)
+        # Copies plan in parallel, so plans other than the first may also have
+        # committed before the projection failed. Each one must be reused.
+        self.assertGreaterEqual(len(before), 1)
         with patch(
             'studio_platform.storyboard_versions.secrets.randbits',
             side_effect=AssertionError('redraw'),
@@ -954,17 +956,20 @@ class StoryboardVersionTests(unittest.TestCase):
         value = response.json()
         self.assertEqual(value['status'], 'completed')
         self.assertEqual([v['seed'] for v in value['items']], ['23', '24', '25'])
-        self.assertEqual(value['items'][0]['plan_id'], before[0][0])
+        self.assertLessEqual(
+            {row[0] for row in before}, {v['plan_id'] for v in value['items']}
+        )
         self.assertEqual(self.preflight(body=body).json(), value)
         with self.app.state.repository.engine.connect() as conn:
             self.assertEqual(conn.scalar(select(func.count()).select_from(plans)), 3)
             self.assertEqual(conn.scalar(select(func.count()).select_from(jobs)), 0)
-            self.assertEqual(
-                conn.scalar(
-                    select(plans.c.request_hash).where(plans.c.id == before[0][0])
-                ),
-                before[0][1],
-            )
+            for plan_id, plan_hash in before:
+                self.assertEqual(
+                    conn.scalar(
+                        select(plans.c.request_hash).where(plans.c.id == plan_id)
+                    ),
+                    plan_hash,
+                )
 
     def test_shared_copies_preference_and_byte_bound_before_seed_materialization(self):
         self.prepare()
@@ -1212,6 +1217,119 @@ class StoryboardVersionTests(unittest.TestCase):
         with self.app.state.repository.engine.connect() as conn:
             self.assertEqual(conn.scalar(select(func.count()).select_from(plans)), 2)
             self.assertEqual(conn.scalar(select(func.count()).select_from(jobs)), 0)
+
+    def test_preflight_loads_the_project_once_however_many_items(self):
+        self.prepare()
+        access = self.app.state.storyboard_versions.access
+        original = access.project
+        loads = []
+
+        def counted(*args, **kwargs):
+            loads.append(args[2] if len(args) > 2 else kwargs.get('operation'))
+            return original(*args, **kwargs)
+
+        counts = {}
+        for copies in (1, 4):
+            loads.clear()
+            with patch.object(access, 'project', side_effect=counted):
+                response = self.preflight(key=f'loads-{copies}', copies=copies)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()['status'], 'completed')
+            self.assertEqual(len(response.json()['items']), copies)
+            counts[copies] = len(loads)
+        # One authorized load up front and one for the response, never per item.
+        self.assertEqual(counts[1], counts[4])
+        self.assertLessEqual(counts[4], 2)
+
+    def interrupt_planning(self, change):
+        """Run ``change`` once, inside the first shot's planning, after the load."""
+        import threading
+        from studio_platform import generation_admission
+
+        original = generation_admission.plan_body
+        lock, fired = threading.Lock(), []
+
+        def planned(*args, **kwargs):
+            with lock:
+                if not fired:
+                    fired.append(True)
+                    change()
+            return original(*args, **kwargs)
+
+        return patch.object(generation_admission, 'plan_body', side_effect=planned)
+
+    def test_parallel_preflight_still_closes_on_a_story_edit_mid_planning(self):
+        self.prepare()
+        repo = self.app.state.repository
+        scope = Scope(self.settings.tenant_id, 'superdan', '__projects')
+
+        def edit_story():
+            row = repo.get_document(scope, 'project', 'story-one')
+            payload = copy.deepcopy(row['payload'])
+            shot = next(e for e in payload['entities'] if e['id'] == 'shot-one')
+            shot['description'] = 'Changed while planning'
+            repo.put_document(
+                scope,
+                'project',
+                'story-one',
+                payload,
+                expected_version=row['version'],
+            )
+
+        with self.interrupt_planning(edit_story):
+            response = self.preflight(key='edit-mid-plan', copies=4)
+        self.assertEqual(response.status_code, 200, response.text)
+        value = response.json()
+        self.assertEqual(value['status'], 'blocked')
+        self.assertEqual(value['blocked'], 'source_changed')
+        with repo.engine.connect() as conn:
+            # The shot that saw the edit stored no plan; none started a job.
+            self.assertLess(conn.scalar(select(func.count()).select_from(plans)), 4)
+            self.assertEqual(conn.scalar(select(func.count()).select_from(jobs)), 0)
+
+    def test_parallel_preflight_still_closes_on_a_defaults_edit_mid_planning(self):
+        self.prepare()
+        service = self.app.state.storyboard_versions
+
+        def edit_defaults():
+            service.set_preferences(
+                Principal('superdan', 'browser:superdan'),
+                {'expected_version': 0, 'defaults': {'controls': {'steps': 19}}},
+                'defaults-mid-plan',
+            )
+
+        with self.interrupt_planning(edit_defaults):
+            response = self.preflight(key='defaults-mid-plan', copies=4)
+        self.assertEqual(response.status_code, 200, response.text)
+        value = response.json()
+        self.assertEqual(value['status'], 'blocked')
+        self.assertEqual(value['blocked'], 'source_changed')
+        with self.app.state.repository.engine.connect() as conn:
+            self.assertLess(conn.scalar(select(func.count()).select_from(plans)), 4)
+            self.assertEqual(conn.scalar(select(func.count()).select_from(jobs)), 0)
+
+    def test_preflight_logs_one_timing_line_without_story_content(self):
+        self.prepare()
+        with self.assertLogs(
+            'studio_platform.storyboard_preflight_plans', level='INFO'
+        ) as logs:
+            response = self.preflight(key='timing', copies=3)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(logs.output), 1)
+        line = logs.output[0]
+        for field in (
+            'status=completed',
+            'items=3',
+            'planned=3',
+            'load_ms=',
+            'capabilities_ms=',
+            'defaults_ms=',
+            'plan_ms=',
+            'store_ms=',
+        ):
+            self.assertIn(field, line)
+        for private in ('story-one', 'shot-one', 'Original action', 'superdan'):
+            self.assertNotIn(private, line)
 
     def test_last_transaction_fence_blocks_defaults_edit_between_outer_check_and_job_write(
         self,

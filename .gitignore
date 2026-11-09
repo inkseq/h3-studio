@@ -738,6 +738,7 @@ inventory.json
 !skills/inkseq/reference/api.md
 !skills/inkseq/reference/recovery.md
 !studio_platform/storyboard_versions.py
+!studio_platform/storyboard_preflight_plans.py
 !studio_platform/story_risk.py
 !tests/test_story_risk.py
 !docs/STORY-RISK-LINT.md

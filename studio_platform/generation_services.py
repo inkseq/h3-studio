@@ -10,7 +10,7 @@ from sqlalchemy import select
 from .capabilities import compile_request
 from .render_plans import RECIPE as RENDER_RECIPE, validate_render_source
 from .enhance_plans import RECIPE as ENHANCE_RECIPE
-from .repository import Scope, NotFound, Conflict, plans, artifacts, jobs
+from .repository import Scope, NotFound, Conflict, documents, plans, artifacts, jobs
 from .source_snapshot import source_snapshot, validate_source_ref
 
 
@@ -24,14 +24,33 @@ class GenerationAccess:
     def project_scope(self, principal):
         return self.scope(principal, "__projects")
 
-    def project(self, principal, project_id, operation="projects:read"):
+    def authorize(self, principal, project_id, operation):
+        """The permission half of project(), for a record already loaded in this call."""
         if not isinstance(project_id, str) or not principal.allows(
             project_id, operation
         ):
             raise NotFound("project_not_found")
+
+    def project(self, principal, project_id, operation="projects:read"):
+        self.authorize(principal, project_id, operation)
         return self.repo.get_document(
             self.project_scope(principal), "project", project_id
         )
+
+    def project_version(self, principal, project_id, operation):
+        """Authorized current version only; a fence that skips reloading the payload."""
+        self.authorize(principal, project_id, operation)
+        with self.repo.engine.connect() as connection:
+            version = connection.execute(
+                select(documents.c.version).where(
+                    self.repo._scope(documents, self.project_scope(principal)),
+                    documents.c.kind == "project",
+                    documents.c.document_id == project_id,
+                )
+            ).scalar()
+        if version is None:
+            raise NotFound("document_not_found")
+        return version
 
     def plan(self, principal, plan_id):
         with self.repo.engine.connect() as conn:
