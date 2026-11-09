@@ -436,6 +436,7 @@ class CapacityRecorder:
             # A stopped host's progress is closed out, not a finished download.
             self._record_download(key, binding, now)
         self._record_worker(key, worker, claims, now)
+        self._record_collect(connection, key, now)
         self._record_idle(connection, key, node, intent, binding, worker, now)
         self._record_stop(key, node, payload, binding, claims, now)
         self._record_snapshots(key, binding, instance, now)
@@ -547,6 +548,50 @@ class CapacityRecorder:
                 True,
                 {"claims": claims.claims, "submitted": claims.submitted},
             )
+
+    def _record_collect(self, connection, key, now):
+        """A failing result collection on this machine, and how it ended.
+
+        One entry per attempt state: failing (with the output held outside
+        the host or not), reclaimed (lost attempt, requeued) or collected.
+        """
+        from .capacity_collect import output_stored
+
+        rows = connection.execute(
+            select(
+                attempts.c.id,
+                attempts.c.job_id,
+                attempts.c.status,
+                attempts.c.error_code,
+                attempts.c.collection_failures,
+            ).where(
+                attempts.c.worker_id == _worker_id(key),
+                attempts.c.collection_failures > 0,
+            )
+        ).mappings()
+        for row in rows:
+            if row["status"] == "collecting":
+                stored = output_stored(connection, row["job_id"], row["id"])
+                code = "collect_output_stored" if stored else "collect_failed"
+            elif row["status"] == "attempt_lost":
+                code = "collect_reclaimed"
+            else:
+                code = "collect_" + _code(row["status"])
+            stage = "collect:" + row["id"][:8]
+            if self._changed(key, stage, code):
+                self._entry(
+                    key,
+                    stage,
+                    code,
+                    now,
+                    code,
+                    {
+                        "job_id": _code(row["job_id"]),
+                        "attempt_id": _code(row["id"]),
+                        "error_code": _code(row["error_code"]),
+                        "failures": row["collection_failures"],
+                    },
+                )
 
     def _record_idle(self, connection, key, node, intent, binding, worker, now):
         track = self._tracks[key]
