@@ -413,6 +413,48 @@ class DstackControllerTests(fixture.DstackOperatorTests):
             )
         self.assertEqual(self.repo.get_job(self.scope, queued['id']), original)
 
+    def test_queued_work_the_test_window_cannot_admit_does_not_keep_machine_on(self):
+        # #1140 item 1: a541ad51 billed idle 40 min for jobs it could not admit.
+        node, controller = self._continuing_ready()
+        queued = self._queued_native('fl')
+        original = copy.deepcopy(queued)
+        self.now += 610
+
+        def guard(code):
+            # Only the per-job admission read sees the refusal; funding passes.
+            return lambda *args, expected_runtime_s=0, **kwargs: (
+                code if expected_runtime_s > 0 else None
+            )
+
+        def desired():
+            with self.repo.engine.connect() as connection:
+                return connection.execute(
+                    select(operator_nodes.c.desired_state).where(
+                        operator_nodes.c.intent_id == node
+                    )
+                ).scalar_one()
+
+        with patch.object(
+            self.service,
+            'demand_start_once',
+            return_value=dict(state='idle'),
+            create=True,
+        ):
+            # An unreadable guard still keeps the conservative obligation.
+            with patch(
+                'studio_platform.dstack_test_budget.budget_reason',
+                guard('dstack_test_budget_unconfirmed'),
+            ):
+                controller.tick()
+            self.assertEqual(desired(), 'running')
+            with patch(
+                'studio_platform.dstack_test_budget.budget_reason',
+                guard('dstack_test_runtime_limit_reached'),
+            ):
+                controller.tick()
+        self.assertEqual(desired(), 'stopped')
+        self.assertEqual(self.repo.get_job(self.scope, queued['id']), original)
+
     def test_exact_ready_registers_hatchet_slot_without_second_apply(self):
         node, controller = self.ready()
         controller.tick()

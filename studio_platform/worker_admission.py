@@ -310,11 +310,40 @@ def managed_window_reason(
     return None
 
 
-def matching_dstack_queued_jobs(connection, intent, node):
+# Test-guard refusals that no amount of waiting or funding can lift for a job.
+WINDOW_CLOSED = {
+    "dstack_test_runtime_limit_reached",
+    "dstack_test_task_limit_reached",
+    "dstack_test_daily_limit_reached",
+}
+
+
+def _admittable(connection, intent, node, job, now, seen):
+    """False only when this node's test guard can no longer fit the job."""
+    expected = job.get("expected_runtime_s")
+    if type(expected) not in (int, float) or not expected > 0:
+        return True
+    if expected not in seen:
+        from .dstack_test_budget import budget_reason
+
+        try:
+            reason = budget_reason(
+                connection, intent, node, now, expected_runtime_s=expected
+            )
+        except Exception:  # An unreadable guard keeps the conservative obligation.
+            reason = None
+        seen[expected] = reason not in WINDOW_CLOSED
+    return seen[expected]
+
+
+def matching_dstack_queued_jobs(connection, intent, node, *, admittable_at=None):
     """Read compatible accepted work in this run's shared tenant/pool.
 
     This pauses business idle only; it grants no slot, funding or dispatch.
     Original bound attempts retain their separate recovery obligations.
+    With ``admittable_at``, work this node's test guard can no longer admit
+    (its runtime window or task cap) is not an obligation: it must not keep a
+    paid machine on (#1140 item 1).
     """
     payload = node.get("payload", {})
     lifecycle, request, original = (
@@ -373,7 +402,7 @@ def matching_dstack_queued_jobs(connection, intent, node):
             jobs.c.lease_expires_at.is_(None),
         )
     ).mappings()
-    matching = []
+    matching, seen = [], {}
     for job in queued:
         stored, plan = job["request"], job["execution_plan"]
         if not isinstance(stored, dict) or not isinstance(plan, dict):
@@ -406,6 +435,10 @@ def matching_dstack_queued_jobs(connection, intent, node):
             ):
                 continue
         if account_status(connection, job["tenant_id"], job["owner_id"]) != "active":
+            continue
+        if admittable_at is not None and not _admittable(
+            connection, intent, node, job, admittable_at, seen
+        ):
             continue
         matching.append(job)
     return tuple(matching)
@@ -443,7 +476,9 @@ def _dstack_idle_reason(connection, intent, node, now):
         and attempt["upstream_stopped"] != 1
         for attempt in related
     )
-    obligations |= bool(matching_dstack_queued_jobs(connection, intent, node))
+    obligations |= bool(
+        matching_dstack_queued_jobs(connection, intent, node, admittable_at=now)
+    )
     ready_at = node["payload"].get("dstack", {}).get("first_runtime_ready_at")
     if not _finite(ready_at) or not 0 <= ready_at <= now:
         return "managed_dstack_lifecycle_unconfirmed"

@@ -249,6 +249,32 @@ def terminal_allocated_identity(run, backend):
     return next(iter(identities)) if len(identities) == 1 else None
 
 
+def removal_proven(node, binding):
+    """A stopped node whose original writer recorded complete provider absence.
+
+    The proof was validated when it was written (``dstack_ledger``) against a
+    fresh, complete, account-bound inventory for the exact original instance.
+    Provider instance ids are not reused, so the node cannot hold capacity
+    again; re-reading live inventories for it only turns a slow read into a
+    phantom machine (#1140 item 6).
+    """
+    proof = binding.get("provider_removal_proof")
+    return (
+        node.get("desired_state") == "stopped"
+        and binding.get("state") == "stopped"
+        and binding.get("dstack_status") in TERMINAL
+        and isinstance(proof, dict)
+        and proof.get("version") == 1
+        and proof.get("complete") is True
+        and proof.get("absent") is True
+        and proof.get("backend") == binding.get("backend")
+        and bool(binding.get("run_id"))
+        and proof.get("run_id") == binding.get("run_id")
+        and bool(proof.get("provider_instance_id"))
+        and proof.get("provider_instance_id") == binding.get("provider_instance_id")
+    )
+
+
 def live_capacity_usage(
     client, nodes, *, provider_inventory=None, clock=time.time, fresh_seconds=30
 ):
@@ -377,6 +403,9 @@ def live_capacity_usage(
             and binding.get("billing_state") == "no_charge_confirmed"
         ):
             included, reason = False, "dstack_never_applied"
+        elif removal_proven(node, binding):
+            included, reason = False, "dstack_provider_removal_proven"
+            status = binding.get("dstack_status")
         elif (
             foreign := foreign_usage(binding, client, provider_absent, BACKENDS)
         ) is not None:

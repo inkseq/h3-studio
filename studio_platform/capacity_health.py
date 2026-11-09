@@ -28,6 +28,34 @@ QUEUED = {"queued", "waiting_capacity"}
 HOST_FAULTS = {"runtime_process_exited", "runtime_readiness_timeout", "CUDAUnavailable"}
 
 
+# Paid-idle diagnoses that may stop the machine so demand can replace it.
+STOP_DIAGNOSES = {"host_runtime", "worker_unreachable"}
+
+
+def worker_unreachable(binding, workers, now):
+    """A machine that served before but has no live worker and no fresh ready runtime.
+
+    After an app restart or deploy a dial-out worker can stay paid while its
+    registration expires and its runtime reads stay unconfirmed (#1140). It
+    takes no work, so with matching work queued it must stop, not bill idle.
+    """
+    if not finite(binding.get("first_runtime_ready_at"), now):
+        return False
+    if any(
+        worker.get("state") in {"ready", "busy"}
+        and type(worker.get("expires_at")) in (int, float)
+        and worker["expires_at"] > now
+        for worker in workers
+    ):
+        return False
+    observed = binding.get("observed_at")
+    return not (
+        binding.get("state") in {"ready", "busy"}
+        and finite(observed, now)
+        and now - observed <= 120
+    )
+
+
 def finite(value, now):
     return type(value) in (int, float) and math.isfinite(value) and 0 <= value <= now
 
@@ -239,6 +267,8 @@ def evaluate(
             if registration.get("reason_code") == "global_capacity_exceeded"
             else "host_runtime"
             if host_fault
+            else "worker_unreachable"
+            if worker_unreachable(binding, associated, now)
             else "dispatch_unobserved"
         )
         result.append(
@@ -248,7 +278,7 @@ def evaluate(
                 since,
                 diagnosis,
                 node_ids=(node["intent_id"],),
-                stop_replace=host_fault and diagnosis == "host_runtime",
+                stop_replace=diagnosis in STOP_DIAGNOSES,
             )
         )
     empty_cycles = sorted(set(empty_cycles))
@@ -508,6 +538,18 @@ def record(service, value, *, policy_version=None):
         health = container.setdefault("capacity_health", {})
         previous = health.get(code)
         if isinstance(previous, dict) and previous.get("episode") == value["episode"]:
+            if (
+                value["stop_replace"]
+                and previous.get("diagnosis") != value["diagnosis"]
+            ):
+                # The same idle episode can turn into a stop diagnosis later,
+                # e.g. a worker that never re-registers after a deploy (#1140).
+                health[code] = {**previous, "diagnosis": value["diagnosis"]}
+                connection.execute(
+                    update(table)
+                    .where(key == value["resource_id"])
+                    .values(payload=container)
+                )
             return None
         payload = _event(connection, tenant, value, now)
         health[code] = {

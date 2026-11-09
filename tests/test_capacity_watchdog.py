@@ -740,6 +740,50 @@ class NodeWatchdogTests(LedgerCase):
         self.assertEqual(len(self.client.stopped), 1)
         self.assertEqual(self.repo.get_job(self.scope, queued["id"]), original)
 
+    def test_worker_lost_after_restart_stops_paid_idle_machine_and_keeps_queue(self):
+        # #1140: an app restart left a served dial-out machine without a live
+        # worker; its runtime reads stayed unconfirmed while work was queued.
+        from studio_platform.capacity_health import check
+        from studio_platform.telemetry import NullTelemetry
+
+        node_id, controller = self._continuing_ready()
+        queued = self._queued_native("fl")
+        original = self.repo.get_job(self.scope, queued["id"])
+        self.now += 601
+        node, intent = self.node(node_id)
+        node["payload"]["dstack"].update(
+            observed_at=self.now - 300, state="runtime_unconfirmed"
+        )
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(payload=node["payload"])
+            )
+        # While the registration is still renewed this is not yet a stop.
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers).values(expires_at=self.now + 60)
+            )
+        live = check(self.service, NullTelemetry())
+        self.assertEqual(live["stop_candidates"], [])
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers).values(expires_at=self.now - 1)
+            )
+        self.now += 181
+        result = check(self.service, NullTelemetry())
+        self.assertEqual(result["stop_candidates"], [node_id])
+        health = self.node(node_id)[0]["payload"]["capacity_health"]
+        self.assertEqual(
+            health["capacity_paid_idle_queue"]["diagnosis"], "worker_unreachable"
+        )
+        self.assertTrue(stop_unserved_node(self.service, node_id))
+        self.assertEqual(self.node(node_id)[0]["desired_state"], "stopped")
+        controller.tick()
+        self.assertEqual(len(self.client.stopped), 1)
+        self.assertEqual(self.repo.get_job(self.scope, queued["id"]), original)
+
     def test_removed_idle_retired_worker_releases_only_its_ghost_device_once(self):
         node_id, controller = self.ready()
         self.now += 1
