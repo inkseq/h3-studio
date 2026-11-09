@@ -56,6 +56,7 @@ inventory.json
 !tests/fixtures/inky/images/*.jpg
 !tools/
 !tools/ci_media_tools.py
+!tools/fetch_chisel.py
 !tools/ci_test_shards.py
 !tools/simulate_capacity.py
 !tools/ci_test_timings.json
