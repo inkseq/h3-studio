@@ -389,6 +389,7 @@ class DstackOperator(DstackPreview, DstackRegistration, DstackCommands):
                 physical['machine_id'],
                 node_id=current['intent_id'],
                 now=now,
+                provider=physical['provider'],
             )
         return payload if payload is not None else copy.deepcopy(current['payload'])
 

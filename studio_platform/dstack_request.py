@@ -320,10 +320,13 @@ class CapacityRequest:
             "dstack_reliability_invalid",
         )
         if self.host_selection is not None:
-            _require(self.backend == VASTAI.id, "dstack_host_backend_invalid")
-            try:
-                from .host_policy import selection
+            from .host_policy import selection, selection_provider
 
+            _require(
+                self.backend == selection_provider(self.host_selection),
+                "dstack_host_backend_invalid",
+            )
+            try:
                 selection(self.host_selection)
             except ValueError:
                 raise DstackError("dstack_host_selection_invalid") from None

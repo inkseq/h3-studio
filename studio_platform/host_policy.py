@@ -20,7 +20,7 @@ from .operator_capacity import (
     operator_policy,
     require,
 )
-from .providers.registry import VASTAI
+from .providers.registry import LIUM, VASTAI
 from .repository import outbox, request_hash
 
 MAX_NODES = 4096
@@ -32,10 +32,20 @@ REASONS = {
     "prefer": "operator_host_preferred",
     "deny": "operator_host_denied",
 }
+# An admin may also deny a host for what it produced, e.g. corrupted takes
+# (#900: a Lium host on staging, 2026-11-09).
+BAD_OUTPUT = "operator_host_bad_output"
+ADMIN_REASONS = {*REASONS.items(), ("deny", BAD_OUTPUT)}
 # A measured slow download denies the host until an admin restores it (owner,
 # 2026-10-31). Stored as the manual policy so the existing admin write clears it.
 AUTOMATIC_SLOW_DOWNLOAD = "automatic_slow_download"
-STORED_REASONS = {*REASONS.items(), ("deny", AUTOMATIC_SLOW_DOWNLOAD)}
+STORED_REASONS = {*ADMIN_REASONS, ("deny", AUTOMATIC_SLOW_DOWNLOAD)}
+# Providers whose physical host is positively bound, and how (#900). A Vast
+# machine id or a Lium executor id names the host; an instance or pod does not.
+# RunPod and CloudRift place a pod on a host the renter cannot choose, so a
+# deny there could not exclude anything before the machine is paid for.
+HOST_SOURCES = {VASTAI.id: "vast_machine_id", LIUM.id: "lium_executor_id"}
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 DOWNLOAD_STOPS = {"dstack_download_timebox_exceeded", "dstack_download_too_slow"}
 START_FAILURES = {
     "provider_provisioning_timeout",
@@ -88,6 +98,45 @@ def provider_id(value):
     return numeric_id(value)
 
 
+def host_provider(value):
+    require(value in HOST_SOURCES, "host_provider_unsupported", 422)
+    return value
+
+
+def host_id(provider, value):
+    """A provider's physical host id: a Vast machine id or a Lium executor id."""
+    if host_provider(provider) == VASTAI.id:
+        return numeric_id(value)
+    require(
+        isinstance(value, str) and _UUID.fullmatch(value),
+        "host_identity_invalid",
+        422,
+    )
+    return value
+
+
+def host_sort_key(value):
+    """Vast machine ids in numeric order, then Lium executors."""
+    provider, machine = value
+    return (
+        provider != VASTAI.id,
+        int(machine) if provider == VASTAI.id else 0,
+        machine,
+    )
+
+
+def instance_id(provider, value):
+    """The rented instance (Vast) or pod (Lium) on that host."""
+    if provider == VASTAI.id:
+        return numeric_id(value)
+    require(
+        isinstance(value, str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,199}", value),
+        "host_observation_invalid",
+    )
+    return value
+
+
 def offer_metadata(value):
     """Closed advertised facts, never wire throughput or inferred geography."""
     require(
@@ -122,13 +171,19 @@ def observation(value, *, now):
         and HOST_FIELDS <= set(value) <= HOST_FIELDS | HOST_METADATA_FIELDS
         and type(value["version"]) is int
         and value["version"] == 1
-        and value["provider"] == "vastai"
+        and value["provider"] in HOST_SOURCES
         and value["identity_confirmed"] is True
-        and value["physical_id_source"] == "vast_machine_id",
+        and value["physical_id_source"] == HOST_SOURCES[value["provider"]],
         "host_observation_invalid",
     )
-    for name in ("machine_id", "provider_instance_id", "offer_id"):
-        numeric_id(value[name])
+    provider = value["provider"]
+    host_id(provider, value["machine_id"])
+    instance_id(provider, value["provider_instance_id"])
+    if provider == VASTAI.id:
+        numeric_id(value["offer_id"])
+    else:
+        # A Lium offer is the executor itself.
+        require(value["offer_id"] == value["machine_id"], "host_observation_invalid")
     require(
         finite(value["observed_at"], minimum=1, maximum=now), "host_observation_invalid"
     )
@@ -170,12 +225,68 @@ def bound_observation(node, *, now):
         bound = payload["dstack"]
         require(
             payload.get("capacity_backend") == "dstack-v1"
-            and bound.get("backend") == VASTAI.id
+            and bound.get("backend") == value["provider"]
             and bound.get("provider_instance_id") == value["provider_instance_id"],
             "host_observation_binding_invalid",
         )
         return value
     except (ValueError, KeyError):
+        return None
+
+
+def lium_observation(provisioning, binding, now):
+    """Bind a Lium pod to its executor from the dstack allocation (#900).
+
+    dstack's Lium backend rents one executor per offer and records it as the
+    allocation's instance type name, so that name is the physical host. No
+    extra provider read is made. None until the pod has a usable identity;
+    an executor outside a frozen selector refuses the allocation.
+    """
+    kind = provisioning.get("instance_type")
+    resource = kind.get("resources", {}) if isinstance(kind, dict) else {}
+    gpus = resource.get("gpus") if isinstance(resource, dict) else None
+    price = provisioning.get("price")
+    instance = provisioning.get("instance_id")
+    executor = kind.get("name") if isinstance(kind, dict) else None
+    if (
+        provisioning.get("backend") != LIUM.id
+        or not isinstance(executor, str)
+        or not _UUID.fullmatch(executor)
+        or not isinstance(instance, str)
+        or binding.get("provider_instance_id") not in (None, instance)
+        or not isinstance(gpus, list)
+        or len(gpus) != 1
+        or not isinstance(gpus[0], dict)
+        or not finite(price)
+        or price <= 0
+    ):
+        return None
+    selected = binding.get("host_selection")
+    if selected is not None:
+        approved = {row["machine_id"] for row in selection(selected)["offers"]}
+        require(executor in approved, "dstack_host_allocation_changed")
+    value = {
+        "version": 1,
+        "provider": LIUM.id,
+        "machine_id": executor,
+        "provider_instance_id": instance,
+        "offer_id": executor,
+        "observed_at": now,
+        "region": provisioning.get("region"),
+        "gpu": gpus[0].get("name"),
+        "gpu_count": 1,
+        "allocated_ram_mib": resource.get("memory_mib"),
+        "allocated_vram_mib": gpus[0].get("memory_mib"),
+        "cpu": resource.get("cpus"),
+        "disk_mib": (resource.get("disk") or {}).get("size_mib"),
+        "reliability": None,
+        "quoted_hourly_microusd": math.ceil(price * 1_000_000),
+        "identity_confirmed": True,
+        "physical_id_source": HOST_SOURCES[LIUM.id],
+    }
+    try:
+        return observation(value, now=now)
+    except ValueError:
         return None
 
 
@@ -233,7 +344,7 @@ def denied_suppliers(store, connection, nodes, offers, *, now=None):
     }
 
 
-def automatic_deny(nodes, machine_id, *, now):
+def automatic_deny(nodes, machine_id, *, now, provider=VASTAI.id):
     """Derive fixed seven-day intervals from distinct original failed rentals.
 
     A stopped-by-owner row, a model-load problem, missing identity, or repeated
@@ -243,7 +354,11 @@ def automatic_deny(nodes, machine_id, *, now):
     for node in nodes:
         physical = bound_observation(node, now=now)
         payload = node.get("payload", {})
-        if not physical or physical["machine_id"] != machine_id:
+        if (
+            not physical
+            or physical["machine_id"] != machine_id
+            or physical["provider"] != provider
+        ):
             continue
         try:
             item = failure(payload.get("host_failure"), now=now)
@@ -300,23 +415,24 @@ class HostPolicyStore:
     def __init__(self, repo, tenant):
         self.repo, self.tenant = repo, tenant
 
-    def key(self, machine_id):
-        numeric_id(machine_id)
-        # The original shared operator_policy.id is VARCHAR(30).
+    def key(self, machine_id, provider=VASTAI.id):
+        host_id(provider, machine_id)
+        # The original shared operator_policy.id is VARCHAR(30). Keyed on
+        # provider plus host id; a Vast key is unchanged from before #900.
         return (
             "host:"
             + request_hash(
-                {"tenant": self.tenant, "provider": "vastai", "machine_id": machine_id}
+                {"tenant": self.tenant, "provider": provider, "machine_id": machine_id}
             )[:25]
         )
 
-    def read(self, connection, machine_id, *, nodes=None, now=None):
-        numeric_id(machine_id)
+    def read(self, connection, machine_id, *, nodes=None, now=None, provider=VASTAI.id):
+        host_id(provider, machine_id)
         now = self.repo.clock() if now is None else now
         row = (
             connection.execute(
                 select(operator_policy).where(
-                    operator_policy.c.id == self.key(machine_id)
+                    operator_policy.c.id == self.key(machine_id, provider)
                 )
             )
             .mappings()
@@ -325,7 +441,7 @@ class HostPolicyStore:
         value = {
             "version": 1,
             "tenant_id": self.tenant,
-            "provider": "vastai",
+            "provider": provider,
             "machine_id": machine_id,
             "manual": "default",
             "reason_code": None,
@@ -348,7 +464,7 @@ class HostPolicyStore:
             )
             value, revision = copy.deepcopy(stored), row["version"]
         nodes = original_nodes(connection, self.tenant) if nodes is None else nodes
-        until = automatic_deny(nodes, machine_id, now=now)
+        until = automatic_deny(nodes, machine_id, now=now, provider=provider)
         effective = (
             "deny"
             if value["manual"] == "deny" or until is not None
@@ -370,13 +486,15 @@ class HostPolicyStore:
             "automatic_deny_until": until,
         }, value
 
-    def deny_slow_download(self, connection, machine_id, *, node_id, now):
+    def deny_slow_download(
+        self, connection, machine_id, *, node_id, now, provider=VASTAI.id
+    ):
         """Persistently deny one host after a measured slow download.
 
         The caller holds the capacity lock. An existing manual deny is kept;
         any other policy is replaced and audited like an admin change.
         """
-        old, value = self.read(connection, machine_id, now=now)
+        old, value = self.read(connection, machine_id, now=now, provider=provider)
         if old["manual"] == "deny":
             return False
         value.update(manual="deny", reason_code=AUTOMATIC_SLOW_DOWNLOAD)
@@ -389,19 +507,19 @@ class HostPolicyStore:
         if old["revision"]:
             connection.execute(
                 update(operator_policy)
-                .where(operator_policy.c.id == self.key(machine_id))
+                .where(operator_policy.c.id == self.key(machine_id, provider))
                 .values(**row)
             )
         else:
             connection.execute(
-                insert(operator_policy).values(id=self.key(machine_id), **row)
+                insert(operator_policy).values(id=self.key(machine_id, provider), **row)
             )
-        new = self.read(connection, machine_id, now=now)[0]
+        new = self.read(connection, machine_id, now=now, provider=provider)[0]
         command_id, actor = str(uuid.uuid4()), "system:download-speed-gate"
         receipt = {
             "state": "completed",
             "changed": True,
-            "host": {"provider": "vastai", "machine_id": machine_id},
+            "host": {"provider": provider, "machine_id": machine_id},
             "policy": new,
             "command_id": command_id,
             "node_id": node_id,
@@ -436,7 +554,7 @@ class HostPolicyStore:
                 aggregate_id=machine_id,
                 payload={
                     "tenant_id": self.tenant,
-                    "provider": "vastai",
+                    "provider": provider,
                     "machine_id": machine_id,
                     "actor_id": actor,
                     "actor_owner": None,
@@ -464,12 +582,12 @@ class HostPolicyStore:
         )
         require(len(rows) <= MAX_NODES, "host_history_limit_exceeded")
         return {
-            numeric_id(row["machine_id"])
+            (row["provider"], host_id(row["provider"], row["machine_id"]))
             for row in rows
-            if isinstance(row, dict) and row.get("provider") == "vastai"
+            if isinstance(row, dict) and row.get("provider") in HOST_SOURCES
         }
 
-    def admission_snapshot(self, connection, offers, *, now=None):
+    def admission_snapshot(self, connection, offers, *, now=None, provider=VASTAI.id):
         require(
             isinstance(offers, (list, tuple)) and 0 < len(offers) <= MAX_OFFERS,
             "host_selection_invalid",
@@ -478,10 +596,10 @@ class HostPolicyStore:
         policies = {}
         for item in offers:
             require(isinstance(item, dict), "host_selection_invalid")
-            machine = numeric_id(item["machine_id"])
+            machine = host_id(provider, item["machine_id"])
             if machine not in policies:
                 policies[machine] = self.read(
-                    connection, machine, nodes=nodes, now=now
+                    connection, machine, nodes=nodes, now=now, provider=provider
                 )[0]
             require(policies[machine]["effective"] != "deny", "host_policy_denied")
         return request_hash(
@@ -501,11 +619,17 @@ class HostPolicyStore:
         )
 
 
+def selection_provider(value):
+    """A frozen selector's provider; selectors before #900 are Vast."""
+    return value.get("provider", VASTAI.id) if isinstance(value, dict) else None
+
+
 def selection(value, *, now=None):
+    fields = {"version", "observed_at", "expires_at", "policy_snapshot", "offers"}
     require(
         isinstance(value, dict)
-        and set(value)
-        == {"version", "observed_at", "expires_at", "policy_snapshot", "offers"}
+        and set(value) - {"provider"} == fields
+        and selection_provider(value) in HOST_SOURCES
         and value["version"] == 1
         and type(value["version"]) is int
         and finite(value["observed_at"], minimum=1)
@@ -527,7 +651,13 @@ def selection(value, *, now=None):
             "host_selection_invalid",
         )
         offer_metadata({key: item[key] for key in OFFER_METADATA_FIELDS if key in item})
-        offer, _ = numeric_id(item["offer_id"]), numeric_id(item["machine_id"])
+        provider = selection_provider(value)
+        machine = host_id(provider, item["machine_id"])
+        if provider == VASTAI.id:
+            offer = numeric_id(item["offer_id"])
+        else:
+            offer = item["offer_id"]
+            require(offer == machine, "host_selection_invalid")
         require(offer not in seen, "host_offer_identity_conflict")
         seen.add(offer)
     if now is not None:

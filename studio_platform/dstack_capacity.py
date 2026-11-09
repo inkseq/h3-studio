@@ -721,6 +721,16 @@ class DstackCapacity:
         An expected/selected offer is not an allocated host. Old unknown runs
         remain compatible; new enforced selectors fail closed before readiness.
         """
+        if binding.get("backend") == LIUM.id:
+            from .host_policy import lium_observation
+
+            prior = binding.get("host_observation")
+            if prior is not None:
+                return prior
+            try:
+                return lium_observation(provisioning, binding, now)
+            except ValueError:
+                raise DstackError("dstack_host_allocation_changed") from None
         if binding.get("backend") != VASTAI.id:
             return None
         strict = binding.get("host_selection") is not None
