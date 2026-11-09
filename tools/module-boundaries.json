@@ -30,7 +30,7 @@
   "platform -> billing": 27,
   "platform -> capacity": 27,
   "platform -> creation": 39,
-  "platform -> identity": 33,
+  "platform -> identity": 34,
   "platform -> jobs": 30,
   "platform -> media": 33
  },
@@ -385,6 +385,7 @@
   "local_slots -> control",
   "local_slots -> fleet",
   "lookup_indexes -> identity",
+  "maintenance_notice -> identity_schema",
   "manage -> assets",
   "manage -> auth",
   "manage -> batches",

@@ -754,6 +754,7 @@ inventory.json
 !tests/test_story_chat_advice.py
 !studio_platform/story_chat_images.py
 !studio_platform/story_chat_settings.py
+!studio_platform/maintenance_notice.py
 !studio_platform/speech_catalog.py
 !studio_platform/speech_provider.py
 !studio_platform/speech_routes.py

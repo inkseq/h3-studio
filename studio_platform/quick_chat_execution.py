@@ -666,10 +666,18 @@ class QuickChatExecutionMixin:
                     "connection_unavailable",
                     "connection_permission_denied",
                 }
+                from .maintenance_notice import MaintenanceInProgress
+
                 code = (
                     error.code
                     if isinstance(
-                        error, (QuickChatError, ContentPolicyError, CreditError)
+                        error,
+                        (
+                            QuickChatError,
+                            ContentPolicyError,
+                            CreditError,
+                            MaintenanceInProgress,
+                        ),
                     )
                     else str(error)
                     if str(error) in spending_codes
