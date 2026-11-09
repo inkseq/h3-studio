@@ -30,6 +30,10 @@ HOST_FAULTS = {"runtime_process_exited", "runtime_readiness_timeout", "CUDAUnava
 
 # Paid-idle diagnoses that may stop the machine so demand can replace it.
 STOP_DIAGNOSES = {"host_runtime", "worker_unreachable"}
+# How long a lost worker gets to come back before its machine is stopped. A deploy
+# restarts the app and, with it, the tunnel the worker dials (#1140); chisel retries
+# with backoff, so give it a few minutes rather than stopping on the first miss.
+WORKER_LOST_GRACE_SECONDS = 600
 
 
 def worker_unreachable(binding, workers, now):
@@ -41,19 +45,22 @@ def worker_unreachable(binding, workers, now):
     """
     if not finite(binding.get("first_runtime_ready_at"), now):
         return False
-    if any(
-        worker.get("state") in {"ready", "busy"}
-        and type(worker.get("expires_at")) in (int, float)
-        and worker["expires_at"] > now
-        for worker in workers
-    ):
-        return False
+    lost_since = []
+    for worker in workers:
+        expires = worker.get("expires_at")
+        if type(expires) not in (int, float):
+            continue
+        if worker.get("state") in {"ready", "busy"} and expires > now:
+            return False
+        lost_since.append(min(expires, now))
     observed = binding.get("observed_at")
-    return not (
-        binding.get("state") in {"ready", "busy"}
-        and finite(observed, now)
-        and now - observed <= 120
-    )
+    if binding.get("state") in {"ready", "busy"} and finite(observed, now):
+        if now - observed <= 120:
+            return False
+        lost_since.append(observed)
+    # Stop only once the last sign of life is older than the grace window.
+    last = max(lost_since, default=None)
+    return last is None or now - last >= WORKER_LOST_GRACE_SECONDS
 
 
 def finite(value, now):

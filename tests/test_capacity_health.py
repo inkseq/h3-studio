@@ -95,14 +95,18 @@ class CapacityHealthTests(unittest.TestCase):
         self.node["payload"]["dstack"].update(
             state="runtime_unconfirmed", observed_at=1
         )
-        expired = {**self.worker, "expires_at": 900}
-        for workers in ([], [expired], [{**self.worker, "state": "retired"}]):
+        expired = {**self.worker, "expires_at": 400}
+        retired = {**self.worker, "state": "retired", "expires_at": 300}
+        for workers in ([], [expired], [retired]):
             with self.subTest(workers=workers):
                 finding = self.evaluate(workers=workers)[0]
                 self.assertEqual(
                     (finding["diagnosis"], finding["stop_replace"]),
                     ("worker_unreachable", True),
                 )
+        # A worker lost less than the grace window ago may still come back.
+        recent = {**self.worker, "expires_at": 900}
+        self.assertFalse(self.evaluate(workers=[recent])[0]["stop_replace"])
         # A live registration, or a fresh ready runtime, is not unreachable.
         finding = self.evaluate()[0]
         self.assertEqual(finding["diagnosis"], "dispatch_unobserved")
