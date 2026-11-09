@@ -913,6 +913,8 @@ class World(LedgerCase):
 
     def _load_service(self):
         self.config_file.write_text(json.dumps(self.config), encoding="utf-8")
+        # Like the production file: not readable by others (_protected_read).
+        self.config_file.chmod(0o600)
         self.service = DstackOperator(
             self.repo, self.settings, self.capacity, self.config
         )
