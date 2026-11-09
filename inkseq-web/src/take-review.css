@@ -70,6 +70,15 @@
 .take-review-mark.keep {
   background: var(--good, var(--accent));
 }
+.take-review-mark.cut {
+  background: var(--muted);
+}
+.take-review-mark.fix {
+  background: var(--accent);
+}
+.take-review-mark.reshoot {
+  background: var(--danger, var(--warn));
+}
 .take-review-mark.draft {
   background: color-mix(in srgb, var(--warn) 55%, transparent);
   pointer-events: none;
@@ -168,6 +177,23 @@
 .take-review-dot.keep {
   background: var(--good, var(--accent));
 }
+.take-review-dot.cut {
+  background: var(--muted);
+}
+.take-review-dot.fix {
+  background: var(--accent);
+}
+.take-review-dot.reshoot {
+  background: var(--danger, var(--warn));
+}
 .take-review-list .take-review-row:hover {
   background: var(--surface-2);
+}
+
+.take-review-apply {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: space-between;
+  flex-wrap: wrap;
 }

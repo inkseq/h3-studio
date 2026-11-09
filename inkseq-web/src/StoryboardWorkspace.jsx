@@ -3,6 +3,7 @@ import { Button } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { sceneBeats } from './script-beats.js';
 import { STAGES, chapterFrom, stageFrom, withStage } from './story-stage.js';
+import { storyFlow } from './story-flow.js';
 import { DEFAULT_CHAPTER_NAMES, sceneHeading } from './story-headings.js';
 import { StoryScript } from './StoryScript.jsx';
 import { CARD_SIZES, readCardSize, rememberCardSize } from './shot-mention.js';
@@ -11,7 +12,7 @@ import './v2/story-view.css';
 import './film-editor.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import React, { Activity, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Plus,
@@ -325,8 +326,13 @@ function InkyInTopBar({ selectedShot }) {
   );
 }
 
-function StageNav({ stage, stages, onChange }) {
+function StageNav({ stage, stages, onChange, flow, onNext }) {
   const { t } = useI18n();
+  const progress = (value) => {
+    const row = flow?.stages[value];
+    return row?.total ? ' ' + row.done + '/' + row.total : '';
+  };
+  const next = flow?.next;
   // Shown in the middle of the top bar, which SeriesApp draws above this page.
   const [slot, setSlot] = useState(null),
     place = useRef(null);
@@ -338,10 +344,24 @@ function StageNav({ stage, stages, onChange }) {
       <Segmented
         tabs
         label={t('stage.title')}
-        options={stages.map((value) => ({ value, label: t('stage.' + value) }))}
+        options={stages.map((value) => ({ value, label: t('stage.' + value) + progress(value) }))}
         value={stage}
         onChange={onChange}
       />
+      {next && (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="sb-next-step"
+          title={t('flow.next.' + next.key, { title: next.title || '' })}
+          aria-label={
+            t('flow.nextHint') + ': ' + t('flow.next.' + next.key, { title: next.title || '' })
+          }
+          onClick={() => onNext(next)}
+        >
+          {t('flow.next.' + next.key, { title: next.title || '' })}
+        </Button>
+      )}
     </nav>
   );
   return (
@@ -440,6 +460,12 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
   };
   const { state, dispatch } = useStoryboardUI(),
     trash = useTrash();
+  // The flow's progress and next step (story-flow.js), shown on the stage tabs.
+  const { scenes: flowScenes, profiles: flowProfiles, shots: flowShots } = state;
+  const flow = useMemo(
+    () => storyFlow({ scenes: flowScenes, profiles: flowProfiles, shots: flowShots }),
+    [flowScenes, flowProfiles, flowShots],
+  );
   const gone = trash?.hidden || EMPTY_SET,
     goneScenes = new Set(
       (state.scenes || [])
@@ -1108,7 +1134,16 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         '--libw': (railed ? 52 : library.size) + 'px',
       }}
     >
-      <StageNav stage={stage} stages={STAGES} onChange={setStage} />
+      <StageNav
+        stage={stage}
+        stages={STAGES}
+        onChange={setStage}
+        flow={flow}
+        onNext={(next) => {
+          setStage(next.stage);
+          if (next.stage === 'storyboard' && next.id) setSelected(next.id);
+        }}
+      />
       <InkyInTopBar selectedShot={selected} />
       {stage === 'script' && (
         <StoryScript

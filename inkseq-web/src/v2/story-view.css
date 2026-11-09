@@ -1617,3 +1617,16 @@ body.sb-resizing-y video {
   align-content: start;
   gap: 10px;
 }
+/* The flow's next step beside the steps (story-flow.js); the full text is its title. */
+.sb-stages {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sb-stages .sb-next-step.sb-next-step {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}

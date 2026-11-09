@@ -25,10 +25,60 @@ export function rangeFrom(a, b, duration) {
   return { start_s: round(start), end_s: round(end) };
 }
 
+// What to do with a marked stretch (inky-help review step): keep it, cut it in the edit,
+// fix it in post, or reshoot. Stored as verdict + optional disposition (h3-studio TakeMark).
+export const CHOICES = ['keep', 'cut', 'fix', 'reshoot'];
+const DISPOSITIONS = ['cut', 'fix', 'reshoot'];
+
+/** The choice a mark shows; an older change mark without a disposition reads 'change'. */
+export function choiceOf(mark) {
+  if (mark?.verdict === 'keep') return 'keep';
+  return DISPOSITIONS.includes(mark?.disposition) ? mark.disposition : 'change';
+}
+
+export function withChoice(mark, choice) {
+  const { disposition: _old, ...rest } = mark;
+  if (choice === 'keep') return { ...rest, verdict: 'keep' };
+  return DISPOSITIONS.includes(choice)
+    ? { ...rest, verdict: 'change', disposition: choice }
+    : { ...rest, verdict: 'change' };
+}
+
+/** The marks the film editor offers to trim: stretches the reviewer said to cut. */
+export function cutRanges(marks) {
+  return (marks || [])
+    .filter((mark) => choiceOf(mark) === 'cut')
+    .map((mark) => ({ start: mark.start_s, end: mark.end_s, id: mark.id }))
+    .sort((a, b) => a.start - b.start);
+}
+
+/**
+ * The parts of a take left after removing the stretches marked "cut", in time order; what
+ * the shot plays once the reviewer's cuts are applied. Parts shorter than `min` are dropped.
+ */
+export function keptAfterCuts(duration, marks, min = 0.25) {
+  if (!Number.isFinite(duration) || duration <= 0) return [];
+  const kept = [];
+  let at = 0;
+  for (const cut of cutRanges(marks)) {
+    if (cut.start - at >= min) kept.push({ start: at, end: Math.min(cut.start, duration) });
+    at = Math.max(at, cut.end);
+  }
+  if (duration - at >= min) kept.push({ start: at, end: duration });
+  return kept;
+}
+
 export function newMark(range, ids = new Set()) {
   let n = ids.size + 1;
   while (ids.has('mark-' + n)) n += 1;
-  return { id: 'mark-' + n, ...range, tags: [], verdict: 'change', note: '' };
+  return {
+    id: 'mark-' + n,
+    ...range,
+    tags: [],
+    verdict: 'change',
+    disposition: 'reshoot',
+    note: '',
+  };
 }
 
 // The exact body the server validates: known fields only, unique tags, bounded note.
@@ -40,6 +90,9 @@ export function cleanMark(mark, duration) {
     ...range,
     tags: [...new Set(mark.tags)].filter((tag) => TAGS.includes(tag)),
     verdict: mark.verdict === 'keep' ? 'keep' : 'change',
+    ...(mark.verdict !== 'keep' && DISPOSITIONS.includes(mark.disposition)
+      ? { disposition: mark.disposition }
+      : {}),
     note: String(mark.note || '').slice(0, MAX_NOTE),
   };
 }

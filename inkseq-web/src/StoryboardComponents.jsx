@@ -2171,6 +2171,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
             shotId={shot.id}
             artifactId={viewing.artifactId}
             mediaRef={mediaRef}
+            chosen={viewing.id === shot.chosen}
           />
         )}
       </div>

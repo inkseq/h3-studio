@@ -158,6 +158,8 @@ class TakeReviewTests(LedgerCase):
             self.mark(tags=["camera", "camera"]),
             self.mark(id="../unsafe"),
             self.mark(verdict="redo"),
+            self.mark(disposition="trim"),
+            self.mark(verdict="keep", disposition="cut"),
         ]
         invalid += [{"expected_revision": 0, "marks": [m]} for m in bad_marks]
         invalid += [
@@ -183,6 +185,22 @@ class TakeReviewTests(LedgerCase):
             }
         )
         self.assertEqual(len(self.read()["marks"]), 2)
+        self.write(
+            {
+                "expected_revision": 1,
+                "marks": [
+                    self.mark(disposition="cut"),
+                    self.mark(id="fix", disposition="fix"),
+                    self.mark(id="again", disposition="reshoot"),
+                    self.mark(id="plain"),
+                ],
+            },
+            key="key-disposition",
+        )
+        self.assertEqual(
+            [m.get("disposition") for m in self.read()["marks"]],
+            ["cut", "fix", "reshoot", None],
+        )
 
     def test_unknown_duration_allows_verdict_not_ranges(self):
         with self.repo.transaction() as conn:
