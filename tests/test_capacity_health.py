@@ -26,6 +26,7 @@ from studio_platform.telemetry import NullTelemetry
 from studio_platform.error_monitoring import report_capacity_health, sanitized_event
 from test_platform_repository import LedgerCase
 import test_dstack_operator as operators
+import test_dstack_controller as controllers
 
 
 class CapacityHealthTests(unittest.TestCase):
@@ -432,6 +433,7 @@ class HealthLedgerTests(LedgerCase):
 class DemandLoopLedgerTests(LedgerCase):
     preview = operators.DstackOperatorTests.preview
     start = operators.DstackOperatorTests.start
+    _queued_native = controllers.DstackControllerTests._queued_native
 
     def setUp(self):
         super().setUp()
@@ -446,6 +448,10 @@ class DemandLoopLedgerTests(LedgerCase):
                     updated_at=self.now - 1,
                 )
             )
+        # Work was already waiting when the machines became ready; without it
+        # an idle ready machine is only a start overshoot (not a loop).
+        self.waiting = self._queued_native("fl")
+        self.now += 1
         for index in range(2):
             node = self.start(key="empty-cycle-" + str(index))["node_id"]
             self.now += 10
@@ -541,3 +547,64 @@ class RefusalCountTests(unittest.TestCase):
             {"claim:worker_readiness_unconfirmed": 2, "defer:none": 1},
         )
         self.assertEqual(drain(), {})
+
+
+class StartOvershootTests(unittest.TestCase):
+    def test_ready_machine_that_idled_after_the_queue_drained_is_not_a_loop(self):
+        nodes = []
+        for identity, started in (("a" * 32, 100), ("b" * 32, 300)):
+            nodes.append(
+                {
+                    "intent_id": identity,
+                    "pool": "p",
+                    "provider": "vast",
+                    "provider_instance_id": "i-" + identity[:4],
+                    "desired_state": "stopped",
+                    "runtime_state": "stopped",
+                    "payload": {
+                        "dstack": {
+                            "apply_started": True,
+                            "apply_started_at": started,
+                            "first_runtime_ready_at": started + 50,
+                            "first_stopped_at": started + 100,
+                            "profile_id": "profile",
+                            "mode": "ref",
+                            "model_id": "model",
+                            "configuration_id": "config",
+                            "manifest_digest": "digest",
+                        }
+                    },
+                }
+            )
+        waiting = {
+            "id": "job",
+            "status": "queued",
+            "created_at": 10,
+            "updated_at": 10,
+            "current_attempt_id": None,
+            "request": {
+                "deployment_profile_id": "profile",
+                "request": {"mode": "ref", "model": "model"},
+            },
+            "execution_plan": {
+                "pool": "p",
+                "model_id": "model",
+                "configuration_id": "config",
+                "engine_manifest_digest": "digest",
+            },
+        }
+        done = {**waiting, "status": "succeeded"}
+        codes = lambda jobs: [
+            f["code"]
+            for f in evaluate(
+                nodes,
+                jobs,
+                (),
+                (),
+                now=1000,
+                demand_enabled=True,
+                demand_enabled_since=50,
+            )
+        ]
+        self.assertIn("capacity_demand_start_loop", codes([waiting]))
+        self.assertNotIn("capacity_demand_start_loop", codes([done]))
