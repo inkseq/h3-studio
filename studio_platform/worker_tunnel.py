@@ -154,6 +154,12 @@ def server_command(port, authfile, keyfile):
     ]
 
 
+# A deploy restarts the tunnel server with the controller. chisel's default
+# reconnect backoff grows to 5 minutes, which left ready GPU machines unable to
+# take work for minutes after every deploy (#1147). Retry every 10 s instead.
+CLIENT_RETRY = ("--max-retry-interval", "10s", "--keepalive", "15s")
+
+
 def client_command(url, server_fingerprint, user, password, forwards):
     """The worker side, for its boot script; `forwards` maps public→local port."""
     remotes = [
@@ -163,6 +169,7 @@ def client_command(url, server_fingerprint, user, password, forwards):
     return [
         CHISEL,
         "client",
+        *CLIENT_RETRY,
         "--fingerprint",
         server_fingerprint,
         "--auth",
