@@ -411,14 +411,9 @@ class WorkerRunner:
         """
         if isinstance(self.backend, MockBackend) or self.control is None:
             return True
-        from .capacity_reasons import count
+        from .capacity_reasons import submission_open
 
-        try:
-            if self.control.submission_allowed(job) is True:
-                return True
-        except Exception as error:
-            count("defer", "check_failed_" + type(error).__name__)
-            return False
+        return submission_open(self.control, job)
         reason = "window_closed"
         try:
             if callable(getattr(type(self.control), "submission_block_reason", None)):

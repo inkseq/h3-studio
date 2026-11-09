@@ -25,3 +25,27 @@ def drain():
         value = dict(_counts)
         _counts.clear()
     return value
+
+
+def submission_open(control, job):
+    """``control.submission_allowed``, counting and logging the reason it is not."""
+    import logging
+
+    try:
+        if control.submission_allowed(job) is True:
+            return True
+    except Exception as error:
+        count("defer", "check_failed_" + type(error).__name__)
+        return False
+    reason = "window_closed"
+    try:
+        if callable(getattr(type(control), "submission_block_reason", None)):
+            reason = control.submission_block_reason(job) or reason
+    except Exception as error:
+        reason = "check_failed_" + type(error).__name__
+    # The deferral itself still says worker_window_closed; keep the why.
+    count("defer", reason)
+    logging.getLogger("studio_platform.worker").info(
+        "worker_submission_deferred job=%s reason=%s", job["id"][:8], reason
+    )
+    return False
