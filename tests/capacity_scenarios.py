@@ -245,12 +245,36 @@ SCENARIOS = [
     Scenario(
         "demand_config_edited",
         "The staging test task id is rotated in operator.json mid-queue",
-        # (#1068 item 5). Queued jobs still start: their frozen admission marker
-        # is not checked at start time, only that job's own demand journal is.
+        # (#1068 item 5). Both machines are already up at the edit and serve
+        # the shared queue, so this alone never showed a stale demand journal;
+        # see demand_task_rotated_after_cap for the stranding case.
         hours=4,
         test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 7200},
         jobs=[JobBatch(0, 12, actual_runtime_s=600)],
         events=[Event(15 * 60, "edit_demand_config", {"test_task_id": "sim-task-2"})],
+    ),
+    Scenario(
+        "demand_task_rotated_after_cap",
+        "Test task cap used up; the task id is rotated and a profile id added.",
+        # Staging 11-10 (#1140 Q3): every queued job had a demand journal from
+        # the refused starts, and its identity hashed test_task_id and
+        # profile_ids, so after the rotation each one read policy_changed.
+        # Two jobs: the refusals alternate between them, so both hold a
+        # journal; a third, unjournaled job would start a machine for all.
+        hours=4,
+        test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 7200},
+        spent_fraction=0.99,
+        jobs=[JobBatch(0, 2, actual_runtime_s=600)],
+        events=[
+            Event(
+                20 * 60,
+                "edit_demand_config",
+                {
+                    "test_task_id": "sim-task-2",
+                    "profile_ids": ["fl-superdan", "fl-superdan-b"],
+                },
+            )
+        ],
     ),
     Scenario(
         "lookahead_fl_30_min_jobs",
