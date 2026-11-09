@@ -927,6 +927,7 @@ inventory.json
 !tests/test_capacity_reclaim.py
 !tests/test_capacity_watchdog.py
 !tests/test_capacity_health.py
+!studio_platform/capacity_collect.py
 # Telegram front end of the core story flow (#531)
 !telegram_bot/
 !telegram_bot/*.py

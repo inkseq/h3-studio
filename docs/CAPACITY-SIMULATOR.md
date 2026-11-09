@@ -95,6 +95,7 @@ counts once it lasts 5 minutes; evidence must follow within 10 more minutes
 | `slow_download`: stalled or below the 50 MB/s floor | timeline `download_stalled`/`download_slow`, the download stop, or `capacity_download_overdue` |
 | `start_blocked_no_machine`: queued, no machine, demand on | demand timeline entry with the blocker code; after 30 min a `capacity_start_blocked` alert with `detail` = exact code |
 | `stuck_job`: queued 30 min without a break, or held by a removed machine | `capacity_queue_age` alert; `capacity.attempt_lost` or the removal on the timeline |
+| `stuck_collect`: a finished run whose result collection keeps failing | timeline `collect_failed`/`collect_output_stored`, `capacity_collect_stuck` alert, or `capacity.attempt_lost` |
 | `refused_start`: demand blocked, create failed, no capacity | demand entry with `reason_code` and raw `detail_code` (or its count in a summary); create error snapshot or no-allocation proof |
 | `refused_claim`: a claimed job's submission deferred | timeline `claim_refused` containing `defer:<exact reason>` |
 | `budget_block`: demand refused by a budget limit | demand entry with the raw limit code (e.g. `dstack_test_task_limit_reached`) |
@@ -109,6 +110,36 @@ waiting and 2 budget blocks. The other 17 were queued-job ages that the
 existing `capacity_queue_age` alert does cover; the first version of the
 check measured from job creation instead of the unbroken wait. All are now
 recorded or alerted.
+
+## Result collection that cannot finish
+
+A job in `collecting` is collected only by the worker that ran it. When that
+host is gone, or collection keeps failing, nothing else ever collects it
+(staging job 27b6213f sat in `collecting`/`collection_failed` for hours after
+its machine was destroyed). The watchdog (`capacity_collect.py`, read from
+committed rows only) now decides each tick:
+
+- **Output already outside the host** (every expected role verified in
+  storage by its sealed size and hash, or files staged on the collector for
+  CPU delivery): never regenerated. The job is held and, after 15 minutes,
+  the `capacity_collect_stuck` alert carries `detail=collection_output_stored`.
+- **Host removed** (provider removal proof): the attempt is lost; it is
+  reclaimed as `capacity_provider_removed`, like a running job on that host.
+- **Collection keeps failing on a live host**: after 10 failures, or a failed
+  collection no worker retried for 10 minutes, the attempt is reclaimed as
+  `capacity_collection_failed` and the machine is stopped.
+
+A reclaim uses the audited `capacity_reclaim` path: the attempt is fenced
+(`attempt_lost`), the job is requeued with a `capacity.attempt_lost` receipt
+(a third lost attempt fails the job and releases its credit hold), the node's
+worker is retired so it no longer points at the job, and a running collect
+turn is never interrupted. The customer's single credit hold stays on the job
+and is captured once, by the attempt that delivers; the lost attempt's supplier
+cost stays unknown until invoice reconciliation, never settled at zero. The
+timeline records `collect_failed`, `collect_output_stored` and
+`collect_reclaimed` per attempt.
+
+Scenarios: `collect_fails_then_machine_removed` and `collect_keeps_failing`.
 
 ## Recorded capacity timeline (staging and production)
 
@@ -212,7 +243,8 @@ Scenario(
 
 - `machines` are used in create order; later creates use `default_machine`.
   `MachineScript` covers: create ok or reply lost, never allocates, no capacity,
-  slow or stalled download, model load failure, worker lost at a time, tunnel
+  slow or stalled download, model load failure, every result collection
+  failing (`collect_fails`), worker lost at a time, tunnel
   lost on app restart (`"returns"` after 5 min or `"never"`), provider removal,
   run turning terminal, stop delay, price and `read_errors` (windows in which
   a run read raises a recorded error code). dstack `max_duration` from the run

@@ -46,6 +46,9 @@ PROBLEMS = (
     "worker_expired",
     "worker_unknown",
     "claim_refused",
+    "collect_failed",
+    "collect_output_stored",
+    "collect_reclaimed",
     "timeline_truncated",
 )
 

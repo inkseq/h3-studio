@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from sqlalchemy import select
 
-from studio_platform.repository import outbox
+from studio_platform.repository import jobs, outbox
 
 # Seconds a problem may stay without evidence once it is detected.
 BOUND_SECONDS = 600
@@ -289,6 +289,35 @@ class Evidence:
                 bound=900,
                 detail="%s held by removed %s" % (job_id[:8], machine.intent_id[:8]),
             )
+        # A finished run whose result collection keeps failing (staging
+        # 27b6213f sat in collecting for hours with no trace of why).
+        if world.collect_failing:
+            with world.repo.engine.connect() as connection:
+                still = set(
+                    connection.execute(
+                        select(jobs.c.id).where(
+                            jobs.c.id.in_(list(world.collect_failing)),
+                            jobs.c.status == "collecting",
+                        )
+                    ).scalars()
+                )
+            for job_id in still:
+                since, machine = world.collect_failing[job_id]
+                if now - since < DETECT_SECONDS:
+                    continue
+                self.expect(
+                    ("collect", job_id),
+                    "stuck_collect",
+                    (job_id, machine.intent_id),
+                    since,
+                    any_of(
+                        timeline("collect_failed", "collect_output_stored"),
+                        alert("capacity_collect_stuck"),
+                        lambda kind, payload: kind == "capacity.attempt_lost",
+                    ),
+                    detail="%s collection failing on %s"
+                    % (job_id[:8], machine.intent_id[:8]),
+                )
         # Work queued without a break for longer than the health window (plus
         # one health interval and a tick, so work claimed just in time is not
         # held against it). A requeue after a lost attempt starts a new wait.

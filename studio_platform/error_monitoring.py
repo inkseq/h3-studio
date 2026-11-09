@@ -96,6 +96,7 @@ def sanitized_event(event, hint=None):
             not in {
                 "capacity_no_progress",
                 "capacity_runtime_exceeded",
+                "capacity_collection_failed",
                 "capacity_owner_recovery",
                 "capacity_provider_removed",
             }
@@ -128,6 +129,7 @@ def sanitized_event(event, hint=None):
                 "capacity_controller_stale",
                 "capacity_download_overdue",
                 "capacity_start_blocked",
+                "capacity_collect_stuck",
             }
             or type(tags.get("diagnosis")) is not str
             or tags["diagnosis"]
@@ -143,6 +145,7 @@ def sanitized_event(event, hint=None):
                 "download_slow",
                 "download_unobserved",
                 "start_blocked",
+                "collect_stuck",
             }
             or "detail" in tags
             and (

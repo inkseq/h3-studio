@@ -88,6 +88,9 @@ class MachineScript:
     removed_at: float | None = None  # provider deletes the machine
     worker_lost_at: float | None = None  # slot heartbeat and consumer stop
     tunnel_lost_on_restart: str | None = None  # None | "returns" | "never"
+    # Every result collection on this machine fails after the run finished
+    # (the host cannot deliver its output), like staging job 27b6213f.
+    collect_fails: bool = False
     stop_seconds: float = 60  # stop request -> machine gone
     price: float = 0.7  # USD/hour billed by the provider
     # Recorded provider fields laid over every run read once the machine is
@@ -757,6 +760,8 @@ class World(LedgerCase):
         self._in_tick = self._in_workers = False
         self._depth, self._locked, self._open = 0, False, 0
         self._claimed_at = 0.0
+        # Ground truth: job id -> (first failed collection, machine).
+        self.collect_failing = {}
         from capacity_sim_evidence import Evidence
 
         self.evidence = Evidence(self)
@@ -1436,6 +1441,15 @@ class World(LedgerCase):
             job = self.repo.get_job(self._scope(job_id), job_id)
             if job["status"] in ("submitting", "running"):
                 queue.begin_collection(lease)
+            if machine.script.collect_fails:
+                # The worker's own failure path (WorkerRunner._run_once):
+                # count the failure, release the lease, keep the binding.
+                self.reasons["collect_failed"] += 1
+                self.collect_failing.setdefault(job_id, (self.now, machine))
+                queue.collection_failed(lease)
+                self.inflight.pop(worker_id, None)
+                control.observe(worker_id, job_id)
+                return
             queue.complete(lease, [ARTIFACT], actual_cost_microusd=0)
             machine.busy_job = None
             self.inflight.pop(worker_id, None)

@@ -38,6 +38,11 @@ WORKER_LOST_GRACE_SECONDS = 600
 DOWNLOAD_OVERDUE_SLACK_SECONDS = 300
 # Queued work, no live machine and demand start refusing: alert after 30 min.
 START_BLOCKED_SECONDS = 1800
+# Job-scoped alerts and the job states in which each is still current.
+JOB_ALERTS = {
+    "capacity_queue_age": QUEUED,
+    "capacity_collect_stuck": {"collecting"},
+}
 
 
 def download_overdue(binding, now):
@@ -476,12 +481,38 @@ def snapshot(service, connection, now):
     blocked = start_blocked(connection, tenant, nodes, job_rows, now)
     if blocked is not None:
         findings.append(blocked)
+    findings.extend(collect_stuck(connection, job_rows, attempt_rows, now))
     for value in findings:
         if value["code"] == "capacity_paid_idle_queue":
             reason = top_refusal(connection, value["resource_id"], now)
             if reason:
                 value["detail"] = reason
     return findings, policy
+
+
+def collect_stuck(connection, job_rows, attempt_rows, now):
+    """A finished run whose result collection keeps failing for 15 minutes.
+
+    ``detail`` says whether the output is already stored outside the host
+    (held, never regenerated: an operator finishes it) or the watchdog is
+    still retrying before it reclaims the attempt (capacity_collect.py).
+    """
+    from .capacity_collect import stuck_collections
+
+    return [
+        finding(
+            "capacity_collect_stuck",
+            job["id"],
+            since,
+            "collect_stuck",
+            detail="collection_output_stored"
+            if stored
+            else attempt.get("error_code") or "collection_failed",
+        )
+        for job, attempt, since, stored in stuck_collections(
+            connection, job_rows, attempt_rows, now
+        )
+    ]
 
 
 def start_blocked(connection, tenant, nodes, job_rows, now):
@@ -668,7 +699,7 @@ def record(service, value, *, policy_version=None):
             return None if previous else _event(connection, tenant, value, now)
         table, key = (
             (jobs, jobs.c.id)
-            if code == "capacity_queue_age"
+            if code in JOB_ALERTS
             else (operator_nodes, operator_nodes.c.intent_id)
         )
         if table is operator_nodes:
@@ -677,7 +708,7 @@ def record(service, value, *, policy_version=None):
         if row is None:
             return None
         if table is jobs:
-            if row["tenant_id"] != tenant or row["status"] not in QUEUED:
+            if row["tenant_id"] != tenant or row["status"] not in JOB_ALERTS[code]:
                 return None
             previous = connection.execute(
                 select(outbox.c.id)
@@ -757,9 +788,9 @@ def pending_reports(service, telemetry, reporter=None):
         try:
             if telemetry.enabled:
                 context = {
-                    "job_id"
-                    if value["code"] == "capacity_queue_age"
-                    else "node_id": value["resource_id"]
+                    "job_id" if value["code"] in JOB_ALERTS else "node_id": value[
+                        "resource_id"
+                    ]
                 }
                 grafana_ok = (
                     telemetry.start("queue_wait", context).finish(
