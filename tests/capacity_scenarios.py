@@ -45,12 +45,6 @@ SCENARIOS = [
         max_machines=1,
         jobs=[JobBatch(0, 4)],
         machines=[MachineScript(load_fails=True), MachineScript(no_capacity=True)],
-        expected_failure=(
-            'A start the provider never allocated counts as a lane-less start loop, '
-            'so one failed boot plus one no-capacity start pauses demand for '
-            'everyone (scheduling/health.py:19-33 lane, capacity_health.py:150-163); '
-            'the startup stop also hits the KeyError at dstack_controller.py:777'
-        ),
     ),
     Scenario(
         "lost_create_reply",
@@ -67,12 +61,6 @@ SCENARIOS = [
         max_machines=1,
         jobs=[JobBatch(0, 3, actual_runtime_s=900)],
         machines=[MachineScript(removed_at=900)],
-        expected_failure=(
-            'Provider removal proof is valid for 30 s only '
-            '(capacity_watchdog.py:440-443); the stopped-node path reclaims only '
-            'with a fresh proof (dstack_controller.py:1202-1216), and no-progress '
-            'reclaim never runs for stopped nodes, so the job stays running forever'
-        ),
     ),
     Scenario(
         "run_turns_terminal",
@@ -106,13 +94,6 @@ SCENARIOS = [
             MachineScript(tunnel_lost_on_restart="never"),
         ],
         events=[Event(15 * 60, "restart_app")],
-        expected_failure=(
-            'A drained machine whose runtime became unreachable never gets '
-            'capacity.stop (dstack_controller.py:1017-1045 needs a fresh ready '
-            'read) and bills forever with max_duration off; the stuck node then '
-            'makes every start allocation_uncertain '
-            '(dstack_demand_start.py:467-487, dstack_demand.py:402-404)'
-        ),
     ),
     Scenario(
         "worker_returns_after_restart",
@@ -169,11 +150,6 @@ SCENARIOS = [
         history_removed=130,
         history_invoiced=False,
         jobs=[JobBatch(0, 3)],
-        expected_failure=(
-            "Never-settled rental reservations of any age count toward today's "
-            'tenant cap (supplier_spending.py:144-153; invoice_checks cannot '
-            'settle), so new jobs are refused with tenant_daily_limit_reached'
-        ),
     ),
     Scenario(
         "test_cap_nearly_spent",
@@ -215,10 +191,6 @@ SCENARIOS = [
         hours=3,
         owner_profiles=("superdan",),
         jobs=[JobBatch(0, 4, owner="supervan")],
-        expected_failure=(
-            "qa-admin work silently starts on the owner's profile and GPU account; "
-            'nothing records the fallback (dstack_demand.py:131, #1140 Q2)'
-        ),
     ),
     Scenario(
         "demand_toggled_off",
@@ -243,11 +215,6 @@ SCENARIOS = [
         max_machines=1,
         jobs=[JobBatch(0, 3)],
         machines=[MachineScript(no_capacity=True), MachineScript(no_capacity=True)],
-        expected_failure=(
-            'Two no-capacity starts in an hour switch demand start off tenant-wide '
-            '(scheduling/health.py:19-33 returns lane None when nothing was '
-            'allocated; capacity_health.py:163)'
-        ),
     ),
     Scenario(
         "three_failed_boots",
@@ -256,12 +223,6 @@ SCENARIOS = [
         max_machines=1,
         jobs=[JobBatch(0, 2)],
         machines=[MachineScript(load_fails=True)] * 3,
-        expected_failure=(
-            "The tick after a watchdog stop raises KeyError: _reclaim_fenced_node "
-            "reads recovery['reason'], which reclaim_node omits when it requests "
-            "no new stop (dstack_controller.py:777); the stop is sent, the tick "
-            "reports dstack_controller_observation_failed"
-        ),
     ),
     Scenario(
         "demand_config_edited",

@@ -265,6 +265,18 @@ def projection(connection, tenant_id, now, *, policy=None):
                     )
                 )
         category, amount, values_problems = _value(reference, rows, now, start)
+        if (
+            category in {"committed", "pending"}
+            and intent is not None
+            and intent.get("state") == "destroyed"
+            and _time(intent.get("updated_at"), now)
+            and intent["updated_at"] < start
+        ):
+            # A rental that ended before today cannot add to today's spend.
+            # Lium/Vast reservations never settle on their own, so counting
+            # them at full amount forever filled the daily cap with old
+            # machines (#1034 unsettled_rentals_fill_daily_cap).
+            continue
         problems.extend(values_problems)
         result["details"].extend(problems)
         if not problems and category is not None:

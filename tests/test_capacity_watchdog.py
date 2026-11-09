@@ -692,7 +692,9 @@ class NodeWatchdogTests(LedgerCase):
         for change in (
             {"complete": False},
             {"provider_instance_id": "another-instance"},
-            {"observed_at": self.now - 31, "inventory_observed_at": self.now - 31},
+            # An old proof stays proof (#1034); a proof from the future does not.
+            {"observed_at": self.now + 31, "inventory_observed_at": self.now + 31},
+            {"inventory_observed_at": self.now - 300},
         ):
             with self.subTest(change=change):
                 payload = copy.deepcopy(original_payload)

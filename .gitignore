@@ -915,6 +915,7 @@ inventory.json
 !studio_platform/capacity_reclaim.py
 !studio_platform/capacity_watchdog.py
 !studio_platform/capacity_health.py
+!studio_platform/capacity_reasons.py
 !tests/test_capacity_reclaim.py
 !tests/test_capacity_watchdog.py
 !tests/test_capacity_health.py

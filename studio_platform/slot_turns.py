@@ -147,15 +147,22 @@ def selected_job_turn(contexts, tenant, owner, project, job_id, *, run_selected)
             else slot.spec.provider == 'modal'
         )
     )
+    claimed, pooled = False, []
     for slot in candidates:
-        if slot.spec.pool != job["pool"] or not slot.lock.acquire(blocking=False):
+        if slot.spec.pool != job["pool"]:
+            continue
+        pooled.append(slot)
+        if not slot.lock.acquire(blocking=False):
             continue
         try:
             if run_selected(slot, job_id):
+                claimed = True
                 break
         finally:
             slot.lock.release()
     fresh = contexts.repo.get_job(scope, job_id)
+    if not claimed and fresh["status"] == "queued":
+        _count_refusal(contexts, pooled, fresh)
     now = contexts.repo.clock()
     deadline = max(fresh["not_before"], fresh["lease_expires_at"] or now)
     return {
@@ -163,6 +170,26 @@ def selected_job_turn(contexts, tenant, owner, project, job_id, *, run_selected)
         "done": fresh["status"] in TERMINAL or fresh["status"] == "recovery_hold",
         "wait_seconds": max(POLL_SECONDS, min(900, deadline - now)),
     }
+
+
+def _count_refusal(contexts, slots, job):
+    """Why no slot took a queued job this turn (#1140 item 4); never raises."""
+    from .capacity_reasons import count
+
+    if not slots:
+        return count("claim", "no_worker_for_pool")
+    try:
+        for slot in slots:
+            control = getattr(slot.runner, "control", None)
+            if control is None:
+                continue
+            with contexts.repo.engine.connect() as connection:
+                worker = control._worker(connection, slot.spec.worker_id)
+                reason = control.claim_reason(connection, worker, job)
+            # Eligible but another job is first in the fair claim order.
+            count("claim", reason or "not_first_in_order")
+    except Exception as error:
+        count("claim", "check_failed_" + type(error).__name__)
 
 
 def run_selected_slot(slot, job_id, *, local_owner=None):

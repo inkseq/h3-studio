@@ -1136,30 +1136,32 @@ class WorkerControl:
 
     def submission_allowed(self, job):
         """Recheck slot/TTL immediately before POST, after slow media uploads."""
+        return self.submission_block_reason(job) is None
+
+    def submission_block_reason(self, job):
+        """The exact reason a leased job may not be submitted now, or None."""
         worker_id = job.get("lease_worker_id")
         if not worker_id:
-            return False
+            return "job_lease_missing"
         with self.repo.engine.connect() as connection:
             worker = self._worker(connection, worker_id)
             now = self.repo.clock()
-            if (
-                worker["current_job_id"] != job["id"]
-                or worker["drain_requested"]
-                or worker["expires_at"] <= now
-                or worker["state"] not in {"leased", "busy"}
-            ):
-                return False
+            if worker["current_job_id"] != job["id"]:
+                return "worker_job_mismatch"
+            if worker["drain_requested"]:
+                return "worker_draining"
+            if worker["expires_at"] <= now:
+                return "worker_registration_expired"
+            if worker["state"] not in {"leased", "busy"}:
+                return "worker_state_" + str(worker["state"])
             from .worker_admission import worker_window_reason
 
-            return (
-                worker_window_reason(
-                    connection,
-                    worker,
-                    now,
-                    expected_runtime_s=job["expected_runtime_s"],
-                    deployment_profile_id=job["request"].get("deployment_profile_id"),
-                )
-                is None
+            return worker_window_reason(
+                connection,
+                worker,
+                now,
+                expected_runtime_s=job["expected_runtime_s"],
+                deployment_profile_id=job["request"].get("deployment_profile_id"),
             )
 
     def queued_diagnostic(self, job):

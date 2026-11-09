@@ -63,7 +63,12 @@ class DemandStartTests(LedgerCase):
             before = list(connection.execute(select(budget_reservations)).mappings())
         result = start_once(self.service)
         self.assertEqual(
-            result, {'state': 'blocked', 'reason_code': 'offer_unavailable'}
+            result,
+            {
+                'state': 'blocked',
+                'reason_code': 'offer_unavailable',
+                'detail_code': 'dstack_no_compatible_offers',
+            },
         )
         self.assertEqual(len(reads), 1)
         self.assertFalse(reads[0]['for_offers_only'])
@@ -850,7 +855,11 @@ class DemandStartTests(LedgerCase):
         before = self.repo.get_budget('owner-budget')
         self.assertEqual(
             start_once(self.service),
-            {'state': 'blocked', 'reason_code': 'budget_limit'},
+            {
+                'state': 'blocked',
+                'reason_code': 'budget_limit',
+                'detail_code': 'budget_exceeded',
+            },
         )
         self.assertEqual(self.client.applied, [])
         self.assertEqual(self.repo.get_budget('owner-budget'), before)
