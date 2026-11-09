@@ -135,6 +135,22 @@ class SlidingSessionTests(unittest.TestCase):
                     self.assertIsNone(self.client.cookies.get(COOKIE))
                     self.assertEqual(self.client.get("/api/auth/me").status_code, 401)
 
+    def test_refused_cookie_logs_only_a_closed_reason(self):
+        # #1145: a refused cookie says why in the log, never the token or owner.
+        self.login()
+        token = self.client.cookies.get(COOKIE)
+        self.now += 8 * 86400
+        with self.assertLogs("studio_platform.api", level="WARNING") as logs:
+            self.assertEqual(self.client.get("/v1/projects").status_code, 401)
+        self.assertEqual(len(logs.output), 1)
+        self.assertIn("session_cookie_refused reason=session_expired", logs.output[0])
+        self.assertNotIn(token, logs.output[0])
+        self.assertNotIn("superdan", logs.output[0])
+        self.assertEqual(self.app.state.auth.refusal_reason("x"), "cookie_malformed")
+        self.assertEqual(
+            self.app.state.auth.refusal_reason("A" * 43), "session_missing"
+        )
+
     def test_old_valid_short_session_upgrades_on_use_but_expired_session_does_not(self):
         old = Auth(
             self.app.state.repository.engine,

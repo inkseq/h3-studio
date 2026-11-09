@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import asyncio
 from contextlib import asynccontextmanager
 import re
@@ -64,6 +66,7 @@ COOKIE = "sixnine_session"
 # The opaque handle can outlive its authority: every request checks the SQL
 # seven-day inactivity expiry. Only login writes the cookie, so a late response
 # from an older account cannot overwrite a newer login or restore a logout.
+_logger = logging.getLogger(__name__)
 BROWSER_HANDLE_SECONDS = 365 * 86400
 TERMINAL = {"succeeded", "failed", "cancelled"}
 ARTIFACT_VIDEO_CACHE_SCOPE_KEY = "inkseq.immutable-artifact-video-cache"
@@ -353,6 +356,18 @@ def create_app(
             and not public_exchange
             and not principal
         ):
+            cookie = request.cookies.get(COOKIE)
+            if cookie and not authorization:
+                # A cookie was sent but refused: log the closed reason only (#1145).
+                try:
+                    reason = await run_in_threadpool(auth.refusal_reason, cookie)
+                except Exception as error:
+                    reason = "diagnosis_failed_" + type(error).__name__
+                _logger.warning(
+                    "session_cookie_refused reason=%s path=%s",
+                    reason,
+                    request.url.path[:80],
+                )
             return JSONResponse({"detail": "请先登录"}, status_code=401)
         request.state.principal = principal
         if (

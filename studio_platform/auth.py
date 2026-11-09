@@ -604,6 +604,52 @@ class Auth:
             digest(token), renew=True, verify_provider=verify_provider
         )
 
+    def refusal_reason(self, token):
+        """Why ``session(token)`` refused this cookie; read-only, for the log (#1145).
+
+        Never returns or logs the token, its hash or the owner, only a closed code.
+        """
+        if not isinstance(token, str) or not TOKEN.fullmatch(token):
+            return "cookie_malformed"
+        now = self.clock()
+        with self.engine.connect() as conn:
+            row = (
+                conn.execute(
+                    select(sessions).where(
+                        sessions.c.tenant == self.tenant,
+                        sessions.c.token_hash == digest(token),
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is None:
+                return "session_missing"
+            if row["expires"] <= now:
+                return "session_expired"
+            if row["auth_mode"] not in (self.mode, "workos"):
+                return "session_mode_mismatch"
+            if (
+                self._grant_account(
+                    conn,
+                    row["username"],
+                    row["auth_mode"],
+                    row["password_version"],
+                    check_identity=False,
+                )
+                is None
+            ):
+                return "account_grant_refused"
+            from .identity import account_identity
+
+            identity = account_identity(conn, self.tenant, row["username"])
+            if identity is not None and identity.get("status") != "active":
+                return "account_inactive"
+            if row["auth_mode"] == "workos" and self.session_checker is not None:
+                return "provider_check_refused"
+        # Valid now: the earlier refusal raced a change that has since settled.
+        return "not_reproducible"
+
     def _session_hash(self, token_hash, *, renew=False, verify_provider=True):
         principal = self._local_session_hash(
             token_hash,
