@@ -109,12 +109,14 @@ export function captionStatus(project, chapterId) {
     previouslyConfirmed: !!track.confirmedSnapshot,
   };
 }
+// The burn-in export asks for this until the film editor's caption bar confirms this version.
+export const CAPTIONS_UNCONFIRMED = '请先到剪辑页，核对字幕后点「确认这一版字幕」。';
 // SRT remains independent. These stricter checks apply only to the fixed burn-in preset.
 export function burnCaptionStatus(project, chapterId) {
   const status = captionStatus(project, chapterId),
     issues = [...status.issues],
     cues = orderedCues(status.track.cues);
-  if (!status.confirmed) issues.push('请先到节奏与声音，核对并确认当前这一版字幕文字和起止时间。');
+  if (!status.confirmed) issues.push(CAPTIONS_UNCONFIRMED);
   let previousEnd = -1;
   const aligned = cues.map((cue, index) => {
     const prefix = `第${index + 1}条：`,
@@ -150,6 +152,26 @@ export function burnCaptionStatus(project, chapterId) {
     };
   });
   return { ...status, issues: [...new Set(issues)], aligned };
+}
+/**
+ * What still stops a burn-in export, apart from the confirmation itself, for the film editor's
+ * caption bar: each problem names its cue (`第N条`) when it has one, so the bar can jump to it.
+ * The checks are exactly the export's own (burnCaptionStatus).
+ */
+export function captionProblems(project, chapterId) {
+  const status = burnCaptionStatus(project, chapterId),
+    cues = orderedCues(status.track.cues);
+  return status.issues
+    .filter((issue) => issue !== CAPTIONS_UNCONFIRMED)
+    .map((issue) => {
+      const match = /^第(\d+)条：/.exec(issue),
+        number = match ? Number(match[1]) : null;
+      return {
+        number,
+        cueId: number ? (cues[number - 1]?.id ?? null) : null,
+        message: match ? issue.slice(match[0].length) : issue,
+      };
+    });
 }
 export function srtTime(seconds) {
   const ms = Math.round(seconds * 1000);

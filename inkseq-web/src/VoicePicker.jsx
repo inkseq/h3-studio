@@ -1,14 +1,21 @@
-// A character's voice from our catalog (h3-studio#997). The story keeps only our voice id; which
-// provider speaks it is the server's business, and people only ever see voice names. Hidden while
-// the server has voice switched off. Choosing is a saved edit that shows at once.
+// A character's one "Voice" section in the profile editor (one person, one voice): the speaker
+// number and group, a note on the voice, a voice from our catalog (h3-studio#997) and the
+// voice samples (rendered by the editor and passed in). The story keeps only our voice id;
+// which provider speaks it is the server's business, and people only ever see voice names. The
+// catalog part is hidden while the server has voice switched off. Choosing is a saved edit.
 import React, { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Pause, Play } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Button, IconButton } from './ui/Button.jsx';
+import { Field } from './ui/Field.jsx';
+import { Note } from './ui/Note.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
 import { VoiceDesign, useSample } from './VoiceDesign.jsx';
+import { useSpeaking } from './ProfileBible.jsx';
+import { ProfileSplit } from './ProfileSplit.jsx';
+import { nextSpeaker, peopleInProfile, voiceGaps } from './story-bible.js';
 
 const DIRECTIONS = ['calm', 'angry', 'sad', 'happy'],
   MAX_LINE = 500;
@@ -84,9 +91,64 @@ function VoiceLine({ profile, language }) {
 
 const sampleOf = (voice, lang) => voice.samples?.[lang] || voice.samples?.en;
 
-export function VoicePicker({ profile }) {
+// The speaker number (S1…S19, one character each) and the group people share.
+function SpeakerFields({ profile }) {
+  const { t } = useI18n();
+  const { state, dispatch } = useStore();
+  const b = profile.bible;
+  const set = (patch) => dispatch({ type: 'bible', pid: profile.id, patch });
+  const characters = state.profiles.filter((x) => x.type === 'character');
+  const holder = (tag) => characters.find((c) => c.id !== profile.id && c.bible?.speaker === tag);
+  return (
+    <>
+      <div className="bible-row">
+        <Field label={t('bible.speaker')}>
+          <div className="bible-inline">
+            <select value={b.speaker} onChange={(e) => set({ speaker: e.target.value })}>
+              <option value="">{t('bible.noSpeaker')}</option>
+              {Array.from({ length: 19 }, (_, i) => 'S' + (i + 1)).map((tag) => (
+                <option key={tag} value={tag} disabled={!!holder(tag)}>
+                  {tag}
+                  {holder(tag) ? ' · ' + holder(tag).name : ''}
+                </option>
+              ))}
+            </select>
+            {!b.speaker && (
+              <Button size="sm" onClick={() => set({ speaker: nextSpeaker(characters) })}>
+                {t('bible.giveSpeaker')}
+              </Button>
+            )}
+          </div>
+        </Field>
+        <Field label={t('bible.group')} help={t('bible.groupHelp')}>
+          <input
+            value={b.groupId}
+            maxLength={80}
+            list="bible-groups"
+            onChange={(e) => set({ groupId: e.target.value })}
+          />
+          <datalist id="bible-groups">
+            {[...new Set(characters.map((c) => c.bible?.groupId).filter(Boolean))].map((g) => (
+              <option key={g} value={g} />
+            ))}
+          </datalist>
+        </Field>
+      </div>
+      <Field label={t('bible.voiceNote')}>
+        <input
+          value={b.voiceNote}
+          maxLength={600}
+          placeholder={t('bible.voiceNotePlaceholder')}
+          onChange={(e) => set({ voiceNote: e.target.value })}
+        />
+      </Field>
+    </>
+  );
+}
+
+export function VoicePicker({ profile, samples = null }) {
   const { t, locale } = useI18n();
-  const { adapter, dispatch } = useStore();
+  const { adapter, dispatch, state } = useStore();
   const read = adapter?.readVoices;
   const { data } = useQuery({
     queryKey: ['voices'],
@@ -96,41 +158,64 @@ export function VoicePicker({ profile }) {
     retry: false,
   });
   const { playing, toggle } = useSample();
-  if (!data?.enabled || !data.voices?.length) return null;
+  const speaking = useSpeaking(profile);
+  const people = peopleInProfile(profile, state.profiles);
+  const gaps = voiceGaps(profile, speaking);
   const language = locale === 'en' ? 'en' : 'zh';
   const choose = (id) => dispatch({ type: 'profile', id: profile.id, patch: { voiceId: id } });
+  const catalog = data?.enabled && data.voices?.length > 0;
   return (
-    <section className="pe-section voice-picker" aria-label={t('voice.title')}>
-      <h3>{t('voice.title')}</h3>
-      {adapter?.designVoice && <VoiceDesign profile={profile} language={language} />}
-      <ul className="voice-list">
-        {data.voices.map((voice) => {
-          const chosen = profile.voiceId === voice.id,
-            name = voice.name?.[language] || voice.id;
-          return (
-            <li key={voice.id} className={chosen ? 'voice-item chosen' : 'voice-item'}>
-              <IconButton
-                size="sm"
-                label={t('voice.listen', { name })}
-                onClick={() => toggle(voice.id, sampleOf(voice, language))}
-              >
-                {playing === voice.id ? <Pause size={14} /> : <Play size={14} />}
-              </IconButton>
-              <span className="voice-name">{name}</span>
-              <small className="muted">{t('voice.gender.' + voice.gender)}</small>
-              <Button
-                size="sm"
-                variant={chosen ? 'primary' : 'secondary'}
-                aria-pressed={chosen}
-                onClick={() => choose(chosen ? '' : voice.id)}
-              >
-                {chosen ? t('voice.chosen') : t('voice.choose')}
-              </Button>
-            </li>
-          );
-        })}
-      </ul>
-      {profile.voiceId && adapter?.speakLine && <VoiceLine profile={profile} language={language} />}
+    <section className="pe-section voice-picker voice-all" aria-labelledby={'voice-' + profile.id}>
+      <h3 id={'voice-' + profile.id}>{t('bible.voiceTitle')}</h3>
+      <p className="muted small">{t('bible.voiceHelp')}</p>
+      {people > 1 && speaking > 0 && <ProfileSplit p={profile} count={people} />}
+      {/* Stays one line whether or not something is missing, so nothing below moves. */}
+      {speaking > 0 && (
+        <Note tone={gaps.length ? 'warn' : 'info'}>
+          {gaps.length
+            ? t('bible.gap.' + (gaps.length > 1 ? 'both' : gaps[0]), { count: speaking })
+            : t('bible.gap.none', { count: speaking })}
+        </Note>
+      )}
+      <SpeakerFields profile={profile} />
+      {catalog && (
+        <div className="voice-catalog">
+          <h4>{t('voice.title')}</h4>
+          {adapter?.designVoice && <VoiceDesign profile={profile} language={language} />}
+          <ul className="voice-list">
+            {data.voices.map((voice) => {
+              const chosen = profile.voiceId === voice.id,
+                name = voice.name?.[language] || voice.id;
+              return (
+                <li key={voice.id} className={chosen ? 'voice-item chosen' : 'voice-item'}>
+                  <IconButton
+                    size="sm"
+                    label={t('voice.listen', { name })}
+                    onClick={() => toggle(voice.id, sampleOf(voice, language))}
+                  >
+                    {playing === voice.id ? <Pause size={14} /> : <Play size={14} />}
+                  </IconButton>
+                  <span className="voice-name">{name}</span>
+                  <small className="muted">{t('voice.gender.' + voice.gender)}</small>
+                  <Button
+                    size="sm"
+                    variant={chosen ? 'primary' : 'secondary'}
+                    aria-pressed={chosen}
+                    aria-label={t(chosen ? 'voice.chosenNamed' : 'voice.chooseNamed', { name })}
+                    onClick={() => choose(chosen ? '' : voice.id)}
+                  >
+                    {chosen ? t('voice.chosen') : t('voice.choose')}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+          {profile.voiceId && adapter?.speakLine && (
+            <VoiceLine profile={profile} language={language} />
+          )}
+        </div>
+      )}
+      {samples}
     </section>
   );
 }

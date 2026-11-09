@@ -360,7 +360,13 @@ export default function Library({ checking = false, account, active = true }) {
   const newProfile = (ptype, name) => {
     let receipt;
     const ok = store.editProject((p) => {
-      receipt = applyStoryboardAction(p, { type: 'newProfile', ptype, name });
+      // The first look or version is named in the reader's language (bible.defaultLook.*).
+      receipt = applyStoryboardAction(p, {
+        type: 'newProfile',
+        ptype,
+        name,
+        ...(ptype === 'prop' ? {} : { lookName: t('bible.defaultLook.' + ptype) }),
+      });
       return receipt !== false;
     });
     if (!ok || !receipt?.id) throw Error('library.failed');

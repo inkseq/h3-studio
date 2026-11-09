@@ -156,12 +156,16 @@ export default function TrimBar({ duration, start, end, getVideo, onCommit, disa
             aria-valuemin={0}
             aria-valuemax={total || 0}
             aria-valuenow={side === 'in' ? inPoint : outPoint}
+            aria-valuetext={t('editor.trimValue', {
+              value: sec(side === 'in' ? inPoint : outPoint),
+            })}
             className={'trim-bar-handle ' + side}
             style={{ left: pct(side === 'in' ? inPoint : outPoint, total) }}
             onPointerDown={drag(side)}
             onKeyDown={(event) => {
-              const step =
-                event.key === 'ArrowLeft' ? -frame : event.key === 'ArrowRight' ? frame : 0;
+              // A frame per press; Shift moves a whole second, like the editor's playhead keys.
+              const size = event.shiftKey ? 1 : frame,
+                step = event.key === 'ArrowLeft' ? -size : event.key === 'ArrowRight' ? size : 0;
               if (!step || !total) return;
               event.preventDefault();
               const v = (side === 'in' ? inPoint : outPoint) + step;

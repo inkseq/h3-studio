@@ -11,7 +11,7 @@ export const POPOVER_CLOSE = 'ui-popover-close';
 export const closePopover = (node) =>
   node?.dispatchEvent(new CustomEvent(POPOVER_CLOSE, { bubbles: true }));
 
-export function Popover({ trigger, align = 'end', className = '', onOpenChange, children }) {
+export function Popover({ trigger, align = 'end', className = '', label, onOpenChange, children }) {
   const triggerRef = useRef(null),
     [container, setContainer] = useState(undefined),
     [open, setOpen] = useState(false);
@@ -30,6 +30,7 @@ export function Popover({ trigger, align = 'end', className = '', onOpenChange, 
       <Primitive.Portal container={container}>
         <Primitive.Content
           className={('ui-popover ' + className).trim()}
+          aria-label={label}
           align={align}
           sideOffset={6}
           collisionPadding={8}

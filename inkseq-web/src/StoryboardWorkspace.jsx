@@ -5,16 +5,28 @@ import { sceneBeats } from './script-beats.js';
 import { STAGES, chapterFrom, stageFrom, withStage } from './story-stage.js';
 import { storyFlow } from './story-flow.js';
 import { DEFAULT_CHAPTER_NAMES, sceneHeading } from './story-headings.js';
-import { StoryScript } from './StoryScript.jsx';
+import { StoryScript, showScriptScene } from './StoryScript.jsx';
+import { useQueries } from '@tanstack/react-query';
 import { CARD_SIZES, readCardSize, rememberCardSize } from './shot-mention.js';
 import { FloatingMessage } from './floating-notice.js';
 import './v2/story-view.css';
 import './film-editor.css';
 import { selectShot, emptySelection } from './storyboard-selection.js';
+import { useCardGrid } from './card-grid.js';
+import { assetLabel, dragAnnouncements, dragItemName } from './storyboard-a11y.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import React, { Activity, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  Activity,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { createPortal } from 'react-dom';
 import {
+  ArrowRight,
   Plus,
   PanelLeftClose,
   PanelLeftOpen,
@@ -80,6 +92,9 @@ import {
 } from './storyboard-ui-model.js';
 
 const EMPTY_SET = new Set();
+// Fields where Escape means "leave this field", not "close the panel".
+const TEXT_FIELD =
+  'input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="range"]), textarea, select, [contenteditable="true"]';
 
 // An empty scene is a drop target for shot cards, highlighted while a card is over it.
 function EmptySceneDrop({ sceneId, label }) {
@@ -313,26 +328,94 @@ function usePersistentFlag(key) {
 // Switching only changes what shows.
 // Inky stays in the top bar on every step of the story (owner, 2026-11-05: always there, silent
 // with nothing to say).
-function InkyInTopBar({ selectedShot }) {
+function InkyInTopBar({ selectedShot, next, onNext }) {
   const [slot, setSlot] = useState(null),
     place = useRef(null);
   useLayoutEffect(() => {
     setSlot(place.current?.closest('.workspace')?.querySelector('.wbar-inky') || null);
   }, []);
+  // The flow's next step sits beside Inky, in the bar's normal flow, so it can never
+  // run under the controls on the right (owner, 2026-11-09).
   return (
     <span ref={place} hidden>
-      {slot && createPortal(<InkyForStory selectedShot={selectedShot} />, slot)}
+      {slot &&
+        createPortal(
+          <>
+            {next && <NextStep next={next} onNext={onNext} />}
+            <InkyForStory selectedShot={selectedShot} />
+          </>,
+          slot,
+        )}
     </span>
   );
 }
 
-function StageNav({ stage, stages, onChange, flow, onNext }) {
+function NextStep({ next, onNext }) {
   const { t } = useI18n();
-  const progress = (value) => {
-    const row = flow?.stages[value];
-    return row?.total ? ' ' + row.done + '/' + row.total : '';
+  const text = t('flow.next.' + next.key, { title: next.title || '' });
+  // The steps sit centred in the bar and the controls around them change with the window,
+  // so measure: the full sentence when it fits, else "Next", else only the arrow.
+  const [fit, setFit] = useState({ mode: 'full', pass: 0 }),
+    mode = fit.mode,
+    box = useRef(null);
+  useEffect(() => {
+    // Start from the full sentence again whenever the bar may have changed size.
+    const remeasure = () => setFit((old) => ({ mode: 'full', pass: old.pass + 1 }));
+    const frame = requestAnimationFrame(remeasure);
+    globalThis.addEventListener?.('resize', remeasure);
+    return () => {
+      cancelAnimationFrame(frame);
+      globalThis.removeEventListener?.('resize', remeasure);
+    };
+  }, []);
+  useLayoutEffect(() => {
+    const own = box.current?.getBoundingClientRect(),
+      steps = document.querySelector('.wbar-stages .sb-stages')?.getBoundingClientRect();
+    if (!own || !steps || fit.mode === 'icon') return;
+    const sameRow = Math.abs(own.top - steps.top) < steps.height;
+    if (sameRow && own.left < steps.right + 8)
+      setFit((old) => ({ ...old, mode: old.mode === 'full' ? 'short' : 'icon' }));
+  }, [fit, text]);
+  return (
+    <span ref={box} className={'sb-next-box ' + mode}>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="sb-next-step"
+        title={text}
+        aria-label={t('flow.nextHint') + ': ' + text}
+        onClick={() => onNext(next)}
+      >
+        {mode === 'full' && <span className="sb-next-text">{text}</span>}
+        {mode === 'short' && <span>{t('flow.nextShort')}</span>}
+        <ArrowRight size={14} aria-hidden="true" />
+      </Button>
+    </span>
+  );
+}
+
+// How far a step is: a thin bar under its name, the counts in its tooltip.
+function stageOption(t, value, row) {
+  if (!row?.total) return { value, label: t('stage.' + value) };
+  const share = row.done / row.total;
+  return {
+    value,
+    title: t('flow.progress.' + value, { done: row.done, total: row.total }),
+    label: (
+      <span className="sb-stage-label">
+        {t('stage.' + value)}
+        <span
+          className={'sb-stage-meter' + (share >= 1 ? ' done' : '')}
+          style={{ '--share': share }}
+          aria-hidden="true"
+        />
+      </span>
+    ),
   };
-  const next = flow?.next;
+}
+
+function StageNav({ stage, stages, onChange, flow }) {
+  const { t } = useI18n();
   // Shown in the middle of the top bar, which SeriesApp draws above this page.
   const [slot, setSlot] = useState(null),
     place = useRef(null);
@@ -344,24 +427,10 @@ function StageNav({ stage, stages, onChange, flow, onNext }) {
       <Segmented
         tabs
         label={t('stage.title')}
-        options={stages.map((value) => ({ value, label: t('stage.' + value) + progress(value) }))}
+        options={stages.map((value) => stageOption(t, value, flow?.stages[value]))}
         value={stage}
         onChange={onChange}
       />
-      {next && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="sb-next-step"
-          title={t('flow.next.' + next.key, { title: next.title || '' })}
-          aria-label={
-            t('flow.nextHint') + ': ' + t('flow.next.' + next.key, { title: next.title || '' })
-          }
-          onClick={() => onNext(next)}
-        >
-          {t('flow.next.' + next.key, { title: next.title || '' })}
-        </Button>
-      )}
     </nav>
   );
   return (
@@ -458,14 +527,41 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     setCardSize(value);
     rememberCardSize(globalThis.localStorage, value);
   };
-  const { state, dispatch } = useStoryboardUI(),
+  const { state, dispatch, adapter } = useStoryboardUI(),
     trash = useTrash();
   // The flow's progress and next step (story-flow.js), shown on the stage tabs.
   const { scenes: flowScenes, profiles: flowProfiles, shots: flowShots } = state;
-  const flow = useMemo(
-    () => storyFlow({ scenes: flowScenes, profiles: flowProfiles, shots: flowShots }),
-    [flowScenes, flowProfiles, flowShots],
-  );
+  // What review said about each chosen take, from the summaries the shot editor already read
+  // (never read here), so the next step can say "reshoot" or "cut the film".
+  const chosenShots = flowShots.filter((shot) => shot.chosen);
+  const summaries = useQueries({
+    queries: chosenShots.map((shot) => ({
+      queryKey: ['take-review-summaries', state.contextId, shot.id],
+      queryFn: () => adapter.readTakeReviewSummaries(shot.id),
+      enabled: false,
+    })),
+  });
+  const reviewKey = chosenShots
+    .map((shot, index) => {
+      const rows = summaries[index]?.data;
+      if (!Array.isArray(rows)) return '';
+      const take = shot.versions.find((v) => v.id === shot.chosen);
+      const row = rows.find((r) => r.artifact_id === (take?.artifactId || shot.chosen));
+      return shot.id + '=' + (row?.verdict || '');
+    })
+    .filter(Boolean)
+    .join('|');
+  const flow = useMemo(() => {
+    const reviews = reviewKey
+      ? new Map(
+          reviewKey.split('|').map((pair) => {
+            const [id, verdict] = pair.split('=');
+            return [id, { verdict: verdict || null }];
+          }),
+        )
+      : null;
+    return storyFlow({ scenes: flowScenes, profiles: flowProfiles, shots: flowShots }, { reviews });
+  }, [flowScenes, flowProfiles, flowShots, reviewKey]);
   const gone = trash?.hidden || EMPTY_SET,
     goneScenes = new Set(
       (state.scenes || [])
@@ -488,6 +584,8 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     [room, setRoom] = useState({ height: 0, content: 0 }),
     [theater, setTheater] = useState(false);
   const [folded, setFolded] = useState(() => new Set());
+  // The shot cards are one Tab stop; arrow keys move between them (card-grid.js).
+  const boardGrid = useCardGrid('[data-shot-card]');
   const { setPlaying } = player;
   useEffect(() => {
     const measure = () => {
@@ -552,32 +650,68 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     return () => media.removeEventListener('change', change);
   }, []);
   useEffect(() => {
-    if (libraryCollapsed || theater) return;
-    const close = (event) => {
-      if (event.key === 'Escape') setLibraryCollapsed(true);
-    };
-    window.addEventListener('keydown', close);
-    return () => window.removeEventListener('keydown', close);
-  }, [libraryCollapsed, theater]);
-  useEffect(() => {
     setExpanded(false);
   }, [selected]);
+  // Escape closes one layer at a time (story tabs audit, 2026-11-09). Fields, menus, pickers,
+  // dialogs and a keyboard drag handle the key first; Escape in a field only leaves the field.
+  // Then full screen, the wide editor, the shot editor, the picked shots, and on a phone the
+  // library drawer. With nothing open it does nothing, so the library never folds away.
+  // One listener for the page's life: it reads the latest state through an effect event, so a
+  // re-render while a key is being handled (another handler setting state) never drops it.
+  const pickedCount = selection.ids.length;
+  const onEscape = useEffectEvent((event) => {
+    if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('dialog[open]'))
+      return;
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[role="listbox"], [role="menu"], .picker')) return;
+    if (target?.matches(TEXT_FIELD)) {
+      event.preventDefault();
+      const home = target.closest('[data-shot-editor], [data-grid-card]');
+      target.blur();
+      home?.focus({ preventScroll: true });
+      return;
+    }
+    const done = () => event.preventDefault();
+    if (theater) {
+      done();
+      setTheater(false);
+    } else if (expanded) {
+      done();
+      setExpanded(false);
+    } else if (selected) {
+      done();
+      setSelected(null);
+    } else if (pickedCount) {
+      done();
+      setSelection(emptySelection());
+    } else if (!libraryCollapsed && globalThis.matchMedia?.('(max-width:760px)').matches) {
+      done();
+      setLibraryCollapsed(true);
+    }
+  });
   useEffect(() => {
-    const close = (event) => {
-      if (event.key !== 'Escape' || document.querySelector('dialog[open]')) return;
-      if (theater) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setTheater(false);
-      } else if (expanded) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setExpanded(false);
-      } else if (selected) setSelected(null);
-    };
-    window.addEventListener('keydown', close, true);
-    return () => window.removeEventListener('keydown', close, true);
-  }, [theater, expanded, selected, setSelected]);
+    if (!pageActive) return undefined;
+    const listen = (event) => onEscape(event);
+    window.addEventListener('keydown', listen);
+    return () => window.removeEventListener('keydown', listen);
+  }, [pageActive]);
+  // Opening a shot moves focus into its editor; closing it puts focus back on the shot's card.
+  const lastSelected = useRef(null);
+  useEffect(() => {
+    const was = lastSelected.current;
+    lastSelected.current = selected;
+    if (!pageActive || selected === was) return undefined;
+    const frame = requestAnimationFrame(() => {
+      const active = document.activeElement;
+      if (selected) {
+        const editor = document.querySelector(`[data-shot-editor="${CSS.escape(selected)}"]`);
+        if (editor && !editor.contains(active)) editor.focus({ preventScroll: true });
+      } else if (was && (!active || active === document.body || active.closest('.drawer'))) {
+        document.querySelector(`[data-shot-card="${CSS.escape(was)}"]`)?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [selected, pageActive]);
   useEffect(() => {
     setSelection(emptySelection());
   }, [state.contextId]);
@@ -587,20 +721,6 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
     const live = new Set(liveShotIds.split('|'));
     setSelection((old) => ({ ...old, ids: old.ids.filter((id) => live.has(id)) }));
   }, [liveShotIds]);
-  useEffect(() => {
-    const clear = (e) => {
-      if (
-        e.key === 'Escape' &&
-        !theater &&
-        !expanded &&
-        !selected &&
-        !document.querySelector('dialog[open]')
-      )
-        setSelection(emptySelection());
-    };
-    window.addEventListener('keydown', clear);
-    return () => window.removeEventListener('keydown', clear);
-  }, [theater, expanded, selected]);
   const library = useStoryboardPanelSize('library', 260, 140, 560),
     dock = useStoryboardPanelSize('dock', DOCK_MIN, DOCK_MIN, 900),
     drawer = useStoryboardPanelSize('drawer', 440, 340, 820),
@@ -846,7 +966,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
             items={state.shots.map((shot) => 'shot:' + shot.id)}
             strategy={rectSortingStrategy}
           >
-            <div className="sb-scene-groups" data-card-size={cardSize}>
+            <div className="sb-scene-groups" data-card-size={cardSize} ref={boardGrid}>
               {state.placeholder ? (
                 <div className="story-opening-shots">
                   {[0, 1, 2, 3, 4, 5].map((i) => (
@@ -1134,17 +1254,16 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
         '--libw': (railed ? 52 : library.size) + 'px',
       }}
     >
-      <StageNav
-        stage={stage}
-        stages={STAGES}
-        onChange={setStage}
-        flow={flow}
+      <StageNav stage={stage} stages={STAGES} onChange={setStage} flow={flow} />
+      <InkyInTopBar
+        selectedShot={selected}
+        next={flow.next}
         onNext={(next) => {
           setStage(next.stage);
+          if (next.stage === 'script' && next.id) showScriptScene(next.id);
           if (next.stage === 'storyboard' && next.id) setSelected(next.id);
         }}
       />
-      <InkyInTopBar selectedShot={selected} />
       {stage === 'script' && (
         <StoryScript
           chapters={chapters}
@@ -1394,8 +1513,36 @@ function StoryboardShell({ onNewScene, filmControl }) {
   const dragged =
       dragging && (dragging.asset ? db.asset(dragging.asset) : db.profile(dragging.profile)),
     thumb = dragging?.profile ? coverOf(db, dragged, dragged?.def) : dragged;
+  // What a screen reader hears while dragging, in the reader's language, naming shots by number
+  // and title and files by what they are, never by internal id (audit 2026-11-09).
+  const {
+    shots: dragShots,
+    assets: dragAssets,
+    profiles: dragProfiles,
+    scenes: dragScenes,
+  } = state;
+  const accessibility = useMemo(
+    () => ({
+      announcements: dragAnnouncements(t, (id) =>
+        dragItemName(
+          id,
+          {
+            shots: dragShots,
+            assets: dragAssets,
+            profiles: dragProfiles,
+            scenes: dragScenes,
+            sceneName: (scene) => sceneHeading(scene.title, t),
+          },
+          t,
+        ),
+      ),
+      screenReaderInstructions: { draggable: t('dnd.instructions') },
+    }),
+    [t, dragShots, dragAssets, dragProfiles, dragScenes],
+  );
   return (
     <DndContext
+      accessibility={accessibility}
       sensors={sensors}
       collisionDetection={collision}
       onDragStart={onDragStart}
@@ -1442,7 +1589,7 @@ function StoryboardShell({ onNewScene, filmControl }) {
           {dragged ? (
             <div className="sb-portal achip drag-ghost">
               <AssetThumb asset={thumb} />
-              <b>{dragged.name}</b>
+              <b>{dragging.asset ? assetLabel(dragged, t) : dragged.name}</b>
             </div>
           ) : null}
         </DragOverlay>

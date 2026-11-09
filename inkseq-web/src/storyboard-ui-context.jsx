@@ -16,6 +16,12 @@ export function StoryboardUIProvider({ adapter, children }) {
         return { ok: true };
       }
       setError('');
+      // A new card's first look or version is named in the person's language.
+      if (action.type === 'newProfile' && !action.lookName && action.ptype !== 'prop') {
+        const key = 'bible.defaultLook.' + action.ptype,
+          lookName = t(key);
+        if (lookName && lookName !== key) action = { ...action, lookName };
+      }
       try {
         const result = await adapter.dispatch(action);
         if (result?.ok === false) {

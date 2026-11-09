@@ -54,33 +54,87 @@ export function storyboardGenerationProfile(capabilities, shot, { quality, sourc
     sourceRequest?.deployment_profile_id || shot.entity?.data.h3?.deploymentProfileId,
   );
 }
-// Media the storyboard library shows, with the inbox flag for media no profile uses.
-function storyboardAssets(project) {
+// Where each file is used on the storyboard (story tabs audit, 2026-11-09): a shot's takes and
+// their sound, its dialogue track, first and last frames, then its references. The first use
+// found wins, in that order; shots are numbered in reading order.
+function mediaUses(project, jobs = []) {
+  const uses = new Map(),
+    put = (id, use) => {
+      if (id && !uses.has(id)) uses.set(id, use);
+    };
+  const byArtifact = new Map(
+    project.entities
+      .filter((e) => e.data?.cloudArtifactId)
+      .map((e) => [e.data.cloudArtifactId, e.id]),
+  );
+  const shots = storyShots(project);
+  shots.forEach((s, index) => {
+    for (const v of shotVersions(project, s, jobs)) {
+      const where = { shot: index + 1, shotId: s.id, take: v.n };
+      put(v.asset?.entity?.id, { ...where, role: 'take' });
+      if (v.audio?.id) put(byArtifact.get(v.audio.id), { ...where, role: 'takeAudio' });
+    }
+  });
+  shots.forEach((s, index) => {
+    const b = s.data.storyboard || {},
+      where = { shot: index + 1, shotId: s.id };
+    put(b.dialogueTrack?.entityId, { ...where, role: 'dialogue' });
+    put(shotFrame(project, s, b, 'firstFrameId', 'firstFrame'), { ...where, role: 'firstFrame' });
+    put(shotFrame(project, s, b, 'lastFrameId', 'lastFrame'), { ...where, role: 'lastFrame' });
+    const refs = b.extraRefs
+      ? list(b.extraRefs).map((r) => r?.entityId)
+      : project.links
+          .filter(
+            (l) =>
+              l.target === s.id && ['reference', 'identity', 'motion', 'audio'].includes(l.role),
+          )
+          .map((l) => l.source);
+    for (const id of refs) put(id, { ...where, role: 'ref' });
+  });
+  return uses;
+}
+
+// Media the storyboard library shows. A file is filed by what it is: takes under video, first
+// frames under images, dialogue tracks under sound. Only uploads (and saved frames) that no
+// profile or shot uses wait in the inbox to be sorted.
+function storyboardAssets(project, jobs) {
+  const uses = mediaUses(project, jobs);
+  const profileFiles = new Set(
+    project.entities.flatMap((profile) =>
+      [
+        ...list(profile.data.imageIds),
+        ...list(profile.data.referenceAssetIds),
+        ...list(profile.data.looks).flatMap((v) =>
+          list(v.imageIds ?? Object.values(v.gallery || {})),
+        ),
+        ...list(profile.data.versions).flatMap((v) => list(v.imageIds)),
+        ...list(profile.data.voices).map((v) => v.assetId),
+        profile.data.ambient?.assetId,
+      ].filter(Boolean),
+    ),
+  );
   return project.entities
     .filter((e) => ['image', 'video', 'audio'].includes(e.type))
-    .map((e) => ({
-      id: e.id,
-      kind: e.type,
-      name: e.title,
-      fileId: e.data.fileId,
-      entity: e,
-      seconds: e.data.metadata?.source_duration ?? e.data.metadata?.duration,
-      inbox:
-        e.data.storyboardInbox !== false &&
-        !project.entities.some((profile) =>
-          [
-            ...list(profile.data.imageIds),
-            ...list(profile.data.referenceAssetIds),
-            ...list(profile.data.looks).flatMap((v) =>
-              list(v.imageIds ?? Object.values(v.gallery || {})),
-            ),
-            ...list(profile.data.versions).flatMap((v) => list(v.imageIds)),
-            ...list(profile.data.voices).map((v) => v.assetId),
-            profile.data.ambient?.assetId,
-          ].includes(e.id),
-        ),
-      source: e.data.source || 'upload',
-    }));
+    .map((e) => {
+      const source = e.data.source || 'upload',
+        meta = e.data.metadata || {},
+        use = uses.get(e.id) || null;
+      return {
+        id: e.id,
+        kind: e.type,
+        name: e.title,
+        fileId: e.data.fileId,
+        entity: e,
+        seconds: meta.source_duration ?? meta.duration ?? meta.duration_s,
+        use,
+        inbox:
+          e.data.storyboardInbox !== false &&
+          source !== 'generation' &&
+          !use &&
+          !profileFiles.has(e.id),
+        source,
+      };
+    });
 }
 
 function storyboardProfiles(project) {
@@ -275,7 +329,7 @@ export function storyboardView(
 ) {
   const chapter =
     find(project, chapterId) || children(project, null).find((e) => e.type === 'chapter');
-  const assets = storyboardAssets(project),
+  const assets = storyboardAssets(project, jobs),
     profiles = storyboardProfiles(project);
   suggestProfiles(assets, profiles);
   const shots = (
