@@ -105,6 +105,8 @@ class WorkerTunnelTests(unittest.TestCase):
             {19002: 8198, 19001: 8199},
         )
         self.assertEqual(client[client.index("--fingerprint") + 1], "fp=")
+        # Reconnect fast after a deploy restarts the server (#1147).
+        self.assertEqual(client[client.index("--max-retry-interval") + 1], "10s")
         self.assertEqual(
             client[-2:],
             ["R:127.0.0.1:19001:127.0.0.1:8199", "R:127.0.0.1:19002:127.0.0.1:8198"],

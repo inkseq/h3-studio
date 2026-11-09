@@ -128,6 +128,12 @@ def keep_tunnel(grant):
     command = [
         str(CHISEL),
         "client",
+        # Reconnect within seconds after a deploy restarts the server (#1147);
+        # same values as worker_tunnel.CLIENT_RETRY (this file runs standalone).
+        "--max-retry-interval",
+        "10s",
+        "--keepalive",
+        "15s",
         "--fingerprint",
         tunnel["fingerprint"],
         "--auth",
