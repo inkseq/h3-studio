@@ -8,9 +8,10 @@ import math
 
 from .budget_policy import effective_budget_limit
 
-from sqlalchemy import inspect, select
+from sqlalchemy import func, inspect, select
 
 from .repository import (
+    artifacts,
     attempts,
     budget_accounts,
     budget_reservations,
@@ -109,13 +110,17 @@ def dstack_policy_reason(
     return None
 
 
-def dstack_budget_reason(connection, intent, node, now, *, expected_runtime_s=None):
+def dstack_budget_reason(
+    connection, intent, node, now, *, expected_runtime_s=None, runtime_gate_s=None
+):
     """Read the funded runway of this instance, without settling supplier costs.
 
     The controller funds rolling chunks in the existing reservation rows. This
     conservative max-price estimate is an admission bound, never an invoice or
     an immutable lifetime deadline. The same helper is used before claiming and
     immediately before submission, including time spent preparing the machine.
+    The funded runway keeps the job's reservation allowance; ``runtime_gate_s``
+    (see ``admission_runtime``) replaces it only in the test runtime window.
     """
     reason = dstack_policy_reason(intent, node, now)
     if reason:
@@ -145,7 +150,8 @@ def dstack_budget_reason(connection, intent, node, now, *, expected_runtime_s=No
         return "job_runtime_unconfirmed"
     from .dstack_test_budget import budget_reason
 
-    reason = budget_reason(connection, intent, node, now, expected_runtime_s=duration)
+    gate = duration if runtime_gate_s is None else min(duration, runtime_gate_s)
+    reason = budget_reason(connection, intent, node, now, expected_runtime_s=gate)
     if reason:
         return reason
     rows = list(
@@ -205,6 +211,101 @@ def dstack_budget_reason(connection, intent, node, now, *, expected_runtime_s=No
     return None
 
 
+def _gate(expected_runtime_s, runtime_gate_s):
+    """Runtime the test window must still fit: never above the allowance."""
+    if expected_runtime_s is None:
+        return 0
+    if _finite(expected_runtime_s) and _finite(runtime_gate_s):
+        return min(expected_runtime_s, runtime_gate_s)
+    return expected_runtime_s
+
+
+def admission_runtime(connection, intent, expected_runtime_s):
+    """How long one more job may occupy this machine, for its test window only.
+
+    A job's ``expected_runtime_s`` is the operator's reservation allowance
+    (FL 1800 s), not a speed estimate; measured FL jobs take about 4 minutes,
+    and the test window already counts the whole boot (#1148 item 3). Money
+    keeps the allowance. The window uses this machine's own history instead:
+    its slowest finished job, as submission to first output (how the
+    generation stats measure a run), scaled to this job's allowance, plus the
+    120 s completion margin. It is never above the allowance, and a machine
+    that has finished nothing yet keeps the allowance.
+    """
+    if not _finite(expected_runtime_s) or expected_runtime_s <= 0:
+        return expected_runtime_s
+    if not intent.get("provider") or not intent.get("provider_instance_id"):
+        return expected_runtime_s
+    workers = select(registered_workers.c.id).where(
+        registered_workers.c.provider == intent["provider"],
+        registered_workers.c.instance_id == intent["provider_instance_id"],
+    )
+    output_at = (
+        select(func.min(artifacts.c.created_at))
+        .where(artifacts.c.attempt_id == attempts.c.id)
+        .scalar_subquery()
+    )
+    ratio = None
+    for started, updated, allowance, output in connection.execute(
+        select(
+            attempts.c.submission_started_at,
+            attempts.c.updated_at,
+            jobs.c.expected_runtime_s,
+            output_at,
+        )
+        .select_from(attempts.join(jobs, attempts.c.job_id == jobs.c.id))
+        .where(attempts.c.worker_id.in_(workers), attempts.c.status == "succeeded")
+    ):
+        finished = output if _finite(output) else updated
+        if (
+            _finite(started)
+            and _finite(finished)
+            and finished >= started
+            and _finite(allowance)
+            and allowance > 0
+        ):
+            ratio = max(ratio or 0.0, (finished - started) / allowance)
+    if ratio is None:
+        return expected_runtime_s
+    return min(
+        expected_runtime_s,
+        math.ceil(expected_runtime_s * ratio) + COMPLETION_MARGIN_SECONDS,
+    )
+
+
+def readiness_proven_at(payload, intent, now):
+    """When this node's bound runtime was last proven ready, or None.
+
+    The controller's observation proves the dstack run is running with this
+    run and instance and that the runtime answered. The consumer's own live
+    readiness read of the same runtime incarnation, recorded under the
+    capacity lock (``runtime_ready_at``), renews only the runtime half, and
+    only while that controller observation is no older than the controller
+    liveness alert threshold. Slow ticks then no longer close every claim
+    and submit check (#1148 item 2); a stalled controller still does.
+    """
+    from .controller_liveness import STALE_AFTER
+
+    observed = payload.get("dstack_observation", {}).get("observed_at")
+    if not _finite(observed) or observed > now:
+        return None
+    original = payload.get("dstack", {})
+    consumer = original.get("consumer_observation") or {}
+    confirmed = consumer.get("runtime_ready_at")
+    fresh = payload.get("observation_fresh_seconds", 30)
+    if (
+        _finite(confirmed)
+        and observed < confirmed <= now
+        and _finite(fresh)
+        and now - observed <= max(fresh, STALE_AFTER)
+        and original.get("runtime_incarnation")
+        and consumer.get("runtime_incarnation") == original["runtime_incarnation"]
+        and consumer.get("instance_id") == intent.get("provider_instance_id")
+    ):
+        return confirmed
+    return observed
+
+
 def managed_window_reason(
     intent,
     node,
@@ -213,6 +314,7 @@ def managed_window_reason(
     expected_runtime_s=None,
     deployment_profile_id=None,
     binding=None,
+    runtime_gate_s=None,
 ):
     from .provider_lifetime import provider_lifetime_current
 
@@ -229,13 +331,13 @@ def managed_window_reason(
             return reason
         from .dstack_test_budget import runtime_reason
 
+        # The test runtime window may use this machine's measured job time
+        # (admission_runtime); everything else keeps expected_runtime_s.
         reason = runtime_reason(
             intent,
             node,
             now,
-            expected_runtime_s=expected_runtime_s
-            if expected_runtime_s is not None
-            else 0,
+            expected_runtime_s=_gate(expected_runtime_s, runtime_gate_s),
         )
         if reason:
             return reason
@@ -274,11 +376,10 @@ def managed_window_reason(
         # uses funded idle/keep-on policy, never a fabricated supplier deadline.
         proof = payload.get("dstack_observation", {})
         original = payload.get("dstack", {})
-        observed = proof.get("observed_at")
+        proven = readiness_proven_at(payload, intent, now)
         if (
-            type(observed) not in (int, float)
-            or not math.isfinite(observed)
-            or not 0 <= now - observed <= payload.get("observation_fresh_seconds", 30)
+            proven is None
+            or not 0 <= now - proven <= payload.get("observation_fresh_seconds", 30)
             or proof.get("status") != "running"
             or not original.get("run_id")
             or proof.get("run_id") != original.get("run_id")
@@ -328,7 +429,11 @@ def _admittable(connection, intent, node, job, now, seen):
 
         try:
             reason = budget_reason(
-                connection, intent, node, now, expected_runtime_s=expected
+                connection,
+                intent,
+                node,
+                now,
+                expected_runtime_s=admission_runtime(connection, intent, expected),
             )
         except Exception:  # An unreadable guard keeps the conservative obligation.
             reason = None
@@ -544,12 +649,18 @@ def worker_window_reason(
                     or not 0 <= now - observed <= CONSUMER_HEARTBEAT_SECONDS
                 ):
                     return "managed_queue_consumer_unconfirmed"
+            gate = (
+                admission_runtime(connection, intent, expected_runtime_s)
+                if expected_runtime_s is not None and intent["hard_deadline"] is None
+                else None
+            )
             reason = managed_window_reason(
                 intent,
                 node,
                 now,
                 expected_runtime_s=expected_runtime_s,
                 deployment_profile_id=deployment_profile_id,
+                runtime_gate_s=gate,
             )
             if reason:
                 return reason
@@ -557,7 +668,12 @@ def worker_window_reason(
                 reason = _dstack_idle_reason(
                     connection, intent, node, now
                 ) or dstack_budget_reason(
-                    connection, intent, node, now, expected_runtime_s=expected_runtime_s
+                    connection,
+                    intent,
+                    node,
+                    now,
+                    expected_runtime_s=expected_runtime_s,
+                    runtime_gate_s=gate,
                 )
                 if reason:
                     return reason

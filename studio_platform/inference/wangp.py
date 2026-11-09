@@ -77,6 +77,15 @@ class WanGPBackend:
         if not self.enabled:
             raise NotReady("backend_disabled")
 
+    def live_readiness(self):
+        """The native runtime's own readiness answer, for the consumer proof.
+
+        The caller checks slot, manifest and incarnation against the node it
+        records; an exception means no proof (#1148 item 2).
+        """
+        self._ready()
+        return self.transport.readiness()
+
     def is_idle(self):
         self._ready()
         try:

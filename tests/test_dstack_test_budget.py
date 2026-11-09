@@ -476,6 +476,47 @@ class DailyTestBudgetTests(LedgerCase):
             with self.assertRaisesRegex(BudgetExceeded, "test_budget_unconfirmed"):
                 projected_cost(connection, GUARD, self.now)
 
+    def test_one_unreadable_row_refuses_only_its_own_machine(self):
+        # #1148 item 4: an unknown pool (say a new v9 name) on one reservation
+        # row used to drain every test machine and refuse every start.
+        self.start()
+        intent, node = self.rows()
+        guard = node["payload"]["lifecycle"]["test_gpu_guard"]
+        with self.repo.transaction() as connection:
+            amount = connection.execute(
+                select(budget_reservations.c.amount_microusd).where(
+                    budget_reservations.c.reference_id == intent["id"],
+                    budget_reservations.c.account_id == ACCOUNT,
+                )
+            ).scalar_one()
+            connection.execute(
+                update(instance_intents).values(pool="inkseq-staging-v9-fl")
+            )
+            with self.assertRaisesRegex(BudgetExceeded, "test_budget_unconfirmed"):
+                projected_cost(connection, guard, self.now)
+            contained = {}
+            with self.assertLogs("studio_platform.dstack_test_budget", "WARNING"):
+                total = projected_cost(connection, guard, self.now, contained=contained)
+            self.assertEqual(total, amount)
+            self.assertEqual(set(contained), {intent["id"]})
+            self.assertEqual(
+                budget_reason(connection, intent, node, self.now),
+                "dstack_test_budget_unconfirmed",
+            )
+            # Another machine of the same task keeps its normal answer.
+            other = dict(intent, id="00000000-0000-4000-8000-000000000001")
+            self.assertIsNone(budget_reason(connection, other, node, self.now))
+            # A row whose money cannot be read bounds nothing: fail everything.
+            connection.execute(
+                update(budget_reservations)
+                .where(budget_reservations.c.reference_id == intent["id"])
+                .values(amount_microusd=-1)
+            )
+            self.assertEqual(
+                budget_reason(connection, other, node, self.now),
+                "dstack_test_budget_unconfirmed",
+            )
+
     def test_delayed_original_apply_rechecks_daily_cost_before_paid_request(self):
         first = self.start()["node_id"]
         preview = self.preview()

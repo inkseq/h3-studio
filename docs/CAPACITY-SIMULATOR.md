@@ -35,12 +35,20 @@ Fake, in `tests/capacity_sim.py`:
 - `SimRuntime.readiness`: native boot progress (download, model load, failure,
   ready/busy) as `DstackError` codes with preparation receipts or `HostReadiness`.
 - `SimSlots` and `World.work/submit`: the DBOS slot and the worker loop
-  (consumer proof, heartbeat, claim, window check before the POST, progress,
-  collection). Media evidence validation is skipped; completion uses one fixed
+  (consumer proof with the slot's own native readiness read, heartbeat, claim,
+  window check before the POST, progress, collection). Media evidence validation is skipped; completion uses one fixed
   artifact.
 - The clock: one controller tick, then workers claim 2 s later and check the
   window `prepare_seconds` later. Ticks are 60 s, or random within
   `tick_jitter` with `--seed`.
+- Provider latency (`provider_latency`, seconds per provider read: run GET,
+  inventory, plan, Vast offer mapping, reusable hosts): each read moves the
+  clock, and workers run concurrently with the tick. A worker turn due during
+  a read runs at its time, unless the controller holds the global capacity
+  lock (the consumer write before claim and submit needs it) or SQLite holds an
+  open connection; then it waits until the lock is free. The report's
+  `metrics` give the longest worker wait, the longest claim-to-submit time and
+  the provider seconds spent under the lock (#1148).
 
 Every socket connect and DNS lookup is refused while a scenario runs.
 
@@ -61,6 +69,11 @@ hosted (EveryFrame) routing, credits and invoices settlement.
   is on and the scenario says capacity and budget allow it.
 - Every demand refusal, reconciliation and stop has a reason code.
 - Billed spend never exceeds the staging test task cap.
+- With provider latency: no provider read runs while the global capacity lock
+  is held.
+- A ready test machine does not stop for idleness or its runtime window while
+  its window still fits two of the waiting jobs (true runtime plus the 120 s
+  completion margin each).
 
 The report gives simulated hours, jobs done, billed and idle machine-hours and
 every reason code seen (demand refusals, node codes, stops, worker deferrals
@@ -89,11 +102,12 @@ Scenario(
   spec is honoured.
 - `events`: `restart_app`, `demand_off`, `demand_on`, `offers_off`, `offers_on`,
   `edit_demand_config` (value: keys merged into `policy.demand_start`, then the
-  controller restarts).
+  controller restarts), `corrupt_reservation` (value: columns set on the
+  latest seeded historical intent, e.g. an unknown pool).
 - World options: `max_machines`, `inventory` (`fresh`, `stale`, `slow`,
   `failed`), `history_removed` and `history_invoiced`, `test_guard` with
   `spent_fraction`, `owner_profiles`, `lookahead`, `tick_jitter`,
-  `prepare_seconds`, `observation_fresh_seconds`.
+  `prepare_seconds`, `observation_fresh_seconds`, `provider_latency`.
 - A run stops early once every job is finished and no machine bills, or 30
   simulated minutes after its first violation.
 - A recorded provider response can become a fixture: put

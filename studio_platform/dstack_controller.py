@@ -75,7 +75,9 @@ class DstackController:
         self.capacity = service.capacity
         self.capacity.readiness = runtime.readiness
         self.control = WorkerControl(
-            self.repo, capacity_usage=service.registration_capacity_usage
+            self.repo,
+            capacity_usage=service.registration_capacity_usage,
+            capacity_preread=getattr(service, "capacity_preread", None),
         )
         self.worker_process = worker_process
         self.reclaim_reporter = reclaim_reporter

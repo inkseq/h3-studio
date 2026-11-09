@@ -6,6 +6,7 @@ Layered owner/shared reservations are counted only once.
 """
 
 from datetime import datetime, time, timedelta, timezone
+import logging
 import math
 import re
 from zoneinfo import ZoneInfo
@@ -35,6 +36,7 @@ PROJECTS = frozenset(
     {"project-inkseq-staging-superdan", "project-inkseq-staging-supervan"}
 )
 ACCOUNT = "inkseq-staging-gpu-shared"
+_logger = logging.getLogger(__name__)
 TASK = re.compile(r"[A-Za-z0-9_.:\-]{1,100}")
 
 
@@ -229,21 +231,33 @@ def _removed_estimate(row, now):
     return max(estimate, floor) + extra
 
 
-def projected_cost(connection, guard, now, *, replacement_id=None, minimum_reserved=0):
+def projected_cost(
+    connection, guard, now, *, replacement_id=None, minimum_reserved=0, contained=None
+):
     """Same-task settled bills and commitments; original v1 daily semantics.
 
     An allocation spanning midnight is deliberately overcounted, rather than
     apportioned without an invoice. Open runs additionally cover elapsed time
     at their approved maximum rate plus shutdown grace and transport allowance.
+    ``contained`` (a dict) opts into per-row containment; see _projected_rows.
     """
-    return _projected_rows(
+    total = _projected_rows(
         connection,
         guard,
         now,
         _reservation_rows(connection),
         replacement_id=replacement_id,
         minimum_reserved=minimum_reserved,
+        contained=contained,
     )
+    for reference, code in sorted((contained or {}).items()):
+        # Keep reporting it: one line per unreadable row and projection.
+        _logger.warning(
+            "dstack_test_budget_row_unconfirmed reference_id=%s reason=%s",
+            reference[:36],
+            code[:80],
+        )
+    return total
 
 
 def projected_costs(connection, guards, now, *, _diagnostic_progress=None):
@@ -305,134 +319,172 @@ def _reservation_rows(connection):
 
 
 def _projected_rows(
-    connection, guard, now, rows, *, replacement_id=None, minimum_reserved=0
+    connection,
+    guard,
+    now,
+    rows,
+    *,
+    replacement_id=None,
+    minimum_reserved=0,
+    contained=None,
 ):
+    """Sum this guard's rows; one unreadable row is contained when it can be.
+
+    Without ``contained`` any unreadable row fails the whole projection, as
+    before. With a dict, a non-Modal row that cannot be read but still has a
+    readable reserved amount counts at that amount (or its settled cost when
+    larger) and is listed in ``contained`` by reference id with the reason.
+    Its own machine is still refused by its caller; the rest of the task is
+    not drained for it (#1148 item 4). A row without a readable amount still
+    fails everything, because nothing bounds it.
+    """
     validate_guard(guard)
     start, _ = day_window(now)
     total = 0
     for row in rows:
-        if row["instance_provider"] == "modal":
-            from .modal_budget import projected_reservation
-
-            total += projected_reservation(connection, row, guard, now)
-            continue
-        if guard["version"] == 2:
-            payload = row["payload"]
-            lifecycle = payload.get("lifecycle") if isinstance(payload, dict) else None
-            attribution = (
-                lifecycle.get("test_gpu_guard") if isinstance(lifecycle, dict) else None
+        try:
+            total += _row_amount(
+                connection, guard, now, start, row, replacement_id, minimum_reserved
             )
-            request = payload.get("request") if isinstance(payload, dict) else None
-            request_task = (
-                request.get("test_task_id") if isinstance(request, dict) else None
+        except (BudgetExceeded, ValueError, TypeError, KeyError) as error:
+            fallback = None if contained is None else _contained_amount(row)
+            if fallback is None:
+                raise
+            key = str(row["reference_id"] or row["id"])
+            contained[key] = (
+                error.args[0]
+                if error.args and isinstance(error.args[0], str)
+                else type(error).__name__
             )
-            try:
-                native_task = payload["dstack"]["run_spec"]["configuration"][
-                    "tags"
-                ].get("inkseq_test_task")
-            except (KeyError, TypeError, AttributeError):
-                native_task = None
-            # Old/unattributed and unrelated obligations remain in the actual
-            # shared account, but cannot consume this acceptance task's cap.
-            attributed_task = (
-                attribution.get("task_id") if isinstance(attribution, dict) else None
-            )
-            if guard["task_id"] not in (attributed_task, request_task, native_task):
-                continue
-            try:
-                checked = node_guard({"pool": row["pool"]}, {"payload": payload})
-                if (
-                    checked is None
-                    or checked["version"] != 2
-                    or checked["task_id"] != guard["task_id"]
-                ):
-                    raise ValueError("dstack_test_guard_binding_invalid")
-            except (ValueError, TypeError, KeyError):
-                raise BudgetExceeded("dstack_test_budget_unconfirmed") from None
-        if (
-            row["reference_type"] != "instance"
-            or row["pool"] not in POOLS
-            or not isinstance(row["payload"], dict)
-            or row["payload"].get("project_id") not in PROJECTS
-            or row["payload"].get("capacity_backend") != "dstack-v1"
-        ):
-            raise BudgetExceeded("dstack_test_budget_unconfirmed")
-        amount, actual = row["amount_microusd"], row["actual_cost_microusd"]
-        if (
-            type(amount) is not int
-            or amount < 0
-            or not finite(row["created_at"])
-            or row["created_at"] > now
-        ):
-            raise BudgetExceeded("dstack_test_budget_unconfirmed")
-        if row["state"] in {"settled", "released"}:
-            settled = row["settled_at"]
-            if (
-                type(actual) is not int
-                or actual < 0
-                or not finite(settled)
-                or settled > now
-            ):
-                raise BudgetExceeded("dstack_test_budget_unconfirmed")
-            if guard["version"] == 2 or row["created_at"] >= start or settled >= start:
-                total += actual
-            continue
-        if row["state"] not in {"reserved", "invoice_pending"} or actual is not None:
-            raise BudgetExceeded("dstack_test_budget_unconfirmed")
-        payload = row["payload"]
-        if guard["version"] == 2 and (
-            row["instance_state"] in {"destroyed", "not_created"}
-            or row["node_runtime_state"] == "stopped"
-        ):
-            # Only complete original physical closure can replace commitment
-            # with an estimate. The ledger and unknown invoice stay untouched.
-            estimate = _removed_estimate(row, now)
-            if estimate is not None:
-                amount = estimate
-            total += (
-                max(amount, minimum_reserved)
-                if row["reference_id"] == replacement_id
-                else amount
-            )
-            continue
-        hourly, extra = (
-            payload.get("hourly_cost_microusd"),
-            payload.get("extra_reservation_microusd", 0),
-        )
-        if (
-            type(hourly) is not int
-            or hourly <= 0
-            or type(extra) is not int
-            or extra < 0
-        ):
-            raise BudgetExceeded("dstack_test_budget_unconfirmed")
-        started = row["create_started_at"]
-        started = row["intent_created_at"] if started is None else started
-        if not finite(started) or not 0 <= now - started:
-            raise BudgetExceeded("dstack_test_budget_unconfirmed")
-        binding = payload.get("dstack", {})
-        # A native run can stop before the supplier stops billing its VM.
-        # Positive provider absence bounds that later interval conservatively.
-        ended = (
-            binding.get("provider_removal_proof", {}).get(
-                "observed_at", row["intent_updated_at"]
-            )
-            if row["instance_state"] == "destroyed"
-            else None
-        )
-        through = (
-            ended
-            if finite(ended) and started <= ended <= now
-            else now + guard["stop_margin_seconds"]
-        )
-        amount = max(amount, math.ceil(hourly * (through - started) / 3600) + extra)
-        observed = binding.get("estimated_cost_microusd")
-        if type(observed) is int and observed >= 0:
-            amount = max(amount, observed + extra)
-        if row["reference_id"] == replacement_id:
-            amount = max(amount, minimum_reserved)
-        total += amount
+            total += fallback
     return total
+
+
+def _contained_amount(row):
+    """A bound for one unreadable non-Modal row: its reserved or settled money."""
+    amount, actual = row["amount_microusd"], row["actual_cost_microusd"]
+    if row["instance_provider"] == "modal" or type(amount) is not int or amount < 0:
+        return None
+    if type(actual) is int and actual >= 0:
+        return max(amount, actual)
+    return amount
+
+
+def _row_amount(connection, guard, now, start, row, replacement_id, minimum_reserved):
+    if row["instance_provider"] == "modal":
+        from .modal_budget import projected_reservation
+
+        return projected_reservation(connection, row, guard, now)
+    if guard["version"] == 2:
+        payload = row["payload"]
+        lifecycle = payload.get("lifecycle") if isinstance(payload, dict) else None
+        attribution = (
+            lifecycle.get("test_gpu_guard") if isinstance(lifecycle, dict) else None
+        )
+        request = payload.get("request") if isinstance(payload, dict) else None
+        request_task = (
+            request.get("test_task_id") if isinstance(request, dict) else None
+        )
+        try:
+            native_task = payload["dstack"]["run_spec"]["configuration"]["tags"].get(
+                "inkseq_test_task"
+            )
+        except (KeyError, TypeError, AttributeError):
+            native_task = None
+        # Old/unattributed and unrelated obligations remain in the actual
+        # shared account, but cannot consume this acceptance task's cap.
+        attributed_task = (
+            attribution.get("task_id") if isinstance(attribution, dict) else None
+        )
+        if guard["task_id"] not in (attributed_task, request_task, native_task):
+            return 0
+        try:
+            checked = node_guard({"pool": row["pool"]}, {"payload": payload})
+            if (
+                checked is None
+                or checked["version"] != 2
+                or checked["task_id"] != guard["task_id"]
+            ):
+                raise ValueError("dstack_test_guard_binding_invalid")
+        except (ValueError, TypeError, KeyError):
+            raise BudgetExceeded("dstack_test_budget_unconfirmed") from None
+    if (
+        row["reference_type"] != "instance"
+        or row["pool"] not in POOLS
+        or not isinstance(row["payload"], dict)
+        or row["payload"].get("project_id") not in PROJECTS
+        or row["payload"].get("capacity_backend") != "dstack-v1"
+    ):
+        raise BudgetExceeded("dstack_test_budget_unconfirmed")
+    amount, actual = row["amount_microusd"], row["actual_cost_microusd"]
+    if (
+        type(amount) is not int
+        or amount < 0
+        or not finite(row["created_at"])
+        or row["created_at"] > now
+    ):
+        raise BudgetExceeded("dstack_test_budget_unconfirmed")
+    if row["state"] in {"settled", "released"}:
+        settled = row["settled_at"]
+        if (
+            type(actual) is not int
+            or actual < 0
+            or not finite(settled)
+            or settled > now
+        ):
+            raise BudgetExceeded("dstack_test_budget_unconfirmed")
+        if guard["version"] == 2 or row["created_at"] >= start or settled >= start:
+            return actual
+        return 0
+    if row["state"] not in {"reserved", "invoice_pending"} or actual is not None:
+        raise BudgetExceeded("dstack_test_budget_unconfirmed")
+    payload = row["payload"]
+    if guard["version"] == 2 and (
+        row["instance_state"] in {"destroyed", "not_created"}
+        or row["node_runtime_state"] == "stopped"
+    ):
+        # Only complete original physical closure can replace commitment
+        # with an estimate. The ledger and unknown invoice stay untouched.
+        estimate = _removed_estimate(row, now)
+        if estimate is not None:
+            amount = estimate
+        return (
+            max(amount, minimum_reserved)
+            if row["reference_id"] == replacement_id
+            else amount
+        )
+    hourly, extra = (
+        payload.get("hourly_cost_microusd"),
+        payload.get("extra_reservation_microusd", 0),
+    )
+    if type(hourly) is not int or hourly <= 0 or type(extra) is not int or extra < 0:
+        raise BudgetExceeded("dstack_test_budget_unconfirmed")
+    started = row["create_started_at"]
+    started = row["intent_created_at"] if started is None else started
+    if not finite(started) or not 0 <= now - started:
+        raise BudgetExceeded("dstack_test_budget_unconfirmed")
+    binding = payload.get("dstack", {})
+    # A native run can stop before the supplier stops billing its VM.
+    # Positive provider absence bounds that later interval conservatively.
+    ended = (
+        binding.get("provider_removal_proof", {}).get(
+            "observed_at", row["intent_updated_at"]
+        )
+        if row["instance_state"] == "destroyed"
+        else None
+    )
+    through = (
+        ended
+        if finite(ended) and started <= ended <= now
+        else now + guard["stop_margin_seconds"]
+    )
+    amount = max(amount, math.ceil(hourly * (through - started) / 3600) + extra)
+    observed = binding.get("estimated_cost_microusd")
+    if type(observed) is int and observed >= 0:
+        amount = max(amount, observed + extra)
+    if row["reference_id"] == replacement_id:
+        amount = max(amount, minimum_reserved)
+    return amount
 
 
 def budget_reason(
@@ -571,13 +623,22 @@ def budget_reason(
                     >= runtime
                 ):
                     return "dstack_test_runtime_limit_reached"
-        if guard is not None and projected_cost(
+        if guard is None:
+            return None
+        # One unreadable row refuses only its own machine; the others keep
+        # running with that row counted at its reserved amount (#1148).
+        contained = {}
+        total = projected_cost(
             connection,
             guard,
             now,
             replacement_id=intent["id"],
             minimum_reserved=minimum_reserved,
-        ) >= guard_limit(guard):
+            contained=contained,
+        )
+        if str(intent["id"]) in contained:
+            return "dstack_test_budget_unconfirmed"
+        if total >= guard_limit(guard):
             return limit_reason(guard)
         return None
     except (ValueError, TypeError, KeyError, BudgetExceeded):

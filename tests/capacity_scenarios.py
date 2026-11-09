@@ -250,13 +250,39 @@ SCENARIOS = [
         prepare_seconds=30,
         observation_fresh_seconds=30,
         jobs=[JobBatch(0, 12, actual_runtime_s=300)],
-        expected_failure=(
-            'observation_fresh_seconds 30 is shorter than tick gap plus '
-            'claim-to-POST time, so every claim defers as '
-            'managed_dstack_readiness_unconfirmed while the queued work keeps both '
-            'machines billed (worker_admission.py:272-289; staging config moved to '
-            '120, the code caps it at 120: dstack_operator.py:142)'
-        ),
+    ),
+    Scenario(
+        "provider_reads_hold_capacity_lock",
+        "Provider reads take 8 s; demand start reads every machine each tick (#1148).",
+        # The fleet is full, so every tick demand start reads each machine's
+        # run before refusing with capacity_limit. Workers claim and submit
+        # concurrently; their consumer write needs the same capacity lock.
+        hours=3,
+        max_machines=3,
+        provider_latency=8,
+        prepare_seconds=30,
+        observation_fresh_seconds=120,
+        jobs=[JobBatch(0, 30, actual_runtime_s=300)],
+    ),
+    Scenario(
+        "test_window_typical_fl",
+        "Staging 2 h test window, 18-minute boots, 4-minute FL jobs (#1148).",
+        # Each FL job reserves 1800 s (an allowance, not a speed estimate).
+        hours=6,
+        test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 7200},
+        default_machine=MachineScript(download_seconds=900),
+        jobs=[JobBatch(0, 30, actual_runtime_s=240)],
+    ),
+    Scenario(
+        "budget_row_malformed",
+        "One settled test-task reservation row gets an unknown pool mid-queue.",
+        hours=3,
+        test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 7200},
+        spent_fraction=0.02,
+        jobs=[JobBatch(0, 20, actual_runtime_s=300)],
+        events=[
+            Event(20 * 60, "corrupt_reservation", {"pool": "inkseq-staging-v9-fl"})
+        ],
     ),
     Scenario(
         "slow_ticks_fresh_120",

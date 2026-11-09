@@ -17,10 +17,55 @@ from .worker import WorkerRunner
 ROUTE = "hatchet-v1"
 
 
-def record_consumer(repo, control, backend, worker_id):
-    """Called by the consumer while holding its original physical slot lock."""
+def _live_readiness(repo, backend):
+    """This consumer's own native readiness read, before the capacity lock.
+
+    Returns ``(read_started_at, HostReadiness)`` or None. The read start
+    bounds its age; a failed or odd read proves nothing (#1148 item 2).
+    """
+    from .inference.wangp_contract import HostReadiness
+
+    read = getattr(backend, "live_readiness", None)
+    if not callable(read):
+        return None
+    started = repo.clock()
+    try:
+        value = read()
+    except Exception:
+        return None
+    return (started, value) if isinstance(value, HostReadiness) else None
+
+
+def _runtime_ready_at(live, node, binding, incarnation, now):
+    """Start of a live read proving this exact bound runtime, else None."""
+    if live is None:
+        return None
+    started, value = live
+    if (
+        value.slot_key == node["intent_id"]
+        and value.manifest_digest == binding.get("manifest_digest")
+        and value.incarnation == incarnation
+        and type(value.idle) is bool
+        and type(started) in (int, float)
+        and 0 <= now - started
+    ):
+        return started
+    return None
+
+
+def record_consumer(repo, control, backend, worker_id, *, probe=False):
+    """Called by the consumer while holding its original physical slot lock.
+
+    With ``probe`` the consumer first reads its runtime's readiness itself,
+    outside the capacity lock, and records the read under the lock as
+    ``runtime_ready_at``. Admission accepts that as a fresh readiness proof
+    only next to a recent controller observation of the same running run, so
+    a claim and its submit check no longer wait for the next controller tick
+    (#1148 item 2).
+    """
     if backend.kind != "wangp-worker":
         return  # Local fake adapters have no managed node.
+    live = _live_readiness(repo, backend) if probe else None
     with repo.transaction() as connection:
         repo._lock_capacity(connection)
         worker = control._worker(connection, worker_id, lock=True)
@@ -63,6 +108,9 @@ def record_consumer(repo, control, backend, worker_id):
             "instance_id": worker["instance_id"],
             "runtime_incarnation": incarnation,
             "observed_at": now,
+            "runtime_ready_at": _runtime_ready_at(
+                live, node, binding, incarnation, now
+            ),
         }
         # A liveness write is not business demand; do not emit self-wake events.
         connection.execute(
@@ -125,7 +173,7 @@ class PostgresSlotRunner(WorkerRunner):
         # renewal. Neither the parent supervisor nor a notification can attest it.
         self.worker_id = worker_id
         self._consumer_observation = record_consumer(
-            self.repo, self.control, self.backend, worker_id
+            self.repo, self.control, self.backend, worker_id, probe=True
         )
         return super()._run_once(worker_id, pool)
 
@@ -135,13 +183,13 @@ class PostgresSlotRunner(WorkerRunner):
             # Claim advances the worker fence. Publish that exact new fence
             # before the original late submission guard checks eligibility.
             self._consumer_observation = record_consumer(
-                self.repo, self.control, self.backend, worker_id
+                self.repo, self.control, self.backend, worker_id, probe=True
             )
         return claim
 
     def _submission_allowed(self, job):
         self._consumer_observation = record_consumer(
-            self.repo, self.control, self.backend, self.worker_id
+            self.repo, self.control, self.backend, self.worker_id, probe=True
         )
         return super()._submission_allowed(job)
 

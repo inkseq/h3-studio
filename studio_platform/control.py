@@ -275,7 +275,14 @@ def require_delivery_configuration(
 
 
 class WorkerControl:
-    def __init__(self, repository, *, registration_seconds=120, capacity_usage=None):
+    def __init__(
+        self,
+        repository,
+        *,
+        registration_seconds=120,
+        capacity_usage=None,
+        capacity_preread=None,
+    ):
         if not math.isfinite(registration_seconds) or registration_seconds <= 0:
             raise ValueError("invalid_registration_lease")
         self.repo = repository
@@ -284,9 +291,14 @@ class WorkerControl:
         # Trusted controller-only read, called inside the existing capacity
         # transaction. HTTP callers cannot supply counts or exclusions. The
         # default remains the conservative original-ledger observation.
+        # ``capacity_preread`` takes its provider reads before that lock; the
+        # reader then rechecks only committed facts under it (#1148).
         if capacity_usage is not None and not callable(capacity_usage):
             raise ValueError("invalid_registration_capacity_reader")
+        if capacity_preread is not None and not callable(capacity_preread):
+            raise ValueError("invalid_registration_capacity_reader")
         self._capacity_usage = capacity_usage
+        self._capacity_preread = capacity_preread
 
     def _worker(self, connection, worker_id, *, lock=False):
         statement = select(registered_workers).where(
@@ -537,6 +549,21 @@ class WorkerControl:
         payload = worker_spec_payload(spec)
         digest = request_hash(payload)
         repo = self.repo
+        preread = None
+        if (
+            self._capacity_usage is not None
+            and self._capacity_preread is not None
+            and spec.backend in REAL_GPU_BACKENDS
+        ):
+            with repo.engine.connect() as connection:
+                known = connection.execute(
+                    select(registered_workers.c.id).where(
+                        registered_workers.c.id == spec.worker_id
+                    )
+                ).first()
+            # Only a first registration counts capacity; an existing row is
+            # returned below without any read.
+            preread = None if known else self._capacity_preread()
         with repo.transaction() as connection:
             limits = (
                 None
@@ -571,9 +598,11 @@ class WorkerControl:
                 raise Conflict("physical_gpu_already_owned")
             if spec.backend in REAL_GPU_BACKENDS:
                 usage = (
-                    self._capacity_usage(connection, spec)
-                    if self._capacity_usage
-                    else repo._global_usage(connection)
+                    repo._global_usage(connection)
+                    if not self._capacity_usage
+                    else self._capacity_usage(connection, spec)
+                    if preread is None
+                    else self._capacity_usage(connection, spec, preread=preread)
                 )
                 key = (spec.provider, spec.instance_id)
                 existing_count = sum(

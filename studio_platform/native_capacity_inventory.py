@@ -5,6 +5,8 @@ read-only projection. The worker, attempts, receipts and money remain intact.
 """
 
 from collections import Counter
+import copy
+import logging
 import re
 
 from sqlalchemy import select
@@ -189,18 +191,101 @@ def resource_overlay(service, connection, nodes, intents, usage, observed_runs):
     )
 
 
-def prelaunch_usage(service, connection):
-    """Keep provider reads and registration's physical exclusion rules identical."""
+_logger = logging.getLogger(__name__)
+PREREAD_CHANGED = 'dstack_capacity_read_changed'
+# Liveness proofs that workers write under the capacity lock while they claim
+# and submit. They are not capacity facts, so they never void a pre-read.
+WORKER_KEYS = frozenset({'consumer_observation'})
+
+
+def _dstack_nodes(connection):
     from .dstack_operator import BACKEND_MARKER
 
-    nodes = [
+    return [
         dict(node)
         for node in connection.execute(select(operator_nodes)).mappings()
         if node['payload'].get('capacity_backend') == BACKEND_MARKER
     ]
+
+
+def committed_facts(nodes):
+    """Digest of every committed node fact a live capacity read depends on."""
+    return request_hash(
+        [
+            [
+                node['intent_id'],
+                node['desired_state'],
+                {
+                    key: value
+                    for key, value in node['payload'].items()
+                    if key != 'dstack'
+                },
+                {
+                    key: value
+                    for key, value in (node['payload'].get('dstack') or {}).items()
+                    if key not in WORKER_KEYS
+                },
+            ]
+            for node in sorted(nodes, key=lambda node: node['intent_id'])
+        ]
+    )
+
+
+def capacity_preread(service):
+    """Provider reads for the capacity overlay, taken before the capacity lock.
+
+    Holding the global lock across dstack and provider GETs (30 s timeouts,
+    retries) made every worker claim and submit check wait behind them
+    (#1148). The node rows are read and released first; no connection is held
+    while the provider answers. Under the lock, ``prelaunch_usage`` accepts
+    this read only if the same committed facts still hold.
+    """
+    with service.repo.engine.connect() as connection:
+        nodes = _dstack_nodes(connection)
+    usage, observed_runs = service._observed_registration_usage(nodes)
+    return {
+        'facts': committed_facts(nodes),
+        'usage': usage,
+        'observed_runs': observed_runs,
+        'read_at': service.repo.clock(),
+    }
+
+
+def prelaunch_usage(service, connection, preread=None, *, reread=False):
+    """Keep provider reads and registration's physical exclusion rules identical.
+
+    With ``preread``, recheck only cheap committed facts under the caller's
+    capacity lock: the same dstack node rows (any start, stop, observation or
+    journal change voids it) and a read no older than the observation freshness
+    the live read itself enforces. See ``observed_usage`` for a changed fact.
+    """
+    nodes = _dstack_nodes(connection)
     intents = {
         row['id']: dict(row)
         for row in connection.execute(select(instance_intents)).mappings()
     }
-    usage, observed_runs = service._observed_registration_usage(nodes)
+    usage, observed_runs = observed_usage(service, nodes, preread, reread=reread)
     return resource_overlay(service, connection, nodes, intents, usage, observed_runs)
+
+
+def observed_usage(service, nodes, preread=None, *, reread=False):
+    """The live usage for these locked node rows: read now, or the pre-read.
+
+    A pre-read counts only for the same committed facts and while no older
+    than the observation freshness the live read itself enforces. When a fact
+    changed, a demand decision fails closed with ``dstack_capacity_read_changed``
+    (nothing starts; the next tick reads again). A start or registration that
+    must answer now passes ``reread``: it reads live under the lock, exactly
+    as before #1148, which is rare because node facts change rarely.
+    """
+    if preread is None:
+        return service._observed_registration_usage(nodes)
+    age = service.repo.clock() - preread['read_at']
+    if preread['facts'] != committed_facts(nodes) or not (
+        0 <= age <= service.policy['observation_fresh_seconds']
+    ):
+        if reread:
+            _logger.info('dstack_capacity_preread_changed action=locked_reread')
+            return service._observed_registration_usage(nodes)
+        raise BudgetExceeded(PREREAD_CHANGED)
+    return copy.deepcopy(preread['usage']), preread['observed_runs']
