@@ -475,6 +475,25 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
     @app.post("/v1/story-chats/{project_id}/turns")
     def story_chat_turn(project_id: str, request: Request, body: dict):
         principal = principal_of(request, "write")
+        return run_turn(principal, project_id, checked_turn(principal, body))
+
+    @app.post("/v1/story-chats/{project_id}/turns/stream")
+    def story_chat_turn_stream(project_id: str, request: Request, body: dict):
+        """Same turn as POST .../turns, as server-sent events (#1083)."""
+        from fastapi.responses import StreamingResponse
+        from .story_chat_stream import stream_turn
+
+        principal = principal_of(request, "write")
+        turn = checked_turn(principal, body)  # Invalid bodies still fail as HTTP.
+        return StreamingResponse(
+            stream_turn(
+                lambda progress: run_turn(principal, project_id, turn, progress)
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
+    def checked_turn(principal, body):
         if (
             not isinstance(body, dict)
             or not {"turn_id", "text"} <= set(body)
@@ -498,7 +517,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             _fail("story_chat_invalid", 422, field="turn_id")
         if not isinstance(text, str) or not text.strip() or len(text) > most:
             _fail("story_chat_invalid", 422, field="text", max=most)
-        text = text.strip()
+        return turn_id, text.strip(), inky, is_script
+
+    def run_turn(principal, project_id, turn, progress=None):
+        turn_id, text, inky, is_script = turn
 
         def answer(row, messages):
             result = view(row, principal)
@@ -559,7 +581,8 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             },
         ) as traced:
             try:
-                result = model_client().generate(
+                client = model_client()
+                call = (
                     MODEL,
                     prompt_messages(
                         row["payload"],
@@ -567,11 +590,16 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                         SCRIPT_NOTE + text if is_script else note + text,
                     ),
                     story_chat_advice.instruction(INSTRUCTION, pictures_enabled()),
-                    # A whole script can come back as dozens of shots.
-                    max_tokens=16384 if is_script else 4096,
-                    json_mode=True,
-                    thinking=THINKING,
                 )
+                # A whole script can come back as dozens of shots.
+                options = {
+                    "max_tokens": 16384 if is_script else 4096,
+                    "json_mode": True,
+                    "thinking": THINKING,
+                }
+                from .story_chat_stream import call_model
+
+                result = call_model(client, call, options, progress)
                 plan = (
                     _parse(result["text"], max_actions=MAX_SCRIPT_ACTIONS)
                     if is_script
@@ -593,6 +621,8 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     "chips": plan["chips"],
                 }
             )
+        if progress is not None:
+            progress("progress", step="applying")
         # A card edit during the model call bumps the version: re-apply the same plan once
         # on the new version, or refuse if a card it names is gone.
         for _attempt in range(2):
