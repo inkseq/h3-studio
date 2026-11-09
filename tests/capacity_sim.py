@@ -16,8 +16,11 @@ every tick and at the end. See docs/CAPACITY-SIMULATOR.md.
 from __future__ import annotations
 
 from collections import Counter
+from contextlib import contextmanager
 import copy
 from dataclasses import dataclass, field
+import heapq
+import itertools
 import json
 import logging
 import random
@@ -151,6 +154,10 @@ class Scenario:
     health_window_seconds: float = 900
     max_queue_age_seconds: float = 2 * 3600
     idle_grace_seconds: float = 600 + 600
+    # Seconds each provider read (run GET, inventory, plan, offer mapping)
+    # takes. Above zero, workers run concurrently with the controller tick:
+    # they act during provider waits unless the capacity lock is held (#1148).
+    provider_latency: float = 0
 
 
 HISTORY = MachineScript(allocate_after=0, running_after=0)
@@ -289,6 +296,7 @@ class SimProvider(operator_fixture.Client):
         )
 
     def plan(self, spec):
+        self.world.provider_wait("plan")
         self.plans += 1
         value = super().plan(spec)
         if not self.world.offers:
@@ -300,6 +308,7 @@ class SimProvider(operator_fixture.Client):
         return value
 
     def vast_offer_mapping(self, request, *, clock):
+        self.world.provider_wait("vast_offer_mapping")
         index = len(self.machines)
         return {
             "observed_at": clock(),
@@ -314,7 +323,12 @@ class SimProvider(operator_fixture.Client):
             ],
         }
 
+    def reusable_hosts_confirmed(self, approved):
+        self.world.provider_wait("reusable_hosts")
+        return super().reusable_hosts_confirmed(approved)
+
     def vast_instance_identity(self, identity):
+        self.world.provider_wait("vast_instance_identity")
         machine = next(
             (m for m in self.machines.values() if m.instance_id == identity), None
         )
@@ -400,6 +414,7 @@ class SimProvider(operator_fixture.Client):
             run["status"] = "running"
 
     def get(self, *, run_name=None, run_id=None):
+        self.world.provider_wait("run_get")
         for name, run in list(self.runs.items()):
             if run_name == name or run_id is not None and run.get("id") == run_id:
                 self._refresh(name)
@@ -430,6 +445,7 @@ class SimProvider(operator_fixture.Client):
 
     # Inventory -------------------------------------------------------------
     def provider_inventory(self, backend, *, clock=None):
+        self.world.provider_wait("inventory")
         self.inventory_reads += 1
         mode = self.world.inventory_mode()
         if mode == "failed":
@@ -650,6 +666,14 @@ class World(LedgerCase):
         self._seeding = False
         self._inventory_calls = 0
         self.trace = []
+        self.metrics = Counter()
+        self._history_ids = []
+        # Concurrency model for provider latency (#1148): worker turns due at
+        # a time, whether a tick runs, and who holds the capacity lock.
+        self._due, self._seq = [], itertools.count()
+        self._in_tick = self._in_workers = False
+        self._depth, self._locked, self._open = 0, False, 0
+        self._claimed_at = 0.0
 
     # Setup -----------------------------------------------------------------
     def build(self):
@@ -787,6 +811,7 @@ class World(LedgerCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self._watch_controller_log()
+        self._track_locks()
         self.runtime = SimRuntime(self)
         self.capacity.readiness = self.runtime.readiness
         self.slots = SimSlots(self)
@@ -825,6 +850,7 @@ class World(LedgerCase):
                     {"preview_id": preview["preview_id"]},
                     "history-%d" % index,
                 )["node_id"]
+                self._history_ids.append(node_id)
                 machine = self.machine_for(node_id)
                 self._stop_seen.add(node_id)
                 # Spread over days, as on staging, under the tenant daily cap.
@@ -886,7 +912,11 @@ class World(LedgerCase):
             self._seeding = False
 
     def _watch_controller_log(self):
-        """A swallowed exception inside a controller tick is a bug, not a reason."""
+        """A swallowed exception inside a controller tick is a bug, not a reason.
+
+        A test-budget row the projection could not read is a reported reason
+        (#1148 item 4): the warning names the row, never the money.
+        """
         world = self
 
         class Handler(logging.Handler):
@@ -898,18 +928,114 @@ class World(LedgerCase):
                     if kind not in world._exceptions:
                         world._exceptions.add(kind)
                         world.violate("controller_exception", kind)
+                elif message.startswith("dstack_test_budget_row_unconfirmed"):
+                    world.reasons["budget_row_unconfirmed"] += 1
 
-        logger = logging.getLogger("studio_platform.dstack_controller")
-        handler, level = Handler(logging.WARNING), logger.level
-        logger.addHandler(handler)
-        logger.setLevel(logging.WARNING)
         self._exceptions = set()
+        for name in (
+            "studio_platform.dstack_controller",
+            "studio_platform.dstack_test_budget",
+        ):
+            logger = logging.getLogger(name)
+            handler, level = Handler(logging.WARNING), logger.level
+            logger.addHandler(handler)
+            logger.setLevel(logging.WARNING)
 
-        def restore():
-            logger.removeHandler(handler)
-            logger.setLevel(level)
+            def restore(logger=logger, handler=handler, level=level):
+                logger.removeHandler(handler)
+                logger.setLevel(level)
 
-        self.addCleanup(restore)
+            self.addCleanup(restore)
+
+    def _track_locks(self):
+        """Know when the global capacity lock or any connection is held (#1148).
+
+        Only the provider-latency model reads this: a worker's consumer write
+        needs the capacity lock, so it waits while the controller holds it.
+        """
+        from sqlalchemy import event
+
+        world, repo = self, self.repo
+        transaction, lock = repo.transaction, repo._lock_capacity
+
+        @contextmanager
+        def tracked():
+            world._depth += 1
+            try:
+                with transaction() as connection:
+                    yield connection
+            finally:
+                world._depth -= 1
+                if not world._depth:
+                    world._locked = False
+
+        def locking(connection):
+            world._locked = True
+            return lock(connection)
+
+        def checkout(*_args):
+            world._open += 1
+
+        def checkin(*_args):
+            world._open -= 1
+
+        repo.transaction, repo._lock_capacity = tracked, locking
+        event.listen(repo.engine, "checkout", checkout)
+        event.listen(repo.engine, "checkin", checkin)
+
+    def provider_wait(self, kind):
+        """One provider read takes ``provider_latency`` simulated seconds.
+
+        Workers keep running during the wait, unless the controller holds the
+        global capacity lock (their consumer write needs it) or SQLite holds
+        an open connection (then they run when it closes).
+        """
+        latency = self.scenario.provider_latency
+        if not latency or self._seeding or self._in_workers or not self._in_tick:
+            return
+        if self._locked:
+            self.metrics["provider_seconds_under_capacity_lock"] += latency
+            self.reasons["provider_read_under_capacity_lock:" + kind] += 1
+            if ("locked_read", kind) not in self._flagged:
+                self._flagged.add(("locked_read", kind))
+                self.violate("provider_read_under_capacity_lock", kind)
+        elif self._open:
+            self.reasons["provider_read_with_open_connection:" + kind] += 1
+        end = self.now + latency
+        if not self._open:
+            self._run_workers(end)
+        self.now = max(self.now, end)
+
+    def _metric_max(self, name, value):
+        self.metrics[name] = max(self.metrics[name], round(value, 1))
+
+    def _run_workers(self, until):
+        """Worker turns due by ``until``, each at its time or once it may run."""
+        while self._due and self._due[0][0] <= until:
+            at, _, phase = heapq.heappop(self._due)
+            self.now = max(self.now, at)
+            self._metric_max("max_worker_lock_wait_s", self.now - at)
+            self._in_workers = True
+            try:
+                if phase == "claim":
+                    self._claimed_at = self.now
+                    self.work()
+                    if self._preparing:
+                        heapq.heappush(
+                            self._due,
+                            (
+                                self.now + self.scenario.prepare_seconds,
+                                next(self._seq),
+                                "submit",
+                            ),
+                        )
+                else:
+                    self._metric_max(
+                        "max_claim_to_submit_s", self.now - self._claimed_at
+                    )
+                    self.submit()
+            finally:
+                self._in_workers = False
 
     def _load_service(self):
         self.config_file.write_text(json.dumps(self.config), encoding="utf-8")
@@ -1069,6 +1195,15 @@ class World(LedgerCase):
                 self.offers = False
             elif event.action == "offers_on":
                 self.offers = True
+            elif event.action == "corrupt_reservation":
+                # One historical test-task reservation becomes unreadable, e.g.
+                # a pool name the projection does not know (#1148 item 4).
+                with self.repo.transaction() as connection:
+                    connection.execute(
+                        update(instance_intents)
+                        .where(instance_intents.c.id == self._history_ids[-1])
+                        .values(**event.value)
+                    )
             elif event.action == "edit_demand_config":
                 # An operator edits operator.json and restarts the controller.
                 self.config["policy"]["demand_start"].update(event.value)
@@ -1245,6 +1380,21 @@ class World(LedgerCase):
             step = self.random.uniform(*scenario.tick_jitter)
         self.apply_events()
         self.arrive()
+        if scenario.provider_latency:
+            # Workers poll every second; one claims 2 s into the tick and
+            # submits after preparing, concurrently with the controller.
+            heapq.heappush(self._due, (began + 2, next(self._seq), "claim"))
+            self._in_tick = True
+            try:
+                result = self.controller.tick()
+            finally:
+                self._in_tick = False
+            self.observe_result(result)
+            self._run_workers(float("inf"))
+            self.now = max(self.now, began + max(step, 2 + scenario.prepare_seconds))
+            self.check_tick(self.now - began)
+            self.account(self.now - began)
+            return
         result = self.controller.tick()
         self.observe_result(result)
         self.now += 2  # Workers poll every second; one claims soon after.
@@ -1538,6 +1688,42 @@ class World(LedgerCase):
                 self.reasons["stop:" + str(reason)] += 1
                 if not reason:
                     self.violate("stop_without_reason", node["intent_id"][:8])
+                self._check_window_used(node, reason)
+
+    def _check_window_used(self, node, reason):
+        """A test machine is not let go while it could still run waiting work.
+
+        Independent arithmetic with the true job runtimes: a machine whose test
+        runtime window still fits two of the queued jobs back to back (each
+        with the 120 s completion margin) must not stop for idleness or for
+        its runtime window (#1148 item 3).
+        """
+        guard = node["payload"].get("lifecycle", {}).get("test_gpu_guard")
+        if not guard or reason not in (
+            "dstack_idle_expired",
+            "dstack_test_runtime_limit_reached",
+        ):
+            return
+        machine = self.machine_for(node["intent_id"])
+        if machine is None or machine.phase(self.now)[0] != "ready":
+            return
+        deadline = self._deadline(machine)
+        fits = [
+            job["id"]
+            for job in self._queued()
+            if self.now + 2 * (self.job_actual.get(job["id"], 240) + 120) < deadline
+        ]
+        if fits:
+            self.violate(
+                "test_window_unused",
+                "%s stopped (%s) with %dm of window left and %d jobs waiting"
+                % (
+                    node["intent_id"][:8],
+                    reason,
+                    (deadline - self.now) // 60,
+                    len(fits),
+                ),
+            )
 
     def _check_spend(self):
         guard = self.scenario.test_guard
@@ -1599,6 +1785,7 @@ class World(LedgerCase):
                 sum(m.idle_seconds for m in machines) / 3600, 2
             ),
             "reasons": dict(sorted(self.reasons.items())),
+            "metrics": dict(sorted(self.metrics.items())),
             "violations": list(self.violations),
         }
 
@@ -1688,6 +1875,11 @@ def format_report(report):
     if report.get("expected_failure"):
         lines.append("    known bug: " + report["expected_failure"])
     lines.extend("    violation: " + item for item in report["violations"])
+    if report.get("metrics"):
+        lines.append(
+            "    metrics: "
+            + ", ".join("%s=%s" % item for item in report["metrics"].items())
+        )
     reasons = ", ".join("%s=%d" % item for item in report["reasons"].items())
     lines.append("    reasons: " + (reasons or "none"))
     return "\n".join(lines)
