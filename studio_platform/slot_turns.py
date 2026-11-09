@@ -187,7 +187,7 @@ def _count_refusal(contexts, slots, job):
                 worker = control._worker(connection, slot.spec.worker_id)
                 reason = control.claim_reason(connection, worker, job)
             # Eligible but another job is first in the fair claim order.
-            count("claim", reason or "not_first_in_order")
+            count("claim", reason or "not_first_in_order", slot.spec.worker_id)
     except Exception as error:
         count("claim", "check_failed_" + type(error).__name__)
 

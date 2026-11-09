@@ -93,6 +93,9 @@ class MachineScript:
     # Recorded provider fields laid over every run read once the machine is
     # allocated, e.g. a real termination_reason or job_provisioning_data.
     run_fields: dict | None = None
+    # [[from, until, code]] seconds after create in which a run read raises
+    # DstackError(code), as recorded by an exported incident.
+    read_errors: list | None = None
 
     @classmethod
     def from_fixture(cls, name, **overrides):
@@ -101,7 +104,10 @@ class MachineScript:
         ``machine`` holds MachineScript timings; ``run`` holds recorded dstack
         run fields (same shape as the API) laid over the scripted state.
         """
-        value = json.loads((FIXTURES / (name + ".json")).read_text(encoding="utf-8"))
+        path = (
+            Path(name) if str(name).endswith(".json") else FIXTURES / (name + ".json")
+        )
+        value = json.loads(path.read_text(encoding="utf-8"))
         fields = dict(value.get("machine", {}), run_fields=value.get("run"))
         return cls(**{**fields, **overrides})
 
@@ -161,6 +167,41 @@ class Scenario:
 
 
 HISTORY = MachineScript(allocate_after=0, running_after=0)
+
+
+def incident_scenario(path):
+    """A Scenario from an exported incident fixture (capacity_incident_export).
+
+    The recorded machine is the first create; later creates are healthy. The
+    fixture may carry ``expected_failure`` while the bug it shows is open.
+    """
+    path = Path(path)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    spec = dict(value["scenario"])
+    jobs = [JobBatch(**batch) for batch in spec.pop("jobs")]
+    guard = spec.pop("test_guard", None)
+    scenario = Scenario(
+        spec.pop("name", path.stem),
+        spec.pop("description", value.get("description", "Recorded incident.")),
+        jobs=jobs,
+        machines=[MachineScript.from_fixture(str(path))],
+        test_guard=guard,
+        expected_failure=value.get("expected_failure"),
+        # A replay is about the recorded machine; whether the rest of the
+        # queue finishes depends on machines the incident did not record.
+        expect_all_done=spec.pop("expect_all_done", False),
+        **spec,
+    )
+    scenario.recorded = value.get("recorded", {})
+    return scenario
+
+
+def incident_scenarios():
+    """Every exported incident checked into tests/fixtures/capacity_sim."""
+    return [
+        incident_scenario(path) for path in sorted(FIXTURES.glob("incident_*.json"))
+    ]
+
 
 # --------------------------------------------------------------------------
 # Fake provider: dstack run JSON + provider inventory, per scripted machine.
@@ -258,6 +299,39 @@ class Machine:
         if now < download_end + script.load_seconds:
             return "load", download_end, 1.0
         return "ready", download_end + script.load_seconds, 1.0
+
+    def lost_since(self, world):
+        """When the dial-out worker stopped answering (only while it is lost)."""
+        lost = []
+        if self.script.worker_lost_at is not None:
+            lost.append(self.created_at + self.script.worker_lost_at)
+        if self.restarted_at is not None and self.script.tunnel_lost_on_restart:
+            lost.append(self.restarted_at)
+        return min(lost, default=world.now)
+
+    def download_problem(self, now):
+        """(since, what) for a stalled or below-floor download, else None."""
+        from studio_platform.dstack_preparation import (
+            DOWNLOAD_MEASURE_SECONDS,
+            MIN_DOWNLOAD_BYTES_PER_SECOND,
+        )
+
+        if self.allocated_at() is None or now < self.allocated_at():
+            return None
+        phase, start, fraction = self.phase(now)
+        if phase != "download":
+            return None
+        script = self.script
+        if (
+            script.download_stall_at is not None
+            and fraction >= script.download_stall_at
+        ):
+            since = start + script.download_stall_at * max(script.download_seconds, 1)
+            return since, "stalled at %d%%" % (script.download_stall_at * 100)
+        rate = script.download_bytes / max(script.download_seconds, 1)
+        if rate < MIN_DOWNLOAD_BYTES_PER_SECOND:
+            return start + DOWNLOAD_MEASURE_SECONDS, "at %d MB/s" % (rate / 1e6)
+        return None
 
     def worker_alive(self, world):
         now = world.now
@@ -365,7 +439,10 @@ class SimProvider(operator_fixture.Client):
         }
         self.runs[spec["run_name"]] = value
         self.world.log("create", machine)
+        if not self.world._seeding and script.no_capacity:
+            self.world.evidence.create_failed(machine, "no_capacity")
         if script.create == "reply_lost":
+            self.world.evidence.create_failed(machine, "dstack_api_unavailable")
             raise DstackError("dstack_api_unavailable")
         return copy.deepcopy(value)
 
@@ -419,6 +496,12 @@ class SimProvider(operator_fixture.Client):
             if run_name == name or run_id is not None and run.get("id") == run_id:
                 self._refresh(name)
                 self._overlay(name)
+                machine = self.machines.get(name)
+                for start, until, code in (
+                    machine and machine.script.read_errors
+                ) or ():
+                    if start <= machine.elapsed(self.world.now) < until:
+                        raise DstackError(code)
         return super().get(run_name=run_name, run_id=run_id)
 
     def _overlay(self, name):
@@ -674,6 +757,9 @@ class World(LedgerCase):
         self._in_tick = self._in_workers = False
         self._depth, self._locked, self._open = 0, False, 0
         self._claimed_at = 0.0
+        from capacity_sim_evidence import Evidence
+
+        self.evidence = Evidence(self)
 
     # Setup -----------------------------------------------------------------
     def build(self):
@@ -1304,26 +1390,19 @@ class World(LedgerCase):
 
     def submit(self):
         """The worker's last window check right before the paid POST."""
-        from studio_platform.worker_admission import worker_window_reason
+        from studio_platform.capacity_reasons import submission_open
 
         control, queue = self.controller.control, self.queue
         preparing, self._preparing = self._preparing, []
         for machine, worker_id, job, lease, slot_fence in preparing:
             try:
                 self._consume(machine, worker_id)
-                if control.submission_allowed(job) is not True:
-                    with self.repo.engine.connect() as connection:
-                        why = worker_window_reason(
-                            connection,
-                            control.get(worker_id),
-                            self.now,
-                            expected_runtime_s=job["expected_runtime_s"],
-                            deployment_profile_id=job["request"].get(
-                                "deployment_profile_id"
-                            ),
-                        )
-                    # The real worker stores only worker_window_closed (#1140 Q1).
+                why = control.submission_block_reason(job)
+                # The real worker's check: it counts the exact reason by worker.
+                if not submission_open(control, job):
+                    # The job row stores only worker_window_closed (#1140 Q1).
                     self.reasons["deferred:" + str(why or "worker_state")] += 1
+                    self.evidence.deferred(machine, str(why or "window_closed"))
                     queue.defer_unsubmitted(
                         lease, retry_after_s=30, error_code="worker_window_closed"
                     )
@@ -1446,6 +1525,7 @@ class World(LedgerCase):
         if state == "blocked":
             self.reasons["demand:" + str(reason)] += 1
             self._demand_reason = reason
+            self.evidence.demand_refused(reason, demand.get("detail_code"))
             if not reason:
                 self.violate("refusal_without_reason", "demand_start blocked")
         elif state in ("accepted", "disabled"):
@@ -1608,6 +1688,39 @@ class World(LedgerCase):
         self._check_stuck_jobs(queued)
         self._check_stop_reasons()
         self._check_spend()
+        self.evidence.detect(queued, live)
+        self.evidence.check()
+
+    def _orphans(self):
+        """(job_id, machine) for active jobs whose machine the provider removed."""
+        with self.repo.engine.connect() as connection:
+            active = list(
+                connection.execute(
+                    select(jobs.c.id, attempts.c.worker_id)
+                    .select_from(
+                        jobs.join(attempts, attempts.c.id == jobs.c.current_attempt_id)
+                    )
+                    .where(
+                        jobs.c.status.in_(
+                            (
+                                "submitting",
+                                "running",
+                                "collecting",
+                                "submission_unknown",
+                            )
+                        )
+                    )
+                )
+            )
+        hosts = {self.worker_id(m.intent_id): m for m in self.client.machines.values()}
+        for job_id, worker_id in active:
+            machine = hosts.get(worker_id)
+            if (
+                machine is not None
+                and machine.gone_at is not None
+                and machine.removed_first()
+            ):
+                yield job_id, machine
 
     def _check_stuck_jobs(self, queued):
         """Queued work eventually starts; running work never outlives its host."""
@@ -1752,6 +1865,7 @@ class World(LedgerCase):
                     machine.idle_seconds += step
 
     def finish(self):
+        self.evidence.check(final=True)
         with self.repo.engine.connect() as connection:
             rows = [dict(r) for r in connection.execute(select(jobs)).mappings()]
             tries = Counter(
@@ -1793,6 +1907,7 @@ class World(LedgerCase):
             "reasons": dict(sorted(self.reasons.items())),
             "metrics": dict(sorted(self.metrics.items())),
             "violations": list(self.violations),
+            "observability_gaps": list(self.evidence.gaps),
         }
 
     def _settled(self):
@@ -1817,7 +1932,48 @@ class World(LedgerCase):
             ).first()
         return open_jobs is None
 
-    def run(self):
+    def outcomes(self):
+        """Per scripted machine, in create order: stop reason and claims."""
+        result = []
+        with self.repo.engine.connect() as connection:
+            for machine in self.client.machines.values():
+                if machine.script is HISTORY:
+                    continue
+                node = (
+                    connection.execute(
+                        select(operator_nodes).where(
+                            operator_nodes.c.intent_id == machine.intent_id
+                        )
+                    )
+                    .mappings()
+                    .first()
+                )
+                rows = list(
+                    connection.execute(
+                        select(attempts.c.submission_started_at).where(
+                            attempts.c.worker_id == self.worker_id(machine.intent_id)
+                        )
+                    ).scalars()
+                )
+                payload = node["payload"] if node else {}
+                reason = (
+                    payload.get("stop_reason_code")
+                    or payload.get("capacity_watchdog", {}).get("reason")
+                    or payload.get("dstack", {}).get("reason_code")
+                    if node and node["desired_state"] == "stopped"
+                    else None
+                )
+                result.append(
+                    {
+                        "intent_id": machine.intent_id,
+                        "stop_reason": reason,
+                        "claims": len(rows),
+                        "submitted": sum(row is not None for row in rows),
+                    }
+                )
+        return result
+
+    def run(self, inspect=None):
         self._done_events, self._arrived = set(), set()
         self._flagged, self._stop_seen = set(), set()
         self._paused = False
@@ -1834,7 +1990,12 @@ class World(LedgerCase):
             end = self.start + self.scenario.hours * 3600
             while self.now < end and not self._settled():
                 self.tick()
-            return self.finish()
+            report = self.finish()
+            report["outcomes"] = self.outcomes()
+            if inspect is not None:
+                # Before teardown: the throwaway ledger is still readable.
+                report["inspect"] = inspect(self)
+            return report
         finally:
             self.doCleanups()
             self.tearDown()
@@ -1844,20 +2005,27 @@ def _offline(*args, **kwargs):
     raise OSError("capacity_simulator_network_disabled")
 
 
-def run_scenario(scenario, *, seed=0):
-    """Run one scenario offline; returns the report dict with a ``status``."""
+def run_scenario(scenario, *, seed=0, inspect=None):
+    """Run one scenario offline; returns the report dict with a ``status``.
+
+    ``inspect(world)`` runs after the last tick, before the ledger is thrown
+    away (for example to export a machine's recorded timeline).
+    """
     logging.getLogger("studio_platform").setLevel(logging.CRITICAL)
     with (
         patch.object(socket.socket, "connect", _offline),
         patch.object(socket, "getaddrinfo", _offline),
     ):
-        report = World(scenario, seed=seed).run()
+        report = World(scenario, seed=seed).run(inspect)
     failed = bool(report["violations"])
     if scenario.expected_failure:
         report["status"] = "expected_fail" if failed else "unexpected_pass"
         report["expected_failure"] = scenario.expected_failure
     else:
         report["status"] = "fail" if failed else "pass"
+    recorded = getattr(scenario, "recorded", None)
+    if recorded:
+        report["recorded_outcome"] = recorded.get("outcome")
     return report
 
 
@@ -1880,6 +2048,18 @@ def format_report(report):
         lines[0] += "  (%.0f s)" % report["wall_seconds"]
     if report.get("expected_failure"):
         lines.append("    known bug: " + report["expected_failure"])
+    recorded = report.get("recorded_outcome")
+    if recorded:
+        replay = (report.get("outcomes") or [{}])[0]
+        lines.append(
+            "    recorded machine: stop %s, claims %s | replay: stop %s, claims %s"
+            % (
+                recorded.get("stop_reason"),
+                recorded.get("claims"),
+                replay.get("stop_reason"),
+                replay.get("claims"),
+            )
+        )
     lines.extend("    violation: " + item for item in report["violations"])
     if report.get("metrics"):
         lines.append(

@@ -32,6 +32,12 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--scenario", action="append", default=[])
+    parser.add_argument(
+        "--fixture",
+        action="append",
+        default=[],
+        help="an exported incident JSON (tools/export_capacity_incident.py)",
+    )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--json", action="store_true")
@@ -39,7 +45,8 @@ def main(argv=None):
         "--trace", action="store_true", help="print every tick of the run"
     )
     args = parser.parse_args(argv)
-    names = {scenario.name for scenario in SCENARIOS}
+    extra = [capacity_sim.incident_scenario(path) for path in args.fixture]
+    names = {scenario.name for scenario in SCENARIOS + extra}
     unknown = sorted(set(args.scenario) - names)
     if unknown:
         parser.error("unknown scenario: " + ", ".join(unknown))
@@ -49,7 +56,12 @@ def main(argv=None):
             print("%-28s %s%s" % (scenario.name, scenario.description, marker))
         return 0
     capacity_sim.World.tracing = args.trace
-    selected = [s for s in SCENARIOS if not args.scenario or s.name in args.scenario]
+    if extra and not args.scenario:
+        selected = extra
+    else:
+        selected = [
+            s for s in SCENARIOS + extra if not args.scenario or s.name in args.scenario
+        ]
     reports = []
     for scenario in selected:
         started = time.monotonic()

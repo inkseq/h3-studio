@@ -1,0 +1,347 @@
+{
+  "description": "Example export (simulator, not a real host): a worker goes silent 20 min after create with work queued; stopped for capacity_no_progress after 2 claims",
+  "machine": {
+    "allocate_after": 60,
+    "download_bytes": 52000000000,
+    "download_seconds": 300,
+    "load_seconds": 60,
+    "price": 0.7,
+    "read_errors": [],
+    "running_after": 60,
+    "stop_seconds": 60,
+    "worker_lost_at": 1200
+  },
+  "recorded": {
+    "outcome": {
+      "claims": 2,
+      "stop_reason": "capacity_no_progress",
+      "submitted": 2
+    },
+    "provider": [
+      {
+        "data": {
+          "present": false
+        },
+        "kind": "run",
+        "t": 0.0
+      },
+      {
+        "data": {
+          "ok": true
+        },
+        "kind": "create",
+        "t": 0.0
+      },
+      {
+        "data": {
+          "status": "submitted"
+        },
+        "kind": "run",
+        "t": 0.0
+      },
+      {
+        "data": {
+          "latest_job_submission": {
+            "job_provisioning_data": {
+              "backend": "vastai",
+              "instance_type": {
+                "gpu_count": 1,
+                "gpus": [
+                  "RTX5090"
+                ],
+                "name": "10000"
+              },
+              "price": 0.7,
+              "region": "test-region"
+            }
+          },
+          "status": "provisioning"
+        },
+        "kind": "run",
+        "t": 60.0
+      },
+      {
+        "data": {
+          "latest_job_submission": {
+            "job_provisioning_data": {
+              "backend": "vastai",
+              "instance_type": {
+                "gpu_count": 1,
+                "gpus": [
+                  "RTX5090"
+                ],
+                "name": "10000"
+              },
+              "price": 0.7,
+              "region": "test-region"
+            }
+          },
+          "status": "running"
+        },
+        "kind": "run",
+        "t": 120.0
+      },
+      {
+        "data": {
+          "ok": true
+        },
+        "kind": "stop",
+        "t": 1800.0
+      },
+      {
+        "data": {
+          "latest_job_submission": {
+            "job_provisioning_data": {
+              "backend": "vastai",
+              "instance_type": {
+                "gpu_count": 1,
+                "gpus": [
+                  "RTX5090"
+                ],
+                "name": "10000"
+              },
+              "price": 0.7,
+              "region": "test-region"
+            }
+          },
+          "status": "terminating"
+        },
+        "kind": "run",
+        "t": 1800.0
+      },
+      {
+        "data": {
+          "latest_job_submission": {
+            "job_provisioning_data": {
+              "backend": "vastai",
+              "instance_type": {
+                "gpu_count": 1,
+                "gpus": [
+                  "RTX5090"
+                ],
+                "name": "10000"
+              },
+              "price": 0.7,
+              "region": "test-region"
+            }
+          },
+          "status": "terminated"
+        },
+        "kind": "run",
+        "t": 1860.0
+      },
+      {
+        "data": {
+          "backend": "vastai",
+          "complete": true,
+          "observed_age_s": 0.0,
+          "present": false
+        },
+        "kind": "inventory",
+        "t": 1860.0
+      }
+    ],
+    "timeline": [
+      {
+        "code": "start_requested",
+        "stage": "start",
+        "t": 0.0
+      },
+      {
+        "code": "run_submitted",
+        "stage": "run",
+        "t": 0.0
+      },
+      {
+        "code": "dstack_runtime_not_observed",
+        "stage": "boot",
+        "t": 0.0
+      },
+      {
+        "code": "billing_unsettled",
+        "stage": "billing",
+        "t": 0.0
+      },
+      {
+        "code": "intent_creating",
+        "stage": "intent",
+        "t": 0.0
+      },
+      {
+        "code": "offer_chosen",
+        "stage": "offer",
+        "t": 60.0
+      },
+      {
+        "code": "allocated",
+        "stage": "allocation",
+        "t": 60.0
+      },
+      {
+        "code": "run_provisioning",
+        "stage": "run",
+        "t": 60.0
+      },
+      {
+        "code": "intent_starting",
+        "stage": "intent",
+        "t": 60.0
+      },
+      {
+        "code": "run_running",
+        "stage": "run",
+        "t": 120.0
+      },
+      {
+        "code": "dstack_runtime_downloading_weights",
+        "stage": "boot",
+        "t": 120.0
+      },
+      {
+        "code": "phase_model_download",
+        "stage": "phase",
+        "t": 120.0
+      },
+      {
+        "code": "download_progress",
+        "stage": "download",
+        "t": 120.0
+      },
+      {
+        "code": "download_progress",
+        "stage": "download",
+        "t": 180.0
+      },
+      {
+        "code": "download_progress",
+        "stage": "download",
+        "t": 240.0
+      },
+      {
+        "code": "download_progress",
+        "stage": "download",
+        "t": 360.0
+      },
+      {
+        "code": "dstack_runtime_loading_model",
+        "stage": "boot",
+        "t": 420.0
+      },
+      {
+        "code": "phase_model_load",
+        "stage": "phase",
+        "t": 420.0
+      },
+      {
+        "code": "serving",
+        "stage": "boot",
+        "t": 480.0
+      },
+      {
+        "code": "phase_runtime_ready",
+        "stage": "phase",
+        "t": 480.0
+      },
+      {
+        "code": "runtime_ready",
+        "stage": "ready",
+        "t": 480.0
+      },
+      {
+        "code": "download_complete",
+        "stage": "download",
+        "t": 480.0
+      },
+      {
+        "code": "worker_ready",
+        "stage": "worker",
+        "t": 480.0
+      },
+      {
+        "code": "intent_ready",
+        "stage": "intent",
+        "t": 480.0
+      },
+      {
+        "code": "first_claim",
+        "stage": "claim",
+        "t": 482.0
+      },
+      {
+        "code": "dstack_runtime_bootstrap_reconciliation_required",
+        "stage": "boot",
+        "t": 1200.0
+      },
+      {
+        "code": "dstack_stop_pending",
+        "stage": "boot",
+        "t": 1800.0
+      },
+      {
+        "code": "worker_retired",
+        "stage": "worker",
+        "t": 1800.0
+      },
+      {
+        "code": "stop_requested",
+        "stage": "stop",
+        "t": 1800.0
+      },
+      {
+        "code": "intent_destroying",
+        "stage": "intent",
+        "t": 1800.0
+      },
+      {
+        "code": "run_terminated",
+        "stage": "run",
+        "t": 1860.0
+      },
+      {
+        "code": "dstack_run_terminal_billing_pending",
+        "stage": "boot",
+        "t": 1860.0
+      },
+      {
+        "code": "removal_confirmed",
+        "stage": "removal",
+        "t": 1860.0
+      },
+      {
+        "code": "intent_destroyed",
+        "stage": "intent",
+        "t": 1860.0
+      }
+    ]
+  },
+  "run": {
+    "latest_job_submission": {
+      "job_provisioning_data": {
+        "price": 0.7,
+        "region": "test-region"
+      }
+    }
+  },
+  "scenario": {
+    "description": "Example export (simulator, not a real host): a worker goes silent 20 min after create with work queued; stopped for capacity_no_progress after 2 claims",
+    "hours": 1.5,
+    "jobs": [
+      {
+        "actual_runtime_s": 355,
+        "at": 0,
+        "count": 2,
+        "expected_runtime_s": 1800,
+        "mode": "fl"
+      },
+      {
+        "actual_runtime_s": 355,
+        "at": 0,
+        "count": 5,
+        "expected_runtime_s": 1800
+      }
+    ],
+    "max_machines": 1,
+    "name": "incident_sim_worker_lost",
+    "observation_fresh_seconds": 30
+  }
+}

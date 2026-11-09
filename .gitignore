@@ -916,6 +916,14 @@ inventory.json
 !studio_platform/capacity_watchdog.py
 !studio_platform/capacity_health.py
 !studio_platform/capacity_reasons.py
+# Persistent capacity timeline, provider snapshots and incident export (#1140).
+!studio_platform/capacity_timeline.py
+!studio_platform/capacity_snapshots.py
+!studio_platform/capacity_timeline_cli.py
+!studio_platform/capacity_incident_export.py
+!tools/capacity_timeline.py
+!tools/export_capacity_incident.py
+!tests/capacity_sim_evidence.py
 !tests/test_capacity_reclaim.py
 !tests/test_capacity_watchdog.py
 !tests/test_capacity_health.py

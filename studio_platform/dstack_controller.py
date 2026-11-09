@@ -94,6 +94,10 @@ class DstackController:
         self._removal_checked_at = {}
         self._invoice_checked_at = None
         self._health_checked_at = None
+        from .capacity_timeline import CapacityRecorder
+
+        # Recording only, after every decision of a tick (#1140 observability).
+        self.recorder = CapacityRecorder(service, self.control)
 
     def _health_check(self, *, force=False):
         now = self.repo.clock()
@@ -1242,7 +1246,7 @@ class DstackController:
                         "code": code,
                     }
                 )
-        return {
+        result = {
             "state": "running",
             "nodes": results,
             "health_check": self._health_check(force=closed_since_health),
@@ -1251,6 +1255,10 @@ class DstackController:
             # Claim and submission refusals by exact reason since the last tick.
             "refusals": self._refusals(),
         }
+        recorder = getattr(self, "recorder", None)
+        if recorder is not None:
+            recorder.record_tick(result)
+        return result
 
     @staticmethod
     def _refusals():

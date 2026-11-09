@@ -3,7 +3,9 @@
 Claims and pre-submission checks run inside the controller's DBOS executor and
 used to leave no trace when they refused. Each refusal is counted here by its
 exact reason; the controller tick reports and resets the counts, so its log
-line says why queued work is not moving. Process-local, never persisted.
+line says why queued work is not moving. Counts that name a worker are also
+kept per worker; the capacity timeline drains those into each machine's
+persisted refusal summary (capacity_timeline.py). Process-local and bounded.
 """
 
 import threading
@@ -11,12 +13,21 @@ from collections import Counter
 
 _lock = threading.Lock()
 _counts = Counter()
+_by_worker = {}
+# A process nobody drains (no controller) must not grow without bound.
+MAX_WORKERS = 256
 
 
-def count(kind, reason):
-    key = "%s:%s" % (kind, reason or "none")
+def count(kind, reason, worker_id=None):
+    key = ("%s:%s" % (kind, reason or "none"))[:120]
     with _lock:
-        _counts[key[:120]] += 1
+        _counts[key] += 1
+        if isinstance(worker_id, str) and worker_id:
+            counts = _by_worker.get(worker_id)
+            if counts is None and len(_by_worker) < MAX_WORKERS:
+                counts = _by_worker[worker_id] = Counter()
+            if counts is not None:
+                counts[key] += 1
 
 
 def drain():
@@ -27,15 +38,24 @@ def drain():
     return value
 
 
+def drain_workers():
+    """Per-worker counts since the last call, then start again from zero."""
+    with _lock:
+        value = {worker: dict(counts) for worker, counts in _by_worker.items()}
+        _by_worker.clear()
+    return value
+
+
 def submission_open(control, job):
     """``control.submission_allowed``, counting and logging the reason it is not."""
     import logging
 
+    worker_id = job.get("lease_worker_id") if isinstance(job, dict) else None
     try:
         if control.submission_allowed(job) is True:
             return True
     except Exception as error:
-        count("defer", "check_failed_" + type(error).__name__)
+        count("defer", "check_failed_" + type(error).__name__, worker_id)
         return False
     reason = "window_closed"
     try:
@@ -44,7 +64,7 @@ def submission_open(control, job):
     except Exception as error:
         reason = "check_failed_" + type(error).__name__
     # The deferral itself still says worker_window_closed; keep the why.
-    count("defer", reason)
+    count("defer", reason, worker_id)
     logging.getLogger("studio_platform.worker").info(
         "worker_submission_deferred job=%s reason=%s", job["id"][:8], reason
     )

@@ -79,6 +79,122 @@ The report gives simulated hours, jobs done, billed and idle machine-hours and
 every reason code seen (demand refusals, node codes, stops, worker deferrals
 with the underlying `worker_window_reason`).
 
+## Observability check (every scenario)
+
+Each problem the simulator can see from its ground truth must leave
+persisted, operator-visible evidence with the exact reason, not a log line
+(controller and app logs last hours: docker json-file, 5 MB x 2). A problem
+counts once it lasts 5 minutes; evidence must follow within 10 more minutes
+(`tests/capacity_sim_evidence.py`), else the run fails with
+`unobserved_<kind>`:
+
+| Problem (ground truth) | Accepted evidence (outbox) |
+|---|---|
+| `paid_idle_with_queue`: booted, billed, idle, admittable work waits | timeline `claim_refused` with reasons, `capacity_paid_idle_queue` alert, or a stop |
+| `lost_worker`: worker gone while the machine bills | timeline `worker_expired`/`worker_unknown`, a runtime read leaving `serving` with its code, a worker-lost stop or alert |
+| `slow_download`: stalled or below the 50 MB/s floor | timeline `download_stalled`/`download_slow`, the download stop, or `capacity_download_overdue` |
+| `start_blocked_no_machine`: queued, no machine, demand on | demand timeline entry with the blocker code; after 30 min a `capacity_start_blocked` alert with `detail` = exact code |
+| `stuck_job`: queued 30 min without a break, or held by a removed machine | `capacity_queue_age` alert; `capacity.attempt_lost` or the removal on the timeline |
+| `refused_start`: demand blocked, create failed, no capacity | demand entry with `reason_code` and raw `detail_code` (or its count in a summary); create error snapshot or no-allocation proof |
+| `refused_claim`: a claimed job's submission deferred | timeline `claim_refused` containing `defer:<exact reason>` |
+| `budget_block`: demand refused by a budget limit | demand entry with the raw limit code (e.g. `dstack_test_task_limit_reached`) |
+
+The first run of this check (before the timeline existed) found 88 gaps over
+33 scenarios: blocked demand decisions (56: `capacity_limit`, `backoff`,
+`budget_limit`, `offer_unavailable` and their raw codes lived only in the
+tick result), create failures and no-capacity starts (part of those 56),
+6 starts blocked with no machine, 5 lost workers (a busy worker keeps a
+900 s lease, so nothing showed for 15 minutes), 2 idle machines with work
+waiting and 2 budget blocks. The other 17 were queued-job ages that the
+existing `capacity_queue_age` alert does cover; the first version of the
+check measured from job creation instead of the unbroken wait. All are now
+recorded or alerted.
+
+## Recorded capacity timeline (staging and production)
+
+The controller records after each tick, never deciding anything
+(`studio_platform/capacity_timeline.py`, outbox events, no new table):
+
+- `capacity.timeline`, aggregate `<intent_id>`: one entry per change, each
+  with `at` and the raw code: start requested (profile, demand job, test task,
+  expected runtime), offer chosen (provider, GPU, region, hourly price),
+  allocated, run status, boot phase and runtime reason, download milestones
+  every 25 % with bytes and rate (plus `download_slow`/`download_stalled`),
+  model load, runtime ready, worker state (`worker_expired`), first claim,
+  idle episode, `claim_refused` summaries (per-reason counts per 5 minutes,
+  from the claim and submission checks and a read-only probe of the real claim
+  gates while idle), stop requested with reason, removal confirmed, billing
+  state, intent state.
+- `capacity.timeline`, aggregate `demand:<tenant>`: demand decisions on
+  change (`reason_code`, raw `detail_code`, queued, live machines, since when
+  blocked). Over 6 changes in 5 minutes become one per-code count summary.
+- `capacity.provider_snapshot`, aggregate `<intent_id>`: sanitized dstack run
+  reads (status, termination reason, provisioning identity: backend, instance
+  id, region, price, instance type), inventory presence of that instance,
+  create/stop/read error codes. Stored on change only. Allowlisted fields
+  only: no env, credentials, tokens, IPs, hostnames, SSH users or keys,
+  emails, project or account names, free-text messages
+  (`capacity_snapshots.py`, tested in `test_capacity_timeline.py`).
+
+Bounds: 240 timeline and 80 snapshot rows per machine, 5-minute refusal
+windows, and both event types are pruned after 30 days (hourly, 5,000 rows
+per pass). A machine's timeline closes once it is destroyed and billed.
+
+New health alerts (capacity health -> outbox -> Sentry, one per episode):
+`capacity_download_overdue` (a download past bytes / 50 MB/s + 5 min:
+`download_slow`, `download_stalled`, `download_unobserved`) and
+`capacity_start_blocked` (queued demand work, no live machine, starts refused
+for 30 min; `detail` is the exact blocker code). `capacity_paid_idle_queue`
+(ready, no claim for 10 min with work queued) now carries the top claim
+refusal as `detail`.
+
+Read it with the read-only CLI (inside the app or controller container, e.g.
+over SSM, or from a checkout with the database URL set):
+
+```sh
+python -m studio_platform.capacity_timeline_cli <intent_id or 8+ char prefix>
+python -m studio_platform.capacity_timeline_cli --recent 10
+python -m studio_platform.capacity_timeline_cli demand
+python tools/capacity_timeline.py ...     # same, from a checkout
+```
+
+It prints every entry with its offset from the start and a "where it got
+stuck" summary (the first lifecycle stage not reached, or the stop reason
+and what is still pending, plus the problem entries and alerts).
+
+## From incident to regression test
+
+1. **Incident.** A machine misbehaves. Read its timeline:
+   `python -m studio_platform.capacity_timeline_cli <intent_id>`.
+2. **Export.** In the same container:
+   `python -m studio_platform.capacity_incident_export <intent_id> [--since T --until T] > incident.json`
+   (or `python tools/export_capacity_incident.py ...`). Read-only. The JSON has
+   a `machine` (MachineScript: allocation, download, stall, model load,
+   worker loss, provider end, stop delay, price, run read error windows), a
+   `run` overlay (recorded region and price), a `scenario` (the jobs that
+   machine ran at their median measured runtime, the work still queued when
+   it stopped, the test runtime window) and `recorded` (outcome, timeline,
+   provider snapshots). It carries no owner, account, IP, budget or spend; a
+   test guard gets a synthetic cap.
+3. **Scenario.** Save it as `tests/fixtures/capacity_sim/incident_<name>.json`
+   (already allowlisted). Every `incident_*.json` there joins the scenario
+   catalog; try it alone with
+   `python tools/simulate_capacity.py --fixture incident.json`. The report line
+   `recorded machine: stop X, claims N | replay: stop Y, claims M` compares
+   the recorded and replayed outcome of that machine.
+4. **Fix.** If the replay breaks an invariant because of a controller rule
+   bug, add `"expected_failure": "<what breaks> (file:line, issue)"` to the
+   JSON, fix the rule, and remove the marker when the scenario reports
+   `unexpected_pass`.
+5. **Regression.** The fixture stays in the catalog and runs in CI with the
+   other scenarios.
+
+`test_capacity_timeline.IncidentRoundTripTests` proves the loop: it runs a
+scenario, exports one machine from the throwaway ledger with the real export
+code, replays the export and expects the same stop reason and claim count
+(a worker lost mid-queue: `capacity_no_progress` after 2 claims; a download
+stalled at 40 %: `dstack_download_too_slow` with none).
+
 ## Adding a scenario
 
 Add a `Scenario` to `tests/capacity_scenarios.py`:
@@ -98,7 +214,8 @@ Scenario(
   `MachineScript` covers: create ok or reply lost, never allocates, no capacity,
   slow or stalled download, model load failure, worker lost at a time, tunnel
   lost on app restart (`"returns"` after 5 min or `"never"`), provider removal,
-  run turning terminal, stop delay and price. dstack `max_duration` from the run
+  run turning terminal, stop delay, price and `read_errors` (windows in which
+  a run read raises a recorded error code). dstack `max_duration` from the run
   spec is honoured.
 - `events`: `restart_app`, `demand_off`, `demand_on`, `offers_off`, `offers_on`,
   `edit_demand_config` (value: keys merged into `policy.demand_start`, then the
