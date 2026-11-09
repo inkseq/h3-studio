@@ -735,6 +735,55 @@ function fileImageGroupAction(project, action, { profile, selected }) {
   changedProfile(project, profile);
   return { id: profile.id };
 }
+// A split member's look takes the old card's look pictures (its list and its front/side/full
+// slots), so the new cards start with the same face. Pictures already gone are skipped.
+const GALLERY_SLOTS = ['front', 'side', 'full'];
+function copyLookAction(project, action, { profile, selected }) {
+  const source = find(project, action.from);
+  if (profile.type !== 'character' || !selected || source?.type !== 'character') return false;
+  if (source.id === profile.id || typeof action.fromVid !== 'string') return false;
+  const from = variant(source, action.fromVid);
+  if (!from) return false;
+  const image = (id) => media(project, id, ['image']);
+  const images = [...new Set([...imageIds(selected), ...imageIds(from).filter(image)])];
+  if (images.length > 100) return false;
+  const gallery = { ...selected.gallery };
+  for (const slot of GALLERY_SLOTS)
+    if (!gallery[slot] && image(from.gallery?.[slot])) gallery[slot] = from.gallery[slot];
+  selected.imageIds = images;
+  selected.gallery = gallery;
+  selected.version = (selected.version || 1) + 1;
+  changedProfile(project, profile);
+  return { id: profile.id };
+}
+// Every cast that holds this person now holds all of `to` in its place (a split), with no look
+// chosen. Scenes and shots alike, so nothing loses the character when the old card is trashed.
+function recastAction(project, action, { profile }) {
+  const to = action.to;
+  if (profile?.type !== 'character' || !Array.isArray(to) || !to.length || to.length > 20)
+    return false;
+  if (new Set(to).size !== to.length) return false;
+  if (to.some((id) => id === profile.id || find(project, id)?.type !== 'character')) return false;
+  const idOf = (value) => (typeof value === 'string' ? value : value?.characterId);
+  for (const entity of project.entities) {
+    const cast = entity.data?.cast;
+    if (
+      entity.id === profile.id ||
+      !Array.isArray(cast) ||
+      !cast.some((c) => idOf(c) === profile.id)
+    )
+      continue;
+    const present = new Set(cast.map(idOf));
+    entity.data.cast = cast.flatMap((value) =>
+      idOf(value) === profile.id
+        ? to.filter((id) => !present.has(id)).map((id) => ({ characterId: id, lookId: '' }))
+        : [value],
+    );
+    entity.version++;
+    if (['scene', 'shot', 'generation'].includes(entity.type)) entity.status = 'review';
+  }
+  return { id: profile.id };
+}
 function addVoiceGroupAction(project, action, { profile }) {
   if (profile.type !== 'character' || !media(project, action.asset, ['audio'])) return false;
   const voices = list(profile.data.voices),
@@ -800,6 +849,7 @@ const SHOT_AND_PAGE_ACTIONS = {
   unplace: updateGroupAction,
   unprop: updateGroupAction,
   newProfile: newProfileAction,
+  recast: recastAction,
   assetTitle: assetTitleAction,
   dismissInbox: dismissInboxAction,
 };
@@ -808,6 +858,7 @@ const PROFILE_ACTIONS = {
   bible: bibleAction,
   addVariant: addVariantAction,
   variant: variantAction,
+  copyLook: copyLookAction,
   fileImage: fileImageGroupAction,
   unfileImage: fileImageGroupAction,
   coverImage: fileImageGroupAction,
@@ -819,7 +870,15 @@ const PROFILE_ACTIONS = {
 // Several profile edits as one: each later action may name a profile or version made by an
 // earlier one as { $ref: index }. The caller's edit runs on a copy, so one refused action
 // leaves the story as it was (an import or a split never lands half done).
-const BATCHABLE = new Set(['newProfile', 'profile', 'variant', 'addVariant', 'bible']);
+const BATCHABLE = new Set([
+  'newProfile',
+  'profile',
+  'variant',
+  'addVariant',
+  'bible',
+  'copyLook',
+  'recast',
+]);
 const MAX_BATCH = 2000;
 function batchAction(project, action, ctx) {
   const actions = action.actions;
@@ -834,10 +893,17 @@ function batchAction(project, action, ctx) {
   for (const raw of actions) {
     if (!plain(raw) || !BATCHABLE.has(raw.type)) return false;
     const step = { ...raw };
-    for (const key of ['id', 'pid', 'vid']) if (owns(step, key)) step[key] = resolve(step[key]);
+    for (const key of ['id', 'pid', 'vid', 'from'])
+      if (owns(step, key)) step[key] = resolve(step[key]);
+    if (Array.isArray(step.to)) step.to = step.to.map(resolve);
     if (plain(step.patch) && owns(step.patch, 'carriedBy'))
       step.patch = { ...step.patch, carriedBy: resolve(step.patch.carriedBy) };
-    if (['id', 'pid', 'vid'].some((key) => owns(step, key) && typeof step[key] !== 'string'))
+    if (
+      ['id', 'pid', 'vid', 'from'].some(
+        (key) => owns(step, key) && typeof step[key] !== 'string',
+      ) ||
+      (Array.isArray(step.to) && step.to.some((id) => typeof id !== 'string'))
+    )
       return false;
     const receipt = applyStoryboardAction(project, step, ctx);
     if (receipt === false) return false;

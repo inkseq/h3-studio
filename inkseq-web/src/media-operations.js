@@ -196,13 +196,64 @@ export async function uploadFreestyleFiles({
   }
 }
 
-export async function uploadLibraryFiles({ store, files, upload }) {
+// The story's own file for an upload: the same server asset (an idempotent replay answers with
+// the earlier receipt), or the same content already in the story (same kind, size and SHA-256
+// from the server's receipt). A second copy would only be a duplicate in the library.
+export function existingUpload(project, result) {
+  const data = result?.data || {},
+    sha = data.metadata?.sha256;
+  return (
+    project.entities.find(
+      (e) =>
+        e.type === result?.type &&
+        !e.data.missingFile &&
+        ((data.cloudAssetId && e.data.cloudAssetId === data.cloudAssetId) ||
+          (data.fileId && e.data.fileId === data.fileId) ||
+          (typeof sha === 'string' &&
+            sha.length >= 32 &&
+            e.data.metadata?.sha256 === sha &&
+            (e.data.metadata?.bytes ?? e.data.bytes) === (data.metadata?.bytes ?? data.bytes))),
+    ) || null
+  );
+}
+
+// Why an uploaded file cannot join what it was uploaded for (a catalog key), or '' if it can.
+// The upload itself is kept: the file stays in the story's files.
+export function uploadAttachRefusal(project, target, assetId) {
+  const asset = project.entities.find((e) => e.id === assetId),
+    owner = project.entities.find((e) => e.id === target?.pid);
+  if (!target || !asset) return '';
+  if (['image', 'voice', 'ambient'].includes(target.kind) && !owner) return 'upload.ownerGone';
+  if (target.kind === 'image' && asset.type !== 'image') return 'upload.notImage';
+  if (target.kind === 'voice' || target.kind === 'ambient') {
+    if (asset.type !== 'audio') return 'upload.notAudio';
+    const meta = asset.data.metadata || {},
+      seconds = meta.source_duration ?? meta.duration;
+    if (Number.isFinite(seconds) && seconds + 0.01 < 3) return 'upload.tooShort';
+  }
+  if (
+    target.kind === 'voice' &&
+    (owner.data.voices || []).some((voice) => voice.assetId === assetId)
+  )
+    return 'upload.voiceAlready';
+  return '';
+}
+
+// Returns the story file ids in the order of `files`; a file the story already holds returns
+// that file's id (listed in `reused`) instead of a new copy, so the caller still attaches it.
+export async function uploadLibraryFiles({ store, files, upload, reused = new Set() }) {
   const context = captureWorkspace(store),
     added = [];
   for (const file of files) {
     assertWorkspace(store, context);
     const result = await upload(file);
     assertWorkspace(store, context);
+    const existing = existingUpload(store.getState().project, result);
+    if (existing) {
+      reused.add(existing.id);
+      added.push(existing.id);
+      continue;
+    }
     const id = store.addEntity(result.type, null, {
       title: file.name.slice(0, 160),
       data: result.data,

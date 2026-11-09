@@ -15,6 +15,7 @@ import {
   uploadCharacterMainImage,
   uploadLibraryFiles,
   uploadFreestyleFiles,
+  uploadAttachRefusal,
 } from './media-operations.js';
 import { storyboardPrompt } from './shot-prompt.js';
 
@@ -361,4 +362,80 @@ test('FL keeps scene cast/location assignments without sending their shared gall
   f.store.updateEntity(f.first, { data: { h3: { inputMode: 'fl' } } });
   assert.equal(referenceSpecs(f.store.exportProject(), f.first).references.length, 1);
   assert.equal(entity(f, f.scene).data.locationId, f.location);
+});
+
+test('uploading a file the story already holds reuses that file instead of adding a copy', async () => {
+  const f = fixture(),
+    count = () => f.store.getState().project.entities.length;
+  const sha = 'a'.repeat(64);
+  f.store.updateEntity(f.image, {
+    data: {
+      fileId: 'image-file',
+      cloudAssetId: 'cloud-image',
+      metadata: { sha256: sha, bytes: 12 },
+    },
+  });
+  const before = count();
+  // The same server asset (an idempotent replay) and the same content under a new asset id.
+  const sameAsset = { type: 'image', data: { ...receipt().data, cloudAssetId: 'cloud-image' } };
+  const sameContent = {
+    type: 'image',
+    data: { ...receipt().data, cloudAssetId: 'fresh', metadata: { sha256: sha, bytes: 12 } },
+  };
+  const reused = new Set();
+  const ids = await uploadLibraryFiles({
+    store: f.store,
+    files: [file(), file()],
+    upload: (() => {
+      const answers = [sameAsset, sameContent];
+      return async () => answers.shift();
+    })(),
+    reused,
+  });
+  assert.deepEqual(ids, [f.image, f.image]);
+  assert.deepEqual([...reused], [f.image]);
+  assert.equal(count(), before);
+  // Different content still becomes its own file.
+  const other = await uploadLibraryFiles({
+    store: f.store,
+    files: [file()],
+    upload: async () => ({
+      type: 'image',
+      data: {
+        ...receipt().data,
+        cloudAssetId: 'new',
+        metadata: { sha256: 'b'.repeat(64), bytes: 12 },
+      },
+    }),
+  });
+  assert.notEqual(other[0], f.image);
+  assert.equal(count(), before + 1);
+});
+
+test('a refused attach of an upload names the reason', () => {
+  const f = fixture();
+  const sample = f.store.addEntity('audio', null, {
+    data: { fileId: 'voice-file', metadata: { duration: 4 } },
+  });
+  const short = f.store.addEntity('audio', null, {
+    data: { fileId: 'short-file', metadata: { duration: 1.5 } },
+  });
+  const person = f.store.addEntity('character', null, {
+    title: '老三',
+    data: { looks: [], voices: [{ id: 'v', assetId: sample, clipStart: 0 }] },
+  });
+  const project = f.store.exportProject();
+  const voice = { kind: 'voice', pid: person };
+  assert.equal(uploadAttachRefusal(project, voice, sample), 'upload.voiceAlready');
+  assert.equal(uploadAttachRefusal(project, voice, short), 'upload.tooShort');
+  assert.equal(uploadAttachRefusal(project, voice, f.image), 'upload.notAudio');
+  assert.equal(
+    uploadAttachRefusal(project, { kind: 'image', pid: person }, sample),
+    'upload.notImage',
+  );
+  assert.equal(
+    uploadAttachRefusal(project, { kind: 'image', pid: 'gone' }, f.image),
+    'upload.ownerGone',
+  );
+  assert.equal(uploadAttachRefusal(project, { kind: 'image', pid: person }, f.image), '');
 });

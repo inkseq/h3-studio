@@ -304,10 +304,13 @@ export const splitBase = (name) => name.replace(/\s*[（(][^（）()]*[）)]\s*$
 /**
  * Storyboard actions (for one `batch`) that turn one profile holding several people into one
  * character per person in a group: each gets the shared description, look and body text and
- * the next free speaker number. The old profile is left alone; the caller moves it to the
- * trash afterwards. Returns null unless the names are 2…6 distinct non-empty names.
+ * the next free speaker number, and (with `copyPhotos`) the default look's pictures. Every
+ * scene and shot cast that held the old profile then holds all the members instead, with no
+ * look chosen, so trashing the old profile afterwards leaves no shot without them. The old
+ * profile itself is left alone; the caller moves it to the trash afterwards. Returns null
+ * unless the names are 2…6 distinct non-empty names.
  */
-export function splitActions(p, profiles, { names, lookName = '' } = {}) {
+export function splitActions(p, profiles, { names, lookName = '', copyPhotos = true } = {}) {
   if (p?.type !== 'character' || !Array.isArray(names)) return null;
   const clean = names.map((n) => (typeof n === 'string' ? n.trim().slice(0, 160) : ''));
   if (clean.length < 2 || clean.length > MAX_SPLIT || clean.some((n) => !n)) return null;
@@ -324,13 +327,17 @@ export function splitActions(p, profiles, { names, lookName = '' } = {}) {
   const each = (total) =>
     Number.isInteger(total) && total % clean.length === 0 ? total / clean.length : null;
   const anchors = b.anchors.filter((x) => x.trim());
-  const actions = [];
+  const actions = [],
+    members = [];
   for (const name of clean) {
     actions.push({ type: 'newProfile', ptype: 'character', name, ...(lookName && { lookName }) });
     const ref = { $ref: actions.length - 1 };
+    members.push(ref);
     if (p.desc) actions.push({ type: 'profile', id: ref, patch: { desc: p.desc } });
     if (look?.desc)
       actions.push({ type: 'variant', pid: ref, vid: 'main', patch: { desc: look.desc } });
+    if (copyPhotos && list(look?.images).length)
+      actions.push({ type: 'copyLook', pid: ref, vid: 'main', from: p.id, fromVid: look.id });
     let speaker = '';
     for (let n = 1; n < 20 && !speaker; n++) if (!used.has('S' + n)) speaker = 'S' + n;
     if (speaker) used.add(speaker);
@@ -345,6 +352,7 @@ export function splitActions(p, profiles, { names, lookName = '' } = {}) {
       },
     });
   }
+  actions.push({ type: 'recast', id: p.id, to: members });
   return actions;
 }
 

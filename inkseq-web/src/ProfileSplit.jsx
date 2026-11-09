@@ -1,7 +1,8 @@
 // One person, one voice (inky-help L20261108-02): a character card that holds several people
 // and has lines is split into one card per person in a group. The new cards are made in one
-// batch (all or nothing); the old card then goes to the trash through the usual trash flow,
-// so it can be restored and is never deleted here.
+// batch (all or nothing, one Undo), which also puts all of them in every scene and shot that
+// had the old card; the old card then goes to the trash through the usual trash flow, so it
+// can be restored and is never deleted here.
 import React, { useState } from 'react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
@@ -38,6 +39,7 @@ export function ProfileSplit({ p, count }) {
   const trash = useTrash();
   const [open, setOpen] = useState(false),
     [names, setNames] = useState([]),
+    [copyPhotos, setCopyPhotos] = useState(true),
     [phase, setPhase] = useState('');
   const busy = phase === 'saving';
   const base = splitBase(p.name);
@@ -45,9 +47,12 @@ export function ProfileSplit({ p, count }) {
   const group = p.bible.groupId || base;
   const valid = splitActions(p, state.profiles, { names }) !== null;
   const lookName = t('bible.defaultLook.character');
+  const look = p.variants.find((v) => v.id === p.def) || p.variants[0];
+  const photos = look?.images?.length || 0;
 
   const start = () => {
     setNames(Array.from({ length: count }, (_, i) => nameFor(i)));
+    setCopyPhotos(true);
     setPhase('');
     setOpen(true);
   };
@@ -58,6 +63,7 @@ export function ProfileSplit({ p, count }) {
     const actions = splitActions(p, state.profiles, {
       names,
       lookName: lookName === 'bible.defaultLook.character' ? '' : lookName,
+      copyPhotos,
     });
     if (!actions) return;
     setPhase('saving');
@@ -120,6 +126,23 @@ export function ProfileSplit({ p, count }) {
                 />
               </Field>
             ))}
+            {/* Always shown, so nothing below moves; greyed out when there is nothing to copy. */}
+            <label className="bible-split-copy">
+              <input
+                type="checkbox"
+                checked={copyPhotos && photos > 0}
+                disabled={busy || !photos}
+                onChange={(e) => setCopyPhotos(e.target.checked)}
+              />
+              <span>
+                {t('bible.splitCopyPhotos')}
+                <small className="muted">
+                  {photos
+                    ? t('bible.splitCopyPhotosCount', { count: photos })
+                    : t('bible.splitCopyPhotosNone')}
+                </small>
+              </span>
+            </label>
           </div>
           {/* One status line that keeps its height, so the buttons below never move. */}
           <p

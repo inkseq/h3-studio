@@ -204,7 +204,11 @@ export const storyboardCatalogs = {
     'bible.split': 'Split into group members',
     'bible.splitTitle': 'Split into group members',
     'bible.splitHelp':
-      'Each person gets a character card in the group "{group}" with this card’s description, look and body text, and the next free speaker number. This card then moves to the trash, where you can restore it.',
+      'Each person gets a character card in the group "{group}" with this card’s description, look and body text, and the next free speaker number. Every shot with this card gets all of them instead. This card then moves to the trash, where you can restore it.',
+    'bible.splitCopyPhotos': 'Copy the original photos',
+    'bible.splitCopyPhotosCount':
+      'Each new card’s default look gets this card’s photos ({count}). Untick to start with none.',
+    'bible.splitCopyPhotosNone': 'This card has no photos to copy.',
     'bible.splitCount': 'How many people',
     'bible.splitName': 'Person {n}',
     'bible.splitMemberName': '{name} {n}',
@@ -212,6 +216,15 @@ export const storyboardCatalogs = {
     'bible.splitNamesInvalid': 'Each person needs a different name.',
     'bible.splitFailed': 'Couldn’t split it. The story is unchanged.',
     'bible.splitSaving': 'Saving the new cards, then moving this card to the trash…',
+    'upload.ownerGone': 'The file is in the story’s files, but the card it was for is gone.',
+    'upload.notImage':
+      'The file is in the story’s files, but only a picture can go on {name}’s look.',
+    'upload.notAudio':
+      'The file is in the story’s files, but only a sound can be {name}’s voice or ambience.',
+    'upload.tooShort':
+      'This clip is under 3 seconds. It is in the story’s files, but too short to be {name}’s sample.',
+    'upload.voiceAlready': '{name} already has this voice sample.',
+    'upload.attachFailed': 'The file is in the story’s files, but it could not be added to {name}.',
     'bible.splitKept':
       'The new cards are made. This card is still here: move it to the trash with the button below when you are ready.',
     'bible.gap.speaker': 'Has lines ({count}) but no speaker number yet.',
@@ -1192,7 +1205,11 @@ export const storyboardCatalogs = {
     'bible.split': '拆成同组成员',
     'bible.splitTitle': '拆成同组成员',
     'bible.splitHelp':
-      '每个人建一张角色卡，放进同一组“{group}”，都带上这张卡的描述、造型和身体结构的文字，并各自分到下一个空闲的说话人编号。然后这张卡移到回收站，可以还原。',
+      '每个人建一张角色卡，放进同一组“{group}”，都带上这张卡的描述、造型和身体结构的文字，并各自分到下一个空闲的说话人编号。用到这张卡的镜头会换成他们全部。然后这张卡移到回收站，可以还原。',
+    'bible.splitCopyPhotos': '复制原来的照片',
+    'bible.splitCopyPhotosCount':
+      '每张新卡的默认造型都带上这张卡的 {count} 张照片。不勾就从没有照片开始。',
+    'bible.splitCopyPhotosNone': '这张卡没有照片可以复制。',
     'bible.splitCount': '几个人',
     'bible.splitName': '第 {n} 个人',
     'bible.splitMemberName': '{name}{n}',
@@ -1200,6 +1217,12 @@ export const storyboardCatalogs = {
     'bible.splitNamesInvalid': '每个人要有一个不重复的名字。',
     'bible.splitFailed': '没能拆开，故事没有改动。',
     'bible.splitSaving': '正在保存新卡，然后把这张卡移到回收站…',
+    'upload.ownerGone': '文件已经在故事的素材里，但它要加到的卡片不在了。',
+    'upload.notImage': '文件已经在故事的素材里，但「{name}」的造型只能加图片。',
+    'upload.notAudio': '文件已经在故事的素材里，但「{name}」的声音或环境声只能用音频。',
+    'upload.tooShort': '这段声音不到 3 秒。它已经在故事的素材里，但太短，不能做「{name}」的样本。',
+    'upload.voiceAlready': '「{name}」已经有这段声音样本了。',
+    'upload.attachFailed': '文件已经在故事的素材里，但没能加到「{name}」。',
     'bible.splitKept': '新卡已经建好。这张卡还在，准备好了用下面的按钮移到回收站。',
     'bible.gap.speaker': '有台词（{count} 处），还没有说话人编号。',
     'bible.gap.voice': '有台词（{count} 处），还没有声音。',
