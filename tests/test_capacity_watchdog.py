@@ -692,7 +692,9 @@ class NodeWatchdogTests(LedgerCase):
         for change in (
             {"complete": False},
             {"provider_instance_id": "another-instance"},
-            {"observed_at": self.now - 31, "inventory_observed_at": self.now - 31},
+            # An old proof stays proof (#1034); a proof from the future does not.
+            {"observed_at": self.now + 31, "inventory_observed_at": self.now + 31},
+            {"inventory_observed_at": self.now - 300},
         ):
             with self.subTest(change=change):
                 payload = copy.deepcopy(original_payload)
@@ -771,7 +773,10 @@ class NodeWatchdogTests(LedgerCase):
             connection.execute(
                 update(registered_workers).values(expires_at=self.now - 1)
             )
+        # Lost for less than the grace window: the worker may still come back.
         self.now += 181
+        self.assertEqual(check(self.service, NullTelemetry())["stop_candidates"], [])
+        self.now += 600
         result = check(self.service, NullTelemetry())
         self.assertEqual(result["stop_candidates"], [node_id])
         health = self.node(node_id)[0]["payload"]["capacity_health"]

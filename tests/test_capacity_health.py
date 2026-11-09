@@ -95,14 +95,18 @@ class CapacityHealthTests(unittest.TestCase):
         self.node["payload"]["dstack"].update(
             state="runtime_unconfirmed", observed_at=1
         )
-        expired = {**self.worker, "expires_at": 900}
-        for workers in ([], [expired], [{**self.worker, "state": "retired"}]):
+        expired = {**self.worker, "expires_at": 50}
+        retired = {**self.worker, "state": "retired", "expires_at": 20}
+        for workers in ([], [expired], [retired]):
             with self.subTest(workers=workers):
                 finding = self.evaluate(workers=workers)[0]
                 self.assertEqual(
                     (finding["diagnosis"], finding["stop_replace"]),
                     ("worker_unreachable", True),
                 )
+        # A worker lost less than the grace window ago may still come back.
+        recent = {**self.worker, "expires_at": 900}
+        self.assertFalse(self.evaluate(workers=[recent])[0]["stop_replace"])
         # A live registration, or a fresh ready runtime, is not unreachable.
         finding = self.evaluate()[0]
         self.assertEqual(finding["diagnosis"], "dispatch_unobserved")
@@ -522,3 +526,18 @@ class DemandLoopLedgerTests(LedgerCase):
         self.assertTrue(result["health_check"]["demand_paused"])
         with self.repo.engine.connect() as connection:
             self.assertFalse(read_runtime(connection, self.scope.tenant_id)["enabled"])
+
+
+class RefusalCountTests(unittest.TestCase):
+    def test_refusals_are_counted_by_reason_and_reset_on_read(self):
+        from studio_platform.capacity_reasons import count, drain
+
+        drain()
+        count("claim", "worker_readiness_unconfirmed")
+        count("claim", "worker_readiness_unconfirmed")
+        count("defer", None)
+        self.assertEqual(
+            drain(),
+            {"claim:worker_readiness_unconfirmed": 2, "defer:none": 1},
+        )
+        self.assertEqual(drain(), {})

@@ -26,6 +26,7 @@ from .repository import (
     Scope,
     budget_accounts,
     instance_intents,
+    jobs,
     registered_workers,
     request_hash,
     scaler_actions,
@@ -402,6 +403,15 @@ class DstackCommands:
         }
         if demand is not None:
             payload["demand_start"] = copy.deepcopy(demand)
+            # Whose job asked for this machine, against whose profile pays for
+            # it. A job owner without a demand profile of their own falls back
+            # to another owner's profile and GPU account (#1140 Q2): record it.
+            job_owner = connection.execute(
+                select(jobs.c.owner_id).where(jobs.c.id == demand["job_id"])
+            ).scalar_one_or_none()
+            if job_owner is not None:
+                payload["demand_job_owner_id"] = job_owner
+                payload["cross_owner_fallback"] = job_owner != owner
         if capacity_snapshot is not None:
             payload["capacity_policy_snapshot"] = copy.deepcopy(capacity_snapshot)
         if continuing:

@@ -133,6 +133,7 @@ def fenced_node_stop(connection, node, intent, *, now=None):
         "capacity_startup_failed",
         "capacity_provider_removed",
         "capacity_dispatch_unavailable",
+        "capacity_worker_lost",
     }:
         return False
     # New decisions use the current clock. A committed desired=stopped command
@@ -234,6 +235,32 @@ def fenced_node_stop(connection, node, intent, *, now=None):
             or node["desired_state"] == "running"
             and not matching_dstack_queued_jobs(connection, intent, node)
         ):
+            return False
+    elif marker["reason"] == "capacity_worker_lost":
+        # A machine that served before, whose worker has been gone past the
+        # grace window (#1140, #1034 worker_never_reregisters). Its runtime can
+        # never give the fresh ready read a normal stop needs.
+        from .capacity_health import worker_unreachable
+
+        binding = node["payload"].get("dstack", {})
+        if not _number(decision_at):
+            return False
+        if node["desired_state"] == "stopped":
+            # Replaying the committed decision: retiring the workers moved their
+            # expiry to the stop itself, so only re-check that none came back.
+            observed = binding.get("observed_at")
+            if any(
+                worker["state"] in {"ready", "busy"}
+                and _number(worker["expires_at"])
+                and worker["expires_at"] > decision_at
+                for worker in workers
+            ) or (
+                binding.get("state") in {"ready", "busy"}
+                and _number(observed)
+                and 0 <= decision_at - observed <= 120
+            ):
+                return False
+        elif not worker_unreachable(binding, workers, decision_at):
             return False
     elif marker["reason"] == "capacity_startup_failed":
         # Decided on a failed one-shot launch; a replay sees the phase move on
@@ -437,9 +464,13 @@ def provider_removed(binding, intent, now):
         and binding.get("state") == "stopped"
         and binding.get("dstack_status") in {"done", "failed", "terminated", "aborted"}
         and _number(proof.get("observed_at"))
-        and 0 <= now - proof["observed_at"] <= 30
+        # The writer validated a fresh complete inventory when it recorded the
+        # proof (dstack_ledger). Provider instance ids are never reused, so the
+        # absence stays true: an older proof is still proof. Requiring it to be
+        # under 30 s old let a job on a removed machine stay "running" forever
+        # once ticks were slower than that (#1034 machine_lost_mid_job).
+        and 0 <= now - proof["observed_at"]
         and _number(proof.get("inventory_observed_at"))
-        and 0 <= now - proof["inventory_observed_at"] <= 30
         and 0 <= proof["observed_at"] - proof["inventory_observed_at"] <= 30
         and isinstance(proof.get("inventory_sha256"), str)
         and len(proof["inventory_sha256"]) == 64
@@ -636,7 +667,15 @@ def reclaim_node(service, node, intent):
         and not related
         and node["desired_state"] == "running"
     )
-    if receipts or cold_due or removed or boot_failed:
+    from .capacity_health import worker_unreachable
+
+    worker_lost = (
+        binding.get("apply_started") is True
+        and not binding.get("stop_started")
+        and binding.get("state") not in {"stopping", "stopped"}
+        and worker_unreachable(binding, workers, now)
+    )
+    if receipts or cold_due or removed or boot_failed or worker_lost:
         reason = (
             receipts[-1]["reason"]
             if receipts
@@ -645,6 +684,8 @@ def reclaim_node(service, node, intent):
             else "capacity_startup_failed"
             if boot_failed
             else "capacity_startup_timeout"
+            if cold_due
+            else "capacity_worker_lost"
         )
         stopped = _stop(
             repo, node, intent, reason, receipts, now, startup_timeout_seconds=startup
