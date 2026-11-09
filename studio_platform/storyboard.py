@@ -647,9 +647,6 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         parts.append(
             {"kind": "camera", "label": "运镜", "text": CAMERAS[value["camera"]]}
         )
-    prompt = "\n".join(part["text"] for part in parts)
-    if len(prompt) > 12000:
-        issues.append("组装后的提示词超过12000字符，请缩短档案或动作描述")
     inputs = {
         "images": [],
         "videos": [],
@@ -659,7 +656,11 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         "guides": [],
     }
 
-    def add(ident, why, *, start=None, slot=None, guide=None, clip_seconds=3):
+    roles = {}
+
+    def add(
+        ident, why, *, start=None, slot=None, guide=None, clip_seconds=3, role=None
+    ):
         entity = lookup.get(ident)
         if not entity:
             issues.append("参考素材不存在，请重新选择")
@@ -711,6 +712,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             or entity["data"].get("missingFile")
         ):
             ref["reason"] = "素材尚未同步为可用的云端输入"
+        roles[id(ref)] = role
         references.append((ref, entry))
 
     def extra_reference(item):
@@ -753,6 +755,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             if entity['type'] in {'video', 'audio'}
             else None,
             clip_seconds=seconds,
+            role={"kind": "extra", "name": entity.get("title", "")},
         )
 
     def soundtrack(ident):
@@ -765,7 +768,13 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         if type(length) in (int, float) and length + 0.01 < seconds:
             issues.append("台词音轨比镜头短，请重新生成音轨或缩短镜头")
             return
-        add(ident, "台词音轨", start=0, clip_seconds=seconds)
+        add(
+            ident,
+            "台词音轨",
+            start=0,
+            clip_seconds=seconds,
+            role={"kind": "soundtrack"},
+        )
         controls["audio_conditioning"] = "soundtrack"
 
     controls = copy.deepcopy(h3.get("controls", {}))
@@ -820,7 +829,15 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         for character, look in cast:
             images = look_images(look) if look else []
             if images:
-                add(images[0], character["title"] + " · " + look["name"])
+                add(
+                    images[0],
+                    character["title"] + " · " + look["name"],
+                    role={
+                        "kind": "character",
+                        "name": character["title"],
+                        "variant": look.get("name", ""),
+                    },
+                )
             else:
                 notes.append(character["title"] + "没有造型主图，只使用文字描述")
             if track:
@@ -837,6 +854,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
                     voice["assetId"],
                     character["title"] + "的声音",
                     start=voice.get("clipStart", 0),
+                    role={"kind": "voice", "name": character["title"]},
                 )
         if location:
             images = (
@@ -845,11 +863,23 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
                 else location["data"].get("referenceAssetIds", [])
             )
             if images:
-                add(images[0], "场景")
+                add(
+                    images[0],
+                    "场景",
+                    role={
+                        "kind": "place",
+                        "name": location["title"],
+                        "variant": (location_version or {}).get("name", ""),
+                    },
+                )
         for ident in value.get("propIds", []):
             prop = lookup[ident]
             if prop["data"].get("imageIds"):
-                add(prop["data"]["imageIds"][0], "道具 · " + prop["title"])
+                add(
+                    prop["data"]["imageIds"][0],
+                    "道具 · " + prop["title"],
+                    role={"kind": "prop", "name": prop["title"]},
+                )
         for ref in value.get("extraRefs", []):
             if track and lookup[ref["entityId"]]["type"] == "audio":
                 notes.append("有台词音轨时不再发送其他声音")
@@ -859,7 +889,12 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             soundtrack(track)
         elif location and location["data"].get("ambient"):
             ambient = location["data"]["ambient"]
-            add(ambient["assetId"], "场景环境声", start=ambient.get("clipStart", 0))
+            add(
+                ambient["assetId"],
+                "场景环境声",
+                start=ambient.get("clipStart", 0),
+                role={"kind": "ambience", "name": location["title"]},
+            )
         if not native_roles and (
             value.get("firstFrameId")
             or value.get("lastFrameId")
@@ -950,6 +985,16 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
         and (inputs['first_frame'] or inputs['last_frame'] or inputs['guides'])
     ):
         issues.append("全能参考至少需要一份当前可发送的素材")
+    if mode == "ref":
+        # Say which sent reference is which, numbered in send order (#505).
+        from .storyboard_roles import role_map
+
+        legend = role_map([(ref, roles.get(id(ref))) for ref, _ in references])
+        if legend:
+            parts.insert(0, {"kind": "references", "label": "参考图", "text": legend})
+    prompt = "\n".join(part["text"] for part in parts)
+    if len(prompt) > 12000:
+        issues.append("组装后的提示词超过12000字符，请缩短档案或动作描述")
     draft = {
         "recipe_id": recipe["id"] if recipe else chosen,
         "prompt": prompt,
