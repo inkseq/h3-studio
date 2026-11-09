@@ -861,6 +861,59 @@ class StoryboardPureTests(unittest.TestCase):
         self.assertEqual(shot["propIds"], [])
         self.assertTrue(self.find("sword-image"))
 
+    def test_shot_picks_which_card_pictures_it_sends(self):
+        # #504 manual override: the shot picks per card; absent keeps the main picture.
+        shot = self.find("shot-one")["data"]["storyboard"]
+        shot["cardImages"] = {"hero": ["night", "portrait"]}
+        validate_project(self.project)
+        draft, issues = read_draft(self.project, "shot-one", capabilities=cap(3, 1, 4))
+        self.assertEqual(issues, [])
+        self.assertEqual(
+            [i["asset_id"] for i in draft["inputs"]["images"]],
+            ["receipt-night", "receipt-portrait", "receipt-room-image"],
+        )
+        legend = draft["storyboard"]["prompt_parts"][0]["text"]
+        self.assertIn("<Picture 1> is the identity reference for 林岚", legend)
+        self.assertIn("<Picture 2> is the identity reference for 林岚", legend)
+        self.assertIn("<Picture 3> is the setting reference", legend)
+
+    def test_a_pick_no_longer_on_the_card_falls_back_with_a_note(self):
+        shot = self.find("shot-one")["data"]["storyboard"]
+        # "extra" is an image of the story but not one of the hero's look pictures.
+        shot["cardImages"] = {"hero": ["extra"], "room": ["room-image"]}
+        validate_project(self.project)
+        draft, _ = read_draft(self.project, "shot-one", capabilities=cap(3, 1, 4))
+        self.assertEqual(draft["inputs"]["images"][0]["asset_id"], "receipt-portrait")
+        self.assertIn(
+            "林岚：所选参考图已不在卡片上，改用主图", draft["storyboard"]["notes"]
+        )
+
+    def test_card_picks_are_validated_and_cleaned_on_delete(self):
+        bad = [
+            {"hero": []},
+            {"hero": ["portrait", "night", "room-image"]},
+            {"hero": ["portrait", "portrait"]},
+            {"shot-one": ["portrait"]},
+            {"hero": ["voice"]},
+            {"missing": ["portrait"]},
+            ["portrait"],
+        ]
+        for value in bad:
+            broken = copy.deepcopy(self.project)
+            target = next(e for e in broken["entities"] if e["id"] == "shot-one")
+            target["data"]["storyboard"]["cardImages"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_project(broken)
+        shot = self.find("shot-one")["data"]["storyboard"]
+        shot["cardImages"] = {"hero": ["night", "portrait"], "sword": ["sword-image"]}
+        delete_entity(self.project, "night", False)
+        delete_entity(self.project, "sword", False)
+        validate_project(self.project)
+        self.assertEqual(shot["cardImages"], {"hero": ["portrait"]})
+        self.assertIn(
+            "cardImages", contract()["fields"]["shot.data.storyboard"]["properties"]
+        )
+
     def test_previous_selected_candidate_requires_saved_exact_last_frame(self):
         shot = self.find("shot-one")
         prior = copy.deepcopy(shot)

@@ -347,6 +347,14 @@ def delete_entity(project, entity_id, cascade):
             for key in ("firstFrameId", "lastFrameId"):
                 if draft.get(key) in deleted:
                     draft[key] = ""
+            if "cardImages" in draft:
+                # A deleted card or picture leaves the shot's picks (#504).
+                picks = {
+                    card: [i for i in images if i not in deleted]
+                    for card, images in draft["cardImages"].items()
+                    if card not in deleted
+                }
+                draft["cardImages"] = {k: v for k, v in picks.items() if v}
             if (draft.get("place") or {}).get("locationId") in deleted:
                 draft["place"] = None
             if draft.get("previousFrame") and any(
