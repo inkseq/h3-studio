@@ -195,3 +195,41 @@ class ModalLifecycleTests(ModalBudgetCase):
             ],
             1,
         )
+
+    def test_finished_job_leaves_admission_once_its_lost_sandbox_is_gone(self):
+        # #915: lost work on a Modal sandbox kept its finished job's hold.
+        from test_platform_queue import VALID_ARTIFACT
+
+        queue = TaskQueue(self.repo)
+        job = self.job()
+        claim = queue.claim(
+            'modal-' + self.identity.replace('-', ''), self.pool, job_ids=[job['id']]
+        )
+        queue.begin_submission(claim.lease)
+        queue.record_submitted(claim.lease, 'original-upstream')
+        self.now += 601
+        self.lifecycle.sweep()
+        self.assertNotEqual(self.row()['state'], 'destroyed')
+        replacement = queue.claim('replacement', self.pool, job_ids=[job['id']])
+        queue.begin_submission(replacement.lease)
+        queue.record_submitted(replacement.lease, 'replacement-upstream')
+        queue.begin_collection(replacement.lease)
+        queue.complete(replacement.lease, [VALID_ARTIFACT], actual_cost_microusd=None)
+
+        def held():
+            with self.repo.engine.connect() as c:
+                return [
+                    (row.state, row.actual_cost_microusd)
+                    for row in c.execute(
+                        select(budget_reservations).where(
+                            budget_reservations.c.reference_type == 'job',
+                            budget_reservations.c.reference_id == job['id'],
+                        )
+                    )
+                ]
+
+        self.assertEqual(held(), [('reserved', None)])
+        self.lifecycle.sweep()
+        self.lifecycle.sweep()
+        self.assertEqual(self.row()['state'], 'destroyed')
+        self.assertEqual(held(), [('invoice_pending', None)])

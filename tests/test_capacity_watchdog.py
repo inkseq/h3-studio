@@ -29,6 +29,7 @@ from studio_platform.repository import (
     Conflict,
     LeaseLost,
     attempts,
+    budget_reservations,
     instance_intents,
     jobs,
     outbox,
@@ -603,6 +604,74 @@ class NodeWatchdogTests(LedgerCase):
             (old["upstream_stopped"], old["actual_cost_microusd"]), (0, None)
         )
 
+    def test_removed_host_and_its_cancelled_job_leave_admission_without_a_cost(
+        self,
+    ):
+        # #915 (staging 3515d90f/881a2328): the host's own release ran while
+        # its attempt was open, and nothing retried it after the reclaim.
+        node_id, controller, original, claim = self.lost()
+        self.now = 1001
+        node, intent = self.node(node_id)
+        binding = node["payload"]["dstack"]
+        binding.update(
+            state="stopped",
+            dstack_status="terminated",
+            provider_removal_proof={
+                "version": 1,
+                "backend": binding["backend"],
+                "run_id": binding["run_id"],
+                "provider_instance_id": intent["provider_instance_id"],
+                "observed_at": self.now,
+                "inventory_observed_at": self.now,
+                "complete": True,
+                "absent": True,
+                "inventory_sha256": "a" * 64,
+            },
+        )
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node_id)
+                .values(payload=node["payload"], runtime_state="stopped")
+            )
+            connection.execute(
+                update(instance_intents)
+                .where(instance_intents.c.id == node_id)
+                .values(state="destroyed")
+            )
+            # The vanished worker no longer carries the job (staging rows had
+            # no busy worker either).
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == "dstack-test-slot")
+                .values(current_job_id=None)
+            )
+
+        def holds(kind, ident):
+            with self.repo.engine.connect() as connection:
+                return [
+                    (row.state, row.actual_cost_microusd)
+                    for row in connection.execute(
+                        select(budget_reservations).where(
+                            budget_reservations.c.reference_type == kind,
+                            budget_reservations.c.reference_id == ident,
+                        )
+                    )
+                ]
+
+        result = reclaim_node(self.service, node, intent)
+        self.assertEqual(result["reason"], "capacity_provider_removed")
+        self.assertEqual(holds("instance", node_id), [("invoice_pending", None)])
+        self.assertEqual(holds("job", original["id"]), [("reserved", None)])
+        self.repo.request_cancel(self.scope, original["id"])
+        self.assertEqual(holds("job", original["id"]), [("invoice_pending", None)])
+        budget = self.repo.get_budget("owner-budget")
+        self.assertEqual(
+            (budget["reserved_microusd"], budget["spent_microusd"]), (0, 0)
+        )
+        reclaim_node(self.service, self.node(node_id)[0], intent)
+        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+
     def _stopped_zombie(self):
         node_id, controller, original, claim = self.lost()
         self.now = 1001
@@ -868,7 +937,29 @@ class NodeWatchdogTests(LedgerCase):
                 devices, {worker["id"]: "released", "unrelated-worker": "owned"}
             )
             self.assertEqual(self.repo._global_usage(connection)["instances"], 1)
-        self.assertEqual(self.repo.get_budget("owner-budget"), budget)
+            holds = [
+                dict(row)
+                for row in connection.execute(
+                    select(budget_reservations).where(
+                        budget_reservations.c.reference_type == "instance",
+                        budget_reservations.c.reference_id == node_id,
+                    )
+                ).mappings()
+            ]
+        # #915: the removed host's hold leaves admission once, with its actual
+        # cost still unknown. Nothing is spent or invented.
+        self.assertEqual(
+            [(h["state"], h["actual_cost_microusd"]) for h in holds],
+            [("invoice_pending", None)],
+        )
+        self.assertEqual(
+            self.repo.get_budget("owner-budget"),
+            {
+                **budget,
+                "reserved_microusd": budget["reserved_microusd"]
+                - holds[0]["amount_microusd"],
+            },
+        )
 
     def test_old_running_host_fault_marker_cannot_authorize_new_stop(self):
         from studio_platform.capacity_health import check

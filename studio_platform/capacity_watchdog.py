@@ -707,5 +707,13 @@ def reclaim_node(service, node, intent):
         stopped = _stop(
             repo, node, intent, reason, receipts, now, startup_timeout_seconds=startup
         )
-        return {"stop_requested": stopped, "reason": reason, "receipts": receipts}
-    return {"stop_requested": False, "receipts": []}
+        outcome = {"stop_requested": stopped, "reason": reason, "receipts": receipts}
+    else:
+        outcome = {"stop_requested": False, "receipts": []}
+    if removed:
+        from .settlement_recovery import release_removed_holds
+
+        # Job end and host removal each release once; the later one finds the
+        # other still open. Retry both here on every pass over a removed host.
+        release_removed_holds(repo, intent["id"], {row["job_id"] for row in related})
+    return outcome
