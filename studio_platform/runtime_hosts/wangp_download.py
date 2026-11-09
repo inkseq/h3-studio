@@ -8,7 +8,9 @@ Downloaded bytes remain unqualified until the existing full runtime verifier.
 from __future__ import annotations
 
 import argparse
+import base64
 import ctypes
+import hashlib
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stderr, redirect_stdout
 import json
@@ -33,6 +35,10 @@ MAX_TOTAL = 256 * 1024**3
 CACHE_LIMIT = 1024**3
 HEADROOM = 10 * 1024**3
 DOWNLOAD_TIMEOUT = 7200
+# A file whose on-disk bytes do not grow for this long is a stalled transfer.
+# The child reports it; the owner stops that child and relaunches it once
+# (completed files are kept, the SDK resumes partial ones).
+STALL_SECONDS = 120
 # Explicit transport identity, reviewed against all eleven original FL/REF files.
 # This is selected before transfer; HTTP failures never select another revision.
 # Official immutable metadata response SHA256:
@@ -323,6 +329,7 @@ SAFE_ERRORS = frozenset(
         "model_download_disk_headroom",
         "model_download_failed",
         "model_download_timeout",
+        "model_download_stalled",
         "model_download_cache_limit",
         "model_download_progress_invalid",
         "model_download_stop_unconfirmed",
@@ -624,6 +631,74 @@ def partial_bytes(root):
     return size if found else None
 
 
+def _short_hash(name):
+    try:
+        from huggingface_hub._local_folder import _short_hash as sdk_hash
+    except ImportError:  # Same scheme as the locked SDK; tests run without it.
+        return base64.urlsafe_b64encode(hashlib.sha1(name.encode()).digest()).decode()
+    return sdk_hash(name)
+
+
+def file_bytes(root, filename):
+    """On-disk bytes of one file: its final size, else its SDK partial size.
+
+    The SDK keeps a local-dir partial beside `<name>.metadata` as
+    `<short_hash(name.metadata)>.<etag>.incomplete`.
+    """
+    relative = PurePosixPath(filename)
+    target = root / relative
+    try:
+        if target.is_file() and not target.is_symlink():
+            return target.stat().st_size
+    except OSError:
+        pass
+    folder = root / ".cache" / "huggingface" / "download" / relative.parent
+    prefix = _short_hash(relative.name + ".metadata") + "."
+    size = 0
+    try:
+        for entry in os.scandir(folder):
+            if (
+                entry.name.startswith(prefix)
+                and entry.name.endswith(".incomplete")
+                and entry.is_file(follow_symlinks=False)
+            ):
+                size += entry.stat(follow_symlinks=False).st_size
+    except OSError:
+        pass
+    return size
+
+
+class _StallWatch:
+    """Per-file no-progress timer over on-disk bytes of in-flight transfers.
+
+    Partial sizes are only meaningful for plain HTTP transfers (Xet may
+    preallocate), which download_environment always selects.
+    """
+
+    def __init__(self, root, seconds, clock):
+        self.root, self.seconds, self.clock = root, seconds, clock
+        self.enabled = os.environ.get("HF_HUB_DISABLE_XET") == "1"
+        self.inflight = {}  # filename -> [bytes, time they last changed]
+
+    def begin(self, filename):
+        self.inflight[filename] = [file_bytes(self.root, filename), self.clock()]
+
+    def end(self, filename):
+        self.inflight.pop(filename, None)
+
+    def stalled(self):
+        if not self.enabled:
+            return False
+        now = self.clock()
+        for filename, seen in self.inflight.items():
+            size = file_bytes(self.root, filename)
+            if size != seen[0]:
+                seen[:] = [size, now]
+            elif now - seen[1] >= self.seconds:
+                return True
+        return False
+
+
 def fetch_files(
     document,
     expected_digest,
@@ -634,6 +709,8 @@ def fetch_files(
     downloader=None,
     sleep=time.sleep,
     tick_seconds=10,
+    stall_seconds=STALL_SECONDS,
+    clock=time.monotonic,
 ):
     records = selected_files(document, expected_digest)
     locator_revision = _content_preserving_revision(document, expected_digest, records)
@@ -660,6 +737,7 @@ def fetch_files(
     lock = threading.Lock()
     completed = set()
     failure = None
+    watch = _StallWatch(root, stall_seconds, clock)
     total = sum(row[4] for row in records)
     measured = False  # Received bytes are reported only once partials are seen.
 
@@ -688,10 +766,16 @@ def fetch_files(
     ticking = threading.Event()
 
     def ticker():
+        nonlocal failure
         # Live received bytes let the controller judge speed between files.
         while not ticking.wait(tick_seconds):
             with lock:
-                if failure is None:
+                if failure is None and watch.stalled():
+                    # The owner stops this child (a stuck SDK thread cannot be
+                    # cancelled here) and relaunches it once.
+                    failure = "model_download_stalled"
+                    progress("failed", failure)
+                elif failure is None:
                     progress("downloading")
 
     threading.Thread(target=ticker, daemon=True).start()
@@ -704,6 +788,8 @@ def fetch_files(
             with lock:
                 if failure is not None:
                     raise ValueError(failure)
+            with lock:
+                watch.begin(filename)
             try:
                 returned = downloader(
                     repo_id=repo,
@@ -724,6 +810,8 @@ def fetch_files(
                     raise ValueError("model_download_size_mismatch")
                 break
             except Exception as error:
+                with lock:
+                    watch.end(filename)
                 # SDK errors may contain transient signed URLs. Never retain or
                 # serialize them. Only a file transfer retries, not bootstrap.
                 if str(error) in SAFE_ERRORS or attempt == 1:
@@ -736,6 +824,7 @@ def fetch_files(
                     raise ValueError(failure) from None
                 sleep(1)
         with lock:
+            watch.end(filename)
             if failure is None:
                 completed.add(filename)
                 progress("downloading")
@@ -743,6 +832,10 @@ def fetch_files(
     try:
         with ThreadPoolExecutor(max_workers=workers) as pool:
             list(pool.map(fetch, records))
+        with lock:
+            if failure is not None:
+                # A stalled transfer that later returned is still not complete.
+                raise ValueError(failure)
     except Exception as error:
         with lock:
             ticking.set()
@@ -787,6 +880,35 @@ def child_guard(owner_pid, timeout):
         raise ValueError("model_download_owner_unconfirmed")
     signal.signal(signal.SIGALRM, signal.SIG_DFL)
     signal.setitimer(signal.ITIMER_REAL, timeout)
+
+
+class _OwnedChild:
+    """The one download child; relaunched once after a stalled-file receipt.
+
+    Completed files are kept and the SDK resumes partial ones on relaunch.
+    """
+
+    def __init__(self, launch, stop, receipt):
+        self.launch, self.stop, self.receipt = launch, stop, receipt
+        self.process = None
+        self.relaunched = False
+
+    def start(self):
+        self.process = self.launch()
+        return self.process
+
+    def read(self, read_receipt):
+        """Return (receipt or None, current child)."""
+        try:
+            return read_receipt(), self.process
+        except ValueError as error:
+            if str(error) != "model_download_stalled" or self.relaunched:
+                raise
+        self.relaunched = True
+        self.stop(self.process)  # Stop and reap this exact child first.
+        self.process = None
+        self.receipt.unlink(missing_ok=True)
+        return None, self.start()
 
 
 def run_download(
@@ -891,10 +1013,9 @@ def run_download(
         return value
 
     deadline = clock() + timeout
-    child = None
     last = None
-    try:
-        child = popen(
+    owned = _OwnedChild(
+        lambda: popen(
             command,
             cwd=str(path_checked(source)),
             env=download_environment(environment, state),
@@ -902,14 +1023,19 @@ def run_download(
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             start_new_session=True,
-        )
+        ),
+        stop,
+        receipt,
+    )
+    try:
+        child = owned.start()
         while True:
             if clock() >= deadline:
                 raise ValueError("model_download_timeout")
             cache_size(state / "cache")
             if shutil.disk_usage(root).free < HEADROOM:
                 raise ValueError("model_download_disk_headroom")
-            value = read_receipt()
+            value, child = owned.read(read_receipt)
             if value is not None and value != last:
                 progress(
                     "model_download",
@@ -929,7 +1055,10 @@ def run_download(
                 child.wait(timeout=10)
                 # A final atomic receipt may arrive between the prior read and
                 # poll. Validate it after the exact child has exited/reaped.
-                value = read_receipt()
+                exited = child
+                value, child = owned.read(read_receipt)
+                if child is not exited:
+                    continue  # Relaunched after a stall; observe the new child.
                 if (
                     result != 0
                     or value is None
@@ -947,6 +1076,7 @@ def run_download(
                 return value
             sleep(0.25)
     except BaseException as original:
+        child = owned.process
         error_code = safe_error(original)
         # No returned Popen handle is not proof that a process never existed.
         failure = DownloadFailure(
