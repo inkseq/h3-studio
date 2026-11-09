@@ -252,8 +252,10 @@ Scenario(
 - `events`: `restart_app`, `demand_off`, `demand_on`, `offers_off`, `offers_on`,
   `edit_demand_config` (value: keys merged into `policy.demand_start`, then the
   controller restarts; a new id in `profile_ids` gets a copy of the first
-  profile, and a new `test_task_id` starts a fresh task cap for the spend
-  check), `corrupt_reservation` (value: columns set on the
+  profile, owned by the owner named in `profile_owners` when given, and a new
+  `test_task_id` starts a fresh task cap for the spend check, as does a new
+  Sydney day, since demand starts fund from `<test_task_id>:<YYYYMMDD>`),
+  `corrupt_reservation` (value: columns set on the
   latest seeded historical intent, e.g. an unknown pool).
 - World options: `max_machines`, `inventory` (`fresh`, `stale`, `slow`,
   `failed`), `history_removed` and `history_invoiced`, `test_guard` with

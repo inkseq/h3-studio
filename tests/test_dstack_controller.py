@@ -65,6 +65,55 @@ class DurableSlotShutdownTests(unittest.TestCase):
                 slots._slots.clear()
                 slots.close()
 
+    def test_stop_retires_slot_so_busy_queue_turns_cannot_keep_it_alive(self):
+        """#1140: queued-job turns held the lock of a removed host's slot on
+        every tick, so stop() never won and each turn renewed the drained
+        registration for hours. A requested stop now hides the slot from new
+        turns; the in-flight turn ends and the next stop completes."""
+        from studio_platform import slot_turns
+
+        with tempfile.TemporaryDirectory() as directory:
+            slots = self.slots(directory).__enter__()
+            spec = SimpleNamespace(
+                pool='pool-a',
+                worker_id='dstack-gone',
+                provider='lium',
+                dispatch_backend='legacy',
+            )
+            item = SimpleNamespace(lock=threading.Lock(), context=Mock(), spec=spec)
+            item.context.__exit__ = Mock()
+            slots._slots['gone'] = item
+            job = {
+                'status': 'queued',
+                'pool': 'pool-a',
+                'lease_worker_id': None,
+                'not_before': 0,
+                'lease_expires_at': None,
+            }
+            slots.repo = SimpleNamespace(
+                get_job=lambda *_: job,
+                clock=lambda: 100.0,
+                engine=None,
+            )
+            run_selected = Mock(return_value=False)
+            try:
+                item.lock.acquire()  # an in-flight turn
+                with self.assertRaisesRegex(Conflict, 'dbos_domain_turn_still_active'):
+                    slots.stop('gone')
+                item.lock.release()
+                with patch.object(slot_turns, '_count_refusal'):
+                    slot_turns.selected_job_turn(
+                        slots, 't', 'o', 'p', 'job', run_selected=run_selected
+                    )
+                run_selected.assert_not_called()
+                slots.stop('gone')
+                self.assertNotIn('gone', slots._slots)
+                item.context.__exit__.assert_called_once()
+                self.assertEqual(slots._retiring, set())
+            finally:
+                slots._slots.clear()
+                slots.close()
+
     def test_failed_context_close_retains_slot_and_fence_for_reconciliation(self):
         with tempfile.TemporaryDirectory() as directory:
             slots = self.slots(directory).__enter__()
@@ -1383,6 +1432,36 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.assertEqual(self.controller().tick()["nodes"][0]["state"], "never_applied")
         self.assertEqual(len(self.client.applied), 0)
         self.assertEqual(self.store.load(node)["billing_state"], "no_charge_confirmed")
+
+    def test_observation_failure_log_names_node_and_static_code(self):
+        from studio_platform.dstack_capacity import DstackError
+
+        node, controller = self.ready()
+        with (
+            patch.object(
+                controller,
+                "_tick_node",
+                side_effect=DstackError("dstack_runtime_identity_invalid"),
+            ),
+            self.assertLogs("studio_platform.dstack_controller", "WARNING") as log,
+        ):
+            controller.tick()
+        line = next(m for m in log.output if "observation_failed" in m)
+        self.assertIn("node_id=" + node, line)
+        self.assertIn("error_code=dstack_runtime_identity_invalid", line)
+        self.assertTrue(line.endswith("error_type=DstackError"))
+        with (
+            patch.object(
+                controller,
+                "_tick_node",
+                side_effect=RuntimeError("provider said secret-ish text"),
+            ),
+            self.assertLogs("studio_platform.dstack_controller", "WARNING") as log,
+        ):
+            controller.tick()
+        line = next(m for m in log.output if "observation_failed" in m)
+        self.assertIn("error_code=-", line)
+        self.assertNotIn("secret", line)
 
     def test_terminal_owned_run_cleans_only_local_resources(self):
         node, controller = self.ready()

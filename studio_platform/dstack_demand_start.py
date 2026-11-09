@@ -686,7 +686,9 @@ def start_once(service):
                 keep_on='idle',
                 idle_shutdown_seconds=idle,
             )
-            task = service.policy['demand_start'].get('test_task_id')
+            from .dstack_test_budget import demand_task_id
+
+            task = demand_task_id(service.policy['demand_start'], service.repo.clock())
             if task is not None:
                 body['test_task_id'] = task
             raised = ladder_price(service, profile, job_id)

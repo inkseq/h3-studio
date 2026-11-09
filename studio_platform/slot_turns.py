@@ -33,6 +33,10 @@ class SlotContexts:
         self._fence = None
         self._runner_context = runner_context
         self._closing = False
+        # Slots the controller asked to stop. Queued-job turns skip them, so a
+        # busy queue cannot hold the slot lock forever and keep renewing the
+        # registration of a removed host (#1140).
+        self._retiring = set()
 
     def __enter__(self):
         from .slot_lock import slot_lock
@@ -55,6 +59,8 @@ class SlotContexts:
             current = self._slots.get(intent_id)
             if current is not None and current.spec != slot.spec:
                 raise Conflict("dbos_native_slot_identity_changed")
+            # A fresh native observation re-opens the slot for new turns.
+            self._retiring.discard(intent_id)
             if current is None:
                 config = FleetConfig(
                     self.work_dir, (slot,), enabled=True, max_children=1
@@ -94,7 +100,11 @@ class SlotContexts:
         with self._lock:
             item = self._slots.get(intent_id)
             if item is None:
+                self._retiring.discard(intent_id)
                 return
+            # No new turn may take this slot; the in-flight one finishes and
+            # the controller's next tick completes the stop.
+            self._retiring.add(intent_id)
             if not item.lock.acquire(blocking=False):
                 raise Conflict("dbos_domain_turn_still_active")
             try:
@@ -110,6 +120,7 @@ class SlotContexts:
                     )
                 item.context.__exit__(None, None, None)
                 del self._slots[intent_id]
+                self._retiring.discard(intent_id)
             finally:
                 item.lock.release()
 
@@ -137,7 +148,11 @@ def selected_job_turn(contexts, tenant, owner, project, job_id, *, run_selected)
             "wait_seconds": POLL_SECONDS,
         }
     with contexts._lock:
-        candidates = list(contexts._slots.values())
+        candidates = [
+            slot
+            for key, slot in contexts._slots.items()
+            if key not in contexts._retiring
+        ]
     # Existing attempts stay with their original worker. New work tries
     # dedicated capacity first; its original claim gates decide eligibility.
     candidates.sort(

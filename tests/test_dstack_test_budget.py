@@ -16,8 +16,10 @@ from studio_platform.dstack_test_budget import (
     ACCOUNT,
     budget_reason,
     day_window,
+    demand_task_id,
     projected_cost,
     task_guard,
+    valid_task_id,
 )
 from studio_platform.operator_capacity import operator_nodes
 from studio_platform.repository import (
@@ -64,6 +66,25 @@ class LayeredClient(original.Client):
         }
         self.runs[spec["run_name"]] = value
         return copy.deepcopy(value)
+
+
+class DemandTaskWindowTests(unittest.TestCase):
+    """#1140: a demand start's task id rotates per Sydney day."""
+
+    def test_suffix_is_the_sydney_day_and_rotates_at_sydney_midnight(self):
+        demand = {"test_task_id": "geryon-h3"}
+        # 2026-11-10 12:59:59 UTC is 23:59:59 in Sydney (AEDT, UTC+11).
+        before = 1794315599
+        self.assertEqual(demand_task_id(demand, before), "geryon-h3:20261110")
+        self.assertEqual(demand_task_id(demand, before + 1), "geryon-h3:20261111")
+        self.assertTrue(valid_task_id(demand_task_id(demand, before)))
+
+    def test_no_configured_id_and_overlong_id(self):
+        self.assertIsNone(demand_task_id({}, 1794315599))
+        self.assertIsNone(demand_task_id(None, 1794315599))
+        too_long = {"test_task_id": "x" * 95}
+        self.assertTrue(valid_task_id(too_long["test_task_id"]))
+        self.assertFalse(valid_task_id(demand_task_id(too_long, 1794315599)))
 
 
 class DailyTestBudgetTests(LedgerCase):
@@ -724,7 +745,8 @@ class DailyTestBudgetTests(LedgerCase):
             )
         ]
 
-    def test_historical_removed_projection_counts_estimate_and_extra_once(self):
+    def test_historical_removed_projection_counts_estimate_without_allowance(self):
+        # #1140: the 1 USD transport allowance is released by the removal proof.
         self._removed_projection_node()
         intent, node = self.rows()
         guard = node["payload"]["lifecycle"]["test_gpu_guard"]
@@ -732,9 +754,9 @@ class DailyTestBudgetTests(LedgerCase):
         self.assertEqual(node["runtime_state"], "stopped")
         self.now += 86400
         for estimate, expected in (
-            (0, 1_012_500),
-            (100_000, 1_100_000),
-            (5_000_000, 6_000_000),
+            (0, 12_500),
+            (100_000, 100_000),
+            (5_000_000, 5_000_000),
         ):
             with self.subTest(estimate=estimate), self.repo.transaction() as connection:
                 payload = copy.deepcopy(node["payload"])
@@ -790,9 +812,9 @@ class DailyTestBudgetTests(LedgerCase):
         self.assertEqual(node["payload"]["hourly_cost_microusd"], 750_000)
         self.now += 86400
         for estimate, expected in (
-            (0, 1_750_000),
-            (100_000, 1_750_000),
-            (2_000_000, 3_000_000),
+            (0, 750_000),
+            (100_000, 750_000),
+            (2_000_000, 2_000_000),
         ):
             with self.subTest(estimate=estimate), self.repo.transaction() as connection:
                 payload = copy.deepcopy(node["payload"])
@@ -811,10 +833,10 @@ class DailyTestBudgetTests(LedgerCase):
         self.assertEqual((intent["created_at"], proof_at), (1000, 4600))
         self.now += 86400
         for started, expected in (
-            (None, 1_750_000),
-            (1600, 1_625_000),
-            (0, 1_958_334),
-            (proof_at - 1, 1_000_209),
+            (None, 750_000),
+            (1600, 625_000),
+            (0, 958_334),
+            (proof_at - 1, 209),
         ):
             with self.subTest(started=started), self.repo.transaction() as connection:
                 connection.execute(
@@ -936,9 +958,9 @@ class DailyTestBudgetTests(LedgerCase):
         with self.repo.engine.connect() as connection:
             before = self._projection_rows(connection)
             guard = task_guard(GUARD, "issue-267", limit=20_000_000, max_runtime=7200)
-            self.assertEqual(projected_cost(connection, guard, self.now), 2_300_000)
+            self.assertEqual(projected_cost(connection, guard, self.now), 300_000)
             other = task_guard(GUARD, "issue-285", limit=20_000_000, max_runtime=7200)
-            self.assertEqual(projected_cost(connection, other, self.now), 1_300_000)
+            self.assertEqual(projected_cost(connection, other, self.now), 300_000)
             self.assertEqual(self._projection_rows(connection), before)
         self.assertEqual((len(self.client.applied), self.client.stopped), (3, []))
 

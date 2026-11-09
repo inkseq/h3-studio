@@ -69,9 +69,11 @@ def demand_configuration(config, *, now):
         return None
     guard = policy.get("test_gpu_guard")
     if guard is not None:
-        from .dstack_test_budget import valid_task_id
+        from .dstack_test_budget import demand_task_id, valid_task_id
 
-        if not valid_task_id(demand.get("test_task_id")):
+        if not valid_task_id(demand.get("test_task_id")) or not valid_task_id(
+            demand_task_id(demand, now)
+        ):
             return None
     elif demand.get("test_task_id") is not None:
         return None
@@ -145,7 +147,16 @@ def journal_profile_hash(config, profile, tenant, job, recorded):
     )
 
 
-def _profile_for(config, compiled, policy, owner, now):
+def _profile_for(config, compiled, policy, owner, now, *, keep=None):
+    """The demand profile for a job; ``keep`` holds its journal's profile.
+
+    A queued job whose demand journal was written for one profile keeps that
+    profile while it is still listed and still matches, even when a newly
+    listed profile would now be preferred (#1159). The journal identity, its
+    start keys and any start in flight stay with the original profile, so
+    nothing is re-keyed and nothing can start twice. A delisted or changed
+    original profile still stops new starts for that journal.
+    """
     from .runtime_catalog import engine_manifest, profile_output_delivery
 
     profiles = demand_configuration(config, now=now)
@@ -181,7 +192,27 @@ def _profile_for(config, compiled, policy, owner, now):
     # stays with an explicitly configured fleet profile; job ownership and
     # signed input/output authorization are never reassigned to that owner.
     matches.sort(key=lambda p: (p["owner_id"] != owner, p["id"]))
-    return matches[0] if matches else None
+    kept = next((p for p in matches if keep is not None and p["id"] == keep), None)
+    return kept or (matches[0] if matches else None)
+
+
+def journal_profiles(connection, tenant):
+    """Job id -> the profile id its demand journal was written for."""
+    from .dstack_demand_start import KIND
+    from .operator_capacity import operator_commands
+
+    actor = "dstack-demand:" + request_hash({"tenant": tenant})[:40]
+    result = {}
+    for key, payload in connection.execute(
+        select(operator_commands.c.idempotency_key, operator_commands.c.payload).where(
+            operator_commands.c.actor == actor,
+            operator_commands.c.kind == KIND,
+        )
+    ):
+        profile = payload.get("profile_id") if isinstance(payload, dict) else None
+        if key.startswith("demand-job-") and isinstance(profile, str):
+            result[key[len("demand-job-") :]] = profile
+    return result
 
 
 def _protected_configuration():
@@ -295,6 +326,8 @@ def eligible_jobs(service, connection, now):
     policies = ExecutionPolicies(service.settings, service.repo)
     from .capacity import pool_members_require_warm_binding
 
+    kept = journal_profiles(connection, service.settings.tenant_id)
+
     rows = connection.execute(
         select(jobs)
         .where(
@@ -366,7 +399,12 @@ def eligible_jobs(service, connection, now):
             if policy is None or request_hash(policy) != execution.get("policy_hash"):
                 continue
             profile = _profile_for(
-                service.config, compiled, policy, job["owner_id"], now
+                service.config,
+                compiled,
+                policy,
+                job["owner_id"],
+                now,
+                keep=kept.get(job["id"]),
             )
         except (ValueError, KeyError, TypeError, OSError):
             continue
