@@ -22,7 +22,10 @@ must set admission_blocked, never masquerade as a missing machine.
 
 The remaining backlog at ready is clamped at zero. With actual queued work and
 zero ready/starting machines, ask for at least one machine; otherwise floor the
-remaining backlog divided by 20. Forecast alone never starts a machine. Proposed
+remaining backlog divided by 20, minus the machines already starting: those are
+extras on the way and share the same backlog (desired total minus pending, as
+Ray Serve and KEDA/HPA scale). Without that subtraction every tick re-planned
+the same backlog and rented again. Forecast alone never starts a machine. Proposed
 starts are bounded by both the pool maximum and available_slots (the minimum
 under global, hourly, reservation/task and other existing caps). Unknown budget
 headroom means zero. A disabled policy or safety pause must block admission.
@@ -123,7 +126,8 @@ invoices, collections, leases and frozen rental idle timers remain original.
 Each tick first reconciles original commands/backoff, then reads the existing
 fresh native capacity witness. Per exact owner/pool/configuration/model/manifest,
 eligible queued jobs supply backlog. Compatible live registered workers supply
-ready throughput; a busy slot adds its remaining configured job-time estimate.
+ready throughput, whether idle (`ready`) or serving (`leased`, `busy`,
+`reconciling`); a busy slot adds its remaining configured job-time estimate.
 Known allocations without usable registration count as starting. Their ETA is
 boot minus age when no registration exists; stale registrations supply no ETA
 or throughput. Unknown/duplicate/stopping matching capacity cannot authorize a
@@ -146,5 +150,13 @@ Identical planning snapshots do not append duplicate audit events.
 
 Read-back must verify both the source revision and the explicit rollout flag.
 GPU acceptance still requires the 1/0 floor, 30/1 covered, 45/1 extra, and guarded
-idle cases; CPU tests are not a provider/spend acceptance receipt. Modal routing
+idle cases; CPU tests are not a provider/spend acceptance receipt. The simulator
+runs the same four cases (`lookahead_floor_one_job`, `lookahead_ready_30_queued`,
+`lookahead_ready_45_queued`, `lookahead_idle_stop_at_boot`) with exact start
+counts and the idle stop at boot seconds plus at most one tick.
+
+The default job time (30 s) suits short jobs. For multi-minute jobs set the
+start rules to the measured job time and keep minimum jobs x job seconds near
+boot seconds; with the defaults a queue of 24 ten-minute jobs keeps one machine
+for about four hours. Modal routing
 and measured p50/p90 remain independent work, not enabled by this integration.

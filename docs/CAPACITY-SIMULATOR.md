@@ -257,8 +257,16 @@ Scenario(
   latest seeded historical intent, e.g. an unknown pool).
 - World options: `max_machines`, `inventory` (`fresh`, `stale`, `slow`,
   `failed`), `history_removed` and `history_invoiced`, `test_guard` with
-  `spent_fraction`, `owner_profiles`, `lookahead`, `tick_jitter`,
+  `spent_fraction`, `owner_profiles`, `lookahead`, `start_rules` (saved
+  `job_seconds`/`boot_seconds`/`minimum_jobs` for every demand profile, as the
+  admin start-rules API stores them), `idle_shutdown_seconds` (the policy
+  default; lookahead starts use the rules' boot seconds), `tick_jitter`,
   `prepare_seconds`, `observation_fresh_seconds`, `provider_latency`.
+- Exact expectations: `expect_starts` (number of machines created) and
+  `expect_idle_stop_seconds` (every idle stop comes that long after the
+  machine's last finished job or readiness, at most one tick later, and at
+  least one happens). The report counts lookahead decisions as
+  `lookahead:<phase>:<reason>`.
 - A run stops early once every job is finished and no machine bills, or 30
   simulated minutes after its first violation.
 - A recorded provider response can become a fixture: put

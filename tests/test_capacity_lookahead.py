@@ -33,6 +33,25 @@ class LookaheadTests(unittest.TestCase):
                 self.assertEqual(decision.left_at_ready, left)
         self.assertEqual(self.decide(1, (Machine("boot", "starting"),)).start_count, 0)
 
+    def test_starting_machines_share_the_backlog_they_were_started_for(self):
+        # 45 queued, 1 ready: one extra. A tick later that extra is starting
+        # (ETA 540 s) with 44 queued: left 22 still feeds only one machine.
+        ready = Machine("ready", "ready")
+        self.assertEqual(self.decide(45, (ready,)).start_count, 1)
+        pending = (ready, Machine("boot", "starting", 540))
+        decision = self.decide(44, pending, remaining_job_seconds=30)
+        self.assertEqual((decision.left_at_ready, decision.start_count), (23, 0))
+        self.assertEqual(decision.reason, "covered")
+        self.assertEqual(self.decide(65, pending).start_count, 1)
+        # A cold pool: one start per backlog of K, never one per tick.
+        boots = tuple(Machine(str(i), "starting", 600) for i in range(5))
+        self.assertEqual(self.decide(100, boots[:4]).start_count, 1)
+        self.assertEqual(self.decide(100, boots).start_count, 0)
+        # The older partial-throughput count stays available (Modal-first).
+        self.assertEqual(
+            self.decide(44, pending, starting_share_backlog=False).start_count, 1
+        )
+
     def test_busy_remaining_work_is_fractional_job_equivalent(self):
         decision = self.decide(
             39, (Machine("busy", "ready"),), remaining_job_seconds=30

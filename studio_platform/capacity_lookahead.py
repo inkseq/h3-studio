@@ -78,6 +78,7 @@ def plan(
     expected_arrivals: float = 0,
     available_slots: int,
     admission_blocked: bool,
+    starting_share_backlog: bool = True,
 ) -> Decision:
     """Plan dedicated capacity; no guessed arrivals or provider prices.
 
@@ -85,12 +86,14 @@ def plan(
     task limits, including incompatible capacity. Unknown headroom must be zero.
     admission_blocked includes disabled policy, safety pause and uncertain creates.
     Idle candidates require a separate fresh no-lease/no-queue stop guard.
+    starting_share_backlog=False keeps the older count, where a starting
+    machine only subtracts its partial throughput (the Modal-first share).
     """
     _number(queued, integer=True)
     _number(remaining_job_seconds)
     _number(expected_arrivals)
     _number(available_slots, integer=True)
-    if type(admission_blocked) is not bool:
+    if type(admission_blocked) is not bool or type(starting_share_backlog) is not bool:
         raise ValueError("capacity_lookahead_invalid_input")
     if len({machine.identity for machine in machines}) != len(machines):
         raise ValueError("capacity_lookahead_duplicate_machine")
@@ -122,12 +125,17 @@ def plan(
             and machine.idle_seconds >= policy.boot_seconds
         )
     )
-    # Forecast alone cannot rent; a cold pool with actual demand gets one floor.
-    wanted = (
-        max(1, floor(left / policy.minimum_jobs))
-        if not machines and queued
-        else (floor(left / policy.minimum_jobs) if queued else 0)
+    # floor(left / K) is the number of extra machines the backlog left at
+    # ready time can feed, K jobs each. Machines still starting are extras
+    # already on the way and share that backlog, so only the difference is
+    # new (desired total minus pending, as Ray Serve and KEDA/HPA scale).
+    # Without this, each tick's re-plan rented again for the same backlog.
+    starting = starting_share_backlog and sum(
+        machine.state == "starting" for machine in machines
     )
+    extra = max(0, floor(left / policy.minimum_jobs) - starting)
+    # Forecast alone cannot rent; a cold pool with actual demand gets one floor.
+    wanted = max(1, extra) if not machines and queued else (extra if queued else 0)
     slots = min(available_slots, max(0, policy.max_machines - len(machines)))
     count = min(wanted, slots) if not admission_blocked else 0
     reason = (
