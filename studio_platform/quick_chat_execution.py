@@ -894,6 +894,8 @@ class QuickChatExecutionMixin:
                 {
                     **child["payload"],
                     "id": child["id"],
+                    "item_id": child["id"],
+                    "submission_id": submission_id,
                     "status": status,
                     "error_code": (job or {}).get("error_code")
                     or current["error_code"],
@@ -902,6 +904,12 @@ class QuickChatExecutionMixin:
                     "executions": history,
                     "retryable": retryable,
                     "resume_admission_available": resumable,
+                    # A never-admitted take is waiting for the caller, not running.
+                    "next_action": "resume_admission"
+                    if resumable
+                    else "retry"
+                    if retryable
+                    else None,
                 }
             )
         states = [v["status"] for v in values]
@@ -915,11 +923,15 @@ class QuickChatExecutionMixin:
                 else "active"
             )
         )
+        resumable_ids = [v["id"] for v in values if v["resume_admission_available"]]
         return {
             **row["payload"],
             "id": submission_id,
+            "submission_id": submission_id,
             "items": values,
             "status": status,
+            "resume_admission_item_ids": resumable_ids,
+            "next_action": "resume_admission" if resumable_ids else None,
             "counts": {s: states.count(s) for s in sorted(set(states))},
             "created_at": row["created_at"],
             "updated_at": max(
