@@ -17,6 +17,7 @@ import {
   voiceGaps,
 } from './story-bible.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
+import { deletionImpact } from './entity-references.js';
 
 const story = () => ({
   entities: [
@@ -282,6 +283,103 @@ test('splitting makes one card per person in a group, all at once, and keeps the
     assert.deepEqual(e.data.body, { heads: 1, arms: 2, legs: 2, line: '三个人肩并肩' });
   }
   assert.equal(entity(project, 'sons').title, '儿子（三兄弟）');
+});
+
+test('a split puts every member in the old card’s shots and copies its photos, in one edit', () => {
+  const project = story();
+  project.entities.push(
+    { id: 'face', type: 'image', version: 1, data: {} },
+    { id: 'side', type: 'image', version: 1, data: {} },
+    {
+      id: 'sons',
+      type: 'character',
+      title: '儿子（三兄弟）',
+      version: 1,
+      data: {
+        looks: [
+          {
+            id: 'main',
+            name: '默认造型',
+            description: '',
+            imageIds: ['face', 'side', 'gone'],
+            gallery: { front: 'face', side: 'gone' },
+          },
+        ],
+        defaultLookId: 'main',
+      },
+    },
+    { id: 'scene', type: 'scene', version: 1, status: 'ready', data: { cast: ['sons'] } },
+    {
+      id: 'shot-1',
+      type: 'shot',
+      parentId: 'scene',
+      version: 1,
+      status: 'ready',
+      data: {
+        cast: [
+          { characterId: 'a', lookId: '' },
+          { characterId: 'sons', lookId: 'main' },
+        ],
+      },
+    },
+    {
+      id: 'shot-2',
+      type: 'shot',
+      parentId: 'scene',
+      version: 1,
+      status: 'ready',
+      data: { cast: [{ characterId: 'b', lookId: '' }] },
+    },
+  );
+  const views = project.entities.filter((e) => e.type === 'character').map(viewOf);
+  const sons = views.find((p) => p.id === 'sons');
+  const actions = splitActions(sons, views, { names: ['老大', '老二', '老三'] });
+  const draft = structuredClone(project);
+  const receipt = applyStoryboardAction(draft, { type: 'batch', actions });
+  assert.equal(receipt.ok, true);
+  const members = draft.entities.filter((e) => e.type === 'character').slice(-3);
+  const ids = members.map((e) => e.id);
+  // The old card keeps its place in the order; members take it, with no look chosen.
+  assert.deepEqual(entity(draft, 'shot-1').data.cast, [
+    { characterId: 'a', lookId: '' },
+    ...ids.map((id) => ({ characterId: id, lookId: '' })),
+  ]);
+  assert.deepEqual(
+    entity(draft, 'scene').data.cast,
+    ids.map((id) => ({ characterId: id, lookId: '' })),
+  );
+  assert.equal(entity(draft, 'shot-1').status, 'review');
+  assert.deepEqual(entity(draft, 'shot-2').data.cast, [{ characterId: 'b', lookId: '' }]);
+  assert.equal(entity(draft, 'shot-2').version, 1);
+  for (const member of members) {
+    assert.deepEqual(member.data.looks[0].imageIds, ['face', 'side']);
+    assert.deepEqual(member.data.looks[0].gallery, { front: 'face' });
+  }
+  // The old card is untouched; trashing it afterwards leaves every shot with the members.
+  assert.deepEqual(entity(draft, 'sons'), entity(project, 'sons'));
+  assert.equal(deletionImpact(draft, 'sons').cast, 0);
+
+  // Leaving the photos out keeps the new looks empty; the casts still change.
+  const bare = structuredClone(project);
+  applyStoryboardAction(bare, {
+    type: 'batch',
+    actions: splitActions(sons, views, { names: ['老大', '老二'], copyPhotos: false }),
+  });
+  const bareMembers = bare.entities.filter((e) => e.type === 'character').slice(-2);
+  for (const member of bareMembers) assert.deepEqual(member.data.looks[0].imageIds, []);
+  assert.equal(entity(bare, 'shot-1').data.cast.length, 3);
+});
+
+test('a recast is refused for unknown, repeated or non-person targets', () => {
+  const project = story();
+  const recast = (to) =>
+    applyStoryboardAction(structuredClone(project), { type: 'recast', id: 'a', to });
+  assert.equal(recast([]), false);
+  assert.equal(recast(['b', 'b']), false);
+  assert.equal(recast(['a']), false);
+  assert.equal(recast(['pen']), false);
+  assert.equal(recast(['nobody']), false);
+  assert.deepEqual(recast(['b']), { id: 'a' });
 });
 
 test('a batch is refused as a whole when any step is refused', () => {

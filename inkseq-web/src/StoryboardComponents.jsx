@@ -458,18 +458,30 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
           {tr('storyboard.copy39')}
         </Note>
         {kind === 'image' ? (
+          // One square per file, same size whether its picture has loaded, is still waiting or
+          // has none: images show themselves, videos their poster or first frame, sounds an icon.
           <div className="pe-choose-grid">
-            {list.map((a) => (
-              <Button
-                key={a.id}
-                className="pe-choose-tile"
-                onClick={() => onPick(a.id)}
-                title={a.name}
-              >
-                <StoryboardAssetImage asset={a} />
-                <small className="clip">{a.name}</small>
-              </Button>
-            ))}
+            {list.map((a) => {
+              const name = assetLabel(a, tr);
+              return (
+                <Button
+                  key={a.id}
+                  className="pe-choose-tile"
+                  onClick={() => onPick(a.id)}
+                  title={name}
+                  aria-label={name}
+                >
+                  <span className="pe-choose-thumb" aria-hidden="true">
+                    {a.kind === 'audio' ? (
+                      <Music size={20} />
+                    ) : (
+                      <StoryboardAssetImage asset={a} alt="" />
+                    )}
+                  </span>
+                  <small className="clip">{name}</small>
+                </Button>
+              );
+            })}
           </div>
         ) : (
           <div className="pe-choose-list">

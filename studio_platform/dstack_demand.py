@@ -78,18 +78,70 @@ def demand_configuration(config, *, now):
     return profiles
 
 
-def profile_hash(config, profile):
+# Selection, not machine identity. Which task funds a test start is bound when
+# the machine starts (the preview test_task_id, node_guard); which profiles are
+# listed is re-checked by demand_configuration on every decision. Hashing them
+# made a task rotation or a new profile id strand every journaled job (#1140).
+SELECTION_FIELDS = {"profile_ids", "test_task_id"}
+
+
+def _hash(config, profile, demand, version):
     return request_hash(
         {
-            "version": 1,
+            "version": version,
             "project": config["project"],
             "profile": {
                 key: value
                 for key, value in profile.items()
                 if key not in DERIVED_PROFILE_FIELDS
             },
-            "demand_start": config["policy"]["demand_start"],
+            "demand_start": demand,
         }
+    )
+
+
+def profile_hash(config, profile):
+    demand = config["policy"]["demand_start"]
+    return _hash(
+        config,
+        profile,
+        {key: value for key, value in demand.items() if key not in SELECTION_FIELDS},
+        2,
+    )
+
+
+def accepted_profile_hashes(config, profile, job=None):
+    """The current hash, then version-1 hashes an older demand journal holds.
+
+    Version 1 hashed the whole demand_start block. A journal written before
+    this change matches it under the current block, or under the block with
+    the test task id the job froze at admission when only that id rotated.
+    """
+    demand = config["policy"]["demand_start"]
+    blocks = [demand]
+    marker = (job or {}).get("execution_plan", {}).get("demand_start")
+    frozen = marker.get("test_task_id") if isinstance(marker, dict) else None
+    if isinstance(frozen, str) and frozen != demand.get("test_task_id"):
+        blocks.append({**demand, "test_task_id": frozen})
+    return [profile_hash(config, profile)] + [
+        _hash(config, profile, block, 1) for block in blocks
+    ]
+
+
+def demand_identity(tenant, job_id, value):
+    """The request hash of a job's demand journal for one profile hash."""
+    return request_hash({"tenant": tenant, "job_id": job_id, "profile_hash": value})
+
+
+def journal_profile_hash(config, profile, tenant, job, recorded):
+    """The accepted profile hash behind a journal identity, else None."""
+    return next(
+        (
+            value
+            for value in accepted_profile_hashes(config, profile, job)
+            if demand_identity(tenant, job["id"], value) == recorded
+        ),
+        None,
     )
 
 
@@ -362,13 +414,22 @@ def validate_start(service, connection, job_id, profile_id):
         == "active",
         "dstack_demand_changed",
     )
+    # The hash the job's journal identity was built from, so a download stop
+    # on this node finds the same journal (a legacy version-1 one included).
+    hashed = journal is not None and journal_profile_hash(
+        service.config,
+        profile,
+        service.settings.tenant_id,
+        job,
+        journal["request_hash"],
+    )
     result = {
         "job_id": job_id,
         "plan_id": job["plan_id"],
         "request_hash": job["request_hash"],
         "execution_hash": request_hash(job["execution_plan"]),
         "profile_id": profile_id,
-        "profile_hash": profile_hash(service.config, profile),
+        "profile_hash": hashed or profile_hash(service.config, profile),
         "policy_hash": job["execution_plan"]["policy_hash"],
         "runtime_revision": runtime["revision"],
     }
@@ -490,14 +551,13 @@ def _recorded_start_blocker(service, connection, job, profile, nodes):
     row = download_journal(connection, service.settings.tenant_id, job['id'])
     if row is None:
         return None
-    identity = request_hash(
-        {
-            'tenant': service.settings.tenant_id,
-            'job_id': job['id'],
-            'profile_hash': profile_hash(service.config, profile),
-        }
-    )
-    if row['request_hash'] != identity:
+    identity = row['request_hash']
+    if (
+        journal_profile_hash(
+            service.config, profile, service.settings.tenant_id, job, identity
+        )
+        is None
+    ):
         return 'policy_changed'
     payload = row['payload']
     original = _start_command(

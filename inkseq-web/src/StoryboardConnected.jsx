@@ -28,7 +28,7 @@ import {
   SHORTEST_SHOT_SECONDS,
 } from './storyboard-domain.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
-import { uploadLibraryFiles } from './media-operations.js';
+import { uploadAttachRefusal, uploadLibraryFiles } from './media-operations.js';
 import { uploadFile } from './media.js';
 import { captureWorkspace, assertWorkspace } from './workspace-context.js';
 import { isActiveTrashItem } from './trash-commands.js';
@@ -660,39 +660,53 @@ export default function StoryboardConnected({
       setBusy(true);
       const context = captureWorkspace(store);
       try {
+        const reused = new Set();
         const ids = await uploadLibraryFiles({
           store,
           files: Array.from(action.files),
           upload: uploadFile,
+          reused,
         });
         assertWorkspace(store, context);
+        // A file the story already had is attached like a new one; a refused attach says why
+        // (the file itself stays in the story's files either way).
+        const refused = [];
+        const name = () =>
+          store.getState().project.entities.find((e) => e.id === action.target?.pid)?.title || '';
         for (const id of ids) {
-          if (action.target?.kind === 'image')
-            mutate({
-              type: 'fileImage',
-              asset: id,
-              pid: action.target.pid,
-              vid: action.target.vid,
-            });
-          else if (action.target?.kind === 'voice')
-            mutate({ type: 'addVoice', asset: id, pid: action.target.pid });
-          else if (action.target?.kind === 'ambient')
-            mutate({ type: 'profile', id: action.target.pid, patch: { ambient: id } });
-          else if (action.target?.kind === 'shot')
-            mutate({
-              type: 'drop',
-              asset: id,
-              shot: action.target.shot,
-              slot: action.target.slot || 'smart',
-            });
+          const refusal = uploadAttachRefusal(store.getState().project, action.target, id);
+          if (refusal) {
+            refused.push(at(refusal, { name: name() }));
+            continue;
+          }
+          try {
+            attachUpload(action.target, id);
+          } catch {
+            refused.push(at('upload.attachFailed', { name: name() }));
+          }
         }
-        return { ok: true, ids };
+        if (refused.length) throw Error(refused[0]);
+        return { ok: true, ids, reused: [...reused] };
       } finally {
         serial.current = false;
         setBusy(false);
       }
     }
     return mutate(action);
+  };
+  const attachUpload = (target, id) => {
+    if (target?.kind === 'image')
+      mutate({ type: 'fileImage', asset: id, pid: target.pid, vid: target.vid });
+    else if (target?.kind === 'voice') mutate({ type: 'addVoice', asset: id, pid: target.pid });
+    else if (target?.kind === 'ambient')
+      mutate({ type: 'profile', id: target.pid, patch: { ambient: id } });
+    else if (target?.kind === 'shot')
+      mutate({
+        type: 'drop',
+        asset: id,
+        shot: target.shot,
+        slot: target.slot || 'smart',
+      });
   };
   // A shot with no chosen take and exactly one finished take uses it without a click
   // (owner, 2026-10-25). An existing choice is never replaced by a newer take.

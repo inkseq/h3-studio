@@ -1297,12 +1297,28 @@ class World(LedgerCase):
                     )
             elif event.action == "edit_demand_config":
                 # An operator edits operator.json and restarts the controller.
-                self.config["policy"]["demand_start"].update(event.value)
-                self._load_service()
-                self.new_controller()
+                self._edit_demand_config(event.value)
             else:
                 raise ValueError("unknown_event:" + event.action)
             self.reasons["event:" + event.action] += 1
+
+    def _edit_demand_config(self, value):
+        demand = self.config["policy"]["demand_start"]
+        known = {profile["id"] for profile in self.config["profiles"]}
+        for profile_id in value.get("profile_ids", ()):
+            if profile_id not in known:
+                # A newly listed profile: same machine type, another id.
+                self.config["profiles"].append(
+                    dict(copy.deepcopy(self.config["profiles"][0]), id=profile_id)
+                )
+        if value.get("test_task_id", demand.get("test_task_id")) != demand.get(
+            "test_task_id"
+        ):
+            # A fresh task cap: spend before the rotation was the old task's.
+            self._prespent = -self._billed_microusd()
+        demand.update(value)
+        self._load_service()
+        self.new_controller()
 
     def arrive(self):
         for number, batch in enumerate(self.scenario.jobs):
@@ -1862,14 +1878,17 @@ class World(LedgerCase):
         guard = self.scenario.test_guard
         if not guard:
             return
-        billed = sum(
-            m.billed_seconds / 3600 * m.script.price * 1_000_000
-            for m in self.client.machines.values()
-        )
+        billed = self._billed_microusd()
         limit = self._task_limit
         if billed + self._prespent > limit and not self._flagged_spend:
             self._flagged_spend = True
             self.violate("test_cap_exceeded", "billed past the task cap")
+
+    def _billed_microusd(self):
+        return sum(
+            m.billed_seconds / 3600 * m.script.price * 1_000_000
+            for m in self.client.machines.values()
+        )
 
     def account(self, step):
         for machine in self.client.machines.values():

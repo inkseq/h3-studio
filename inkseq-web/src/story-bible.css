@@ -269,3 +269,17 @@
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: var(--sp-2) var(--sp-3);
 }
+/* The photo choice spans the whole row under the names. */
+.bible-split-copy {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+.bible-split-copy > span {
+  display: grid;
+  gap: 2px;
+}
+.bible-split-copy small {
+  font-size: var(--fs-xs);
+}

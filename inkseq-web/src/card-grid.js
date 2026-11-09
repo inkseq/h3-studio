@@ -23,12 +23,18 @@ export function nextCard(rects, from, key) {
   const here = rects[from],
     down = key === 'ArrowDown',
     middle = (r) => r.left + r.width / 2;
-  const others = rects
+  const beyond = rects
     .map((rect, index) => ({ rect, index }))
     .filter(({ rect }) =>
       down ? rect.top >= here.top + here.height / 2 : rect.top + rect.height / 2 <= here.top,
     );
-  if (!others.length) return from;
+  if (!beyond.length) return from;
+  // A card straight above or below wins over a nearer row elsewhere: beside a group box the
+  // group's members sit lower than the single cards, but ↓ from a single card means its column.
+  const column = beyond.filter(
+    ({ rect }) => rect.left < here.left + here.width && rect.left + rect.width > here.left,
+  );
+  const others = column.length ? column : beyond;
   const edge = down
     ? Math.min(...others.map(({ rect }) => rect.top))
     : Math.max(...others.map(({ rect }) => rect.top));
@@ -42,8 +48,11 @@ export function nextCard(rects, from, key) {
 const INNER = 'button, a[href], input, select, textarea, [tabindex]';
 const OFF = 'data-grid-off';
 
-// Only the active card and its own controls can be reached with Tab.
-function apply(root, selector, active) {
+// Only the active card and its own controls can be reached with Tab. Every other card carries
+// an explicit tabindex="-1", so a click or a script can still focus it (and Enter then opens
+// it): a div's tabIndex property already reads -1 without the attribute, so compare the
+// attribute, not the property.
+export function applyRovingStops(root, selector, active) {
   const cards = [...root.querySelectorAll(selector)];
   if (!cards.length) return;
   const current =
@@ -52,7 +61,8 @@ function apply(root, selector, active) {
     cards[0];
   for (const card of cards) {
     const on = card === current;
-    if (card.tabIndex !== (on ? 0 : -1)) card.tabIndex = on ? 0 : -1;
+    if (card.getAttribute('tabindex') !== (on ? '0' : '-1'))
+      card.setAttribute('tabindex', on ? '0' : '-1');
     for (const node of card.querySelectorAll(INNER)) {
       if (!on) {
         if (!node.hasAttribute(OFF)) node.setAttribute(OFF, node.getAttribute('tabindex') ?? '');
@@ -75,11 +85,11 @@ export function useCardGrid(selector = '[data-grid-card]') {
   const [root, setRoot] = useState(null),
     active = useRef(null);
   useLayoutEffect(() => {
-    if (root) apply(root, selector, active);
+    if (root) applyRovingStops(root, selector, active);
   });
   useLayoutEffect(() => {
     if (!root) return undefined;
-    const refresh = () => apply(root, selector, active);
+    const refresh = () => applyRovingStops(root, selector, active);
     const focus = (event) => {
       const card = event.target.closest?.(selector);
       if (!card || !root.contains(card) || card.dataset.gridCard === active.current) return;

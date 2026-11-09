@@ -301,7 +301,9 @@ def _claim(service, preread=None):
     from .dstack_demand import (
         _nodes,
         demand_configuration,
+        demand_identity,
         eligible_jobs,
+        journal_profile_hash,
         node_stage,
         profile_hash,
     )
@@ -360,18 +362,21 @@ def _claim(service, preread=None):
         covered_groups = set()
         for job, profile in work:
             key = 'demand-job-' + job['id']
-            identity = request_hash(
-                {
-                    'tenant': tenant,
-                    'job_id': job['id'],
-                    'profile_hash': profile_hash(service.config, profile),
-                }
-            )
             row = by_key.get(key)
-            if row is not None and row['request_hash'] != identity:
-                observing = _result('blocked', 'policy_changed')
-                continue
-            if row is None:
+            if row is not None:
+                # An existing journal keeps its identity (and so its start
+                # keys) for life; a version-1 identity is still accepted.
+                identity = row['request_hash']
+                if (
+                    journal_profile_hash(service.config, profile, tenant, job, identity)
+                    is None
+                ):
+                    observing = _result('blocked', 'policy_changed')
+                    continue
+            else:
+                identity = demand_identity(
+                    tenant, job['id'], profile_hash(service.config, profile)
+                )
                 payload = dict(
                     version=1,
                     tenant_id=tenant,

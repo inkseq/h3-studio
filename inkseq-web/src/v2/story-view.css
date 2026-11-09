@@ -1615,6 +1615,8 @@ body.sb-resizing-y video {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   align-content: start;
+  /* A group box (三兄弟) is taller than one card; the cards beside it keep their own height. */
+  align-items: start;
   gap: 10px;
 }
 /* Step progress (story-flow.js): a thin bar under each step name; counts are in its tooltip. */

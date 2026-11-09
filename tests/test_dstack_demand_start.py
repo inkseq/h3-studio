@@ -1335,6 +1335,188 @@ class DemandStartTests(LedgerCase):
                 )
             self.assertEqual(self.client.applied, [])
 
+    def refused_journal(self):
+        """A queued job whose start was refused once, so it holds a journal."""
+        job = self.accepted()
+        self.enabled()
+        with patch.object(
+            self.service,
+            '_preview_for_owner',
+            side_effect=BudgetExceeded('dstack_test_task_limit_reached'),
+        ):
+            self.assertEqual(start_once(self.service)['reason_code'], 'budget_limit')
+        self.now = self.journal()['payload']['next_decision_at'] + 1
+        return job
+
+    def test_profile_ids_edit_keeps_journaled_job_starting(self):
+        # #1140 Q3: listing another profile changed every journaled job's
+        # identity, so each one read policy_changed for good.
+        self.refused_journal()
+        before = self.journal()
+        extra = dict(copy.deepcopy(self.config['profiles'][0]), id='5090-fl-b')
+        self.config['profiles'].append(extra)
+        self.config['policy']['demand_start']['profile_ids'].append('5090-fl-b')
+        self.service = DstackOperator(
+            self.repo, self.settings, self.capacity, self.config
+        )
+        self.assertEqual(start_once(self.service)['state'], 'accepted')
+        self.assertEqual(self.journal()['request_hash'], before['request_hash'])
+        self.assertEqual(len(self.client.applied), 1)
+
+    def test_version_one_journal_still_starts_with_its_original_identity(self):
+        from studio_platform.dstack_demand import _hash, demand_identity
+        from studio_platform.dstack_demand_start import _start_key
+
+        job = self.refused_journal()
+        # A journal written before the deploy: its identity hashed the whole
+        # demand_start block (formula version 1).
+        legacy = _hash(
+            self.config,
+            self.service.profiles['5090-fl'],
+            self.config['policy']['demand_start'],
+            1,
+        )
+        identity = demand_identity(self.scope.tenant_id, job['id'], legacy)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_commands)
+                .where(operator_commands.c.id == self.journal()['id'])
+                .values(request_hash=identity)
+            )
+        self.client.vast_offer_mapping = lambda *args, **kw: dict(
+            observed_at=self.now,
+            offers=[
+                dict(
+                    offer_id='12345',
+                    machine_id='19493',
+                    country='US',
+                    region='test-region',
+                    advertised_download_mbps=2000,
+                )
+            ],
+        )
+        result = start_once(self.service)
+        self.assertEqual(result['state'], 'accepted')
+        self.assertEqual(self.journal()['request_hash'], identity)
+        with self.repo.engine.connect() as connection:
+            command = (
+                connection.execute(
+                    select(operator_commands).where(
+                        operator_commands.c.id == result['command_id']
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            node = (
+                connection.execute(
+                    select(operator_nodes).where(
+                        operator_nodes.c.intent_id == result['node_id']
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        self.assertEqual(command['idempotency_key'], _start_key(identity, 0))
+        self.assertEqual(node['payload']['demand_start']['profile_hash'], legacy)
+        # A download stop on that node still finds the same journal.
+        stopped = self.close_slow_allocation(result['node_id'], '19493')
+        self.assertEqual(stopped['download_timebox_event']['job_id'], job['id'])
+        self.assertEqual(len(self.journal()['payload']['download_stops']), 1)
+
+    def test_unknown_journal_identity_still_reads_policy_changed(self):
+        self.refused_journal()
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_commands)
+                .where(operator_commands.c.id == self.journal()['id'])
+                .values(request_hash='0' * 64)
+            )
+        self.assertEqual(start_once(self.service)['reason_code'], 'policy_changed')
+        self.assertEqual(self.client.applied, [])
+
+
+class ProfileHashTests(unittest.TestCase):
+    """#1140 Q3: selection fields never strand a queued job's demand journal."""
+
+    def setUp(self):
+        self.profile = {'id': '5090-fl', 'mode': 'fl', 'max_price_microusd': 900_000}
+        self.config = {
+            'project': 'sixnine',
+            'profiles': [self.profile],
+            'policy': {
+                'demand_start': {
+                    'profile_ids': ['5090-fl'],
+                    'test_task_id': 'task-2',
+                }
+            },
+        }
+
+    def edited(self, **changes):
+        config = copy.deepcopy(self.config)
+        config['policy']['demand_start'].update(changes)
+        return config
+
+    def test_task_rotation_and_profile_ids_do_not_change_the_hash(self):
+        from studio_platform.dstack_demand import profile_hash
+
+        value = profile_hash(self.config, self.profile)
+        for config in (
+            self.edited(test_task_id='task-3'),
+            self.edited(profile_ids=['5090-fl', '5090-ref']),
+            self.edited(profile_ids=['5090-fl'], test_task_id=None),
+        ):
+            self.assertEqual(profile_hash(config, self.profile), value)
+        self.assertNotEqual(
+            profile_hash(self.edited(lookahead_version=1), self.profile), value
+        )
+        self.assertNotEqual(
+            profile_hash(self.config, dict(self.profile, max_price_microusd=1)), value
+        )
+
+    def test_legacy_hash_accepted_under_current_or_frozen_task_id(self):
+        from studio_platform.dstack_demand import (
+            _hash,
+            demand_identity,
+            journal_profile_hash,
+            profile_hash,
+        )
+
+        demand = self.config['policy']['demand_start']
+        job = {
+            'id': 'job-1',
+            'execution_plan': {'demand_start': {'test_task_id': 'task-1'}},
+        }
+        current = _hash(self.config, self.profile, demand, 1)
+        frozen = _hash(
+            self.config, self.profile, dict(demand, test_task_id='task-1'), 1
+        )
+        for value in (profile_hash(self.config, self.profile), current, frozen):
+            recorded = demand_identity('tenant', 'job-1', value)
+            self.assertEqual(
+                journal_profile_hash(
+                    self.config, self.profile, 'tenant', job, recorded
+                ),
+                value,
+            )
+        # The frozen task id only helps that job; another listing never does.
+        recorded = demand_identity('tenant', 'job-1', frozen)
+        self.assertIsNone(
+            journal_profile_hash(
+                self.config, self.profile, 'tenant', {'id': 'job-1'}, recorded
+            )
+        )
+        moved = _hash(self.config, self.profile, dict(demand, profile_ids=['x']), 1)
+        self.assertIsNone(
+            journal_profile_hash(
+                self.config,
+                self.profile,
+                'tenant',
+                job,
+                demand_identity('tenant', 'job-1', moved),
+            )
+        )
+
 
 class VastShareTests(unittest.TestCase):
     """Owner 2026-10-29 / #688: Modal first; Vast by the boot-time lookahead."""

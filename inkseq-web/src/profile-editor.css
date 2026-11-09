@@ -182,23 +182,54 @@
 .pe-choose-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  grid-auto-rows: max-content;
+  align-items: start;
   gap: var(--sp-2);
   max-height: 50vh;
   overflow: auto;
 }
-.pe-choose-tile {
+/* Every tile the same: a square picture box and one line of name, whatever has loaded.
+   Specific enough to beat the dialog's fit-content button rule (ui/dialog.css). */
+:root dialog .pe-choose-grid > .pe-choose-tile.pe-choose-tile.pe-choose-tile {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  justify-content: stretch;
+  align-content: start;
+  width: 100%;
+  min-width: 0;
   height: auto;
-  flex-direction: column;
-  align-items: stretch;
   gap: var(--sp-1);
   padding: var(--sp-1);
   white-space: normal;
 }
-.pe-choose-tile img {
+.pe-choose-thumb {
+  display: grid;
+  place-items: center;
   width: 100%;
   aspect-ratio: 1;
-  object-fit: cover;
+  overflow: hidden;
   border-radius: var(--r-sm);
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.pe-choose-thumb > img,
+.pe-choose-thumb > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pe-choose-thumb > .media-empty {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+.pe-choose-tile > small {
+  display: block;
+  min-width: 0;
+  text-align: center;
 }
 .pe-choose-list {
   display: flex;

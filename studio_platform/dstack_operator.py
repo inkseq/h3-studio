@@ -393,7 +393,7 @@ class DstackOperator(DstackPreview, DstackRegistration, DstackCommands):
         return payload if payload is not None else copy.deepcopy(current['payload'])
 
     def _journal_download_stop(self, connection, current, intent, now, reason_code):
-        from .dstack_demand import profile_hash
+        from .dstack_demand import accepted_profile_hashes
         from .dstack_demand_start import (
             MAX_DOWNLOAD_REPLACEMENTS,
             _start_command,
@@ -434,7 +434,8 @@ class DstackOperator(DstackPreview, DstackRegistration, DstackCommands):
                     demand.get('request_hash') != job['request_hash'],
                     demand.get('execution_hash') != request_hash(job['execution_plan']),
                     demand.get('profile_id') != profile['id'],
-                    demand.get('profile_hash') != profile_hash(self.config, profile),
+                    demand.get('profile_hash')
+                    not in accepted_profile_hashes(self.config, profile, job),
                 )
             )
         ):
