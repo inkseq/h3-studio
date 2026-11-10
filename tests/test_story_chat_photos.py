@@ -162,6 +162,17 @@ class PhotoTurnTests(unittest.TestCase):
         user = [m for m in response.json()["messages"] if m["role"] == "user"][-1]
         self.assertEqual(user["photos"], [first, second])
         self.assertEqual(user["text"], "what do you see?")
+        # The bubble can show what was sent, also after a reload (inkseq-design#457).
+        files = [
+            {"id": ident, "name": name, "url": f"/v1/assets/{ident[6:]}/content"}
+            for ident, name in ((first, "scarf.png"), (second, "cafe.png"))
+        ]
+        self.assertEqual(user["photo_files"], files)
+        reloaded = self.client.get(f"/v1/story-chats/{self.pid}").json()["messages"]
+        self.assertEqual(
+            [m.get("photo_files") for m in reloaded if m["role"] == "user"][-1], files
+        )
+        self.assertTrue(all("photo_files" not in m for m in reloaded[:2]))
 
     def test_streamed_photo_turn_calls_model_once_and_replays_stored_result(self):
         from test_story_chat_stream import StreamingModel, events
