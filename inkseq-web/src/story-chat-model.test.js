@@ -404,3 +404,45 @@ test('generation advice shows per shot in order, never stale or unknown advice (
     [],
   );
 });
+
+test('sent photos show on the bubble: at once, after the reply and after a reload (#457)', async () => {
+  const { fromServer } = await import('./story-chat-client.js');
+  const local = [
+    { kind: 'image', name: 'scarf.png', url: 'blob:local' },
+    { kind: 'video', name: 'walk.mp4', url: 'blob:video' },
+  ];
+  const sent = applyEvent(emptyChat(), {
+    type: 'user.message',
+    id: 't2-u',
+    text: 'use this',
+    attachments: local,
+  });
+  const view = {
+    version: 2,
+    messages: [
+      { id: 't1-u', turn_id: 't1', role: 'user', text: 'aliens' },
+      {
+        id: 't2-u',
+        turn_id: 't2',
+        role: 'user',
+        text: 'use this',
+        photos: ['asset-a1'],
+        photo_files: [
+          { id: 'asset-a1', name: 'scarf.png', url: '/v1/assets/a1/content' },
+          { id: 'asset-x', name: 'x', url: 'https://elsewhere.example/x.png' },
+        ],
+      },
+      { id: 't2-a', turn_id: 't2', role: 'assistant', text: 'Nice scarf.' },
+    ],
+  };
+  const server = fromServer(view);
+  // After a reload the server's own asset path is the picture; nothing else is shown.
+  assert.deepEqual(server.messages[1].attachments, [
+    { kind: 'image', name: 'scarf.png', url: '/v1/assets/a1/content' },
+  ]);
+  assert.deepEqual(server.messages[0].attachments, []);
+  // Right after sending, what is already on screen stays (the video too).
+  const replied = applyEvent(sent, { type: 'chat.loaded', state: server });
+  assert.deepEqual(replied.messages[1].attachments, local);
+  assert.equal(replied.messages[2].text, 'Nice scarf.');
+});

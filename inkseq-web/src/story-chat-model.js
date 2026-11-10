@@ -21,6 +21,21 @@ export function emptyChat(title = '') {
   };
 }
 
+// What the person just attached stays on their own bubble (inkseq-design#457): the
+// server's view names only the photos, and these previews are already on screen.
+const keepSent = (before, after) => {
+  const sent = new Map(
+    before
+      .filter((message) => message.role === 'user' && message.attachments?.length)
+      .map((message) => [message.id, message.attachments]),
+  );
+  return sent.size
+    ? after.map((message) =>
+        sent.has(message.id) ? { ...message, attachments: sent.get(message.id) } : message,
+      )
+    : after;
+};
+
 const upsert = (cards, card) => {
   const index = cards.findIndex((item) => item.id === card.id);
   if (index < 0) return [...cards, card];
@@ -83,6 +98,7 @@ const EVENTS = {
   'chat.loaded': (state, event) => ({
     ...state,
     ...event.state,
+    messages: keepSent(state.messages, event.state.messages),
     quotes: event.state.quotes || {},
     draft: '',
     step: '',
