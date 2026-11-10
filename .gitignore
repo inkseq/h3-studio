@@ -778,6 +778,7 @@ inventory.json
 !studio_platform/starter_pictures/
 !studio_platform/starter_pictures/*.webp
 !studio_platform/story_chat_undo.py
+!studio_platform/story_chat_stream.py
 !tests/test_story_chat_images.py
 !tests/test_story_chat_photos.py
 !tests/test_story_chat_image_credits.py
