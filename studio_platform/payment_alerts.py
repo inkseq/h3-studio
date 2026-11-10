@@ -24,6 +24,10 @@ ACTIVITY = {
 }
 PAID_TYPES = ("checkout.session.completed", "checkout.session.async_payment_succeeded")
 PENDING = ("received", "deferred", "review")
+# A Checkout Session that expired can no longer be paid. Its event, correlated
+# to one unpaid purchase, has nothing left to fulfil; one left in review is not
+# a stalled payment (#1064).
+CLOSED_UNPAID = ("checkout.session.expired",)
 
 
 def _finite(value):
@@ -97,7 +101,9 @@ def _event_statement(tenant_id, livemode, account_scope):
             events.c.account_scope,
             events.c.livemode,
             events.c.received_at,
+            events.c.type,
             payments.c.id.label("correlated_id"),
+            payments.c.paid_at.label("correlated_paid_at"),
             _grant_exists().label("grant_present"),
         )
         .select_from(events.outerjoin(payments, same))
@@ -120,7 +126,22 @@ def _rows(connection, statement):
     return rows
 
 
-def _event_incidents(rows, tenant_id, now, *, needs_grant=False):
+def _closed_unpaid(group):
+    """Every row is an expired session event on the same one unpaid purchase."""
+    matched = {row["correlated_id"] for row in group}
+    return (
+        len(matched) == 1
+        and None not in matched
+        and all(
+            row["type"] in CLOSED_UNPAID and row["correlated_paid_at"] is None
+            for row in group
+        )
+    )
+
+
+def _event_incidents(
+    rows, tenant_id, now, *, needs_grant=False, skip_closed_unpaid=False
+):
     grouped = {}
     for row in rows:
         if not _finite(row["received_at"]) or row["received_at"] > now:
@@ -132,6 +153,8 @@ def _event_incidents(rows, tenant_id, now, *, needs_grant=False):
         if needs_grant and all(
             row["correlated_id"] is not None and row["grant_present"] for row in group
         ):
+            continue
+        if skip_closed_unpaid and _closed_unpaid(group):
             continue
         matched = {r["correlated_id"] for r in group if r["correlated_id"] is not None}
         if len(matched) == 1:
@@ -225,6 +248,7 @@ def read_payment_snapshot(
                 _rows(connection, event_query.where(events.c.status.in_(PENDING))),
                 tenant_id,
                 now,
+                skip_closed_unpaid=True,
             )
             for name, kinds in ACTIVITY.items():
                 activity = _event_incidents(
