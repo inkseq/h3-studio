@@ -8,7 +8,7 @@ export default function GenerationControl({
   schema,
   value,
   onChange,
-  className = 'qc-field',
+  className = 'ui-field',
 }) {
   const { t: at } = useI18n();
   const options = {
@@ -96,7 +96,7 @@ export default function GenerationControl({
     unset = selected === undefined;
   return (
     <label className={`${className}${disabled ? ' qc-disabled' : ''}`}>
-      <span>
+      <span className="ui-field-label">
         {label}
         {schema.experimental ? at('adjunct.generationControl.copy95') : ''}
       </span>

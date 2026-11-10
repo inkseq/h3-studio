@@ -255,6 +255,32 @@ div.sc-tabs {
   gap: 4px;
   margin-top: 6px;
 }
+/* Advice on the proposed shots (h3-studio#628): part of the card from the start. */
+.sc-risks {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--warn-soft);
+  color: var(--sc-ink);
+}
+.sc-risks p {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  color: var(--warn);
+}
+.sc-risks ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.sc-risks li + li {
+  margin-top: 4px;
+}
+.sc-risks small {
+  display: block;
+  color: var(--sc-muted);
+}
 .sc-short {
   color: var(--warn) !important;
 }

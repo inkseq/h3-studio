@@ -18,6 +18,10 @@ OPTIONAL_DEFAULTS = {
     "next_video_interval_seconds": 120,
     "modal_trigger_seconds": 180,
     "fair_share": True,
+    # The cold-download speed gate (#885, #903): a host slower than this after
+    # the measurement window is stopped and denied. Tunable without a deploy.
+    "min_download_mb_per_second": 50,
+    "download_measure_seconds": 180,
 }
 DEFAULTS = {
     "capacity_policy_version": POLICY_VERSION,
@@ -58,6 +62,8 @@ FIELD_BOUNDS = {
     "first_video_max_seconds": (30, 3600),
     "next_video_interval_seconds": (30, 3600),
     "modal_trigger_seconds": (1, 3600),
+    "min_download_mb_per_second": (5, 1000),
+    "download_measure_seconds": (60, 1800),
 }
 LEGACY_FIELDS = frozenset(
     {

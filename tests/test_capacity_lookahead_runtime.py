@@ -138,6 +138,17 @@ class LookaheadRuntimeTests(LedgerCase):
         self.assertEqual(second["decision"]["left_at_ready"], 25)
         self.assertEqual(second["decision"]["start_count"], 1)
 
+    def test_serving_worker_is_ready_capacity_not_a_cold_slot(self):
+        # A worker that claimed a job is leased/busy, not "ready"; it still
+        # serves the queue and must not read as a starting slot (#688 sim).
+        self.worker(state="leased", current_job_id="running-job")
+        for queued, count in ((30, 0), (45, 1)):
+            with self.subTest(queued=queued):
+                result = self.calculate(queued, [self.node])
+                self.assertEqual(result["machines"][0]["state"], "ready")
+                self.assertEqual(result["remaining_job_seconds"], 30)
+                self.assertEqual(result["decision"]["start_count"], count)
+
     def test_shared_fleet_forecast_combines_users_not_duplicate_floors(self):
         self.worker()
         self.job["owner_id"] = "user-a"

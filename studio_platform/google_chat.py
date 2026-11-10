@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import sys
 import time
 from pathlib import Path
@@ -19,6 +20,10 @@ MAX_MESSAGE_CHARS = 60000
 # The story assistant's rules plus the script rules (#1115) run to about 6.7k characters.
 MAX_INSTRUCTION_CHARS = 9000
 MAX_TOTAL_CHARS = 100000
+# Photos the person attached to the latest message (#726): bounded previews only.
+MAX_IMAGES = 4
+MAX_IMAGE_BYTES = 1024 * 1024
+IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MODELS = {"gemma-4-31b-it": "Gemma 4 31B IT", "gemini-3.8-flash": "Gemini 3.8 Flash"}
 DEFAULT_INSTRUCTION = prompt_text("quick_chat_default")
 
@@ -66,7 +71,7 @@ def payload(
         expected = "user" if index % 2 == 0 else "model"
         if (
             not isinstance(message, dict)
-            or set(message) != {"role", "text"}
+            or set(message) - {"images"} != {"role", "text"}
             or message.get("role") != expected
             or not isinstance(message.get("text"), str)
             or not message["text"].strip()
@@ -78,7 +83,12 @@ def payload(
                 422,
             )
         total += len(message["text"])
-        contents.append({"role": expected, "parts": [{"text": message["text"]}]})
+        parts = [{"text": message["text"]}]
+        if "images" in message:
+            parts += _image_parts(
+                model, message["images"], last=index == len(messages) - 1
+            )
+        contents.append({"role": expected, "parts": parts})
     if contents[-1]["role"] != "user" or total > MAX_TOTAL_CHARS:
         raise ChatError(
             "history_limit",
@@ -101,6 +111,38 @@ def payload(
     if thinking:
         config["thinkingConfig"] = {"thinkingLevel": thinking}
     return {"contents": contents, "generationConfig": config}
+
+
+def _image_parts(model, images, last):
+    """Inline pictures for the latest user message only; never history."""
+    if (
+        not last
+        or not model.startswith("gemini")
+        or not isinstance(images, list)
+        or not 1 <= len(images) <= MAX_IMAGES
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"mime", "data"}
+            or item["mime"] not in IMAGE_TYPES
+            or not isinstance(item["data"], bytes)
+            or not 0 < len(item["data"]) <= MAX_IMAGE_BYTES
+            for item in images
+        )
+    ):
+        raise ChatError(
+            "invalid_images",
+            f"每条消息最多附{MAX_IMAGES}张图片，且只随最新一条发送。",
+            422,
+        )
+    return [
+        {
+            "inlineData": {
+                "mimeType": item["mime"],
+                "data": base64.b64encode(item["data"]).decode("ascii"),
+            }
+        }
+        for item in images
+    ]
 
 
 class GoogleChatClient:
@@ -207,7 +249,12 @@ class GoogleChatClient:
                 "json_mode": json_mode,
                 "thinking": thinking,
             },
-            metadata={"instruction": digest(instruction), "turns": len(messages)},
+            metadata={
+                "instruction": digest(instruction),
+                "turns": len(messages),
+                # Picture bytes never enter the trace; only how many were sent.
+                "images": len(messages[-1].get("images") or []),
+            },
         ) as traced:
             result = self._generate(model, body)
             usage = result["usage"]
@@ -222,6 +269,134 @@ class GoogleChatClient:
                 metadata={"finish_reason": result["finish_reason"]},
             )
         return result
+
+    def generate_stream(
+        self,
+        model,
+        messages,
+        instruction=DEFAULT_INSTRUCTION,
+        max_tokens=2048,
+        json_mode=False,
+        thinking=None,
+        on_text=None,
+    ):
+        """Same result as generate(); on_text(text_so_far) is called as it arrives."""
+        body = payload(model, messages, instruction, max_tokens, json_mode, thinking)
+        with generation(
+            "gemini-generate",
+            model=model,
+            input=clip(messages[-1]["text"]),
+            model_parameters={
+                "max_tokens": max_tokens,
+                "json_mode": json_mode,
+                "thinking": thinking,
+                "stream": True,
+            },
+            metadata={"instruction": digest(instruction), "turns": len(messages)},
+        ) as traced:
+            result = self._generate_stream(model, body, on_text)
+            usage = result["usage"]
+            traced.update(
+                output=clip(result["text"]),
+                usage_details=traced_usage(
+                    usage.get("promptTokenCount", 0),
+                    usage.get("candidatesTokenCount", 0)
+                    + usage.get("thoughtsTokenCount", 0),
+                    usage.get("cachedContentTokenCount", 0),
+                ),
+                metadata={"finish_reason": result["finish_reason"]},
+            )
+        return result
+
+    def _generate_stream(self, model, body, on_text):
+        import json
+
+        started = time.monotonic()
+        text, last = "", {}
+        try:
+            config = self.loader()
+            if config.base_url != ORIGIN or not config.api_key:
+                raise ChatError(
+                    "profile_mismatch", "中央Google配置端点或凭据不匹配。", 503
+                )
+            with httpx.Client(
+                base_url=ORIGIN,
+                headers={"x-goog-api-key": config.api_key},
+                timeout=self.timeout,
+                follow_redirects=False,
+                transport=self.transport,
+            ) as client:
+                with client.stream(
+                    "POST",
+                    "/v1beta/models/" + model + ":streamGenerateContent",
+                    params={"alt": "sse"},
+                    json=body,
+                ) as response:
+                    if response.status_code != 200:
+                        raise ChatError(
+                            "google_http_" + str(response.status_code),
+                            "Google服务暂时未完成请求。",
+                            502,
+                        )
+                    for line in response.iter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        try:
+                            chunk = json.loads(line[5:].strip())
+                        except ValueError:
+                            raise ChatError(
+                                "invalid_response", "Google返回了无法解析的响应。"
+                            ) from None
+                        last = chunk
+                        candidates = chunk.get("candidates") or [{}]
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        added = "".join(
+                            p["text"]
+                            for p in parts
+                            if isinstance(p.get("text"), str) and not p.get("thought")
+                        )
+                        if added:
+                            text += added
+                            if on_text is not None:
+                                on_text(text)
+        except ChatError:
+            raise
+        except httpx.TimeoutException:
+            raise ChatError(
+                "upstream_timeout",
+                "Google响应超时，调用可能已执行并计费；没有自动重发。",
+            ) from None
+        except Exception:
+            raise ChatError(
+                "connection_failed",
+                "无法完成Google连接，请检查中央配置或网络；没有自动重发。",
+                503,
+            ) from None
+        if not text.strip():
+            raise ChatError(
+                "empty_or_blocked",
+                "没有收到可展示的文本，可能被拦截或输出额度耗尽；没有自动重试。",
+            )
+        candidate = (last.get("candidates") or [{}])[0]
+        usage = last.get("usageMetadata", {})
+        return {
+            "model": model,
+            "reported_model_version": last.get("modelVersion"),
+            "text": text,
+            "finish_reason": candidate.get("finishReason"),
+            "elapsed_seconds": round(time.monotonic() - started, 2),
+            "usage": {
+                k: usage[k]
+                for k in (
+                    "promptTokenCount",
+                    "candidatesTokenCount",
+                    "thoughtsTokenCount",
+                    "cachedContentTokenCount",
+                    "totalTokenCount",
+                )
+                if k in usage
+            },
+        }
 
     def _generate(self, model, body):
         started = time.monotonic()

@@ -32,6 +32,8 @@ import { uploadAttachRefusal, uploadLibraryFiles } from './media-operations.js';
 import { uploadFile } from './media.js';
 import { captureWorkspace, assertWorkspace } from './workspace-context.js';
 import { isActiveTrashItem } from './trash-commands.js';
+import { copiesToUse } from './enhance-take.js';
+import { chosenTake, liveTake } from './shot-status.js';
 import { stableJSON, shotSnapshot } from './cloud-model.js';
 
 function planRecipe(plan, capabilities) {
@@ -729,6 +731,18 @@ export default function StoryboardConnected({
     autoPicked.current.add(shot.id);
     const version = shot.versions.find((v) => v.status === 'done');
     void choose(shot.id, version.id);
+  }, [view, busy]);
+  // A sharper copy asked for with "use it when done" (h3-studio#893) becomes the chosen take
+  // once it is finished, one at a time; the original stays in the takes.
+  const usedCopies = useRef(new Set());
+  useEffect(() => {
+    if (busy || serial.current) return;
+    const next = copiesToUse(view.project.id, view.shots, chosenTake, liveTake).find(
+      (row) => !usedCopies.current.has(row.version),
+    );
+    if (!next) return;
+    usedCopies.current.add(next.version);
+    void choose(next.shot, next.version);
   }, [view, busy]);
   const adapter = {
     previewScriptWindows: (id, options) => cloud.previewScriptWindows(id, options),

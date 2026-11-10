@@ -8,6 +8,7 @@ kept per worker; the capacity timeline drains those into each machine's
 persisted refusal summary (capacity_timeline.py). Process-local and bounded.
 """
 
+import re
 import threading
 from collections import Counter
 
@@ -16,6 +17,27 @@ _counts = Counter()
 _by_worker = {}
 # A process nobody drains (no controller) must not grow without bound.
 MAX_WORKERS = 256
+
+
+_STATIC_CODE = re.compile(r"[a-z][a-z0-9_]{0,79}")
+
+
+def static_error_code(error):
+    """A short static code from our own error types for a log line, else "-".
+
+    DstackError, BudgetExceeded and Conflict carry static codes only. Anything
+    else, or any argument that is not a plain snake_case code, may hold
+    provider text and is not logged (#1140: a stuck node logged no reason).
+    """
+    from .dstack_request import DstackError
+    from .repository import BudgetExceeded, Conflict
+
+    if not isinstance(error, (DstackError, BudgetExceeded, Conflict)) or not error.args:
+        return "-"
+    code = error.args[0]
+    if isinstance(code, str) and _STATIC_CODE.fullmatch(code):
+        return code
+    return "-"
 
 
 def count(kind, reason, worker_id=None):

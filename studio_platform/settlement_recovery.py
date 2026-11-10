@@ -14,7 +14,7 @@ import re
 import uuid
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 
 from .repository import (
     Repository,
@@ -553,6 +553,56 @@ def release_pending_invoice(repo, conn, kind, identity):
         )
 
 
+HOST_WORKER = re.compile(r"(?:dstack|modal)-([0-9a-f]{32})\Z")
+
+
+def removed_host(conn, worker_id):
+    """Every host that ran this worker is destroyed with a provider identity.
+
+    The same standard release_removed_instance applies to the host's own hold.
+    An unknown worker or an ambiguous host keeps the attempt open.
+    """
+    hosts = []
+    match = HOST_WORKER.match(worker_id or "")
+    if match:
+        hosts.append(instance_intents.c.id == str(uuid.UUID(match.group(1))))
+    worker = conn.execute(
+        select(registered_workers.c.provider, registered_workers.c.instance_id).where(
+            registered_workers.c.id == worker_id
+        )
+    ).first()
+    if worker is not None and worker.instance_id:
+        hosts.append(
+            and_(
+                instance_intents.c.provider == worker.provider,
+                instance_intents.c.provider_instance_id == worker.instance_id,
+            )
+        )
+    if not hosts:
+        return False
+    rows = conn.execute(
+        select(instance_intents.c.state, instance_intents.c.provider_instance_id).where(
+            or_(*hosts)
+        )
+    ).all()
+    return bool(rows) and all(
+        row.state == "destroyed" and row.provider_instance_id for row in rows
+    )
+
+
+def attempt_settled(conn, attempt):
+    """closed_attempt, plus lost work whose upstream can no longer run.
+
+    A reclaim alone is never stop proof. A lost attempt is closed when its run
+    had already finished (lost while collecting) or its host is removed.
+    """
+    if closed_attempt(attempt):
+        return True
+    return attempt["status"] == "attempt_lost" and (
+        attempt["upstream_stopped"] == 1 or removed_host(conn, attempt["worker_id"])
+    )
+
+
 def release_terminal_job(repo, conn, job_id):
     row = repo._job(conn, job_id, lock=True)
     if row["status"] not in TERMINAL:
@@ -562,9 +612,50 @@ def release_terminal_job(repo, conn, job_id):
             select(attempts).where(attempts.c.job_id == job_id).with_for_update()
         ).mappings()
     )
-    if any(not closed_attempt(a) for a in history):
+    if any(not attempt_settled(conn, a) for a in history):
         return  # A historical uncertain attempt still owns its original hold.
     release_pending_invoice(repo, conn, "job", job_id)
+
+
+def _reserved(repo, kind, ids):
+    query = select(budget_reservations.c.reference_id).where(
+        budget_reservations.c.state == "reserved",
+        budget_reservations.c.reference_type == kind,
+        budget_reservations.c.reference_id.in_(sorted(ids)),
+    )
+    if kind == "job":
+        # Unlocked prefilter only; release_terminal_job rechecks under lock.
+        query = query.join(jobs, jobs.c.id == budget_reservations.c.reference_id).where(
+            jobs.c.status.in_(sorted(TERMINAL))
+        )
+    with repo.engine.connect() as conn:
+        return set(conn.execute(query).scalars())
+
+
+def release_terminal_jobs(repo, job_ids):
+    """Retry release_terminal_job for ended jobs that still hold a reservation.
+
+    A job's release runs once when it ends; a lost attempt on a host that is
+    removed later only closes then. Each job uses its own transaction in the
+    ordinary job-first lock order. Unknown cost stays invoice_pending.
+    """
+    for job_id in sorted(_reserved(repo, "job", job_ids)):
+        with repo.transaction() as conn:
+            release_terminal_job(repo, conn, job_id)
+
+
+def release_removed_holds(repo, intent_id, job_ids):
+    """Retry the terminal-path releases for one removed host and its jobs.
+
+    Job end and host removal each release once; whichever happens first finds
+    the other still open. The removed host's controller pass calls this on
+    every tick, so the later of the two releases both holds. Nothing is settled.
+    """
+    release_terminal_jobs(repo, job_ids)
+    if _reserved(repo, "instance", [intent_id]):
+        with repo.transaction() as conn:
+            repo._lock_capacity(conn)
+            release_removed_instance(repo, conn, intent_id)
 
 
 def release_removed_instance(repo, conn, identity):
@@ -595,7 +686,7 @@ def release_removed_instance(repo, conn, identity):
         if ids
         else []
     )
-    if any(not closed_attempt(a) for a in history):
+    if any(not attempt_settled(conn, a) for a in history):
         return
     release_pending_invoice(repo, conn, "instance", identity)
 

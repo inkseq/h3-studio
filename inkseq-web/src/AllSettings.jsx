@@ -20,6 +20,7 @@ import {
   stillNotStored,
 } from './all-settings-model.js';
 import { ruleTargets, targetLabels } from './start-rules-model.js';
+import { ledgerSpend } from './admin-money-model.js';
 
 const SPENDING = '/v1/operator/admin/spending-settings';
 const RULES = '/v1/operator/dstack/admin/start-rules';
@@ -197,16 +198,28 @@ const PROVIDER_NAMES = {
   google: 'Google Cloud',
 };
 
-function Balance({ row }) {
+// The spend our own ledger recorded beside the vendor's balance, so a mismatch shows (#966).
+function ledgerHelp(row, days, t) {
+  const spend = ledgerSpend(row);
+  if (!spend) return undefined;
+  return spend.open
+    ? t('allSettings.ledgerSpendOpen', { days, settled: spend.settled, open: spend.open })
+    : t('allSettings.ledgerSpend', { days, settled: spend.settled });
+}
+
+function Balance({ row, days }) {
   const { t, locale } = useI18n();
-  const link = (
+  const help = ledgerHelp(row, days, t);
+  const link = row.console_url ? (
     <a href={row.console_url} target="_blank" rel="noreferrer">
       {t('allSettings.balanceConsole')}
     </a>
+  ) : (
+    <b>—</b>
   );
   if (!row.readable) {
     return (
-      <SettingRow as="div" label={PROVIDER_NAMES[row.provider] || row.provider}>
+      <SettingRow as="div" label={PROVIDER_NAMES[row.provider] || row.provider} help={help}>
         {link}
       </SettingRow>
     );
@@ -227,6 +240,7 @@ function Balance({ row }) {
     <SettingRow
       as="div"
       label={PROVIDER_NAMES[row.provider] || row.provider}
+      help={help}
       meta={row.last_read_failed ? t('allSettings.balanceFailed', { time: read }) : read}
     >
       <b>
@@ -241,10 +255,14 @@ function Balance({ row }) {
 function Balances({ balances }) {
   const { t } = useI18n();
   if (!balances?.rows) return null;
+  const days = balances.ledger_window_days ?? 30;
   return (
     <SettingsSection title={t('allSettings.balances')} help={t('allSettings.balancesHelp')}>
       {balances.rows.map((row) => (
-        <Balance key={row.provider} row={row} />
+        <Balance key={row.provider} row={row} days={days} />
+      ))}
+      {Object.entries(balances.ledger_other || {}).map(([provider, ledger]) => (
+        <Balance key={provider} row={{ provider, ledger, readable: false }} days={days} />
       ))}
     </SettingsSection>
   );

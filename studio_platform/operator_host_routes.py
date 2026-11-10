@@ -39,7 +39,10 @@ def register_routes(app):
         request: Request,
         limit: int = Query(100, ge=1, le=100),
         offset: int = Query(0, ge=0, le=100000),
-        machine_id: str | None = Query(None, pattern=r"^[1-9][0-9]{0,17}$"),
+        machine_id: str | None = Query(
+            None, pattern=r"^([1-9][0-9]{0,17}|[0-9a-f-]{36})$"
+        ),
+        provider: str = Query("vastai", pattern=r"^(vastai|lium)$"),
     ):
         return response(
             service.list(
@@ -48,6 +51,7 @@ def register_routes(app):
                 offset=offset,
                 admin=True,
                 machine_id=machine_id,
+                provider=provider,
             )
         )
 

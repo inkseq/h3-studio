@@ -277,12 +277,107 @@ SCENARIOS = [
         ],
     ),
     Scenario(
+        "demand_owner_profile_added",
+        "A job owner's own profile is listed while its journaled jobs wait.",
+        # #1159 (staging 11-09, the qa-admin v9 FL profile): the jobs' demand
+        # journals were written for the other owner's profile they fell back
+        # to. The new profile is now preferred for them, and a journal keyed
+        # to the old one read policy_changed for good. Both jobs are refused
+        # by the test cap first so each one holds a journal.
+        hours=4,
+        test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 7200},
+        spent_fraction=0.99,
+        owner_profiles=("superdan",),
+        jobs=[JobBatch(0, 2, owner="supervan", actual_runtime_s=600)],
+        events=[
+            Event(
+                20 * 60,
+                "edit_demand_config",
+                {
+                    "test_task_id": "sim-task-2",
+                    "profile_ids": ["fl-superdan", "fl-supervan"],
+                    "profile_owners": {"fl-supervan": "supervan"},
+                },
+            )
+        ],
+    ),
+    Scenario(
         "lookahead_fl_30_min_jobs",
         "Start rules (lookahead v1) with 24 queued 30-minute FL jobs.",
         hours=6,
         max_machines=4,
         lookahead=True,
+        # Rules sized to these 10-minute jobs, keeping the defaults' ratio
+        # (K x job = boot = 600 s). The 30 s default would leave one machine
+        # on 24 such jobs for 4 h; this scenario used to pass only because a
+        # busy worker read as a cold slot and rented per claim (#688).
+        start_rules={"job_seconds": 600, "minimum_jobs": 1},
         jobs=[JobBatch(0, 24, actual_runtime_s=600)],
+    ),
+    # #688 staging acceptance, start rules at their defaults (job 30 s, boot
+    # 600 s, 20 jobs left at ready). max_machines=4 so the fleet cap never
+    # hides an extra start; every idle stop must come 600 s after the last job.
+    Scenario(
+        "lookahead_floor_one_job",
+        "Lookahead: 1 queued job and no machine starts exactly one (floor).",
+        hours=2,
+        max_machines=4,
+        lookahead=True,
+        jobs=[JobBatch(0, 1, actual_runtime_s=30)],
+        expect_starts=1,
+        expect_idle_stop_seconds=600,
+    ),
+    Scenario(
+        "lookahead_ready_30_queued",
+        "Lookahead: 1 ready machine and 30 queued (10 left at ready) adds none.",
+        hours=3,
+        max_machines=4,
+        lookahead=True,
+        jobs=[
+            JobBatch(0, 1, actual_runtime_s=30),
+            JobBatch(15 * 60, 30, actual_runtime_s=30),
+        ],
+        expect_starts=1,
+        expect_idle_stop_seconds=600,
+    ),
+    Scenario(
+        "lookahead_ready_45_queued",
+        "Lookahead: 1 ready machine and 45 queued (25 left at ready) adds one.",
+        hours=3,
+        max_machines=4,
+        lookahead=True,
+        jobs=[
+            JobBatch(0, 1, actual_runtime_s=30),
+            JobBatch(15 * 60, 45, actual_runtime_s=30),
+        ],
+        expect_starts=2,
+        expect_idle_stop_seconds=600,
+    ),
+    Scenario(
+        "lookahead_idle_stop_at_boot",
+        "Lookahead: an idle machine stops 600 s (boot) after its last job.",
+        # The policy idle default is 30 minutes; a lookahead start keeps the
+        # start rules' boot time instead (rent-or-buy keep-alive).
+        hours=2,
+        max_machines=4,
+        lookahead=True,
+        idle_shutdown_seconds=1800,
+        jobs=[JobBatch(0, 2, actual_runtime_s=30)],
+        expect_starts=1,
+        expect_idle_stop_seconds=600,
+    ),
+    Scenario(
+        "upstream_download_slowdown",
+        "Every host downloads at 30 MB/s for the first hour: a CDN, not the hosts.",
+        # #903: one 180 s average cannot tell a slow host from a slow
+        # upstream. Each slow host is stopped and replaced; the first two are
+        # denied, then the brake stops denying and raises one alert. Healthy
+        # hosts follow and finish the queue.
+        hours=4,
+        jobs=[JobBatch(0, 2, actual_runtime_s=300)],
+        machines=[MachineScript(download_seconds=52e9 / 30e6)] * 3,
+        expect_slow_denies=2,
+        expect_alerts=("capacity_download_upstream_slow",),
     ),
     Scenario(
         "slow_ticks_fresh_30",

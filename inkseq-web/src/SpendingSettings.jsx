@@ -9,6 +9,7 @@ import TakePreferencesSettings from './TakePreferencesSettings.jsx';
 import { admissionExposure } from './spending-breakdown.js';
 import { microsToDollars, dollarsToMicros, formatMoneyMicros } from './money.js';
 import AssistantConnections from './AssistantConnections.jsx';
+import FeedbackSettings from './FeedbackSettings.jsx';
 import React, { useEffect, useMemo, useRef, useState, useEffectEvent } from 'react';
 import { createCloudClient } from './cloud-client.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -504,6 +505,11 @@ export default function SpendingSettings({ account }) {
               account={account}
               active={pageActive && section === 'assistants'}
               onLogin={() => navigateApp('/')}
+            />
+            <FeedbackSettings
+              api={api}
+              account={account}
+              active={pageActive && section === 'assistants'}
             />
           </div>
         </section>

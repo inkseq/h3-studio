@@ -637,7 +637,7 @@ class BudgetAlertSnapshotTests(budget_fixture.DailyTestBudgetTests):
         tasks = result['test_spend']['tasks']
         self.assertEqual([row['task_id'] for row in tasks], ['alpha', 'zeta'])
         self.assertEqual(
-            [row['projected_microusd'] for row in tasks], [1_200_000, 2_400_000]
+            [row['projected_microusd'] for row in tasks], [200_000, 400_000]
         )
         self.assertEqual(
             [row['limit_microusd'] for row in tasks], [4_000_000, 5_000_000]

@@ -479,6 +479,29 @@ class DownloadSpeedTests(unittest.TestCase):
         # A stale provider read is never stop evidence.
         self.assertFalse(download_too_slow(binding, 400))
 
+    def test_speed_gate_comes_from_the_capacity_policy(self):
+        # #903: the floor and the window are policy values, not constants.
+        from studio_platform.dstack_preparation import speed_gate
+
+        binding = self.sample(self.binding(), 100, 0)
+        self.sample(binding, 200, 38 * 10**8 // 10)
+        self.sample(binding, 280, 38 * 10**6 * 180)
+        lenient = speed_gate(
+            {"min_download_mb_per_second": 30, "download_measure_seconds": 180}
+        )
+        self.assertFalse(download_too_slow(binding, 280, gate=lenient))
+        self.assertEqual(download_startup_credit(binding, 280, lenient), 180)
+        longer = speed_gate({"download_measure_seconds": 600})
+        self.assertFalse(download_too_slow(binding, 280, gate=longer))
+        # Missing or out-of-bound values keep the documented defaults.
+        for value in (None, {}, {"min_download_mb_per_second": 0}):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    speed_gate(value),
+                    {"min_rate": 50 * 10**6, "measure_seconds": 180},
+                )
+        self.assertTrue(download_too_slow(binding, 280, gate=speed_gate()))
+
     def test_fast_host_earns_startup_credit_until_progress_stops(self):
         binding = self.sample(self.binding(), 100, 0)
         self.sample(binding, 400, 120 * 10**6 * 300, complete=GB, files=7)

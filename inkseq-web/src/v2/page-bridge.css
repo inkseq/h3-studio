@@ -590,3 +590,33 @@ dialog::backdrop {
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+/* Story settings → Default picture (h3-studio#891). */
+.story-picture-defaults {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
+  margin: 4px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+}
+.story-picture-defaults legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+.story-picture-defaults > small,
+.story-picture-check,
+.story-picture-apply {
+  grid-column: 1 / -1;
+}
+.story-picture-check,
+.story-picture-apply {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+@media (max-width: 560px) {
+  .story-picture-defaults {
+    grid-template-columns: 1fr;
+  }
+}

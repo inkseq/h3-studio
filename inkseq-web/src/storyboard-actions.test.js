@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { applyStoryboardAction as edit } from './storyboard-actions.js';
 import { validateProject, children } from './store.js';
+import { storyboardView } from './storyboard-domain.js';
+import { togglePicture } from './shot-card-pictures.js';
 
 const entity = (id, type, parentId = null, data = {}, order = 0) => ({
   id,
@@ -90,6 +92,89 @@ function fixture() {
 }
 const get = (project, id) => project.entities.find((value) => value.id === id);
 const act = (project, action) => edit(project, action, { chapterId: 'chapter' });
+
+test('picture picker updates persist through the action path and retain legacy shot context', () => {
+  for (const storyboard of [
+    undefined,
+    {
+      mode: 'ref',
+      quality: 'draft',
+      place: { locationId: 'place', versionId: '' },
+      firstFrameId: 'image-one',
+    },
+  ]) {
+    const project = fixture(),
+      shot = get(project, 'shot-a'),
+      jobs = structuredClone(project.jobs);
+    if (storyboard) shot.data.storyboard = storyboard;
+    shot.data.qualityIntent = 'final';
+    get(project, 'hero').data.looks[0].imageIds = ['image-one', 'image-two'];
+    const picks = togglePicture({}, 'hero', ['image-one', 'image-two'], 'image-two');
+    assert.deepEqual(act(project, { type: 'update', id: shot.id, patch: { cardImages: picks } }), {
+      id: shot.id,
+    });
+    assert.deepEqual(shot.data.storyboard.cardImages, { hero: ['image-one', 'image-two'] });
+    const view = storyboardView(project, { chapterId: 'chapter' }).shots.find(
+      (value) => value.id === shot.id,
+    );
+    assert.deepEqual(view.cardImages, picks);
+    assert.deepEqual(view.cast, [{ id: 'hero', variant: 'coat' }]);
+    assert.equal(view.place.id, 'place');
+    assert.equal(view.start, 'image-one');
+    assert.equal(view.quality, storyboard?.quality ?? 'final');
+    assert.deepEqual(project.jobs, jobs);
+    assert.equal(get(project, 'result').data.sourceJobId, 'paid-job');
+    assert.ok(act(project, { type: 'update', id: shot.id, patch: { cardImages: {} } }));
+    assert.deepEqual(shot.data.storyboard.cardImages, {});
+  }
+});
+
+test('picture updates reject malformed references without changing the document', () => {
+  const project = fixture();
+  const invalid = [
+    null,
+    [],
+    { missing: ['image-one'] },
+    { 'image-one': ['image-two'] },
+    { hero: [] },
+    { hero: ['image-one', 'image-two', 'frame'] },
+    { hero: ['image-one', 'image-one'] },
+    { hero: ['missing'] },
+    { hero: ['voice-one'] },
+  ];
+  for (const cardImages of invalid) {
+    const before = structuredClone(project);
+    assert.equal(act(project, { type: 'update', id: 'shot-a', patch: { cardImages } }), false);
+    assert.deepEqual(project, before);
+  }
+  // An image may still exist after being removed from its card; compilation owns the fallback.
+  assert.ok(
+    act(project, { type: 'update', id: 'shot-a', patch: { cardImages: { hero: ['frame'] } } }),
+  );
+});
+
+test('picture updates respect the backend card bound and explicit-reference legacy guard', () => {
+  const project = fixture(),
+    cardImages = {};
+  for (let i = 0; i < 41; i++) {
+    const id = `card-${i}`;
+    project.entities.push(entity(id, 'prop', null, { imageIds: ['image-one'] }));
+    cardImages[id] = ['image-one'];
+  }
+  const before = structuredClone(project);
+  assert.equal(act(project, { type: 'update', id: 'shot-a', patch: { cardImages } }), false);
+  assert.deepEqual(project, before);
+  delete cardImages['card-40'];
+  assert.ok(act(project, { type: 'update', id: 'shot-a', patch: { cardImages } }));
+  const restored = fixture();
+  get(restored, 'shot-a').data.h3.explicitReferences = true;
+  const original = structuredClone(restored);
+  assert.equal(
+    act(restored, { type: 'update', id: 'shot-a', patch: { cardImages: { hero: ['image-one'] } } }),
+    false,
+  );
+  assert.deepEqual(restored, original);
+});
 
 test('scene header adds to the requested earlier scene without moving existing shots or results', () => {
   const project = fixture(),

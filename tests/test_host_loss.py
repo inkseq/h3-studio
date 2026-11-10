@@ -1,4 +1,4 @@
-"""#816: the off-host stop list names only our live paid Vast rentals."""
+"""#816: the off-host stop list names only our live paid dstack rentals."""
 
 import json
 from pathlib import Path
@@ -18,7 +18,16 @@ class HostLossTests(LedgerCase):
         super().setUp()
         self.repo.configure_pool("test-pool", max_instances=10, max_physical_gpus=10)
 
-    def rental(self, key, owner, *, instance="58211106", provider="vast", state=None):
+    def rental(
+        self,
+        key,
+        owner,
+        *,
+        instance="58211106",
+        provider="vast",
+        state=None,
+        backend=None,
+    ):
         intent = self.repo.reserve_instance_intent(
             self.scope,
             "test-pool",
@@ -62,7 +71,10 @@ class HostLossTests(LedgerCase):
                     binding_hash="a" * 64,
                     desired_state="running",
                     runtime_state="ready",
-                    payload={"owner_id": owner} if owner else {},
+                    payload={
+                        **({"owner_id": owner} if owner else {}),
+                        **({"dstack": {"backend": backend}} if backend else {}),
+                    },
                     updated_at=self.now,
                 )
             )
@@ -75,7 +87,60 @@ class HostLossTests(LedgerCase):
         self.rental("gone", "superdan", instance="400", state="destroyed")
         self.rental("modal", "superdan", instance="sb-1", provider="modal")
         with self.repo.engine.connect() as c:
-            self.assertEqual(stoppable(c), [{"instance_id": "100", "intent_id": ours}])
+            self.assertEqual(
+                stoppable(c),
+                [{"provider": "vast", "instance_id": "100", "intent_id": ours}],
+            )
+
+    def test_lists_runpod_and_lium_pods_rented_through_dstack(self):
+        vast = self.rental("vast", "superdan", instance="100", backend="vastai")
+        pod = self.rental(
+            "runpod",
+            "superdan",
+            instance="x7k2pod9",
+            provider="runpod",
+            backend="runpod",
+        )
+        uuid_pod = "0b9f6a52-4a1e-4c5e-9d0a-0e2f5f1a7c11"
+        lium = self.rental(
+            "lium", "superdan", instance=uuid_pod, provider="lium", backend="lium"
+        )
+        named = self.rental(
+            "lium-name",
+            "superdan",
+            instance="sixnine-a-0-0",
+            provider="lium",
+            backend="lium",
+        )
+        # RunPod Serverless jobs bill as runpod but are no pods: never listed.
+        self.rental(
+            "serverless",
+            "superdan",
+            instance="job-1",
+            provider="runpod",
+            backend="runpod-serverless",
+        )
+        self.rental("no-binding", "superdan", instance="y1", provider="runpod")
+        self.rental(
+            "lium-theirs", "supervan", instance="1" * 8, provider="lium", backend="lium"
+        )
+        self.rental(
+            "lium-unknown", None, instance="2" * 8, provider="lium", backend="lium"
+        )
+        self.rental(
+            "bad-id", "superdan", instance="a/b", provider="runpod", backend="runpod"
+        )
+        with self.repo.engine.connect() as c:
+            listed = stoppable(c)
+        self.assertEqual(
+            [(i["provider"], i["instance_id"], i["intent_id"]) for i in listed],
+            [
+                ("lium", uuid_pod, lium),
+                ("lium", "sixnine-a-0-0", named),
+                ("runpod", "x7k2pod9", pod),
+                ("vast", "100", vast),
+            ],
+        )
 
     def test_manifest_writes_at_most_once_per_interval(self):
         self.rental("ours", "superdan", instance="100")
@@ -86,6 +151,8 @@ class HostLossTests(LedgerCase):
             path = Path(directory) / FILE_NAME
             value = json.loads(path.read_text())
             self.assertEqual(value["updated_at"], 1000.0)
+            self.assertEqual(value["version"], 2)
+            self.assertEqual(value["instances"][0]["provider"], "vast")
             self.assertEqual([i["instance_id"] for i in value["instances"]], ["100"])
             clock[0] += 30
             manifest.beat()

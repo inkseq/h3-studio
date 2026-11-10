@@ -12,6 +12,7 @@ from sqlalchemy import insert, select
 from .capacity_watchdog import reclaimed_attempt, timeout_reason
 from .modal_budget import settle_destroyed
 from .queue import TaskQueue
+from .settlement_recovery import release_terminal_jobs
 from .repository import (
     Conflict,
     InvalidTransition,
@@ -66,6 +67,15 @@ class ModalLifecycle:
                 )
                 for attempt in related
             ]
+
+    def _job_ids(self, identity):
+        worker = 'modal-' + identity.replace('-', '')
+        with self.repo.engine.connect() as c:
+            return set(
+                c.execute(
+                    select(attempts.c.job_id).where(attempts.c.worker_id == worker)
+                ).scalars()
+            )
 
     def _reclaims(self, identity):
         receipts = []
@@ -180,13 +190,17 @@ class ModalLifecycle:
         state = fact['state']
         if state in {'destroyed', 'not_created'}:
             self.slots.stop(identity)
+            outcome = dict(intent_id=identity, state=state)
             if state == 'destroyed':
                 try:
                     settle_destroyed(self.repo, identity)
                 except Exception:
                     # Unbound or malformed attribution stays held for review.
-                    return dict(intent_id=identity, state='settlement_unconfirmed')
-            return dict(intent_id=identity, state=state)
+                    outcome = dict(intent_id=identity, state='settlement_unconfirmed')
+            # Lost work on a removed sandbox no longer holds its finished job
+            # (#915). The sandbox's own hold settles only at its exit bound.
+            release_terminal_jobs(self.repo, self._job_ids(identity))
+            return outcome
         startup_due = (
             state == 'starting'
             and not self._attempts(identity)

@@ -1,7 +1,7 @@
 """Local end-to-end dial-out (#859): real app, Caddy route, chisel and boot script.
 
 Opt-in: INKSEQ_DIALOUT_E2E=1 with Docker and a pinned chisel 1.12.0 binary at
-INKSEQ_E2E_CHISEL (see Dockerfile.dispatch for the checksum). Production
+INKSEQ_E2E_CHISEL (see tools/fetch_chisel.py for the checksum). Production
 topology: Caddy (container) terminates TLS and routes /v1/worker-tunnel to the
 controller's chisel server, everything else to the app. The "GPU host" is a
 plain python:3.12-slim container in Caddy's network namespace, running the run

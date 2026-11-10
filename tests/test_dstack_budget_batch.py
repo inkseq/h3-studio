@@ -118,7 +118,8 @@ class DstackBudgetBatchTests(unittest.TestCase):
             before = case._projection_rows(connection)
             guards = [self.guard('other'), self.guard(), self.guard('absent')]
             expected = [projected_cost(connection, guard, case.now) for guard in guards]
-            self.assertEqual(expected, [1_812_500, 2_450_000, 0])
+            # A removed machine no longer holds its transport allowance (#1140).
+            self.assertEqual(expected, [1_812_500, 1_450_000, 0])
             progress = []
             self.assertEqual(
                 projected_costs(

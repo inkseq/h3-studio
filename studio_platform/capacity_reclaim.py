@@ -1,7 +1,9 @@
 """Explicit lost-attempt authority on the original job, never supplier stop proof.
 
 Only trusted control-plane callers may request this transition. No provider IO,
-new job/admission, quote, reservation or financial settlement is performed here.
+new job/admission, quote, reservation or financial settlement is performed here;
+a job that ends here hands its hold to the ordinary terminal release, which
+keeps the actual cost unknown (invoice_pending) and never settles it.
 """
 
 import copy
@@ -229,6 +231,9 @@ def cancel_before_replacement(repo, connection, job):
 
     cancelled = repo._job(connection, job["id"])
     release(connection, repo, cancelled, reason="cancelled_before_replacement")
+    from .settlement_recovery import release_terminal_job
+
+    release_terminal_job(repo, connection, job["id"])
     repo._emit(
         connection,
         "job.cancel_requested",
@@ -414,8 +419,12 @@ def reclaim(
         )
         if exhausted:
             from .credits import release
+            from .settlement_recovery import release_terminal_job
 
             release(conn, repo, repo._job(conn, job_id), reason=error)
+            # Unknown supplier cost: invoice_pending once every lost upstream
+            # is proven stopped; otherwise the hold stays for the retry pass.
+            release_terminal_job(repo, conn, job_id)
         repo._emit(
             conn,
             "job.failed" if exhausted else "job.queued",

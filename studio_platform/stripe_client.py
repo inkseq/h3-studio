@@ -1,8 +1,12 @@
 """Pinned, account/mode-bound Stripe client and bounded provider DTOs."""
 
+from collections import OrderedDict
+import hashlib
 import math
 import logging
 import re
+import threading
+import time
 from urllib.parse import urlsplit
 import uuid
 
@@ -26,6 +30,10 @@ EVENT_TYPES = frozenset(
 )
 MAX_BODY = 512 * 1024
 MAX_INTEGER = (1 << 63) - 1
+# A verified catalog Price is reused for this long per (account, mode, price,
+# pack revision, amount, currency); a pack edit changes the revision at once.
+PRICE_CHECK_TTL_SECONDS = 300.0
+MAX_CLIENTS = 4
 logger = logging.getLogger(__name__)
 
 
@@ -205,10 +213,90 @@ def _default_client(config):
     )
 
 
+_clients = OrderedDict()
+_clients_lock = threading.Lock()
+
+
+def _close(client):
+    try:
+        client._requestor._client.close()
+    except Exception:
+        logger.warning("billing_client_close_failed")
+
+
+def _shared_client(factory, config):
+    """One SDK/HTTP client per process and credential; a rotated key replaces it."""
+    fingerprint = hashlib.sha256(config.secret_key.encode()).hexdigest()
+    key = (factory, config.account_id, config.mode, fingerprint)
+    stale = []
+    with _clients_lock:
+        client = _clients.get(key)
+        if client is None:
+            for other in [k for k in _clients if k[:3] == key[:3]]:
+                stale.append(_clients.pop(other))
+            client = _clients[key] = factory(config)
+            while len(_clients) > MAX_CLIENTS:
+                stale.append(_clients.popitem(last=False)[1])
+        _clients.move_to_end(key)
+    for old in stale:
+        _close(old)
+    return client
+
+
 class StripeGateway:
-    def __init__(self, settings, *, client_factory=None):
+    def __init__(self, settings, *, client_factory=None, clock=time.monotonic):
         self.settings = settings
         self.client_factory = client_factory or _default_client
+        self.clock = clock
+        self._verified_prices = {}
+        self._prices_lock = threading.Lock()
+
+    def _client(self, config):
+        return _shared_client(self.client_factory, config)
+
+    def _price_verified(self, key):
+        with self._prices_lock:
+            expires = self._verified_prices.get(key)
+            if expires is not None and expires > self.clock():
+                return True
+            self._verified_prices.pop(key, None)
+            return False
+
+    def _remember_price(self, key):
+        with self._prices_lock:
+            now = self.clock()
+            for old in [k for k, v in self._verified_prices.items() if v <= now]:
+                del self._verified_prices[old]
+            self._verified_prices[key] = now + PRICE_CHECK_TTL_SECONDS
+
+    def _forget_price(self, key):
+        with self._prices_lock:
+            self._verified_prices.pop(key, None)
+
+    def _check_price(self, client, config, payment, *, live):
+        key = (
+            config.account_id,
+            live,
+            payment["price_id"],
+            payment["pack_revision"],
+            payment["amount_cents"],
+            payment["currency"],
+        )
+        if self._price_verified(key):
+            return key
+        price = client.v1.prices.retrieve(payment["price_id"])
+        if (
+            _get(price, "id") != payment["price_id"]
+            or _get(price, "active") is not True
+            or _get(price, "livemode") is not live
+            or _get(price, "type") != "one_time"
+            or _get(price, "unit_amount") != payment["amount_cents"]
+            or _get(price, "currency") != payment["currency"]
+            or _get(price, "tax_behavior") != "exclusive"
+        ):
+            raise StripeGatewayError("billing_price_mismatch", 409)
+        self._remember_price(key)
+        return key
 
     def configuration(self, *, for_checkout=False, require_webhook=True):
         try:
@@ -255,21 +343,11 @@ class StripeGateway:
             or payment.get("livemode", False) is not live
         ):
             raise StripeGatewayError("billing_configuration_invalid")
-        client = self.client_factory(config)
+        client = self._client(config)
         import stripe
 
         try:
-            price = client.v1.prices.retrieve(payment["price_id"])
-            if (
-                _get(price, "id") != payment["price_id"]
-                or _get(price, "active") is not True
-                or _get(price, "livemode") is not live
-                or _get(price, "type") != "one_time"
-                or _get(price, "unit_amount") != payment["amount_cents"]
-                or _get(price, "currency") != payment["currency"]
-                or _get(price, "tax_behavior") != "exclusive"
-            ):
-                raise StripeGatewayError("billing_price_mismatch", 409)
+            price_key = self._check_price(client, config, payment, live=live)
             metadata = {
                 key: str(payment[key]) for key in ("user_id", "pack_id", "credits")
             }
@@ -294,6 +372,8 @@ class StripeGateway:
                     params=params, options={"idempotency_key": idempotency_key}
                 )
             except stripe.StripeError:
+                # The Price may have been archived since it was verified.
+                self._forget_price(price_key)
                 raise StripeGatewayError(
                     "billing_checkout_unknown", unknown=True
                 ) from None
@@ -319,8 +399,6 @@ class StripeGateway:
             }
         except stripe.StripeError:
             raise StripeGatewayError("billing_provider_unavailable") from None
-        finally:
-            client._requestor._client.close()
 
     def verify_event(self, raw, signature):
         """No HTTP or persistence. Signature validation precedes normalization."""
@@ -444,7 +522,7 @@ class StripeGateway:
         ):
             raise StripeGatewayError("billing_configuration_invalid")
         value = dict(verified["object"])
-        client = self.client_factory(config)
+        client = self._client(config)
         import stripe
 
         try:
@@ -516,5 +594,3 @@ class StripeGateway:
             return {**verified, "object": value}
         except stripe.StripeError:
             raise StripeGatewayError("billing_provider_unavailable") from None
-        finally:
-            client._requestor._client.close()

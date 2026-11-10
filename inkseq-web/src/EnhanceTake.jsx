@@ -10,7 +10,9 @@ import { CreditUsageBar, creditShortfall, useCredits } from './CreditsUI.jsx';
 import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { batchEnhanceTakes, enhanceable } from './enhance-take.js';
+import { batchEnhanceTakes, enhanceable, rememberUseCopy } from './enhance-take.js';
+import { enhanceAllPlan, howManyFit } from './shot-status.js';
+import './enhance-take.css';
 
 const TIERS = ['1080p', '2k'];
 
@@ -203,6 +205,176 @@ function EnhanceDialog({ entityId, onClose }) {
           onClick={() => void start()}
         >
           {t('enhance.start')}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// Plans for many takes, a few at a time, so a long story does not flood the service.
+async function planAll(entityIds, tier) {
+  const out = new Array(entityIds.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < entityIds.length) {
+      const at = next++;
+      out[at] = await cloud.planEnhance(entityIds[at], tier);
+    }
+  };
+  await Promise.all([1, 2, 3, 4].map(worker));
+  return out;
+}
+
+// The whole story (h3-studio#893): every shot whose chosen take is an original with no copy at
+// that size yet. Shots left out are listed with why. A shot already being enhanced is never sent
+// again, and a second press finds its copy and leaves it out.
+export function EnhanceAllButton({ shots, projectId }) {
+  const { t } = useI18n(),
+    c = useCloud(),
+    [open, setOpen] = useState(false);
+  const enabled = c.capabilities?.enhance?.enabled === true;
+  if (!enabled) return null;
+  const any = enhanceAllPlan(shots, '1080p', true).targets.length > 0;
+  return (
+    <>
+      <Button disabled={!any} title={t('enhance.allHelp')} onClick={() => setOpen(true)}>
+        <Sparkles size={14} />
+        <span className="label">{t('enhance.allButton')}</span>
+      </Button>
+      {open && (
+        <EnhanceAllDialog shots={shots} projectId={projectId} onClose={() => setOpen(false)} />
+      )}
+    </>
+  );
+}
+
+function EnhanceAllDialog({ shots, projectId, onClose }) {
+  const { t } = useI18n(),
+    c = useCloud(),
+    balance = useCredits(c.account)?.available,
+    [tier, setTier] = useState('1080p'),
+    // The shots as they were when the dialog opened: what is listed is what is sent.
+    [frozen] = useState(() =>
+      Object.fromEntries(TIERS.map((value) => [value, enhanceAllPlan(shots, value, true)])),
+    ),
+    [plans, setPlans] = useState({}),
+    [useCopy, setUseCopy] = useState(true),
+    [busy, setBusy] = useState(false),
+    [started, setStarted] = useState(0),
+    [failed, setFailed] = useState(false);
+  const plan = frozen[tier],
+    number = (shot) => shots.findIndex((s) => s.id === shot.id) + 1;
+  useEffect(() => {
+    let alive = true;
+    for (const value of TIERS)
+      planAll(
+        frozen[value].targets.map((target) => target.take.asset.entity.id),
+        value,
+      )
+        .then((list) => alive && setPlans((old) => ({ ...old, [value]: list })))
+        .catch(() => alive && setFailed(true));
+    return () => {
+      alive = false;
+    };
+  }, [frozen]);
+  const list = plans[tier],
+    ready = list
+      ? plan.targets
+          .map((target, i) => ({ target, plan: list[i] }))
+          .filter((row) => row.plan?.status === 'ready')
+      : [],
+    charged = ready.length > 0 && ready.every((row) => row.plan.admission === 'credits'),
+    costs = ready.map((row) => row.plan.credits),
+    credits = charged ? costs.reduce((sum, value) => sum + value, 0) : null,
+    short = creditShortfall(credits, balance),
+    fit = short ? howManyFit(costs, balance) : null,
+    // Short of credits: only an explicit "the first N" is ever sent, never a silent part.
+    sending = short ? ready.slice(0, fit || 0) : ready;
+  const start = async () => {
+    setBusy(true);
+    setFailed(false);
+    let count = 0;
+    try {
+      for (const row of sending) {
+        await cloud.submitEnhance(row.plan);
+        if (useCopy)
+          rememberUseCopy(projectId, row.target.shot.id, row.target.take.asset.entity.id);
+        count += 1;
+      }
+      onClose(count);
+    } catch {
+      setStarted(count);
+      setFailed(true);
+      setBusy(false);
+    }
+  };
+  const skipped = [
+    ...plan.skipped,
+    ...(list
+      ? plan.targets
+          .filter((target, i) => list[i]?.status !== 'ready')
+          .map((target) => ({ shot: target.shot, reason: 'unavailable' }))
+      : []),
+  ];
+  return (
+    <Dialog title={t('enhance.allTitle')} onClose={() => onClose(started)} busy={busy}>
+      <Segmented
+        label={t('enhance.allTitle')}
+        options={TIERS.map((value) => ({ value, label: t('enhance.tier.' + value) }))}
+        value={tier}
+        onChange={setTier}
+      />
+      <small className="muted">{t('enhance.tier.' + tier + 'Note')}</small>
+      <p className="sb-confirm-note">
+        {t('enhance.allCount', {
+          count: list ? ready.length : plan.targets.length,
+          skipped: skipped.length,
+        })}
+      </p>
+      {skipped.length > 0 && (
+        <ul className="enhance-skipped">
+          {skipped.map(({ shot, reason }) => (
+            <li key={shot.id}>
+              <b>{t('enhance.allShot', { n: number(shot) })}</b>
+              {shot.entity?.title ? ' ' + shot.entity.title : ''} · {t('enhance.skip.' + reason)}
+            </li>
+          ))}
+        </ul>
+      )}
+      <CreditUsageBar credits={credits} balance={balance} />
+      {short && (
+        <p role="alert">
+          {fit ? t('enhance.allFit', { fit, count: ready.length }) : t('enhance.allNone')}
+        </p>
+      )}
+      <label className="enhance-use-copy">
+        <input
+          type="checkbox"
+          checked={useCopy}
+          onChange={(event) => setUseCopy(event.target.checked)}
+        />
+        {t('enhance.allUseCopy')}
+      </label>
+      <p className="sb-confirm-note">
+        {list ? t('enhance.batchTiming') : failed ? '' : t('enhance.checking')}
+      </p>
+      {failed && (
+        <p role="alert">
+          {started ? t('enhance.allPartial', { count: started }) : t('enhance.failed')}
+        </p>
+      )}
+      <DialogActions>
+        <Button disabled={busy} onClick={() => onClose(started)}>
+          {t('enhance.cancel')}
+        </Button>
+        <Button
+          variant="primary"
+          disabled={busy || !sending.length || started > 0}
+          onClick={() => void start()}
+        >
+          {short && fit
+            ? t('enhance.allStartFirst', { count: fit })
+            : t('enhance.allStart', { count: list ? sending.length : plan.targets.length })}
         </Button>
       </DialogActions>
     </Dialog>

@@ -1,14 +1,14 @@
 // A shot's prompt on its own card (h3-studio#1040), saved through the same edit as the side editor.
 // `@` offers the story's characters, places and props and adds the chosen one to the shot.
-// While the box is not being edited, the video model's line markup reads as "名字：台词"
-// (prompt-display.js); editing shows and saves the stored text.
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+// Spoken lines show and are edited as 「台词」 without the video model's tags, which saving keeps
+// (h3-studio#1113, speech-edit.js).
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { Button } from './ui/Button.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
 import { mentionAt, mentionOptions, withMention } from './shot-mention.js';
-import { hasModelLines, readablePrompt, speakerNames } from './prompt-display.js';
+import { useSpeechText } from './use-speech-text.js';
 
 const stop = (event) => event.stopPropagation();
 
@@ -17,12 +17,8 @@ export function ShotCardPrompt({ shot }) {
   const { state, dispatch } = useStore();
   const box = useRef(null);
   const [mention, setMention] = useState(null),
-    [active, setActive] = useState(0),
-    [editing, setEditing] = useState(false);
-  const profiles = state.profiles;
-  const names = useMemo(() => speakerNames(profiles), [profiles]);
-  const shown =
-    editing || !hasModelLines(shot.prompt) ? shot.prompt : readablePrompt(shot.prompt, names);
+    [active, setActive] = useState(0);
+  const speech = useSpeechText(shot.prompt);
   const options = mention ? mentionOptions(state.profiles, mention.query) : [];
   const shut = () => setMention(null);
   useEffect(() => {
@@ -42,8 +38,12 @@ export function ShotCardPrompt({ shot }) {
     setMention({ ...found, left: rect.left, top: rect.bottom + 4, width: rect.width });
   };
   const pick = (profile) => {
-    const next = withMention(shot.prompt, mention, profile.name);
-    dispatch({ type: 'update', id: shot.id, patch: { prompt: next.text } });
+    const next = withMention(speech.shown, mention, profile.name);
+    dispatch({
+      type: 'update',
+      id: shot.id,
+      patch: { prompt: speech.edit(next.text, next.caret) },
+    });
     dispatch({ type: 'drop', profile: profile.id, shot: shot.id, slot: 'smart' });
     shut();
     requestAnimationFrame(() => {
@@ -71,19 +71,16 @@ export function ShotCardPrompt({ shot }) {
         ref={box}
         className="card-prompt-input"
         rows={3}
-        value={shown}
+        value={speech.shown}
         aria-label={t('shotCard.prompt')}
         placeholder={t('shotCard.promptHint')}
         onChange={(event) => {
-          dispatch({ type: 'update', id: shot.id, patch: { prompt: event.target.value } });
+          const prompt = speech.edit(event.target.value, event.target.selectionEnd);
+          dispatch({ type: 'update', id: shot.id, patch: { prompt } });
           read(event.target);
         }}
         onKeyDown={keys}
-        onFocus={() => setEditing(true)}
-        onBlur={() => {
-          setEditing(false);
-          setTimeout(shut, 120);
-        }}
+        onBlur={() => setTimeout(shut, 120)}
       />
       {mention &&
         options.length > 0 &&

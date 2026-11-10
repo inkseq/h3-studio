@@ -179,6 +179,7 @@ def agent_contract():
             "fields": ["cancelled_by", "reason_code", "message", "retry_advice"],
             "retry_advice": "safe_to_retry is explicit; charged and upstream_still_running are bool or null when unknown. A terminal status, accepted cancellation, empty provider list or absent worker alone does not prove safe/free retry. Safe retry still requires current preflight, permission, user generation authorization, budget and explicit confirmation.",
             "resume_admission": {
+                "find": "Keep the submission response's submission_id. To find it again, read the session takes (GET /v1/quick-chat/sessions/{session_id}/takes) or a card's takes: each take has submission_id, item_id (same as id), revision_id and next_action. The revision GET stays an unchanged snapshot. A take with next_action=resume_admission (status admission_blocked or pending_admission) is not running and will not start by itself; the submission lists them in resume_admission_item_ids.",
                 "observe": PREFIX + "/{session_id}/submissions/{submission_id}",
                 "revision": PREFIX + "/{session_id}/revisions/{revision_id}",
                 "preflight": PREFIX

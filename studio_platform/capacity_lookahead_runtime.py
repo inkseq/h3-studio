@@ -15,6 +15,9 @@ from .control import WorkerControl
 from .operator_capacity import require
 from .repository import instance_intents, jobs, outbox, registered_workers, request_hash
 
+# Registered worker states of a live slot that claims or runs work (control.py).
+SERVING = frozenset({"ready", "leased", "busy", "reconciling"})
+
 
 def enabled(service):
     value = service.policy.get("demand_start", {}).get("lookahead_version")
@@ -104,9 +107,13 @@ def evaluate(service, connection, job, profile, work, usage, now):
             continue
         identities.add(physical)
         worker = workers.get("dstack-" + node["intent_id"].replace("-", ""))
+        # A worker serving a job (leased, busy, collecting) is ready capacity:
+        # its job goes into remaining_job_seconds below. Counting it as a
+        # starting slot without an ETA gave it no throughput, so every claim
+        # looked like a cold fleet and rented another machine (#688 simulator).
         ready = bool(
             worker
-            and worker["state"] == "ready"
+            and worker["state"] in SERVING
             and not worker["drain_requested"]
             and _number(worker["expires_at"])
             and worker["expires_at"] > now

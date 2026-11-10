@@ -12,6 +12,7 @@ import {
   failureLabel,
   hostInventoryConfirmed,
   hostPolicyBody,
+  hostPolicyChoice,
   hostPolicyReceipt,
   hostReasonText,
   inventoryError,
@@ -730,7 +731,7 @@ test('real host rendering labels allocated observations, separate IDs, controls 
     React.createElement(module.exports.HostRecord, { host: original }),
   );
   for (const text of [
-    '物理主机目标 #152440',
+    'Vast 物理主机 #152440',
     '已分配内存',
     'original-node',
     'original-run',
@@ -771,6 +772,93 @@ function renderWithLocale(module, element, locale = 'zh') {
     else delete globalThis.localStorage;
   }
 }
+
+const EXECUTOR = '0453b369-1111-4222-8333-444455556666';
+const liumHost = (extra = {}) =>
+  host(EXECUTOR, { provider: 'lium', physical_id_source: 'lium_executor_id', ...extra });
+
+test('Lium executors are hosts too: provider-keyed pages, lookups and a bad-output deny (h3-studio#900)', async () => {
+  const calls = [],
+    api = createP4OperatorClient({
+      fetcher: async (path, options) => {
+        calls.push({ path, options });
+        const value =
+          options.method === 'POST'
+            ? {
+                ...receipt(JSON.parse(options.body)),
+                host: { provider: 'lium', machine_id: EXECUTOR },
+              }
+            : page(true, [liumHost()], { provider: 'lium' });
+        return new Response(JSON.stringify(value), {
+          headers: { 'Content-Type': 'application/json', 'X-Authenticated-Account': 'superdan' },
+        });
+      },
+    });
+  api.setAccount('superdan');
+  await api.hosts({ admin: true, provider: 'lium' });
+  await api.hosts({ admin: true, provider: 'lium', machine_id: EXECUTOR });
+  assert.deepEqual(
+    calls.map((call) => call.path),
+    [
+      '/v1/operator/admin/hosts?limit=100&offset=0&provider=lium',
+      '/v1/operator/admin/hosts?limit=100&offset=0&provider=lium&machine_id=' + EXECUTOR,
+    ],
+  );
+  // A Vast id is not an executor id, and owners never read other providers.
+  await assert.rejects(() => api.hosts({ admin: true, provider: 'lium', machine_id: '19492' }));
+  await assert.rejects(() => api.hosts({ provider: 'lium' }));
+  await assert.rejects(() => api.hosts({ admin: true, provider: 'runpod' }));
+  const body = hostPolicyBody(liumHost(), 'deny_bad_output');
+  assert.deepEqual(body, {
+    provider: 'lium',
+    machine_id: EXECUTOR,
+    policy: 'deny',
+    reason_code: 'operator_host_bad_output',
+    expected_revision: 0,
+    expected_snapshot: 'a'.repeat(64),
+  });
+  assert.equal(validHostPolicyBody(body), true);
+  assert.equal(hostPolicyReceipt(receipt(body), body), false); // receipt names Vast
+  assert.equal(
+    hostPolicyReceipt({ ...receipt(body), host: { provider: 'lium', machine_id: EXECUTOR } }, body),
+    true,
+  );
+  for (const changed of [
+    { ...body, provider: 'runpod' },
+    { ...body, machine_id: '19492' },
+    { ...body, policy: 'prefer' },
+  ])
+    assert.equal(validHostPolicyBody(changed), false);
+  // A Lium page is not a Vast page, and its hosts must all be Lium.
+  assert.equal(
+    validHostPage(page(true, [liumHost()], { provider: 'lium' }), 'superdan', { admin: true }),
+    false,
+  );
+  assert.equal(
+    validHostPage(page(true, [liumHost()], { provider: 'lium' }), 'superdan', {
+      admin: true,
+      provider: 'lium',
+    }),
+    true,
+  );
+  assert.equal(
+    validHostPage(page(true, [host()], { provider: 'lium' }), 'superdan', {
+      admin: true,
+      provider: 'lium',
+    }),
+    false,
+  );
+  assert.equal(
+    hostPolicyChoice(policy({ manual: 'deny', reason_code: 'operator_host_bad_output' })),
+    'deny_bad_output',
+  );
+  assert.equal(
+    hostPolicyChoice(policy({ manual: 'deny', reason_code: 'automatic_slow_download' })),
+    'deny',
+  );
+  assert.equal(hostReasonText('operator_host_bad_output', 'en'), 'denied by an admin: bad output');
+  assert.equal(hostReasonText('operator_host_bad_output', 'zh'), '管理员禁止：出片有问题');
+});
 
 test('host policy reasons read as words in both languages; unknown codes stay visible', () => {
   assert.equal(hostReasonText('automatic_slow_download', 'zh'), '自动禁止：模型下载太慢');

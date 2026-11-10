@@ -466,6 +466,15 @@ jobs:
             --tmpfs /tmp:size=134217728,mode=1777 \
             --mount "type=bind,source=$PWD/tools/check_platform_container.py,target=/check_platform_container.py,readonly" \
             "inkseq-platform:$GITHUB_SHA" python /check_platform_container.py
+      - name: Restore pinned chisel release asset
+        id: chisel
+        uses: actions/cache@v4
+        with:
+          path: .build-cache/chisel_1.12.0_linux_amd64.gz
+          key: chisel-1.12.0-linux-amd64-f3f180f1d93aa72cce4e6386f98cc06569a0146fbd65eb4423cf83e6434bcfe6
+      - name: Fetch pinned chisel once on a cache miss
+        if: steps.chisel.outputs.cache-hit != 'true'
+        run: python tools/fetch_chisel.py --cache .build-cache --cache-only
       - name: Build exact CPU dispatch derivative
         # The base was loaded into this Docker daemon. A separate Buildx
         # container cannot resolve that private local tag as a registry image.
@@ -578,6 +587,23 @@ jobs:
           if-no-files-found: error
           retention-days: 1
           compression-level: 0
+
+  secret-scan:
+    # Every push and PR: new commits only, with a pinned, sha256-checked
+    # gitleaks binary. Findings are redacted in the log (#976).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Scan new commits for credentials
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: python tools/secret_scan.py --base "$BASE"
 
   dependency-audit:
     needs: changes

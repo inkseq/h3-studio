@@ -661,11 +661,12 @@ def reclaim_node(service, node, intent):
                     continue  # A live transition won the original row lock.
                 raise
     started = binding.get("apply_started_at")
+    from .capacity_policy import speed_gate
     from .dstack_preparation import download_startup_credit, model_load_stalled
 
     # Measured on-pace model download time does not count toward the cold
     # window (#885); a slow or stalled host earns no credit and times out.
-    startup += int(download_startup_credit(binding, now))
+    startup += int(download_startup_credit(binding, now, speed_gate(service)))
     # A machine that has the whole model but cannot load it will not recover: stop it early.
     if _number(started) and model_load_stalled(binding, now):
         startup = min(startup, max(1, int(now - started)))
@@ -707,5 +708,13 @@ def reclaim_node(service, node, intent):
         stopped = _stop(
             repo, node, intent, reason, receipts, now, startup_timeout_seconds=startup
         )
-        return {"stop_requested": stopped, "reason": reason, "receipts": receipts}
-    return {"stop_requested": False, "receipts": []}
+        outcome = {"stop_requested": stopped, "reason": reason, "receipts": receipts}
+    else:
+        outcome = {"stop_requested": False, "receipts": []}
+    if removed:
+        from .settlement_recovery import release_removed_holds
+
+        # Job end and host removal each release once; the later one finds the
+        # other still open. Retry both here on every pass over a removed host.
+        release_removed_holds(repo, intent["id"], {row["job_id"] for row in related})
+    return outcome

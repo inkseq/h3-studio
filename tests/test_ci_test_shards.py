@@ -256,6 +256,7 @@ class ShardTests(unittest.TestCase):
             "test_platform_repository",
             "test_credit_admission_reader",
             "test_credit_only_admission",
+            "test_admission_gate_wait",
             "test_platform_queue",
             "test_platform_control",
             "test_platform_worker",

@@ -12,7 +12,13 @@ import uuid
 from sqlalchemy import insert, select
 
 from .control import WorkerControl
-from .dstack_test_budget import ACCOUNT, PROJECTS, finite, task_guard
+from .dstack_test_budget import (
+    ACCOUNT,
+    PROJECTS,
+    demand_task_id,
+    finite,
+    task_guard,
+)
 from .modal_budget import bind_test_guard, production_guard, require
 from .modal_capacity import BACKEND, admission, precreate
 from .repository import (
@@ -171,7 +177,7 @@ class ModalAdmission:
             policy = self.service.policy
             guard = task_guard(
                 policy['test_gpu_guard'],
-                policy['demand_start']['test_task_id'],
+                demand_task_id(policy['demand_start'], now),
                 limit=limits['test_task_limit_microusd'],
                 max_runtime=limits['max_runtime_seconds'],
             )

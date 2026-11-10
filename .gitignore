@@ -54,10 +54,17 @@ inventory.json
 !tests/fixtures/inky/eval-cases.json
 !tests/fixtures/inky/images/
 !tests/fixtures/inky/images/*.jpg
+!tests/fixtures/story-chat/
+!tests/fixtures/story-chat/eval-conversations.json
 !tools/
 !tools/ci_media_tools.py
+!tools/fetch_chisel.py
+!tools/secret_scan.py
+!tools/rotate_key.py
+!tools/key-rotation.example.json
 !tools/ci_test_shards.py
 !tools/simulate_capacity.py
+!tools/langfuse_evals.py
 !tools/ci_test_timings.json
 !tools/check_aws_release_account.py
 !tools/h3_pro6000_pilot_runtime.py
@@ -737,7 +744,9 @@ inventory.json
 !skills/inkseq/reference/
 !skills/inkseq/reference/api.md
 !skills/inkseq/reference/recovery.md
+!studio_platform/storyboard_roles.py
 !studio_platform/storyboard_versions.py
+!studio_platform/storyboard_preflight_plans.py
 !studio_platform/story_risk.py
 !tests/test_story_risk.py
 !docs/STORY-RISK-LINT.md
@@ -753,7 +762,9 @@ inventory.json
 !tests/test_story_chat.py
 !tests/test_story_chat_advice.py
 !studio_platform/story_chat_images.py
+!studio_platform/story_chat_photos.py
 !studio_platform/story_chat_settings.py
+!studio_platform/maintenance_notice.py
 !studio_platform/speech_catalog.py
 !studio_platform/speech_provider.py
 !studio_platform/speech_routes.py
@@ -767,7 +778,9 @@ inventory.json
 !studio_platform/starter_pictures/
 !studio_platform/starter_pictures/*.webp
 !studio_platform/story_chat_undo.py
+!studio_platform/story_chat_stream.py
 !tests/test_story_chat_images.py
+!tests/test_story_chat_photos.py
 !tests/test_story_chat_image_credits.py
 
 !studio_platform/universal_trash.py
@@ -1106,6 +1119,7 @@ inventory.json
 !studio_platform/llm_tracing.py
 !deploy/platform/langfuse_credentials.py
 !tools/import_langfuse_credentials.py
+!tests/test_langfuse_evals.py
 !tests/test_llm_tracing.py
 !tests/test_langfuse_deployment.py
 !deploy/platform/langfuse-staging-read-policy.json
@@ -1188,3 +1202,7 @@ inventory.json
 !studio_platform/speech_requests.py
 !tests/test_speech_credit_core.py
 !tests/test_speech_billing.py
+!studio_platform/spending_by_provider.py
+!studio_platform/payment_revenue.py
+!tests/test_admin_money.py
+!.gitleaks.toml

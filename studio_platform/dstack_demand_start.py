@@ -7,6 +7,7 @@ This module neither settles invoices nor changes an accepted generation job.
 
 import copy
 import math
+import re
 import uuid
 
 from sqlalchemy import insert, select, update
@@ -17,6 +18,7 @@ from .operator_capacity import operator_commands, operator_nodes
 from .repository import request_hash
 
 KIND = 'dstack_demand'
+_EXECUTOR = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 LEASE_SECONDS = 60
 STATES = {'planning', 'starting', 'observing', 'backoff', 'blocked'}
 MAX_DOWNLOAD_REPLACEMENTS = 2
@@ -71,8 +73,12 @@ def download_journal(connection, tenant, job_id):
             and isinstance(s['node_id'], str)
             and 1 <= len(s['node_id']) <= 100
             and isinstance(s['machine_id'], str)
-            and s['machine_id'].isdigit()
-            and 1 <= len(s['machine_id']) <= 18
+            # A Vast machine id or, since #900, a Lium executor id.
+            and (
+                s['machine_id'].isdigit()
+                and 1 <= len(s['machine_id']) <= 18
+                or _EXECUTOR.fullmatch(s['machine_id']) is not None
+            )
             and type(s['at']) in (int, float)
             and math.isfinite(s['at'])
             and s['at'] > 0
@@ -686,7 +692,9 @@ def start_once(service):
                 keep_on='idle',
                 idle_shutdown_seconds=idle,
             )
-            task = service.policy['demand_start'].get('test_task_id')
+            from .dstack_test_budget import demand_task_id
+
+            task = demand_task_id(service.policy['demand_start'], service.repo.clock())
             if task is not None:
                 body['test_task_id'] = task
             raised = ladder_price(service, profile, job_id)

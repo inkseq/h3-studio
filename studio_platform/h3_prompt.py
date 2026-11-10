@@ -7,6 +7,11 @@ for our own H3 machines is rewritten into the six sections of MiniMax's
 full-reference format, in English, with the pictures and voices numbered in the
 order they are sent and the lines copied word for word inside ``<d>`` tags.
 
+First/last-frame shots (#1086) are rewritten into the official first/last-frame
+format instead: three English sections, the frames numbered ``<Picture 1>`` (first)
+and ``<Picture 2>`` (last), and every card called by a generic English identity
+("the old ferryman") rather than its Chinese name.
+
 The person keeps editing their own words; this text is only what the model reads.
 A rewrite that loses a line, leaks Chinese outside a line, or cites a missing
 picture is refused and the original prompt is sent instead.
@@ -22,6 +27,7 @@ from .prompt_files import text as prompt_text
 from .storyboard import look_images
 
 INSTRUCTION = prompt_text("h3_reference_prompt")
+FRAME_INSTRUCTION = prompt_text("h3_frame_prompt")
 MODEL = "gemini-3.8-flash"
 VERSION = "h3-reference-v1"
 SECTIONS = (
@@ -32,6 +38,12 @@ SECTIONS = (
     "overall_soundscape:",
     "non_diegetic_music:",
 )
+FRAME_SECTIONS = (
+    "integrated_multimodal_description:",
+    "overall_soundscape:",
+    "non_diegetic_music:",
+)
+KINDS = {"cast": "character", "place": "place", "prop": "prop"}
 MAX_PROMPT = 12000
 LINE = re.compile(r"<d>.*?</d>", re.S)
 FENCE = re.compile(r"^```[a-z]*$", re.M)
@@ -103,15 +115,19 @@ def source(project, shot, draft):
     board = draft.get("storyboard")
     action = (shot.get("data") or {}).get("prompt", shot.get("description", ""))
     inputs = draft.get("inputs") or {}
+    mode = ((shot.get("data") or {}).get("storyboard") or {}).get("mode")
     if (
         not board
-        or ((shot.get("data") or {}).get("storyboard") or {}).get("mode") != "ref"
+        or mode not in {"ref", "fl"}
         or not isinstance(action, str)
         or not action.strip()
         or official(action)
         or inputs.get("guides")
-        or inputs.get("last_frame")
     ):
+        return None
+    if mode == "fl":
+        return _frame_source(project, board, draft, shot, action)
+    if inputs.get("last_frame"):
         return None
     lookup = _cards(project)
     soundtrack = (draft.get("controls") or {}).get("audio_conditioning") == "soundtrack"
@@ -132,10 +148,7 @@ def source(project, shot, draft):
     for part in board.get("prompt_parts", []):
         entity = lookup.get(part.get("entity_id"))
         if entity is not None:
-            card(
-                {"cast": "character", "place": "place", "prop": "prop"}[part["kind"]],
-                entity,
-            )
+            card(KINDS[part["kind"]], entity)
     pictures, audios, videos, extras = 0, 0, 0, []
     for ref in board.get("references", []):
         if not ref.get("sent") or ref.get("slot") not in {"images", "audios", "videos"}:
@@ -195,20 +208,63 @@ def source(project, shot, draft):
     }
 
 
+def _frame_source(project, board, draft, shot, action):
+    """Facts for a first/last-frame shot, or None when it sends other references."""
+    inputs = draft.get("inputs") or {}
+    if any(inputs.get(slot) for slot in ("images", "audios", "videos")):
+        return None  # Extra references in this mode have no agreed numbering yet.
+    lookup = _cards(project)
+    cards, seen = [], set()
+    for part in board.get("prompt_parts", []):
+        entity = lookup.get(part.get("entity_id"))
+        if entity is None or part.get("kind") not in KINDS or entity["id"] in seen:
+            continue
+        seen.add(entity["id"])
+        cards.append(
+            {
+                "kind": KINDS[part["kind"]],
+                "name": entity.get("title", ""),
+                # The compiled card text also carries the chosen look or version.
+                "description": part.get("text", ""),
+            }
+        )
+    frames = [slot for slot in ("first_frame", "last_frame") if inputs.get(slot)]
+    labels = {slot: f"<Picture {n}>" for n, slot in enumerate(frames, 1)}
+    parts = {p["kind"]: p["text"] for p in board.get("prompt_parts", [])}
+    controls = draft.get("controls") or {}
+    seconds = controls.get("duration") or (shot.get("data") or {}).get("seconds", 5)
+    return {
+        "format": "frames",
+        "seconds": seconds,
+        "style": " ".join(filter(None, (parts.get("style"), parts.get("look")))),
+        "camera": parts.get("camera", ""),
+        "first_frame": labels.get("first_frame"),
+        "last_frame": labels.get("last_frame"),
+        "cards": cards,
+        "action": action.strip(),
+        "counts": {"Picture": len(frames), "Audio": 0, "Video": 0},
+    }
+
+
+def _frames(facts):
+    return facts.get("format") == "frames"
+
+
 def problems(value, facts):
     """Why a rewrite cannot be sent; empty when it can."""
     found = []
     if not isinstance(value, str) or not value.strip():
         return ["empty"]
+    sections = FRAME_SECTIONS if _frames(facts) else SECTIONS
     at = -1
-    for header in SECTIONS:
+    for header in sections:
         index = value.find("\n" + header) if at >= 0 else value.find(header)
         if index <= at:
             found.append("section order: " + header)
             break
         at = index
-    if not value.lstrip().startswith(SECTIONS[0]):
-        found.append("must start with subject_definitions:")
+    if not value.lstrip().startswith(sections[0]):
+        found.append("must start with " + sections[0])
     if leaks(value):
         found.append("Chinese text outside <d> lines")
     wanted = LINE.findall(facts["action"])
@@ -219,6 +275,39 @@ def problems(value, facts):
     if any(line not in facts["action"] for line in got):
         found.append("a <d> line that is not in the source")
     found += _speaker_problems(value, facts["action"])
+    if _frames(facts):
+        found += _names_kept(value, facts)
+    else:
+        found += _summary_problems(value, facts)
+    for kind, number in LABEL.findall(value):
+        if not 1 <= int(number) <= facts["counts"][kind]:
+            found.append(f"<{kind} {number}> was not sent")
+    for kind, count in facts["counts"].items():
+        for number in range(1, count + 1):
+            if f"<{kind} {number}>" not in value:
+                found.append(f"<{kind} {number}> is never cited")
+    if len(value) > MAX_PROMPT:
+        found.append("too long")
+    return found
+
+
+def _names_kept(value, facts):
+    """A Latin-letter card name left outside the lines (Chinese ones are leaks)."""
+    outside = LINE.sub("", value)
+    found = []
+    for card in facts["cards"]:
+        name = card["name"].strip()
+        if (
+            name
+            and not leaks(name)
+            and re.search(r"\b" + re.escape(name) + r"\b", outside)
+        ):
+            found.append(f"call {name} by a generic English identity, not the name")
+    return found
+
+
+def _summary_problems(value, facts):
+    found = []
     summary = value.split("\nsummary:", 1)[-1].lstrip()
     kinds = TASK.match(summary)
     named = set(kinds.group(1).split(" + ")) if kinds else set()
@@ -236,15 +325,6 @@ def problems(value, facts):
             "summary must start with the task types inside one pair of brackets, "
             "e.g. [reference generation + audio reference]"
         )
-    for kind, number in LABEL.findall(value):
-        if not 1 <= int(number) <= facts["counts"][kind]:
-            found.append(f"<{kind} {number}> was not sent")
-    for kind, count in facts["counts"].items():
-        for number in range(1, count + 1):
-            if f"<{kind} {number}>" not in value:
-                found.append(f"<{kind} {number}> is never cited")
-    if len(value) > MAX_PROMPT:
-        found.append("too long")
     return found
 
 
@@ -268,9 +348,13 @@ def _tidy(value):
     return "\n".join(line for line in lines if line)
 
 
+def _instruction(facts):
+    return FRAME_INSTRUCTION if _frames(facts) else INSTRUCTION
+
+
 def _key(facts):
     return hashlib.sha256(
-        json.dumps([VERSION, INSTRUCTION, facts], sort_keys=True).encode()
+        json.dumps([VERSION, _instruction(facts), facts], sort_keys=True).encode()
     ).hexdigest()
 
 
@@ -283,7 +367,7 @@ def rewrite(client, facts, attempts=2):
         if key in _CACHE:
             _CACHE.move_to_end(key)
             return _CACHE[key]
-    request = {k: v for k, v in facts.items() if k != "counts"}
+    request = {k: v for k, v in facts.items() if k not in {"counts", "format"}}
     messages = [{"role": "user", "text": json.dumps(request, ensure_ascii=False)}]
     for _ in range(attempts):
         try:
@@ -291,7 +375,7 @@ def rewrite(client, facts, attempts=2):
             response = client.generate(
                 MODEL,
                 messages,
-                instruction=INSTRUCTION,
+                instruction=_instruction(facts),
                 max_tokens=8192,
                 thinking="low",
             )

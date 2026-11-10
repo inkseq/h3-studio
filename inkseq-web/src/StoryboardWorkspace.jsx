@@ -1,4 +1,6 @@
 import { WorkbenchBulk } from './StoryboardWorkbench.jsx';
+import { EnhanceAllButton } from './EnhanceTake.jsx';
+import { chosenTake, liveTake, shotState } from './shot-status.js';
 import { Button } from './ui/Button.jsx';
 import { Segmented } from './ui/Segmented.jsx';
 import { sceneBeats } from './script-beats.js';
@@ -762,12 +764,11 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
       group.shots.push(shot);
     }
   }
-  const count = state.shots.filter((shot) => shot.chosen).length,
-    pending = state.shots.filter((shot) => !shot.versions.length),
+  // From the one shared shot status (h3-studio#892): trashed takes never count.
+  const count = state.shots.filter((shot) => chosenTake(shot)).length,
+    pending = state.shots.filter((shot) => shotState(shot).id === 'empty'),
     // Finished takes nobody has chosen yet (e.g. stories moved from old Quick Create).
-    unpicked = state.shots.filter(
-      (shot) => !shot.chosen && shot.versions.some((v) => ['done', 'succeeded'].includes(v.status)),
-    );
+    unpicked = state.shots.filter((shot) => !chosenTake(shot) && shot.versions.some(liveTake));
   // First shot of each chapter, so the dock timeline can mark chapter boundaries.
   const chapterStarts = new Set();
   if (multi)
@@ -939,6 +940,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   </span>
                 </Button>
               )}
+              <EnhanceAllButton shots={state.shots} projectId={state.project.id} />
               <span className="sb-film-primary">
                 {filmControl && React.cloneElement(filmControl, { primary: count > 0 })}
               </span>

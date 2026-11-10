@@ -37,6 +37,11 @@ from .dstack_operator_contract import (
 _logger = logging.getLogger(__name__)
 
 
+def _event_provider(physical):
+    """The telemetry provider name of a bound host ("vast" kept for Vast)."""
+    return "vast" if physical["provider"] == VASTAI.id else physical["provider"]
+
+
 class LedgerDstackStore:
     """Same-row atomic journals; no rental, task or reservation side database."""
 
@@ -103,12 +108,14 @@ class LedgerDstackStore:
                 "dstack_start_window_expired",
             )
             if stored.get("host_selection") is not None:
-                from .host_policy import HostPolicyStore, selection
+                from .host_policy import HostPolicyStore, selection, selection_provider
 
                 selected = selection(stored["host_selection"], now=self.repo.clock())
                 require(
                     HostPolicyStore(self.repo, self.tenant_id).admission_snapshot(
-                        connection, selected["offers"]
+                        connection,
+                        selected["offers"],
+                        provider=selection_provider(selected),
                     )
                     == selected["policy_snapshot"],
                     "host_policy_changed",
@@ -350,7 +357,7 @@ class LedgerDstackStore:
                     value.pop("host_observation"), now=self.repo.clock()
                 )
                 require(
-                    binding["backend"] == VASTAI.id
+                    binding["backend"] == physical["provider"]
                     and physical["provider_instance_id"]
                     == value.get(
                         "provider_instance_id", binding.get("provider_instance_id")
@@ -373,7 +380,7 @@ class LedgerDstackStore:
                         **physical,
                         "node_id": intent_id,
                         "dstack_run": binding["run_name"],
-                        "provider": "vast",
+                        "provider": _event_provider(physical),
                         "profile_id": binding["profile_id"],
                         "mode": binding["mode"],
                         "simulation": False,
@@ -416,7 +423,7 @@ class LedgerDstackStore:
                             **physical,
                             "node_id": intent_id,
                             "dstack_run": binding["run_name"],
-                            "provider": "vast",
+                            "provider": _event_provider(physical),
                             "profile_id": binding["profile_id"],
                             "mode": binding["mode"],
                             "warmth": "cold",

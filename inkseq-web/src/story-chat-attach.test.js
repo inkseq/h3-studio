@@ -117,3 +117,17 @@ test('upload waits until the asset is ready, and gives up on failure', async () 
     /asset_not_ready/,
   );
 });
+
+test('the assistant sees up to four attached photos by their story ids', async () => {
+  const { turnPhotos, MAX_TURN_PHOTOS } = await import('./story-chat-attach.js');
+  const items = [
+    { kind: 'image', assetId: 'a1' },
+    { kind: 'audio', assetId: 'b1' },
+    { kind: 'image', assetId: 'a2' },
+    { kind: 'image' },
+    ...['a3', 'a4', 'a5'].map((assetId) => ({ kind: 'image', assetId })),
+  ];
+  assert.equal(MAX_TURN_PHOTOS, 4);
+  assert.deepEqual(turnPhotos(items), ['asset-a1', 'asset-a2', 'asset-a3', 'asset-a4']);
+  assert.deepEqual(turnPhotos([]), []);
+});

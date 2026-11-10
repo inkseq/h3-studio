@@ -206,7 +206,16 @@ class StoryboardPureTests(unittest.TestCase):
         self.assertEqual(issues, [])
         self.assertEqual(
             [part["kind"] for part in draft["storyboard"]["prompt_parts"]],
-            ["style", "look", "place", "cast", "prop", "action", "camera"],
+            [
+                "references",
+                "style",
+                "look",
+                "place",
+                "cast",
+                "prop",
+                "action",
+                "camera",
+            ],
         )
         self.assertIn("Black and white", draft["prompt"])
         self.assertIn("slowly pushes in", draft["prompt"])
@@ -215,7 +224,7 @@ class StoryboardPureTests(unittest.TestCase):
         draft, issues = read_draft(self.project, "shot-one", capabilities=cap())
         self.assertEqual(
             [part["kind"] for part in draft["storyboard"]["prompt_parts"]],
-            ["style", "place", "cast", "prop", "action"],
+            ["references", "style", "place", "cast", "prop", "action"],
         )
         validate_project(self.project)
         for field in ("look", "camera"):
@@ -239,13 +248,61 @@ class StoryboardPureTests(unittest.TestCase):
         self.assertEqual(profile_text("Mia", "a tall woman"), "Mia (a tall woman)")
         self.assertEqual(profile_text("Mia", " "), "Mia")
 
+    def test_reference_role_map_numbers_only_sent_references_in_order(self):
+        # #505: every sent reference gets one role, numbered as inputs are filled.
+        draft, issues = read_draft(self.project, "shot-one", capabilities=cap(3, 2, 6))
+        self.assertEqual(issues, [])
+        part = draft["storyboard"]["prompt_parts"][0]
+        self.assertEqual((part["kind"], part["label"]), ("references", "参考图"))
+        self.assertTrue(draft["prompt"].startswith(part["text"] + "\n"))
+        self.assertEqual(
+            part["text"].splitlines(),
+            [
+                "<Picture 1> is the identity reference for 林岚 (白天), "
+                "for the face, body and clothing.",
+                "<Picture 2> is the setting reference for the place 站台 (傍晚), "
+                "for the environment and light only.",
+                "<Picture 3> is the reference for the prop 铁剑, "
+                "for its shape and colour.",
+                "<Video 1> is an extra reference video (motion).",
+                "<Audio 1> is the voice timbre reference for 林岚; "
+                "no words are copied from it.",
+                "<Audio 2> is the ambient sound reference for the place 站台.",
+            ],
+        )
+        receipts = [item["asset_id"] for item in draft["inputs"]["images"]]
+        self.assertEqual(
+            receipts,
+            ["receipt-portrait", "receipt-room-image", "receipt-sword-image"],
+        )
+        # The extra picture is over the limit: it is reported, never numbered.
+        self.assertNotIn("<Picture 4>", draft["prompt"])
+        self.assertNotIn("(extra)", draft["prompt"])
+        # A dropped picture never shifts the numbers of the ones after it.
+        narrow, _ = read_draft(self.project, "shot-one", capabilities=cap())
+        legend = narrow["storyboard"]["prompt_parts"][0]["text"]
+        self.assertIn("<Picture 1> is the identity reference for 林岚", legend)
+        self.assertNotIn("<Picture 2>", legend)
+        self.assertNotIn("站台", legend)
+        for line in legend.splitlines():
+            self.assertRegex(line, r"^<(Picture|Video|Audio) \d+> is ")
+
+    def test_reference_role_map_only_in_reference_mode(self):
+        shot = self.find("shot-one")
+        shot["data"]["storyboard"]["mode"] = "fl"
+        shot["data"]["h3"]["recipeId"] = "h3-base-fl2va-v1"
+        draft, _ = read_draft(self.project, "shot-one", capabilities=cap())
+        kinds = [part["kind"] for part in draft["storyboard"]["prompt_parts"]]
+        self.assertNotIn("references", kinds)
+        self.assertNotIn("<Picture", draft["prompt"])
+
     def test_default_override_prompt_order_priority_and_dynamic_limits(self):
         before = copy.deepcopy(self.project)
         draft, issues = read_draft(self.project, "shot-one", capabilities=cap())
         self.assertEqual(issues, [])
         self.assertEqual(
             [part["kind"] for part in draft["storyboard"]["prompt_parts"]],
-            ["style", "place", "cast", "prop", "action"],
+            ["references", "style", "place", "cast", "prop", "action"],
         )
         self.assertEqual(
             draft["prompt"],
@@ -803,6 +860,59 @@ class StoryboardPureTests(unittest.TestCase):
         self.assertEqual(shot["place"], None)
         self.assertEqual(shot["propIds"], [])
         self.assertTrue(self.find("sword-image"))
+
+    def test_shot_picks_which_card_pictures_it_sends(self):
+        # #504 manual override: the shot picks per card; absent keeps the main picture.
+        shot = self.find("shot-one")["data"]["storyboard"]
+        shot["cardImages"] = {"hero": ["night", "portrait"]}
+        validate_project(self.project)
+        draft, issues = read_draft(self.project, "shot-one", capabilities=cap(3, 1, 4))
+        self.assertEqual(issues, [])
+        self.assertEqual(
+            [i["asset_id"] for i in draft["inputs"]["images"]],
+            ["receipt-night", "receipt-portrait", "receipt-room-image"],
+        )
+        legend = draft["storyboard"]["prompt_parts"][0]["text"]
+        self.assertIn("<Picture 1> is the identity reference for 林岚", legend)
+        self.assertIn("<Picture 2> is the identity reference for 林岚", legend)
+        self.assertIn("<Picture 3> is the setting reference", legend)
+
+    def test_a_pick_no_longer_on_the_card_falls_back_with_a_note(self):
+        shot = self.find("shot-one")["data"]["storyboard"]
+        # "extra" is an image of the story but not one of the hero's look pictures.
+        shot["cardImages"] = {"hero": ["extra"], "room": ["room-image"]}
+        validate_project(self.project)
+        draft, _ = read_draft(self.project, "shot-one", capabilities=cap(3, 1, 4))
+        self.assertEqual(draft["inputs"]["images"][0]["asset_id"], "receipt-portrait")
+        self.assertIn(
+            "林岚：所选参考图已不在卡片上，改用主图", draft["storyboard"]["notes"]
+        )
+
+    def test_card_picks_are_validated_and_cleaned_on_delete(self):
+        bad = [
+            {"hero": []},
+            {"hero": ["portrait", "night", "room-image"]},
+            {"hero": ["portrait", "portrait"]},
+            {"shot-one": ["portrait"]},
+            {"hero": ["voice"]},
+            {"missing": ["portrait"]},
+            ["portrait"],
+        ]
+        for value in bad:
+            broken = copy.deepcopy(self.project)
+            target = next(e for e in broken["entities"] if e["id"] == "shot-one")
+            target["data"]["storyboard"]["cardImages"] = value
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                validate_project(broken)
+        shot = self.find("shot-one")["data"]["storyboard"]
+        shot["cardImages"] = {"hero": ["night", "portrait"], "sword": ["sword-image"]}
+        delete_entity(self.project, "night", False)
+        delete_entity(self.project, "sword", False)
+        validate_project(self.project)
+        self.assertEqual(shot["cardImages"], {"hero": ["portrait"]})
+        self.assertIn(
+            "cardImages", contract()["fields"]["shot.data.storyboard"]["properties"]
+        )
 
     def test_previous_selected_candidate_requires_saved_exact_last_frame(self):
         shot = self.find("shot-one")

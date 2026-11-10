@@ -37,6 +37,7 @@ from studio_platform.dstack_capacity import DstackError
 from studio_platform.dstack_controller import DstackController
 from studio_platform.dstack_demand_policy import policy_key
 from studio_platform.dstack_operator import DstackOperator
+from studio_platform.dstack_test_budget import ACCOUNT, demand_task_id
 from studio_platform.fleet import SlotConfig
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.operator_capacity import operator_nodes, operator_policy
@@ -48,6 +49,7 @@ from studio_platform.repository import (
     attempts,
     instance_intents,
     jobs,
+    outbox,
     registered_workers,
     request_hash,
 )
@@ -159,7 +161,19 @@ class Scenario:
     demand_enabled: bool = True
     expect_all_done: bool = True
     expect_capacity: bool = True  # capacity and budget allow work to start
+    # Hosts the speed gate denies, and health alert codes raised (#903).
+    expect_slow_denies: int | None = None
+    expect_alerts: tuple = ()
     expected_failure: str | None = None  # known controller bug, with reason
+    # Policy idle_shutdown_seconds; lookahead starts use the start rules' boot.
+    idle_shutdown_seconds: float = 600
+    # Saved start rules (job_seconds, boot_seconds, minimum_jobs) for every
+    # demand profile, as the admin start-rules API stores them; None: defaults.
+    start_rules: dict | None = None
+    expect_starts: int | None = None  # exact number of machines created
+    # Every idle stop comes this many seconds after the machine's last job
+    # (or readiness), at most one tick late, and at least one happens.
+    expect_idle_stop_seconds: float | None = None
     health_window_seconds: float = 900
     max_queue_age_seconds: float = 2 * 3600
     idle_grace_seconds: float = 600 + 600
@@ -228,6 +242,7 @@ class Machine:
         self.idle_with_work = 0.0
         self.idle_without_work = 0.0
         self.job_done_at = 0.0
+        self.last_completed_at = None
 
     def incarnation(self):
         """The native runtime identity; one per machine in these scripts."""
@@ -793,7 +808,7 @@ class World(LedgerCase):
             max_physical_gpus=scenario.max_machines,
             expires_at=None,
             max_ttl_seconds=7200,
-            idle_shutdown_seconds=600,
+            idle_shutdown_seconds=scenario.idle_shutdown_seconds,
             observation_fresh_seconds=scenario.observation_fresh_seconds,
         )
         guard = scenario.test_guard
@@ -811,8 +826,6 @@ class World(LedgerCase):
             max_instances=scenario.max_machines, max_physical_gpus=scenario.max_machines
         )
         if guard:
-            from studio_platform.dstack_test_budget import ACCOUNT
-
             # The staging shape of DailyTestBudgetTests, with the task guard
             # template giving the admin defaults (cap and runtime window).
             self.settings.public_origin = "https://staging.inkseq.com"
@@ -867,6 +880,8 @@ class World(LedgerCase):
         environment.start()
         self.addCleanup(environment.stop)
         self._load_service()
+        if scenario.start_rules:
+            self._save_start_rules(scenario.start_rules)
         profile = self.service.profiles[self.profile_ids[0]]
         from studio_platform.runtime_catalog import (
             engine_manifest,
@@ -920,12 +935,38 @@ class World(LedgerCase):
             )
         if guard and scenario.spent_fraction:
             spent = int(guard["task_limit_microusd"] * scenario.spent_fraction)
-            self._seed_history(1, task=demand["test_task_id"], actual=spent)
+            # Spent from the task window the simulation starts in (#1140).
+            task = demand_task_id(demand, self.now + 86400)
+            self._seed_history(1, task=task, actual=spent)
             self._prespent = spent
         # History predates the audited capacity policy (and its tenant daily
         # cap on unsettled exposure); the simulation starts a day later.
         self._adopt_settings()
         self.now += 86400
+
+    def _save_start_rules(self, value):
+        """The row the admin start-rules API writes, per demand profile."""
+        from studio_platform.capacity_start_rules import DEFAULTS, StartRules
+        from studio_platform.dstack_workspace import DstackWorkspace
+
+        rules = StartRules(DstackWorkspace(self.service))
+        with self.repo.transaction() as connection:
+            for profile_id in self.profile_ids:
+                identity, binding = rules._target(profile_id)
+                payload = {
+                    "tenant_id": self.scope.tenant_id,
+                    "binding": binding,
+                    "value": {**DEFAULTS, **value},
+                }
+                connection.execute(
+                    insert(operator_policy).values(
+                        id=identity,
+                        version=1,
+                        payload=payload,
+                        actor="simulator",
+                        updated_at=self.now,
+                    )
+                )
 
     def _seed_history(self, count, *, task=None, actual=None):
         """Historical runs through the real start path, then provider removal."""
@@ -1304,13 +1345,31 @@ class World(LedgerCase):
 
     def _edit_demand_config(self, value):
         demand = self.config["policy"]["demand_start"]
+        value = dict(value)
+        # {profile id: owner} for newly listed profiles owned by someone else
+        # than the first profile's owner (#1159).
+        owners = value.pop("profile_owners", {})
         known = {profile["id"] for profile in self.config["profiles"]}
         for profile_id in value.get("profile_ids", ()):
             if profile_id not in known:
                 # A newly listed profile: same machine type, another id.
-                self.config["profiles"].append(
-                    dict(copy.deepcopy(self.config["profiles"][0]), id=profile_id)
-                )
+                profile = dict(copy.deepcopy(self.config["profiles"][0]), id=profile_id)
+                owner = owners.get(profile_id)
+                if owner is not None and owner != profile["owner_id"]:
+                    account = owner + "-budget"
+                    self.repo.configure_budget(
+                        account,
+                        tenant_id=self.scope.tenant_id,
+                        owner_id=owner,
+                        limit_microusd=10_000_000_000,
+                    )
+                    profile["owner_id"] = owner
+                    accounts = [account]
+                    if self.scenario.test_guard:
+                        profile["project_id"] = "project-inkseq-staging-" + owner
+                        accounts = [ACCOUNT, account]
+                    profile["budget_account_ids"] = accounts
+                self.config["profiles"].append(profile)
         if value.get("test_task_id", demand.get("test_task_id")) != demand.get(
             "test_task_id"
         ):
@@ -1467,6 +1526,7 @@ class World(LedgerCase):
                 control.observe(worker_id, job_id)
                 return
             queue.complete(lease, [ARTIFACT], actual_cost_microusd=0)
+            machine.last_completed_at = self.now
             machine.busy_job = None
             self.inflight.pop(worker_id, None)
             control.observe(worker_id, job_id)
@@ -1490,6 +1550,7 @@ class World(LedgerCase):
     def tick(self):
         """One controller pass, then the always-polling workers react to it."""
         scenario, began = self.scenario, self.now
+        self._tick_at = began
         step = scenario.tick_seconds
         if scenario.tick_jitter:
             step = self.random.uniform(*scenario.tick_jitter)
@@ -1838,6 +1899,32 @@ class World(LedgerCase):
                 if not reason:
                     self.violate("stop_without_reason", node["intent_id"][:8])
                 self._check_window_used(node, reason)
+                self._check_idle_stop(node, reason)
+
+    def _check_idle_stop(self, node, reason):
+        """An idle stop keeps the machine for exactly its idle rule (#688 rent-or-buy).
+
+        Measured from the machine's last finished job (or its readiness), to
+        the controller tick that asked for the stop: not earlier than the rule
+        and at most one tick later.
+        """
+        expected = self.scenario.expect_idle_stop_seconds
+        if expected is None or reason != "dstack_idle_expired":
+            return
+        machine = self.machine_for(node["intent_id"])
+        if machine is None or machine.allocated_at() is None:
+            return
+        phase, ready_at, _ = machine.phase(self._tick_at)
+        if phase != "ready":
+            return
+        self._idle_stops += 1
+        idle = self._tick_at - max(machine.last_completed_at or 0, ready_at)
+        if not expected <= idle <= expected + self.scenario.tick_seconds:
+            self.violate(
+                "idle_stop_off_rule",
+                "%s stopped after %ds idle, rule %ds"
+                % (node["intent_id"][:8], idle, expected),
+            )
 
     def _check_window_used(self, node, reason):
         """A test machine is not let go while it could still run waiting work.
@@ -1879,10 +1966,46 @@ class World(LedgerCase):
         if not guard:
             return
         billed = self._billed_microusd()
+        window = demand_task_id(self.config["policy"]["demand_start"], self.now)
+        if window != self._spend_window:
+            if self._spend_window is not None:
+                # A new Sydney day is a fresh task cap (#1140).
+                self._prespent = -billed
+            self._spend_window = window
         limit = self._task_limit
         if billed + self._prespent > limit and not self._flagged_spend:
             self._flagged_spend = True
             self.violate("test_cap_exceeded", "billed past the task cap")
+
+    def _check_host_policy(self):
+        """Count speed-gate denies and health alerts; check what the scenario expects."""
+        with self.repo.engine.connect() as connection:
+            denies = connection.execute(
+                select(outbox.c.payload).where(
+                    outbox.c.event_type == "operator.host_policy_updated"
+                )
+            ).scalars()
+            denies = sum(
+                row.get("reason_code") == "automatic_slow_download" for row in denies
+            )
+            alerts = Counter(
+                row.get("code")
+                for row in connection.execute(
+                    select(outbox.c.payload).where(
+                        outbox.c.event_type == "capacity.health_alert"
+                    )
+                ).scalars()
+            )
+        if denies:
+            self.reasons["host_deny:automatic_slow_download"] = denies
+        for code, count in alerts.items():
+            self.reasons["alert:" + str(code)] = count
+        expected = self.scenario.expect_slow_denies
+        if expected is not None and denies != expected:
+            self.violate("slow_denies", "%d denied, expected %d" % (denies, expected))
+        for code in self.scenario.expect_alerts:
+            if not alerts.get(code):
+                self.violate("alert_missing", code)
 
     def _billed_microusd(self):
         return sum(
@@ -1926,7 +2049,9 @@ class World(LedgerCase):
                 "jobs_not_done",
                 ", ".join("%s=%d" % item for item in sorted(statuses.items())),
             )
+        self._check_host_policy()
         machines = [m for m in self.client.machines.values() if m.script is not HISTORY]
+        self._check_expected_counts(machines)
         return {
             "scenario": self.scenario.name,
             "simulated_hours": round((self.now - self.start) / 3600, 2),
@@ -1942,6 +2067,33 @@ class World(LedgerCase):
             "violations": list(self.violations),
             "observability_gaps": list(self.evidence.gaps),
         }
+
+    def _check_expected_counts(self, machines):
+        """Exact start count and idle-stop presence; lookahead reasons reported."""
+        from studio_platform.repository import outbox
+
+        scenario = self.scenario
+        with self.repo.engine.connect() as connection:
+            for payload in connection.execute(
+                select(outbox.c.payload).where(
+                    outbox.c.event_type == "capacity.lookahead_decision"
+                )
+            ).scalars():
+                self.reasons[
+                    "lookahead:%s:%s"
+                    % (payload["phase"], payload["decision"]["reason"])
+                ] += 1
+        if (
+            scenario.expect_starts is not None
+            and len(machines) != scenario.expect_starts
+        ):
+            self.violate(
+                "start_count_mismatch",
+                "%d machines started, expected %d"
+                % (len(machines), scenario.expect_starts),
+            )
+        if scenario.expect_idle_stop_seconds is not None and not self._idle_stops:
+            self.violate("idle_stop_missing", "no machine stopped for idleness")
 
     def _settled(self):
         """Stop early once nothing can change, or 30 min after a violation."""
@@ -2017,6 +2169,8 @@ class World(LedgerCase):
             False,
         )
         self._prespent, self._task_limit, self._demand_reason = 0, 0, None
+        self._spend_window = None
+        self._tick_at, self._idle_stops = None, 0
         try:
             self.build()
             self.start = self.now

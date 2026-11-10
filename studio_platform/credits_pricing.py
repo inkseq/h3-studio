@@ -222,6 +222,12 @@ def image_price(connection, tenant):
     return {"credits": amount, "price_revision": price["revision"]}
 
 
+def fee_terms(price):
+    """Processing fee rate and fixed USD per order, shared by margin and revenue."""
+    rate = Fraction(str(price["configuration"]["fee_rate"]))
+    return max(Fraction(7, 100), rate), Fraction(1, 5)
+
+
 def admin_margin_estimate(price, catalog):
     """Tax-exclusive pack estimate, never a fee invoice or customer charge.
 
@@ -231,8 +237,7 @@ def admin_margin_estimate(price, catalog):
     """
     config = price["configuration"]
     tax = Fraction(0)
-    fee = max(Fraction(7, 100), Fraction(str(config["fee_rate"])))
-    fixed_fee = Fraction(1, 5)
+    fee, fixed_fee = fee_terms(price)
     packs = []
     for pack in catalog["packs"]:
         gross = Fraction(pack["amount_cents"], 100)

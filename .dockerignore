@@ -129,3 +129,8 @@ deploy/wangp/profiles/*
 # #997 voice billing (also covered by the platform module wildcard)
 !studio_platform/speech_credit_proof.py
 !studio_platform/speech_requests.py
+
+# CI actions-cache copy of the pinned chisel release asset (#1151); verified by
+# tools/fetch_chisel.py in Dockerfile.dispatch. Never tracked in Git.
+!.build-cache/
+!.build-cache/chisel_1.12.0_linux_amd64.gz

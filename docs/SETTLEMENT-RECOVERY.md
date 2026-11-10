@@ -23,6 +23,18 @@ creation is not absence proof. Original typed no-allocation evidence remains
 the separate authority for a confirmed zero charge. Historical worker/attempt
 obligations keep their admission hold until positively closed.
 
+A reclaimed (`attempt_lost`) attempt is never stop proof by itself (#915). It
+closes only when its run had already finished (lost while collecting, so
+`upstream_stopped` is set) or when every host that ran its worker is
+`destroyed` with a provider identity, the same standard the host's own release
+uses. Job end and host removal each release once, so whichever comes first
+finds the other still open: jobs that end through reclaim exhaustion or a cancel
+before replacement now take the same terminal release, and every controller
+pass over a removed dstack host (or a destroyed Modal sandbox, for its jobs)
+retries both releases. The retry only moves a `reserved` hold to
+`invoice_pending`; it never settles, never writes a zero, and leaves an
+attempt on a live or unknown host holding its reservation.
+
 ## Operator recovery
 
 `studio_platform.settlement_recovery` is a private operator interface, not HTTP

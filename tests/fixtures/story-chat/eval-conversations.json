@@ -1,0 +1,227 @@
+{
+ "source": "Story chat blind A/B set (h3-studio#756, 2026-10-29): 20 synthetic conversations, 10 zh and 10 en; short stories, promos, multi-scene, mid-conversation changes and vague asks. expected.seconds is the total length the person asked for; expected.shots a shot count they asked for.",
+ "conversations": [
+  {
+   "id": "zh01",
+   "lang": "zh",
+   "kind": "short",
+   "turns": [
+    "一个老奶奶在雨夜的面馆等她的孙子回家，30秒，温暖一点"
+   ],
+   "expected": {
+    "seconds": 30
+   }
+  },
+  {
+   "id": "zh02",
+   "lang": "zh",
+   "kind": "promo",
+   "turns": [
+    "帮我做一个15秒的手工咖啡店宣传片，店名叫'慢一点'，在墨尔本的小巷里，主打手冲"
+   ],
+   "expected": {
+    "seconds": 15
+   }
+  },
+  {
+   "id": "zh03",
+   "lang": "zh",
+   "kind": "multi",
+   "turns": [
+    "一个三幕的短片：小女孩在海边捡到一个会说话的贝壳，贝壳告诉她爸爸的船在哪里，最后她在码头等到了爸爸。大概一分钟"
+   ],
+   "expected": {
+    "seconds": 60
+   }
+  },
+  {
+   "id": "zh04",
+   "lang": "zh",
+   "kind": "change",
+   "turns": [
+    "做一个20秒的短片，一只橘猫在书店里偷偷睡在畅销书架上",
+    "把猫改成一只黑猫，然后加一个店员发现它的镜头",
+    "好的，可以生成视频了"
+   ],
+   "expected": {
+    "seconds": 20
+   }
+  },
+  {
+   "id": "zh05",
+   "lang": "zh",
+   "kind": "short",
+   "turns": [
+    "两个大学室友毕业那天在宿舍楼下告别，有对白，25秒左右"
+   ],
+   "expected": {
+    "seconds": 25
+   }
+  },
+  {
+   "id": "zh06",
+   "lang": "zh",
+   "kind": "promo",
+   "turns": [
+    "我卖手工羊毛围巾，想做个10秒的产品短视频，冬天，模特在雪地里"
+   ],
+   "expected": {
+    "seconds": 10
+   }
+  },
+  {
+   "id": "zh07",
+   "lang": "zh",
+   "kind": "multi",
+   "turns": [
+    "武侠风：一个年轻剑客在竹林里与师父比剑，输了之后师父教他一句话，最后他独自下山。分成三个场景，每个场景两个镜头"
+   ],
+   "expected": {
+    "shots": 6
+   }
+  },
+  {
+   "id": "zh08",
+   "lang": "zh",
+   "kind": "change",
+   "turns": [
+    "一个外卖小哥在暴雨里送餐，客户是个独居老人，30秒",
+    "第三个镜头太长了，拆成两个，然后结尾让老人给他一把伞"
+   ],
+   "expected": {
+    "seconds": 30
+   }
+  },
+  {
+   "id": "zh09",
+   "lang": "zh",
+   "kind": "vague",
+   "turns": [
+    "我想拍个关于思念的片子"
+   ],
+   "expected": {}
+  },
+  {
+   "id": "zh10",
+   "lang": "zh",
+   "kind": "short",
+   "turns": [
+    "一个程序员凌晨三点终于修好了bug，在空荡的办公室里跳了一段舞，15秒，搞笑一点"
+   ],
+   "expected": {
+    "seconds": 15
+   }
+  },
+  {
+   "id": "en01",
+   "lang": "en",
+   "kind": "short",
+   "turns": [
+    "A lighthouse keeper finds a message in a bottle on the last night before the lighthouse is automated. 30 seconds, quiet and bittersweet."
+   ],
+   "expected": {
+    "seconds": 30
+   }
+  },
+  {
+   "id": "en02",
+   "lang": "en",
+   "kind": "promo",
+   "turns": [
+    "15-second promo for a surf school in Byron Bay called Salt & Board. Sunrise lesson, beginners, friendly instructor."
+   ],
+   "expected": {
+    "seconds": 15
+   }
+  },
+  {
+   "id": "en03",
+   "lang": "en",
+   "kind": "multi",
+   "turns": [
+    "Three-part story, about a minute: a robot janitor in a closed museum at night, it befriends a dinosaur skeleton display, and at dawn it hides before the guards arrive."
+   ],
+   "expected": {
+    "seconds": 60
+   }
+  },
+  {
+   "id": "en04",
+   "lang": "en",
+   "kind": "change",
+   "turns": [
+    "20 seconds: a kid tries to bake a birthday cake for her mum alone and the kitchen becomes a mess.",
+    "Make the kid a teenage boy instead and add a line where he says something to his mum at the end.",
+    "Looks good, make the video."
+   ],
+   "expected": {
+    "seconds": 20
+   }
+  },
+  {
+   "id": "en05",
+   "lang": "en",
+   "kind": "short",
+   "turns": [
+    "Two old friends meet again at a train station after 20 years. They talk. 25 seconds."
+   ],
+   "expected": {
+    "seconds": 25
+   }
+  },
+  {
+   "id": "en06",
+   "lang": "en",
+   "kind": "promo",
+   "turns": [
+    "10-second ad for a handmade ceramic mug brand. Morning light, someone's hands, coffee steam."
+   ],
+   "expected": {
+    "seconds": 10
+   }
+  },
+  {
+   "id": "en07",
+   "lang": "en",
+   "kind": "multi",
+   "turns": [
+    "Sci-fi short in two scenes: an astronaut alone on Mars receives a video message from her daughter, then she goes outside and watches Earth rise. Around 40 seconds."
+   ],
+   "expected": {
+    "seconds": 40
+   }
+  },
+  {
+   "id": "en08",
+   "lang": "en",
+   "kind": "change",
+   "turns": [
+    "A street musician in New York plays violin in the subway, nobody stops, then a little girl drops a coin. 30 seconds.",
+    "Change the violin to a saxophone and set it in London instead."
+   ],
+   "expected": {
+    "seconds": 30
+   }
+  },
+  {
+   "id": "en09",
+   "lang": "en",
+   "kind": "vague",
+   "turns": [
+    "something about summer"
+   ],
+   "expected": {}
+  },
+  {
+   "id": "en10",
+   "lang": "en",
+   "kind": "short",
+   "turns": [
+    "A dog waits every day at the bus stop for its owner. 20 seconds, a little sad but hopeful ending."
+   ],
+   "expected": {
+    "seconds": 20
+   }
+  }
+ ]
+}

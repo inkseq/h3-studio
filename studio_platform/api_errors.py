@@ -19,6 +19,57 @@ def register_handlers(app, *, repository, settings):
     async def missing(_request, _error):
         return JSONResponse({"detail": "资源不存在或无权访问"}, status_code=404)
 
+    from .identity import AccountGateBusy
+
+    @app.exception_handler(AccountGateBusy)
+    async def account_gate_busy(_request, error):
+        # Retryable: nothing was written, and the same Idempotency-Key and
+        # body can be sent again after Retry-After (#450).
+        messages = {
+            "en": "Maintenance is in progress. Nothing was submitted or charged; please try again shortly.",
+            "zh": "系统正在维护，本次未提交也未扣费，请稍后重试。",
+        }
+        return JSONResponse(
+            {
+                "code": error.code,
+                "message": messages["en"],
+                "messages": messages,
+                "retryable": True,
+            },
+            status_code=503,
+            headers={
+                "Retry-After": str(error.retry_after),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    from .maintenance_notice import MaintenanceInProgress
+
+    @app.exception_handler(MaintenanceInProgress)
+    async def maintenance(_request, error):
+        # Nothing was submitted or charged; the UI shows the expected end.
+        import math
+        import time
+
+        wait = (error.expected_end_at or 0) - time.time()
+        messages = {
+            "en": "A release is in progress. Nothing was submitted or charged; please try again after it ends.",
+            "zh": "系统正在更新，本次未提交也未扣费，请在更新结束后重试。",
+        }
+        return JSONResponse(
+            {
+                "code": error.code,
+                "expected_end_at": error.expected_end_at,
+                "message": messages["en"],
+                "messages": messages,
+            },
+            status_code=503,
+            headers={
+                "Retry-After": str(min(3600, max(30, math.ceil(wait)))),
+                "Cache-Control": "no-store",
+            },
+        )
+
     @app.exception_handler(Conflict)
     async def conflict(_request, error):
         from .quality_http import error_response

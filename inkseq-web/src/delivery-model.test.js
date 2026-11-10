@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { deliveryIssues } from './delivery-model.js';
+import { deliveryIssues, shotsAspect } from './delivery-model.js';
 import { createStore } from './store.js';
 test('delivery reports exact missing shot, accepted placeholder and upstream review separately', () => {
   const s = createStore({
@@ -29,4 +29,23 @@ test('delivery reports exact missing shot, accepted placeholder and upstream rev
     data: { uxReview: { chosen: 'A', status: 'selected' } },
   });
   assert.equal(deliveryIssues(s.exportProject(), c).length, 0);
+});
+
+test('the film frame follows the shots, not the story brief (#1114)', () => {
+  const shot = (id, aspect, chosen = true) => ({
+    id,
+    data: {
+      ...(chosen ? { selectedAssetId: 'a-' + id } : {}),
+      ...(aspect ? { h3: { controls: { aspect_ratio: aspect } } } : {}),
+    },
+  });
+  const p = { journey: { brief: { aspect: '9:16' } } };
+  // Shots without a set shape generate 16:9, as the server does.
+  assert.equal(shotsAspect(p, [shot('a'), shot('b')]), '16:9');
+  assert.equal(shotsAspect(p, [shot('a', '9:16'), shot('b', '9:16'), shot('c')]), '9:16');
+  // Shots with a chosen take decide; unfinished shots do not.
+  assert.equal(shotsAspect(p, [shot('a', '1:1'), shot('b', '9:16', false)]), '1:1');
+  // No shots: the brief, else 16:9.
+  assert.equal(shotsAspect(p, []), '9:16');
+  assert.equal(shotsAspect({}, []), '16:9');
 });

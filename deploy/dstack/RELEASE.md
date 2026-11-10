@@ -421,6 +421,10 @@ Only these existing profiles may fund automatic capacity; their tenant, native
 mode/configuration/manifest and shared pool remain exact. Job owners and signed
 asset/result access are unchanged. Staging additionally supplies its current
 `test_task_id` here and retains the task budget, idle stop and maximum runtime.
+Each new machine funds from `<test_task_id>:<YYYYMMDD>` (the Sydney day of its
+start), so the task cap is per day and needs no daily edit; a running machine
+keeps the task it started under. Change `test_task_id` only to start a new
+batch within a day. At most 91 characters leave room for the day suffix.
 The operator policy and selected execution qualification/reservation may use
 explicit `expires_at: null` for no authority expiry. Offers, previews,
 confirmation plans, worker heartbeats and private member approvals remain

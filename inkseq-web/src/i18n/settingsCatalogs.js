@@ -317,3 +317,25 @@ Object.assign(settingsCatalogs.zh, {
   'settings.grossExposure': '原始成本占用',
   'settings.chargeWaived': '已免单 {count} 笔',
 });
+
+// Product feedback from Inky and connected assistants (h3-studio#635).
+Object.assign(settingsCatalogs.en, {
+  'feedbackSettings.title': 'Feedback to Inkseq',
+  'feedbackSettings.help':
+    'When a tool fails or something is missing, Inky and your connected assistants can send us a short note about it. The note never includes your story text, prompts, pictures, videos or contact details.',
+  'feedbackSettings.allow': 'Let assistants send feedback',
+  'feedbackSettings.allowHelp': 'Only you can change this. An assistant cannot turn it back on.',
+  'feedbackSettings.saved': 'Saved.',
+  'feedbackSettings.changed': 'This setting was changed elsewhere. The latest value is shown.',
+  'feedbackSettings.error': "Couldn't save this setting. Please try again.",
+});
+Object.assign(settingsCatalogs.zh, {
+  'feedbackSettings.title': '向 Inkseq 反馈',
+  'feedbackSettings.help':
+    '工具出错或缺少功能时，小墨和你连接的 AI 助手可以给我们发一条简短说明。说明里不会带上你的故事文字、提示词、图片、视频或联系方式。',
+  'feedbackSettings.allow': '允许助手发送反馈',
+  'feedbackSettings.allowHelp': '只有你能修改这项设置，助手不能替你重新打开。',
+  'feedbackSettings.saved': '已保存。',
+  'feedbackSettings.changed': '这项设置在别处改过了，现在显示的是最新值。',
+  'feedbackSettings.error': '没能保存这项设置，请再试一次。',
+});

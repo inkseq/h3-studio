@@ -6,6 +6,7 @@ import re
 import uuid
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from .auth import (
     Principal,
@@ -17,7 +18,11 @@ from .auth import (
     _workos_session_shape,
     sessions,
 )
-from .identity import lock_account_gate
+from .identity import (
+    ADMISSION_GATE_WAIT_SECONDS,
+    AccountGateBusy,
+    lock_account_gate,
+)
 from .identity_schema import users
 from .repository import documents, request_hash
 from .session_authority import advance, read, write
@@ -155,8 +160,15 @@ class AccountSessions:
                 raise SessionUnavailable()
         except Exception:
             raise SessionUnavailable() from None
+        try:
+            return self._confirm_check(token_hash, row, binding, live, fingerprint)
+        except AccountGateBusy:
+            # Account maintenance: a bounded wait, then 503 + Retry-After.
+            raise SessionUnavailable() from None
+
+    def _confirm_check(self, token_hash, row, binding, live, fingerprint):
         with self.repo.transaction() as conn:
-            lock_account_gate(conn)
+            lock_account_gate(conn, wait_seconds=ADMISSION_GATE_WAIT_SECONDS)
             current = (
                 conn.execute(
                     select(sessions).where(
@@ -191,14 +203,20 @@ class AccountSessions:
                 return False
             if live[binding["sid"]]["expires_at"] <= self.auth.clock():
                 return False
-            write(
-                conn,
-                self.tenant,
-                "provider_check",
-                token_hash,
-                {"fingerprint": fingerprint, "checked_at": self.auth.clock()},
-                self.auth.clock(),
-            )
+            try:
+                with conn.begin_nested():
+                    write(
+                        conn,
+                        self.tenant,
+                        "provider_check",
+                        token_hash,
+                        {"fingerprint": fingerprint, "checked_at": self.auth.clock()},
+                        self.auth.clock(),
+                    )
+            except IntegrityError:
+                # A parallel read on the same cookie created the cache record
+                # first; the session is still verified (#1145).
+                pass
         return True
 
     def revoke_all(self, principal, body, key):

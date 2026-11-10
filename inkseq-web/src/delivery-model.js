@@ -6,6 +6,21 @@ export const chapterShots = (p, id) =>
   children(p, id)
     .filter((e) => e.type === 'scene')
     .flatMap((e) => children(p, e.id).filter((s) => s.type === 'shot'));
+// The film's frame follows its shots (#1114): the most common shape among the shots that have
+// a chosen take (else all of them), each as it generates (default 16:9, as the server). The
+// story brief only decides when there are no shots at all.
+export function shotsAspect(p, shots) {
+  const chosen = shots.filter((s) => s.data?.selectedAssetId),
+    counts = new Map();
+  for (const s of chosen.length ? chosen : shots) {
+    const aspect = s.data?.h3?.controls?.aspect_ratio || '16:9';
+    counts.set(aspect, (counts.get(aspect) || 0) + 1);
+  }
+  let best = p.journey?.delivery?.aspect || p.journey?.brief?.aspect || '16:9',
+    most = 0;
+  for (const [aspect, n] of counts) if (n > most) [best, most] = [aspect, n];
+  return best;
+}
 export const entityPath = (p, id) =>
   [...ancestors(p, id), p.entities.find((e) => e.id === id)]
     .filter(Boolean)

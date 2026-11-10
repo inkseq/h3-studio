@@ -180,6 +180,18 @@ class HostPolicyTests(ledger.LedgerCase):
             )
         self.assertEqual(len(self.service.audit(self.owner)["events"]), 3)
 
+    def test_slow_download_never_overrides_an_admin_prefer(self):
+        # #903 item 4: a preferred host is only stopped, never auto-denied.
+        self.service.policy(self.owner, self.body("prefer"), "prefer")
+        store = HostPolicyStore(self.repo, self.scope.tenant_id)
+        with self.repo.transaction() as conn:
+            self.assertFalse(
+                store.deny_slow_download(conn, "19492", node_id="node-one", now=1000)
+            )
+        host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]
+        self.assertEqual(host["policy"]["effective"], "prefer")
+        self.assertEqual(len(self.service.audit(self.owner)["events"]), 1)
+
     def test_unknown_lookup_is_not_fabricated_and_policy_audit_replay(self):
         host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]
         self.assertFalse(host["identity_confirmed"])
@@ -280,3 +292,179 @@ class HostPolicyTests(ledger.LedgerCase):
         malformed["payload"].pop("host_observation")
         self.assertIsNone(automatic_deny([nodes[0], malformed], "19492", now=1200))
         self.assertIsNone(automatic_deny([nodes[0], nodes[0]], "19492", now=1200))
+
+
+EXECUTOR = "0453b369-1111-4222-8333-444455556666"
+POD = "758e7d2d-17da-4ed0-95a5-057b33483ad8"
+
+
+def lium_provisioning(executor=EXECUTOR, pod=POD, price=0.9):
+    return {
+        "backend": "lium",
+        "instance_id": pod,
+        "region": "us",
+        "price": price,
+        "instance_type": {
+            "name": executor,
+            "resources": {
+                "gpus": [{"name": "RTX5090", "memory_mib": 32 * 1024}],
+                "memory_mib": 96 * 1024,
+                "cpus": 12,
+                "disk": {"size_mib": 200 * 1024},
+            },
+        },
+    }
+
+
+class LiumHostIdentityTests(ledger.LedgerCase):
+    """#900: a Lium pod is bound to its executor; deny keys on provider + id."""
+
+    def setUp(self):
+        super().setUp()
+        self.settings = SimpleNamespace(
+            tenant_id=self.scope.tenant_id,
+            operator_capacity_owners=("superdan", "supervan"),
+            operator_admin_owners=("superdan",),
+        )
+        self.owner = Principal("superdan", "browser")
+        self.service = OperatorHosts(self.repo, self.settings)
+        self.store = HostPolicyStore(self.repo, self.scope.tenant_id)
+
+    def node(self, value):
+        return {
+            "intent_id": "node-lium",
+            "desired_state": "stopped",
+            "runtime_state": "stopped",
+            "payload": {
+                "capacity_backend": "dstack-v1",
+                "tenant_id": self.scope.tenant_id,
+                "owner_id": "superdan",
+                "host_observation": value,
+                "dstack": {
+                    "backend": "lium",
+                    "provider_instance_id": POD,
+                    "profile_id": "fl",
+                    "mode": "fl",
+                },
+            },
+        }
+
+    def test_vast_policy_key_is_unchanged(self):
+        from studio_platform.repository import request_hash
+
+        self.assertEqual(
+            self.store.key("19492"),
+            "host:"
+            + request_hash(
+                {
+                    "tenant": self.scope.tenant_id,
+                    "provider": "vastai",
+                    "machine_id": "19492",
+                }
+            )[:25],
+        )
+        self.assertNotEqual(self.store.key(EXECUTOR, "lium"), self.store.key("19492"))
+        with self.assertRaisesRegex(ValueError, "host_identity_invalid"):
+            self.store.key("19492", "lium")
+        with self.assertRaisesRegex(ValueError, "host_provider_unsupported"):
+            self.store.key("abc", "runpod")
+
+    def test_executor_from_the_allocation_is_the_bound_host(self):
+        from studio_platform.host_policy import lium_observation
+
+        value = lium_observation(lium_provisioning(), {}, 1000)
+        self.assertEqual(
+            (
+                value["provider"],
+                value["machine_id"],
+                value["provider_instance_id"],
+                value["physical_id_source"],
+                value["quoted_hourly_microusd"],
+            ),
+            ("lium", EXECUTOR, POD, "lium_executor_id", 900000),
+        )
+        self.assertEqual(bound_observation(self.node(value), now=1100), value)
+        # Not yet an executor id, another pod already bound, or a Vast JPD.
+        for provisioning, binding in (
+            (lium_provisioning(executor="RTX5090"), {}),
+            (lium_provisioning(), {"provider_instance_id": "other-pod"}),
+            ({**lium_provisioning(), "backend": "vastai"}, {}),
+        ):
+            with self.subTest(binding=binding):
+                self.assertIsNone(lium_observation(provisioning, binding, 1000))
+        frozen = {
+            "version": 1,
+            "provider": "lium",
+            "observed_at": 900,
+            "expires_at": 1020,
+            "policy_snapshot": "a" * 64,
+            "offers": [
+                {
+                    "offer_id": "11111111-1111-4111-8111-111111111111",
+                    "machine_id": "11111111-1111-4111-8111-111111111111",
+                }
+            ],
+        }
+        with self.assertRaisesRegex(ValueError, "dstack_host_allocation_changed"):
+            lium_observation(lium_provisioning(), {"host_selection": frozen}, 1000)
+
+    def test_slow_download_and_bad_output_deny_a_lium_executor(self):
+        from studio_platform.host_policy import lium_observation
+
+        value = lium_observation(lium_provisioning(), {}, 1000)
+        with self.repo.transaction() as conn:
+            self.assertTrue(
+                self.store.deny_slow_download(
+                    conn, EXECUTOR, node_id="node-lium", now=1000, provider="lium"
+                )
+            )
+            read = self.store.read(conn, EXECUTOR, provider="lium", nodes=[])[0]
+            vast = self.store.read(conn, "19492", nodes=[])[0]
+        self.assertEqual(read["effective"], "deny")
+        self.assertEqual(vast["effective"], "default")
+        listing = self.service.list(
+            self.owner, admin=True, provider="lium", machine_id=EXECUTOR
+        )
+        self.assertEqual(listing["provider"], "lium")
+        [host] = listing["hosts"]
+        self.assertEqual(
+            (host["provider"], host["machine_id"], host["policy"]["reason_code"]),
+            ("lium", EXECUTOR, "automatic_slow_download"),
+        )
+        # Vast stays the default listing; the Lium host is not in it.
+        self.assertEqual(self.service.list(self.owner, admin=True)["hosts"], [])
+        # An admin marks it as producing bad output; the change is audited.
+        body = {
+            "provider": "lium",
+            "machine_id": EXECUTOR,
+            "policy": "deny",
+            "reason_code": "operator_host_bad_output",
+            "expected_revision": host["policy"]["revision"],
+            "expected_snapshot": host["policy"]["snapshot"],
+        }
+        result = self.service.policy(self.owner, body, "bad-output")
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["host"], {"provider": "lium", "machine_id": EXECUTOR})
+        self.assertEqual(result["policy"]["reason_code"], "operator_host_bad_output")
+        events = self.service.audit(self.owner)["events"]
+        self.assertEqual(
+            sorted((e["provider"], e["reason_code"]) for e in events),
+            [("lium", "automatic_slow_download"), ("lium", "operator_host_bad_output")],
+        )
+        # The bound pod's history shows on the host once a node carries it.
+        with patch(
+            "studio_platform.host_scorecard.original_nodes",
+            return_value=[self.node(value)],
+        ):
+            [host] = self.service.list(self.owner, admin=True, provider="lium")["hosts"]
+        self.assertEqual((host["runs"], host["identity_confirmed"]), (1, True))
+        for bad in (
+            {**body, "reason_code": "automatic_slow_download"},
+            {**body, "policy": "prefer"},
+            {**body, "provider": "runpod"},
+        ):
+            with (
+                self.subTest(bad=bad),
+                self.assertRaisesRegex(ValueError, "host_policy_request_invalid"),
+            ):
+                self.service.policy(self.owner, bad, "bad-" + bad["policy"])

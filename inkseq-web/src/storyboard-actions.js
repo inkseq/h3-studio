@@ -1,5 +1,7 @@
 /* Pure edits of the existing document. Cloud IO and execution stay in the controller. */
 import { validCamera, validLook } from './shot-look.js';
+import { applyPictureDefaults, pictureDefaults } from './picture-defaults.js';
+import { MAX_CARD_PICTURES } from './shot-card-pictures.js';
 import { children, ancestors } from './store.js';
 import { detachDeletedReferences } from './entity-references.js';
 import {
@@ -176,6 +178,18 @@ function validShotLinks(project, patch) {
     return false;
   return true;
 }
+function validCardImages(project, value) {
+  if (!plain(value) || Object.keys(value).length > 40) return false;
+  return Object.entries(value).every(
+    ([card, images]) =>
+      media(project, card, ['character', 'location', 'prop']) &&
+      Array.isArray(images) &&
+      images.length >= 1 &&
+      images.length <= MAX_CARD_PICTURES &&
+      new Set(images).size === images.length &&
+      images.every((id) => media(project, id, ['image'])),
+  );
+}
 function validShotPatch(project, patch) {
   if (
     !fields(patch, [
@@ -190,6 +204,7 @@ function validShotPatch(project, patch) {
       'cast',
       'place',
       'props',
+      'cardImages',
       'continuePrev',
       'look',
       'camera',
@@ -201,7 +216,11 @@ function validShotPatch(project, patch) {
     ])
   )
     return false;
-  return validShotScalars(patch) && validShotLinks(project, patch);
+  return (
+    validShotScalars(patch) &&
+    validShotLinks(project, patch) &&
+    (!owns(patch, 'cardImages') || validCardImages(project, patch.cardImages))
+  );
 }
 // The first opt-in edit of a legacy shot copies its inherited cast, place, frames and refs
 // into the edit, so the shot's storyboard is exact from then on.
@@ -237,7 +256,7 @@ function patchShot(project, shot, patch) {
     !shot.data.storyboard &&
     shot.data.h3?.explicitReferences &&
     Object.keys(patch).some((key) =>
-      ['cast', 'place', 'props', 'continuePrev', 'look', 'camera'].includes(key),
+      ['cast', 'place', 'props', 'cardImages', 'continuePrev', 'look', 'camera'].includes(key),
     )
   )
     return false;
@@ -247,7 +266,9 @@ function patchShot(project, shot, patch) {
     !shot.data.storyboard &&
     !shot.data.h3?.explicitReferences &&
     Object.keys(clean).some((key) =>
-      ['mode', 'cast', 'place', 'props', 'continuePrev', 'look', 'camera'].includes(key),
+      ['mode', 'cast', 'place', 'props', 'cardImages', 'continuePrev', 'look', 'camera'].includes(
+        key,
+      ),
     )
   )
     materializeLegacyContext(project, shot, clean);
@@ -328,6 +349,9 @@ function addAction(project, action, { chapterId, view }) {
       extraRefs: [],
     },
   });
+  // A new shot starts with the story's default picture, when the story has one (#891).
+  const defaults = pictureDefaults(project);
+  if (defaults.set) applyPictureDefaults(added, defaults);
   if (after) placeAfter(project, added, after);
   return { id: added.id };
 }

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from './ui/Button.jsx';
 import { Dialog } from './ui/Dialog.jsx';
+import { Field } from './ui/Field.jsx';
 import { LogOut } from 'lucide-react';
 import HostedSignIn, { UsernameSignIn } from './HostedSignIn.jsx';
 import { useAccountLabel } from './StudioHeader.jsx';
@@ -51,8 +52,7 @@ export function Login({ onClose, onDone, title, lead }) {
           <p>{lead ?? t('workspace.copy119')}</p>
           <HostedSignIn auth={c.auth} />
           <UsernameSignIn auth={c.auth}>
-            <label className="qc-field">
-              {t('workspace.copy3')}
+            <Field label={t('workspace.copy3')}>
               <input
                 autoComplete="username"
                 required
@@ -60,10 +60,9 @@ export function Login({ onClose, onDone, title, lead }) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
-            </label>
+            </Field>
             {!['username-test', 'username-only-test'].includes(c.auth?.authentication) && (
-              <label className="qc-field">
-                {t('workspace.copy4')}
+              <Field label={t('workspace.copy4')}>
                 <input
                   type="password"
                   autoComplete="current-password"
@@ -72,7 +71,7 @@ export function Login({ onClose, onDone, title, lead }) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
-              </label>
+              </Field>
             )}
             {['username-test', 'username-only-test'].includes(c.auth?.authentication) && (
               <p className="qc-warning">{t('workspace.copy120')}</p>

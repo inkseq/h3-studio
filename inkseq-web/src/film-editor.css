@@ -365,7 +365,10 @@ button.autosave-status {
 @media (max-width: 900px) {
   .film-editor {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(200px, 40vh) auto auto auto auto auto auto;
+    /* The page scrolls here, so every row below the preview is exactly as tall as its content:
+       'auto' rows let the page squeeze the clip panel to 92 px, its trim bar lay over the
+       timeline and the sound and caption bars over the clips (layout audit 2026-11-10). */
+    grid-template-rows: auto minmax(200px, 40vh) repeat(6, max-content);
     grid-template-areas: 'head' 'monitor' 'inspector' 'tools' 'timeline' 'audio' 'captions' 'foot';
   }
   .film-inspector {
@@ -419,6 +422,25 @@ button.autosave-status {
   touch-action: none;
   user-select: none;
   overflow: hidden;
+}
+/* The block's own sound as a waveform, behind its name (#232, items 19–20). */
+.film-audio-wave {
+  position: absolute;
+  inset: 3px 0;
+  width: 100%;
+  height: calc(100% - 6px);
+  pointer-events: none;
+  stroke: currentColor;
+  stroke-width: 1px;
+  opacity: 0.32;
+}
+.film-audio-label {
+  position: relative;
+}
+/* A sound file held over the lane: it lands where it is dropped. */
+.film-audio-lane.dropping {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 .film-audio.generated {
   background: color-mix(in srgb, var(--fl) 18%, var(--surface-2, var(--surface)));

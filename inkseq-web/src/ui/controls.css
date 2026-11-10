@@ -381,6 +381,8 @@ select.field-sm {
 .ui-field {
   display: grid;
   gap: 6px;
+  /* A field in a grid or a narrow dialog shrinks with it instead of pushing it wider. */
+  min-width: 0;
   color: var(--ink-2);
   font-size: var(--fs-md);
 }

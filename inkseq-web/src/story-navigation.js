@@ -114,8 +114,13 @@ export function storyLibrarySummary(value, locale = 'zh') {
     }
     return entities.indexOf(a) - entities.indexOf(b);
   };
+  // A chosen take that went to the trash left the story: that shot no longer counts (#892).
   const chosen = shots
-    .filter((shot) => typeof shot.data?.selectedAssetId === 'string' && shot.data.selectedAssetId)
+    .filter(
+      (shot) =>
+        typeof shot.data?.selectedAssetId === 'string' &&
+        ['image', 'video'].includes(byId.get(shot.data.selectedAssetId)?.type),
+    )
     .sort(compare);
   details.shotCount = shots.length;
   details.chosenCount = chosen.length;

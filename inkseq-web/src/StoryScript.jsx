@@ -1,14 +1,6 @@
 // The Script step (h3-studio#1062): the whole story's text in one place, to read from top to bottom
 // and change in place. It only edits text, so nothing here can start a generation or spend credits.
-import React, {
-  memo,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Plus } from 'lucide-react';
 import { Button, IconButton } from './ui/Button.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -18,7 +10,7 @@ import { DEFAULT_CHAPTER_NAMES, sceneHeading } from './story-headings.js';
 import { store } from './store.js';
 import { SceneBeats, SceneIntent } from './ScriptBeats.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
-import { hasModelLines, readablePrompt, speakerNames } from './prompt-display.js';
+import { useSpeechText } from './use-speech-text.js';
 import './story-script.css';
 
 const SAVE_AFTER_MS = 500;
@@ -33,8 +25,8 @@ const textRows = (text) =>
 // One piece of text. Typing stays in this box and reaches the story after a short pause, or on
 // leaving the box: saving redraws the whole story page, far too much to do on every key. The text
 // on screen is always what was typed, and a pause is one step of the top bar's undo.
-// `display` (optional) turns the stored text into what a person reads while the box is not being
-// edited (the video model's line markup, prompt-display.js); editing always shows the stored text.
+// `speech`: a shot's text, whose spoken lines show and are edited as 「台词」, without the video
+// model's tags, which saving keeps (h3-studio#1113, speech-edit.js).
 const ScriptText = memo(function ScriptText({
   id,
   value,
@@ -43,10 +35,9 @@ const ScriptText = memo(function ScriptText({
   max,
   onSave,
   part,
-  display,
+  speech = false,
 }) {
   const [draft, setDraft] = useState(null),
-    [editing, setEditing] = useState(false),
     unsaved = useRef(null),
     timer = useRef(0),
     composing = useRef(false),
@@ -82,7 +73,8 @@ const ScriptText = memo(function ScriptText({
     };
   }, []);
   const stored = draft ?? value;
-  const shown = !editing && display ? display(stored) : stored;
+  const spoken = useSpeechText(stored);
+  const shown = speech ? spoken.shown : stored;
   return (
     <textarea
       className="script-text"
@@ -92,10 +84,12 @@ const ScriptText = memo(function ScriptText({
       value={shown}
       aria-label={label}
       placeholder={placeholder}
-      onFocus={() => setEditing(true)}
       onChange={(event) => {
-        unsaved.current = event.target.value;
-        setDraft(event.target.value);
+        const typed = speech
+          ? spoken.edit(event.target.value, event.target.selectionEnd)
+          : event.target.value;
+        unsaved.current = typed;
+        setDraft(typed);
         // Half-typed pinyin is not text yet: it waits until the word is chosen.
         if (!composing.current) later();
       }}
@@ -107,24 +101,13 @@ const ScriptText = memo(function ScriptText({
         composing.current = false;
         later();
       }}
-      onBlur={() => {
-        setEditing(false);
-        save.current();
-      }}
+      onBlur={() => save.current()}
     />
   );
 });
 
 // Every value here is plain text or a stable callback, so a saved edit redraws only its own row.
-const ScriptShot = memo(function ScriptShot({
-  id,
-  number,
-  title,
-  prompt,
-  display,
-  onSave,
-  onOpen,
-}) {
+const ScriptShot = memo(function ScriptShot({ id, number, title, prompt, onSave, onOpen }) {
   const { t } = useI18n();
   const no = String(number).padStart(2, '0');
   return (
@@ -138,7 +121,7 @@ const ScriptShot = memo(function ScriptShot({
           label={t('shotCard.prompt')}
           placeholder={t('script.shotHint')}
           max={SHOT_TEXT_MAX}
-          display={display}
+          speech
           onSave={onSave}
         />
       </div>
@@ -158,7 +141,6 @@ function ScriptScene({
   group,
   numbers,
   locked,
-  display,
   level,
   onSaveShot,
   onSaveScene,
@@ -214,7 +196,6 @@ function ScriptScene({
           number={numbers.get(shot.id)}
           title={shot.title}
           prompt={shot.prompt}
-          display={display}
           onSave={onSaveShot}
           onOpen={onOpenShot}
         />
@@ -317,12 +298,6 @@ export function StoryScript({ chapters, groups, shots, onNewScene, onOpenShot })
     added.current = false;
     document.querySelector(`[data-script-shot="${state.lastAdded}"] textarea`)?.focus();
   }, [state.lastAdded]);
-  // The video model's line markup reads as "名字：台词" until the box is edited.
-  const profiles = state.profiles;
-  const display = useMemo(() => {
-    const names = speakerNames(profiles);
-    return (text) => (hasModelLines(text) ? readablePrompt(text, names) : text);
-  }, [profiles]);
   // The flow's "next step" may name a scene (showScriptScene): land there once it is drawn.
   useEffect(() => {
     landOnScene();
@@ -351,7 +326,6 @@ export function StoryScript({ chapters, groups, shots, onNewScene, onOpenShot })
       onSaveScene={saveScene}
       onAddShot={addShot}
       onOpenShot={openShot}
-      display={display}
       level={several ? 'h3' : 'h2'}
     />
   );

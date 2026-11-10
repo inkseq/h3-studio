@@ -1,0 +1,403 @@
+/* World and Library as whole pages (StagePage.jsx). One toolbar row, then one card grid whose
+   pictures have a fixed shape, so nothing moves while pictures load, fail or change. */
+.stage-page {
+  --sp-gutter: clamp(var(--sp-4), 3vw, var(--sp-6));
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 var(--sp-gutter) var(--sp-6);
+  scrollbar-gutter: stable;
+}
+
+/* ---------- toolbar ---------- */
+.sp-bar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-raised);
+  display: grid;
+  grid-template-columns: auto minmax(180px, 320px) auto minmax(0, 1fr) auto;
+  grid-template-areas: 'title search tabs . actions';
+  align-items: center;
+  gap: var(--sp-3) var(--sp-4);
+  padding: var(--sp-4) 0;
+  margin-bottom: var(--sp-2);
+  background: var(--bg);
+}
+.sp-title {
+  grid-area: title;
+  /* World and Library start their search box at the same place. */
+  min-width: 132px;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  white-space: nowrap;
+}
+.sp-title h2 {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.sp-title small {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.sp-search {
+  grid-area: search;
+  min-width: 0;
+}
+.sp-tabs {
+  grid-area: tabs;
+  max-width: 100%;
+}
+.sp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Counts have room for two digits, so a tab never changes width as files come and go. */
+.sp-count {
+  min-width: 2ch;
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.sp-count.alert {
+  color: var(--accent);
+  font-weight: 650;
+}
+.sp-actions {
+  grid-area: actions;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+/* The same width for every category's New and for Upload. */
+.sp-new {
+  min-width: 88px;
+}
+
+@media (max-width: 1100px) {
+  .sp-bar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      'title . actions'
+      'tabs search search';
+  }
+}
+@media (max-width: 640px) {
+  .sp-bar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'title actions'
+      'search search'
+      'tabs tabs';
+    gap: var(--sp-2);
+    padding: var(--sp-3) 0;
+  }
+  .sp-tabs {
+    display: flex;
+  }
+  .sp-tabs > * {
+    flex: 1 1 0;
+    min-width: 0;
+    justify-content: center;
+  }
+  .sp-tab > svg {
+    display: none;
+  }
+}
+
+/* ---------- grid ---------- */
+.sp-grid {
+  --sp-card-min: 168px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--sp-card-min), 1fr));
+  /* One gutter both ways (layout audit 2026-11-10). */
+  gap: var(--sp-4);
+  align-items: start;
+}
+.sp-grid[data-kind='location'] {
+  --sp-card-min: 260px;
+}
+.sp-grid[data-kind='file'] {
+  --sp-card-min: 180px;
+}
+@media (max-width: 640px) {
+  .sp-grid,
+  .sp-grid[data-kind='file'] {
+    --sp-card-min: 148px;
+    gap: var(--sp-3);
+  }
+  .sp-grid[data-kind='location'] {
+    --sp-card-min: 100%;
+  }
+}
+
+/* A group (三兄弟): a labelled section across the grid whose members use the grid's own
+   columns, so they line up exactly with the single cards above and below. A rule above the
+   label marks it; a tinted box would need a negative margin and stick out past the page's
+   left edge (layout audit 2026-11-10). */
+.sp-group {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  gap: inherit;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.sp-group-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-md);
+}
+.sp-group-head small {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+.sp-group-note::before {
+  content: '·';
+  margin-right: var(--sp-2);
+}
+
+/* ---------- card ---------- */
+.sp-card {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+  cursor: pointer;
+  transition:
+    border-color var(--ease),
+    box-shadow var(--ease);
+}
+.sp-card:hover {
+  border-color: var(--line-3);
+  box-shadow: var(--shadow);
+}
+.sp-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sp-media {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+.sp-media[data-frame='location'] {
+  aspect-ratio: 16 / 9;
+}
+.sp-media[data-frame='prop'] {
+  aspect-ratio: 1;
+}
+.sp-media[data-frame='file'] {
+  aspect-ratio: 4 / 3;
+}
+/* Sounds have no picture: a short band with the note icon. */
+.sp-media[data-frame='sound'] {
+  aspect-ratio: 3;
+}
+.sp-media > :is(img, video, .media-empty) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* People: faces sit near the top of a full-length photo. */
+.sp-media[data-frame='character'] > img {
+  object-position: 50% 12%;
+}
+/* Library files: a portrait shows its upper part; a wide picture is centred either way. */
+.sp-media[data-frame='file'] > img {
+  object-position: 50% 25%;
+}
+/* One person's part of a shared group photo: the inline box comes from memberCrop(). */
+.sp-media > img.sp-crop {
+  inset: auto;
+  left: var(--crop-left);
+  top: var(--crop-top);
+  width: var(--crop-width);
+  height: var(--crop-height);
+  max-width: none;
+  object-fit: fill;
+}
+.sp-media > .media-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--sp-1);
+  color: var(--muted);
+}
+.sp-initial {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: calc(var(--fs-2xl) * 2);
+  font-weight: 600;
+}
+.sp-media-tag {
+  position: absolute;
+  left: var(--sp-2);
+  bottom: var(--sp-2);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  max-width: calc(100% - 2 * var(--sp-2));
+  padding: 2px var(--sp-2);
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--media-scrim);
+  color: var(--white);
+  font-size: var(--fs-xs);
+  line-height: 16px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sp-media-tag.end {
+  left: auto;
+  right: var(--sp-2);
+}
+.sp-media-tag.warn {
+  top: var(--sp-2);
+  bottom: auto;
+  background: var(--warn);
+  color: var(--warn-ink);
+  font-weight: 600;
+}
+.sp-card-body {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--sp-1) var(--sp-1) var(--sp-2) var(--sp-3);
+}
+.sp-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: var(--h-sm);
+}
+.sp-name > b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  font-weight: 650;
+}
+.sp-name > .item-menu {
+  flex: none;
+  margin-left: auto;
+}
+.sp-name > .bible-speaker {
+  flex: none;
+}
+.sp-play {
+  display: inline-flex;
+  flex: none;
+  margin-left: calc(-1 * var(--sp-1));
+}
+/* One line of facts and one line of flags, each a fixed height, so every card in a row is
+   the same height whatever it says. */
+.sp-facts {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 18px;
+  padding-right: var(--sp-2);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+.sp-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+.sp-setup {
+  flex: none;
+  margin-left: auto;
+  padding-right: var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+.sp-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-flags {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 22px;
+  margin-top: 2px;
+  overflow: hidden;
+}
+.sp-flag {
+  flex: none;
+  padding: 0 var(--sp-2);
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: var(--fs-xs);
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+/* ---------- inbox and empty states ---------- */
+.sp-inbox {
+  display: grid;
+  gap: var(--sp-3);
+}
+.sp-inbox-help {
+  margin: 0;
+}
+/* Files to sort are cards in the same grid: the picture, then its name and where to file it. */
+.sp-inbox .inbox {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-4);
+  align-items: start;
+}
+.sp-inbox .inbox .inrow {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--surface);
+}
+.sp-inbox .inbox .inrow .tile {
+  aspect-ratio: 4 / 3;
+  border: 0;
+  border-radius: 0;
+  cursor: default;
+}
+.sp-inbox .inbox .inrow .tile:hover {
+  transform: none;
+}
+/* The name is written under the picture, so the picture does not repeat it. */
+.sp-inbox .inrow .tile-name {
+  display: none;
+}
+.sp-inbox .inrow-body {
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+.stage-page .sp-empty {
+  margin-top: var(--sp-4);
+}

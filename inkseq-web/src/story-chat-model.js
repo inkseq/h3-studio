@@ -9,7 +9,16 @@ export const CARD_GROUPS = [
 ];
 
 export function emptyChat(title = '') {
-  return { title, version: 0, messages: [], cards: [], quotes: {}, busy: false };
+  return {
+    title,
+    version: 0,
+    messages: [],
+    cards: [],
+    quotes: {},
+    busy: false,
+    draft: '',
+    step: '',
+  };
 }
 
 const upsert = (cards, card) => {
@@ -56,8 +65,11 @@ function projectChanged(state, event) {
 }
 
 const EVENTS = {
-  'turn.started': (state) => ({ ...state, busy: true }),
-  'turn.finished': (state) => ({ ...state, busy: false }),
+  // While a turn runs: the reply written so far and the server's step (#1083).
+  'turn.started': (state) => ({ ...state, busy: true, draft: '', step: '' }),
+  'turn.reply': (state, event) => (state.busy ? { ...state, draft: event.text || '' } : state),
+  'turn.progress': (state, event) => (state.busy ? { ...state, step: event.step || '' } : state),
+  'turn.finished': (state) => ({ ...state, busy: false, draft: '', step: '' }),
   'user.message': addMessage,
   'assistant.message': addMessage,
   'project.changed': projectChanged,
@@ -68,7 +80,13 @@ const EVENTS = {
     ),
   }),
   // The live server's whole view replaces local state (#422).
-  'chat.loaded': (state, event) => ({ ...state, ...event.state, quotes: event.state.quotes || {} }),
+  'chat.loaded': (state, event) => ({
+    ...state,
+    ...event.state,
+    quotes: event.state.quotes || {},
+    draft: '',
+    step: '',
+  }),
   'quote.proposed': (state, event) =>
     state.quotes[event.id]
       ? state

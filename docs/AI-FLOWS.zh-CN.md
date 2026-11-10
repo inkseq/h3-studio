@@ -78,8 +78,11 @@ flowchart TD
 |---|---|
 | 角色、地点、道具卡 | [`card_picture_styles.md`](../studio_platform/prompts/card_picture_styles.md)；故事里已有卡片图时，第一张作为画风参考，见 [`card_picture_match.md`](../studio_platform/prompts/card_picture_match.md) |
 | 镜头首帧 | [`first_frame.md`](../studio_platform/prompts/first_frame.md) |
+| 用用户附上的照片当素材（#726） | [`card_picture_photo.md`](../studio_platform/prompts/card_picture_photo.md)，排在卡片图之后编号 |
 
 某张卡片的图读不出来时，首帧照样画，只是这张卡只发文字。
+
+快速创作里附上的照片（每条消息最多 4 张）会以缩小后的预览图随这一条消息发给 Gemini，助手能看到照片内容：可以把照片放到对应卡片上，也可以提议用照片当素材画一张新卡片图（最多 3 张，出图照常确认、照常扣积分）。照片读不出来时这一轮不发送，什么都不改。照片本身只存在故事素材里，不另存副本。
 
 ## 生成音色
 
@@ -119,12 +122,44 @@ flowchart TD
   G -->|不通过| H[发原来的提示词]
 ```
 
-检查：六段齐全且顺序对；台词标签外没有中文；每句台词一字不差、顺序不变、说话人编号还在；每张发出去的图和每段声音都被引用，没有引用没发的。同样的输入只改写一次，结果留在内存里。
+首尾帧模式（只挂首帧、尾帧或纯文字，没有别的参考）的镜头也改写（#1086），用官方首尾帧格式的三段：`integrated_multimodal_description`、`overall_soundscape`、`non_diegetic_music`。首帧编号成 `<Picture 1>`，有尾帧时接着编号；人物、场景、道具都写成英文的通用身份（"the old ferryman"），不写卡片上的中文名字。
+
+检查：六段（首尾帧是三段）齐全且顺序对；台词标签外没有中文；每句台词一字不差、顺序不变、说话人编号还在；每张发出去的图和每段声音都被引用，没有引用没发的。同样的输入只改写一次，结果留在内存里。
 
 | 情况 | prompt 文件 |
 |---|---|
 | 把镜头改写成 H3 全参考格式 | [`h3_reference_prompt.md`](../studio_platform/prompts/h3_reference_prompt.md) |
+| 首尾帧镜头改写成 H3 官方首尾帧格式 | [`h3_frame_prompt.md`](../studio_platform/prompts/h3_frame_prompt.md) |
 
 ## 查真实记录
 
 配置好 Langfuse 后，每次模型调用都有记录：Jev、Terra 和出图记录发送的内容，Gemini 记录最后一条消息。快速对话这一轮还会记录 `prompt` 文件名和 `prompt_version`，这个版本号是 prompt 全文的摘要，内容一改就会变。
+
+### 记录里存了什么、存多久（#770，2026-11-10 核对）
+
+- 发出去的内容：Gemini 只记最后一条消息，Jev、Terra 和出图记发送的请求；每段最多 6000 字，超出截断。图片只记"发了几张"，不存图本身；不记凭据；用户只记成不可反推的编号（`u_` 加摘要），不记名字或邮箱。
+- 保存期限：Langfuse 项目目前**没有设置保存期限**（公开接口读到的项目信息里没有 retentionDays），记录会一直保留到手动删除。
+- 注销账号：现在**不会**删除这个人在 Langfuse 里的记录（记录按上面的编号存）。
+- 这两条要负责人决定：在 Langfuse 项目设置里定一个保存期限（可能需要付费套餐），以及注销账号时要不要按编号删掉记录（Langfuse 有删除记录的接口）。
+
+## 固定评测集
+
+改 prompt、换模型或改设置之前，先在同一批固定例子上跑一遍，结果在 Langfuse 的实验页里并排比较。
+
+| 评测集（Langfuse dataset） | 来源 | 打分 |
+|---|---|---|
+| `story-chat-conversations` | [`tests/fixtures/story-chat/eval-conversations.json`](../tests/fixtures/story-chat/eval-conversations.json)，#756 的 20 段对话 | 计划能否套用、总时长是否接近要求、镜头数、每轮耗时 |
+| `inky-text-cases` | [`tests/fixtures/inky/eval-cases.json`](../tests/fixtures/inky/eval-cases.json) 的文字题，#687 | Jev 的判断和人工标注是否一致、期望分 |
+
+```
+python tools/langfuse_evals.py upload                 # 把评测集放进 Langfuse，重复运行只更新同一批
+python tools/langfuse_evals.py run story-chat --limit 2 --run-name 改了什么
+python tools/langfuse_evals.py run inky --dry-run     # 只列出会跑哪些，不调用模型
+```
+
+- 走的是和线上一样的代码（同一份 prompt、解析和卡片规则），每次运行是 Langfuse 的一个实验，模型调用记在对应例子下面。
+- 凭据只从中央目录读：Langfuse 用 `langfuse--inkseq`，模型用应用自己的 Gemini 和 TypeSafe 配置，不用 OpenRouter。
+- 默认只跑 2 个例子；跑全集要明确加 `--limit`。
+- 评测集只放编出来的例子，不放用户的故事或图片。
+- 需要 `langfuse` 包（requirements.lock 里有，WSL 和应用环境都装了）。
+- 上传图片的题（upload_card）还留在单元测试里，没有放进 Langfuse。

@@ -96,10 +96,10 @@ test('cumulative warning includes existing reservations and exhaustion never imp
 });
 
 test('retained financial labels distinguish owners, projects, shared accounts and retired caps', () => {
-  assert.equal(budgetLabel(row({ owner_id: 'supervan' })), '账户预算 · supervan');
+  assert.equal(budgetLabel(row({ owner_id: 'qa-user' })), '账户预算 · qa-user');
   assert.equal(
-    budgetLabel(row({ owner_id: 'supervan', project_id: 'night-delivery' })),
-    '项目预算 · supervan / night-delivery',
+    budgetLabel(row({ owner_id: 'qa-user', project_id: 'night-delivery' })),
+    '项目预算 · qa-user / night-delivery',
   );
   assert.equal(
     budgetLabel(row({ owner_id: null, id: 'demand-gpu-remaining-20261004' })),
@@ -112,6 +112,14 @@ test('retained financial labels distinguish owners, projects, shared accounts an
   assert.equal(
     budgetLabel(row({ owner_id: null, id: 'demand-gpu-remaining-20261004' }), 'en'),
     'Shared GPU budget',
+  );
+  assert.equal(
+    budgetLabel(row({ owner_id: 'qa-user', id: 'demand-gpu-owner-qa-user' })),
+    'GPU 预算 · qa-user',
+  );
+  assert.equal(
+    budgetLabel(row({ owner_id: 'qa-user', id: 'demand-job-owner-qa-user' }), 'en'),
+    'Generation budget · qa-user',
   );
   assert.equal(budgetUsage(row({ limit_mode: 'settings', status: 'exhausted' })), null);
   assert.equal(budgetUsage(row({ legacy_projection_only: true, status: 'exhausted' })), null);

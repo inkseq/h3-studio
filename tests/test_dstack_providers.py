@@ -223,6 +223,37 @@ class FallbackBackendTests(LedgerCase):
         self.assertEqual(self.planned, ["vastai", "lium"])
         self.assertEqual({row["backend"] for row in preview["offers"]}, {"lium"})
 
+    def test_denied_lium_executor_is_excluded_and_the_rest_are_frozen(self):
+        # #900: a Lium offer names its executor (the physical host).
+        from studio_platform.host_policy import HostPolicyStore
+
+        bad = "0453b369-1111-4222-8333-444455556666"
+        good = "11111111-1111-4111-8111-111111111111"
+        self.stock["lium"] = [offer("lium", bad), offer("lium", good)]
+        service = self.operator(fallback_backends=["lium"])
+        request = {"profile_id": "5090-fl", "ttl_seconds": 900}
+        # Nothing denied: no selector, unchanged behaviour.
+        preview = service.preview(self.owner, request)
+        self.assertEqual({row["offer_id"] for row in preview["offers"]}, {bad, good})
+        with self.repo.transaction() as connection:
+            HostPolicyStore(self.repo, self.scope.tenant_id).deny_slow_download(
+                connection, bad, node_id="node-bad", now=self.now, provider="lium"
+            )
+        preview = service.preview(self.owner, request)
+        self.assertEqual([row["offer_id"] for row in preview["offers"]], [good])
+        service.start(self.owner, {"preview_id": preview["preview_id"]}, "start-1")
+        (applied,) = self.client.applied
+        binding = self.store.load(applied)
+        self.assertEqual(binding["run_spec"]["profile"]["instance_types"], [good])
+        self.assertEqual(binding["host_selection"]["provider"], "lium")
+        # Every executor denied: this lane has nothing to offer.
+        with self.repo.transaction() as connection:
+            HostPolicyStore(self.repo, self.scope.tenant_id).deny_slow_download(
+                connection, good, node_id="node-good", now=self.now, provider="lium"
+            )
+        with self.assertRaisesRegex(OperatorError, "dstack_no_compatible_host_offers"):
+            service.preview(self.owner, request)
+
     def test_vast_host_rejection_without_fallback_keeps_its_reason(self):
         self.stock["vastai"] = self.client.__class__.plan(self.client, {})["job_plans"][
             0

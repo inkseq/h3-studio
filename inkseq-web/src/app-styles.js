@@ -42,3 +42,10 @@ import './demo-v2.css';
 import './v2/page-bridge.css';
 import './ui/dialog.css';
 import './skins.css';
+// Shared ui/ primitives ship with the first script too: a primitive's stylesheet that came in a
+// later chunk arrived after the storyboard was drawn, and every cast chip grew a 1px border
+// (cards grew 10px at random, h3-studio layout audit). Last here, where the late chunk used
+// to put them, so the cascade is unchanged.
+import './ui/chip.css';
+import './ui/list-button.css';
+import './ui/tabs.css';

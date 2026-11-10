@@ -24,7 +24,7 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 metadata = MetaData()
 accounts = Table(
@@ -659,7 +659,15 @@ class Auth:
         if principal is _PROVIDER_CHECK:
             # The first local read has CLOSED its connection before checking
             # AuthKit. Password sessions keep their original one-read path.
-            if not self.session_checker(token_hash):
+            try:
+                checked = self.session_checker(token_hash)
+            except (SessionUnavailable, SQLAlchemyError):
+                raise
+            except Exception:
+                # A timeout or provider/transport error is not proof that the
+                # session ended: answer 503 + Retry-After, never 401 (#1145).
+                raise SessionUnavailable() from None
+            if not checked:
                 return None
             return self._local_session_hash(token_hash, renew=renew)
         return principal

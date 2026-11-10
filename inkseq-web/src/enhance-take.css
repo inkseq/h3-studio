@@ -1,0 +1,21 @@
+/* Story-wide enhance (h3-studio#893): the shots left out, in a short scrolling list so a long
+   story does not stretch the dialog. */
+.enhance-skipped {
+  max-height: 160px;
+  margin: 0;
+  padding: 8px 10px 8px 26px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  font-size: 13px;
+}
+.enhance-skipped b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.enhance-use-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
