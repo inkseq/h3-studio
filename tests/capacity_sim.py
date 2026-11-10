@@ -118,6 +118,17 @@ class MachineScript:
 
 
 @dataclass
+class Host:
+    """One physical host the provider keeps offering (#1198).
+
+    ``rentals`` script its rentals in order; the last one repeats.
+    """
+
+    machine_id: str
+    rentals: list
+
+
+@dataclass
 class JobBatch:
     at: float
     count: int
@@ -146,6 +157,10 @@ class Scenario:
     observation_fresh_seconds: int = 30
     jobs: list = field(default_factory=list)
     machines: list = field(default_factory=list)  # scripts in create order
+    # A market of named hosts instead: every plan offers all of them, cheapest
+    # first, and a create lands on the first one the frozen selector names.
+    hosts: list = field(default_factory=list)
+    expect_host_rentals: dict | None = None  # machine id -> most rentals allowed
     default_machine: MachineScript = field(default_factory=MachineScript)
     events: list = field(default_factory=list)
     max_machines: int = 2
@@ -374,6 +389,7 @@ class SimProvider(operator_fixture.Client):
         self.plans = 0
         self.inventory_reads = 0
         self.scripted = 0
+        self.rented = Counter()  # machine id -> rentals, for scenario.hosts
 
     # Planning -------------------------------------------------------------
     def _next_script(self):
@@ -387,6 +403,20 @@ class SimProvider(operator_fixture.Client):
             else self.world.scenario.default_machine
         )
 
+    def _market(self):
+        """(offer id, host, its next rental's script), cheapest first."""
+        if self.world._seeding:
+            return []
+        rows = [
+            (
+                str(30_000 + index),
+                host,
+                host.rentals[min(self.rented[host.machine_id], len(host.rentals) - 1)],
+            )
+            for index, host in enumerate(self.world.scenario.hosts)
+        ]
+        return sorted(rows, key=lambda row: row[2].price)
+
     def plan(self, spec):
         self.world.provider_wait("plan")
         self.plans += 1
@@ -395,6 +425,17 @@ class SimProvider(operator_fixture.Client):
             value["job_plans"][0]["offers"] = []
             return value
         offer = value["job_plans"][0]["offers"][0]
+        market = self._market()
+        if market:
+            value["job_plans"][0]["offers"] = [
+                dict(
+                    copy.deepcopy(offer),
+                    price=script.price,
+                    instance=dict(copy.deepcopy(offer["instance"]), name=offer_id),
+                )
+                for offer_id, _, script in market
+            ]
+            return value
         offer["instance"]["name"] = str(10_000 + len(self.machines))
         offer["price"] = self._next_script().price
         return value
@@ -402,16 +443,20 @@ class SimProvider(operator_fixture.Client):
     def vast_offer_mapping(self, request, *, clock):
         self.world.provider_wait("vast_offer_mapping")
         index = len(self.machines)
+        hosts = [
+            (offer_id, host.machine_id) for offer_id, host, _ in self._market()
+        ] or [(str(10_000 + index), str(19_000 + index))]
         return {
             "observed_at": clock(),
             "offers": [
                 {
-                    "offer_id": str(10_000 + index),
-                    "machine_id": str(19_000 + index),
+                    "offer_id": offer_id,
+                    "machine_id": machine_id,
                     "country": "US",
                     "region": "test-region",
                     "advertised_download_mbps": 2000,
                 }
+                for offer_id, machine_id in hosts
             ],
         }
 
@@ -435,9 +480,19 @@ class SimProvider(operator_fixture.Client):
         intent = spec["configuration"]["tags"]["sixnine_intent"]
         assert self.store.load(intent)["apply_started"] is True
         self.applied.append(intent)
-        script = self._next_script()
-        if script is not HISTORY:
-            self.scripted += 1
+        market = self._market()
+        if market:
+            # The native selector keeps the controller's order (dstack_preview).
+            order = (spec.get("profile") or {}).get("instance_types") or []
+            offer_id, host, script = next(
+                (row for name in order for row in market if row[0] == name),
+                market[0],
+            )
+            self.rented[host.machine_id] += 1
+        else:
+            script = self._next_script()
+            if script is not HISTORY:
+                self.scripted += 1
         machine = Machine(
             script,
             intent_id=intent,
@@ -445,6 +500,8 @@ class SimProvider(operator_fixture.Client):
             created_at=self.world.now,
             index=len(self.machines),
         )
+        if market:
+            machine.offer_id, machine.machine_id = offer_id, host.machine_id
         limit = spec["configuration"].get("max_duration")
         machine.max_duration = limit if type(limit) is int else None
         self.machines[spec["run_name"]] = machine
@@ -2092,6 +2149,13 @@ class World(LedgerCase):
                 "%d machines started, expected %d"
                 % (len(machines), scenario.expect_starts),
             )
+        for machine_id, most in (scenario.expect_host_rentals or {}).items():
+            if self.client.rented[machine_id] > most:
+                self.violate(
+                    "host_rented_again",
+                    "host %s rented %d times, at most %d expected"
+                    % (machine_id, self.client.rented[machine_id], most),
+                )
         if scenario.expect_idle_stop_seconds is not None and not self._idle_stops:
             self.violate("idle_stop_missing", "no machine stopped for idleness")
 

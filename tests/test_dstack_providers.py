@@ -254,6 +254,37 @@ class FallbackBackendTests(LedgerCase):
         with self.assertRaisesRegex(OperatorError, "dstack_no_compatible_host_offers"):
             service.preview(self.owner, request)
 
+    def test_lium_executor_that_just_failed_to_start_is_left_out_if_another_is(
+        self,
+    ):
+        # #1198: Lium rents the cheapest executor in the selector, so the one
+        # whose last start failed is left out while another is on offer.
+        from unittest.mock import patch
+
+        bad = "0453b369-1111-4222-8333-444455556666"
+        good = "11111111-1111-4111-8111-111111111111"
+        self.stock["lium"] = [offer("lium", bad), offer("lium", good)]
+        service = self.operator(fallback_backends=["lium"])
+        request = {"profile_id": "5090-fl", "ttl_seconds": 900}
+        with patch(
+            "studio_platform.host_policy.recent_start_failures", return_value={bad}
+        ) as recent:
+            preview = service.preview(self.owner, request)
+            self.assertEqual([row["offer_id"] for row in preview["offers"]], [good])
+            self.assertEqual(recent.call_args.kwargs["provider"], "lium")
+            service.start(self.owner, {"preview_id": preview["preview_id"]}, "start-1")
+            binding = self.store.load(self.client.applied[0])
+            self.assertEqual(binding["run_spec"]["profile"]["instance_types"], [good])
+        with patch(
+            "studio_platform.host_policy.recent_start_failures", return_value={bad}
+        ):
+            # The only executor on offer is still offered.
+            self.stock["lium"] = [offer("lium", bad)]
+            preview = self.operator(fallback_backends=["lium"]).preview(
+                self.owner, request
+            )
+            self.assertEqual([row["offer_id"] for row in preview["offers"]], [bad])
+
     def test_vast_host_rejection_without_fallback_keeps_its_reason(self):
         self.stock["vastai"] = self.client.__class__.plan(self.client, {})["job_plans"][
             0

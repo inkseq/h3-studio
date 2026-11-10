@@ -249,6 +249,12 @@ Scenario(
   run turning terminal, stop delay, price and `read_errors` (windows in which
   a run read raises a recorded error code). dstack `max_duration` from the run
   spec is honoured.
+- `hosts` instead of `machines` gives the provider a market of named physical
+  hosts (`Host("19901", [MachineScript(...), ...])`): every plan offers all of
+  them, cheapest first, a create lands on the first one the frozen selector
+  names, and each host plays its own rentals in order (the last repeats). Use
+  it for rules that depend on which host is rented, such as a host that never
+  becomes reachable.
 - `events`: `restart_app`, `demand_off`, `demand_on`, `offers_off`, `offers_on`,
   `edit_demand_config` (value: keys merged into `policy.demand_start`, then the
   controller restarts; a new id in `profile_ids` gets a copy of the first
@@ -267,7 +273,8 @@ Scenario(
 - Exact expectations: `expect_starts` (number of machines created) and
   `expect_idle_stop_seconds` (every idle stop comes that long after the
   machine's last finished job or readiness, at most one tick later, and at
-  least one happens). The report counts lookahead decisions as
+  least one happens), and `expect_host_rentals` (host id -> the most times
+  that host may be rented). The report counts lookahead decisions as
   `lookahead:<phase>:<reason>`.
 - A run stops early once every job is finished and no machine bills, or 30
   simulated minutes after its first violation.

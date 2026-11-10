@@ -498,18 +498,24 @@ class DstackCapacity:
                     host_observation=physical,
                     provider_instance_id=physical["provider_instance_id"],
                 )
+            # dstack gave up waiting: for the instance to become reachable, or
+            # for the runner on it. Both are the host's start failing (#1198).
+            from .host_policy import DSTACK_START_FAILURES
+
+            start_failure = DSTACK_START_FAILURES.get(
+                submission.get("termination_reason")
+            )
             if (
                 physical is not None
                 and status == "failed"
                 and not binding.get("stop_started")
                 and not binding.get("first_runtime_ready_at")
-                and submission.get("termination_reason")
-                == "waiting_runner_limit_exceeded"
+                and start_failure is not None
             ):
                 value["host_failure"] = {
                     "version": 1,
-                    "stage": "runtime_start",
-                    "reason_code": "provider_runner_timeout",
+                    "stage": start_failure[0],
+                    "reason_code": start_failure[1],
                     "at": value["observed_at"],
                     "qualified_start_failure": True,
                 }
