@@ -43,6 +43,33 @@ def register_handlers(app, *, repository, settings):
             },
         )
 
+    from .maintenance_notice import MaintenanceInProgress
+
+    @app.exception_handler(MaintenanceInProgress)
+    async def maintenance(_request, error):
+        # Nothing was submitted or charged; the UI shows the expected end.
+        import math
+        import time
+
+        wait = (error.expected_end_at or 0) - time.time()
+        messages = {
+            "en": "A release is in progress. Nothing was submitted or charged; please try again after it ends.",
+            "zh": "系统正在更新，本次未提交也未扣费，请在更新结束后重试。",
+        }
+        return JSONResponse(
+            {
+                "code": error.code,
+                "expected_end_at": error.expected_end_at,
+                "message": messages["en"],
+                "messages": messages,
+            },
+            status_code=503,
+            headers={
+                "Retry-After": str(min(3600, max(30, math.ceil(wait)))),
+                "Cache-Control": "no-store",
+            },
+        )
+
     @app.exception_handler(Conflict)
     async def conflict(_request, error):
         from .quality_http import error_response

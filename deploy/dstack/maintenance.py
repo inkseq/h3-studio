@@ -897,6 +897,23 @@ def profiles_check(base, directory, environment):
     return value["profiles"]
 
 
+RELEASE_NOTICE_MINUTES = 10
+
+
+def release_notice(base, directory, environment, state):
+    """Best effort (#453): the running app tells users a release is in progress.
+
+    An app without the notice module, or a stopped app, is not a release
+    failure; the notice only informs users and refuses new paid work."""
+    arguments = ["on", "--minutes", str(RELEASE_NOTICE_MINUTES)] if state == "on" else ["off"]
+    try:
+        compose(base, directory, environment, "exec", "-T", "app", "python", "-B", "-m",
+                "studio_platform.maintenance_notice", *arguments, timeout=30)
+        return True
+    except release.ReleaseError:
+        return False
+
+
 def apply_locked(root, commit):
     """Caller holds existing release lock. Reconnect every shared CPU member."""
     storyboard_maintenance_fence(root)
@@ -941,6 +958,7 @@ def apply_locked(root, commit):
     previous = state.get("current")
     release.write_state(root, {**state, "pending": commit, "status": "deploying_migration", "updated_at": time.time()})
     atomic(active_path, {**active, "pending": commit})
+    release_notice(base, directory, env, "on")
     try:
         # Stop only the four CPU members before replacing their shared namespace.
         # Broker volumes and native provider runs/attempts remain untouched.
@@ -966,6 +984,7 @@ def apply_locked(root, commit):
                 time.sleep(3)
         compose(base, directory, env, "up", "-d", "--no-deps", "caddy")
         release.wait_proxy_stable(base, env)
+        release_notice(base, directory, env, "off")
         if notify_layout(migration):
             stop_superseded_cpu(env, remove=True)
         atomic(active_path, {"version": 1, "active": True, "paths_sha256": config_digest,
@@ -974,6 +993,7 @@ def apply_locked(root, commit):
         release.write_state(root, {"current": commit, "previous": previous if previous != commit else state.get("previous"),
             "dependencies": state["dependencies"], "status": "app_ready", "updated_at": time.time()})
     except Exception:
+        release_notice(base, directory, env, "off")  # Never leave the banner up on abort.
         release.write_state(root, {**state, "pending": commit, "status": "migration_failed_needs_reconciliation",
             "updated_at": time.time()})
         raise release.ReleaseError("migration_release_failed_original_state_preserved") from None

@@ -388,6 +388,7 @@
   "local_slots -> control",
   "local_slots -> fleet",
   "lookup_indexes -> identity",
+  "maintenance_notice -> identity_schema",
   "manage -> assets",
   "manage -> auth",
   "manage -> batches",

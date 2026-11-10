@@ -312,6 +312,8 @@ class GenerationAdmission:
         )
         if status in {"queued", "planned", "waiting_capacity"} and not ready:
             status = "blocked"
+        if status in {"queued", "waiting_capacity"}:
+            self._require_no_maintenance()
         budgets = self.policies.ensure_current(plan, task_scope) if ready else ()
         return self.repo.create_job(
             task_scope,
@@ -321,6 +323,13 @@ class GenerationAdmission:
             budget_account_ids=budgets,
             spending_actor=principal.actor_id,
         )
+
+    def _require_no_maintenance(self):
+        """Release window (#453): refuse new paid work; accepted work continues."""
+        from .maintenance_notice import require_open
+
+        with self.repo.engine.connect() as connection:
+            require_open(connection, self.settings.tenant_id)
 
     def create_planned(self, principal, plan_id, business_identity):
         return self.create(
@@ -349,6 +358,7 @@ class GenerationAdmission:
         elif not managed_project(project) or job["actor_id"] != "quick-chat-execution":
             raise Conflict("quick_chat_execution_required")
         self.planning.check_source(project, plan["request"], principal)
+        self._require_no_maintenance()
         task_scope = self.task_scope(
             principal, job["project_id"], job["id"] if business else None
         )

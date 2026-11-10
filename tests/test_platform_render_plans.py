@@ -537,6 +537,52 @@ class RenderApiTests(unittest.TestCase):
         )
         self.assertEqual(fresh.status_code, 409)
 
+    def test_release_notice_refuses_new_paid_job_with_its_end_time(self):
+        from sqlalchemy import func, select
+        from studio_platform.maintenance_notice import release_write
+        from studio_platform.repository import jobs
+
+        repo = self.app.state.repository
+        plan = self.plan()
+        with repo.transaction() as connection:
+            notice = release_write(
+                connection,
+                self.app.state.settings.tenant_id,
+                {"active": True, "minutes": 10},
+                repo.clock(),
+            )
+        refused = self.client.post(
+            "/v1/jobs",
+            json={"plan_id": plan["plan_id"]},
+            headers={"Idempotency-Key": "during-release"},
+        )
+        self.assertEqual(refused.status_code, 503, refused.text)
+        body = refused.json()
+        self.assertEqual(body["code"], "maintenance_in_progress")
+        self.assertEqual(body["expected_end_at"], notice["expected_end_at"])
+        self.assertGreaterEqual(int(refused.headers["retry-after"]), 30)
+        with repo.engine.connect() as connection:
+            self.assertEqual(
+                connection.execute(select(func.count()).select_from(jobs)).scalar(),
+                0,
+            )
+        config = self.client.get("/api/auth/config").json()["maintenance_notice"]
+        self.assertTrue(config["active"])
+        with repo.transaction() as connection:
+            release_write(
+                connection,
+                self.app.state.settings.tenant_id,
+                {"active": False},
+                repo.clock(),
+            )
+        accepted = self.client.post(
+            "/v1/jobs",
+            json={"plan_id": plan["plan_id"]},
+            headers={"Idempotency-Key": "during-release"},
+        )
+        self.assertEqual(accepted.status_code, 202, accepted.text)
+        self.assertEqual(accepted.json()["status"], "queued")
+
     def test_http_trim_precheck_and_edit_invalidate_old_consent(self):
         shot, video = self.project["entities"][2], self.project["entities"][-1]
         shot["data"].update(

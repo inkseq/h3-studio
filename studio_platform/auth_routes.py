@@ -15,9 +15,19 @@ def create_auth_router(app, *, cookie: str, browser_handle_seconds: int) -> APIR
     router = APIRouter()
     repo, auth, settings = app.state.repository, app.state.auth, app.state.settings
 
+    def maintenance_notice():
+        from sqlalchemy.exc import SQLAlchemyError
+        from .maintenance_notice import INACTIVE, current, public
+
+        try:
+            return public(current(repo.engine, settings.tenant_id))
+        except SQLAlchemyError:
+            return dict(INACTIVE)  # The banner never blocks sign-in.
+
     @router.get("/api/auth/config")
     def auth_config():
         return {
+            "maintenance_notice": maintenance_notice(),
             "authentication": "password"
             if settings.auth_mode == "password"
             else "username-only-test",
@@ -27,6 +37,30 @@ def create_auth_router(app, *, cookie: str, browser_handle_seconds: int) -> APIR
             if settings.auth_mode == "local-test"
             else [],
         }
+
+    @router.get("/v1/admin/maintenance-notice")
+    def get_maintenance_notice(request: Request):
+        from .maintenance_notice import read
+
+        if not is_admin(request.state.principal, repo, settings):
+            raise HTTPException(403, "admin_required")
+        with repo.engine.connect() as connection:
+            return read(connection, settings.tenant_id)
+
+    @router.put("/v1/admin/maintenance-notice")
+    def put_maintenance_notice(request: Request, body: dict):
+        from .maintenance_notice import MaintenanceNoticeError, write
+
+        principal = request.state.principal
+        if not is_admin(principal, repo, settings):
+            raise HTTPException(403, "admin_required")
+        try:
+            with repo.transaction() as connection:
+                return write(
+                    connection, settings.tenant_id, principal, body, repo.clock()
+                )
+        except MaintenanceNoticeError as error:
+            return JSONResponse({"code": error.code}, status_code=error.status)
 
     @router.post("/api/auth/login")
     async def login(request: Request):

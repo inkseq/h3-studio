@@ -1736,6 +1736,9 @@ class MigrationGuardAndDeployment(unittest.TestCase):
                 )
             )
             verified = stack.enter_context(patch.object(maintenance, "verify_services"))
+            notices = stack.enter_context(
+                patch.object(maintenance, "release_notice", return_value=True)
+            )
             checked = stack.enter_context(
                 patch.object(maintenance, "profiles_check", return_value=2)
             )
@@ -1746,8 +1749,12 @@ class MigrationGuardAndDeployment(unittest.TestCase):
             with self.assertRaisesRegex(release.ReleaseError, "need_rebind"):
                 maintenance.apply_locked(self.root, COMMIT)
             self.assertEqual((calls, writes), ([], []))
+            notices.assert_not_called()
             checked.side_effect = None
             maintenance.apply_locked(self.root, COMMIT)
+            # Users are told before the restart and the notice ends after it.
+            self.assertEqual([c.args[3] for c in notices.call_args_list], ["on", "off"])
+            notices.reset_mock()
             self.assertEqual(calls[0][0], ("stop", *maintenance.SHARED))
             update = next(args for args, _ in calls if "--force-recreate" in args)
             self.assertEqual(update[-5:], ("app", *maintenance.SHARED))
@@ -1816,6 +1823,52 @@ class MigrationGuardAndDeployment(unittest.TestCase):
             self.assertEqual(
                 writes[-1]["status"], "migration_failed_needs_reconciliation"
             )
+            # An aborted release never leaves the notice on.
+            self.assertEqual(notices.call_args_list[-1].args[3], "off")
+
+    def test_release_notice_is_best_effort_through_the_running_app(self):
+        calls = []
+
+        def fake(base, directory, env, *args, **kwargs):
+            calls.append(args)
+            return b'{"maintenance_notice": {}}'
+
+        with patch.object(maintenance, "compose", side_effect=fake):
+            self.assertTrue(maintenance.release_notice("b", "d", {}, "on"))
+            self.assertTrue(maintenance.release_notice("b", "d", {}, "off"))
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "exec",
+                    "-T",
+                    "app",
+                    "python",
+                    "-B",
+                    "-m",
+                    "studio_platform.maintenance_notice",
+                    "on",
+                    "--minutes",
+                    "10",
+                ),
+                (
+                    "exec",
+                    "-T",
+                    "app",
+                    "python",
+                    "-B",
+                    "-m",
+                    "studio_platform.maintenance_notice",
+                    "off",
+                ),
+            ],
+        )
+
+        def failing(*args, **kwargs):
+            raise release.ReleaseError("container_operation_failed_no_details_logged")
+
+        with patch.object(maintenance, "compose", side_effect=failing):
+            self.assertFalse(maintenance.release_notice("b", "d", {}, "on"))
 
     def test_profiles_check_runs_the_incoming_app_image_without_a_restart(self):
         calls = []
