@@ -46,6 +46,9 @@ def vast_share(rules, queued, work, now, machines):
         queued=len(queued),
         available_slots=1,
         admission_blocked=False,
+        # Modal hosts take one input each and scale to zero; they are not
+        # dedicated extras. The demand-start lookahead still gates each start.
+        starting_share_backlog=False,
     )
     if decision.start_count:
         return work

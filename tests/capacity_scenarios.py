@@ -307,7 +307,64 @@ SCENARIOS = [
         hours=6,
         max_machines=4,
         lookahead=True,
+        # Rules sized to these 10-minute jobs, keeping the defaults' ratio
+        # (K x job = boot = 600 s). The 30 s default would leave one machine
+        # on 24 such jobs for 4 h; this scenario used to pass only because a
+        # busy worker read as a cold slot and rented per claim (#688).
+        start_rules={"job_seconds": 600, "minimum_jobs": 1},
         jobs=[JobBatch(0, 24, actual_runtime_s=600)],
+    ),
+    # #688 staging acceptance, start rules at their defaults (job 30 s, boot
+    # 600 s, 20 jobs left at ready). max_machines=4 so the fleet cap never
+    # hides an extra start; every idle stop must come 600 s after the last job.
+    Scenario(
+        "lookahead_floor_one_job",
+        "Lookahead: 1 queued job and no machine starts exactly one (floor).",
+        hours=2,
+        max_machines=4,
+        lookahead=True,
+        jobs=[JobBatch(0, 1, actual_runtime_s=30)],
+        expect_starts=1,
+        expect_idle_stop_seconds=600,
+    ),
+    Scenario(
+        "lookahead_ready_30_queued",
+        "Lookahead: 1 ready machine and 30 queued (10 left at ready) adds none.",
+        hours=3,
+        max_machines=4,
+        lookahead=True,
+        jobs=[
+            JobBatch(0, 1, actual_runtime_s=30),
+            JobBatch(15 * 60, 30, actual_runtime_s=30),
+        ],
+        expect_starts=1,
+        expect_idle_stop_seconds=600,
+    ),
+    Scenario(
+        "lookahead_ready_45_queued",
+        "Lookahead: 1 ready machine and 45 queued (25 left at ready) adds one.",
+        hours=3,
+        max_machines=4,
+        lookahead=True,
+        jobs=[
+            JobBatch(0, 1, actual_runtime_s=30),
+            JobBatch(15 * 60, 45, actual_runtime_s=30),
+        ],
+        expect_starts=2,
+        expect_idle_stop_seconds=600,
+    ),
+    Scenario(
+        "lookahead_idle_stop_at_boot",
+        "Lookahead: an idle machine stops 600 s (boot) after its last job.",
+        # The policy idle default is 30 minutes; a lookahead start keeps the
+        # start rules' boot time instead (rent-or-buy keep-alive).
+        hours=2,
+        max_machines=4,
+        lookahead=True,
+        idle_shutdown_seconds=1800,
+        jobs=[JobBatch(0, 2, actual_runtime_s=30)],
+        expect_starts=1,
+        expect_idle_stop_seconds=600,
     ),
     Scenario(
         "slow_ticks_fresh_30",
