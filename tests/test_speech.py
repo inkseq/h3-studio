@@ -1,6 +1,7 @@
 """Voices and generated lines (#997) with a fake provider; no network, no credits."""
 
 import json
+import secrets
 import unittest
 from pathlib import Path
 import subprocess
@@ -11,6 +12,7 @@ import httpx
 from sqlalchemy import insert
 
 from studio_platform import speech_provider, speech_settings
+from studio_platform.auth import digest
 from studio_platform.repository import documents
 from studio_platform.speech_catalog import LANGUAGES, RETIRED, VOICES, maker, public
 from studio_platform.speech_provider import (
@@ -73,6 +75,64 @@ def set_switches(app, **value):
         )
 
 
+EDIT_SCOPES = ["projects:read", "projects:write"]
+SPEND_SCOPES = [*EDIT_SCOPES, "assets:read", "assets:write", "jobs:write"]
+
+
+def key_headers(client, scopes):
+    """A synthetic API key with these scopes, minted by the signed-in client."""
+    reply = client.post(
+        "/v1/api-keys",
+        json={
+            "name": "Synthetic key",
+            "scopes": scopes,
+            "all_projects": True,
+            "project_ids": [],
+            "expires_in_days": 1,
+        },
+    )
+    reply.raise_for_status()
+    return {"Authorization": "Bearer " + reply.json()["api_key"]}
+
+
+def connection_headers(app, permission):
+    """A synthetic agent connection over all of the owner's stories."""
+    auth, service = app.state.auth, app.state.agent_connect
+    origin = "http://127.0.0.1:8850"
+    grant = service.issue(
+        auth.session(auth.login("superdan", "", source="test")),
+        name="Synthetic assistant",
+        authorization_profile_id="creator-full",
+        authorization_profile_version=1,
+        idempotency_key=secrets.token_hex(12),
+        origin=origin,
+        scope={"kind": "all"},
+        permission=permission,
+    )
+    token = "sxp_" + secrets.token_urlsafe(32)
+    service.exchange(
+        code=grant["code"],
+        client_challenge=digest(secrets.token_urlsafe(32)),
+        token_hash=digest(token),
+        key_prefix=token[:12],
+        expected_authorization_fingerprint=grant["connection"][
+            "authorization_fingerprint"
+        ],
+        origin=origin,
+        source="synthetic",
+    )
+    return {"Authorization": "Bearer " + token}
+
+
+def assert_paid_work_refused(case, organise, editor):
+    """The refusals a generation job gives the same two callers."""
+    case.assertEqual(organise.status_code, 409, organise.text)
+    case.assertEqual(organise.json()["code"], "connection_permission_denied")
+    case.assertEqual(set(organise.json()["messages"]), {"en", "zh"})
+    case.assertEqual(editor.status_code, 404, editor.text)
+    case.assertEqual(set(editor.json()), {"detail"})
+
+
 class SpeechRouteTests(unittest.TestCase):
     setUp = fixtures.ApiTests.setUp
     login = fixtures.ApiTests.login
@@ -85,7 +145,7 @@ class SpeechRouteTests(unittest.TestCase):
         if switches:
             set_switches(self.app, **switches)
 
-    def speak(self, request_id="line-0001", **body):
+    def speak(self, request_id="line-0001", headers=None, **body):
         return self.client.post(
             "/v1/projects/story-one/speech",
             json={
@@ -94,7 +154,47 @@ class SpeechRouteTests(unittest.TestCase):
                 "voice_id": "v-warm",
                 **body,
             },
+            headers=headers,
         )
+
+    def test_a_line_needs_the_permission_a_generation_job_needs(self):
+        self.prepare(voice_enabled=True)
+        organise = connection_headers(self.app, "organise")
+        editor = key_headers(self.client, EDIT_SCOPES)
+        assert_paid_work_refused(
+            self, self.speak(headers=organise), self.speak(headers=editor)
+        )
+        # The same key is refused the same way where a generation is planned.
+        planned = self.client.post(
+            "/v1/generation-plans", json=fixtures.generation_request(), headers=editor
+        )
+        self.assertEqual(
+            (planned.status_code, planned.json()),
+            (404, self.speak(headers=editor).json()),
+        )
+        self.assertEqual(self.adapter.calls, [])
+        project = self.client.get("/v1/projects/story-one").json()["project"]
+        self.assertNotIn("speechRequests", project.get("journey", {}))
+        self.assertFalse([e for e in project["entities"] if e["type"] == "audio"])
+        # Pricing a line spends nothing, so both may still ask.
+        for headers in (organise, editor):
+            quoted = self.client.post(
+                "/v1/projects/story-one/speech/quote",
+                json={"request_id": "line-0001", "text": "x", "voice_id": "v-warm"},
+                headers=headers,
+            )
+            self.assertEqual(quoted.status_code, 200, quoted.text)
+        # A refusal uses nothing up: the same request then works for a caller who may spend.
+        self.assertEqual(self.speak().status_code, 200)
+        for number, headers in enumerate(
+            (
+                connection_headers(self.app, "generate"),
+                key_headers(self.client, SPEND_SCOPES),
+            )
+        ):
+            reply = self.speak(f"line-100{number}", headers=headers)
+            self.assertEqual(reply.status_code, 200, reply.text)
+        self.assertEqual(len(self.adapter.calls), 3)
 
     def test_default_off_shows_nothing_and_calls_nothing(self):
         self.prepare()

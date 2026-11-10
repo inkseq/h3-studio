@@ -6,6 +6,7 @@ original audio attachment succeeds. Production switches remain unchanged.
 """
 
 import io
+import json
 from pathlib import Path
 import re
 
@@ -14,6 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 from .credits import CreditError
+from .repository import Conflict
 from .speech_credit_proof import quote as speech_quote
 from .speech_requests import SpeechRequest
 from .speech_catalog import LANGUAGES, VOICES, public
@@ -35,6 +37,26 @@ class SpeechBody(BaseModel):
 
 def _fail(code, status, **detail):
     raise HTTPException(status, {"code": code, **detail})
+
+
+def require_paid_work(app, principal, project_id):
+    """Voice costs credits or provider money, so it asks what a generation job asks."""
+    if principal.machine:
+        from .agent_management import connection_for_actor
+
+        with app.state.repository.engine.connect() as connection:
+            grant = connection_for_actor(
+                connection,
+                app.state.settings.tenant_id,
+                principal.owner,
+                principal.actor_id,
+            )
+        if (
+            grant is not None
+            and json.loads(grant["authorization"]).get("permission") == "organise"
+        ):
+            raise Conflict("connection_permission_denied")
+    app.state.generation_access.authorize(principal, project_id, "jobs:write")
 
 
 def clean(text):
@@ -173,6 +195,7 @@ def register_routes(app):
 
         principal = request.state.principal
         row = app.state.authorized_project(principal, project_id, "projects:write")
+        require_paid_work(app, principal, project_id)
         reject_managed(row["payload"])
         # Existing receipts retain their catalog and charging decision. Catalog or
         # enable-switch changes only decide admission of a genuinely new request.
