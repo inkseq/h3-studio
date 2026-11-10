@@ -737,6 +737,7 @@ inventory.json
 !skills/inkseq/reference/
 !skills/inkseq/reference/api.md
 !skills/inkseq/reference/recovery.md
+!studio_platform/storyboard_roles.py
 !studio_platform/storyboard_versions.py
 !studio_platform/story_risk.py
 !tests/test_story_risk.py
