@@ -533,10 +533,10 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             _fail("story_chat_invalid", 422, field="turn_id")
         if not isinstance(text, str) or not text.strip() or len(text) > most:
             _fail("story_chat_invalid", 422, field="text", max=most)
-        return turn_id, text.strip(), inky, is_script
+        return turn_id, text.strip(), inky, is_script, body.get("photos")
 
     def run_turn(principal, project_id, turn, progress=None):
-        turn_id, text, inky, is_script = turn
+        turn_id, text, inky, is_script, photo_ids = turn
 
         def answer(row, messages):
             result = view(row, principal)
@@ -584,9 +584,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             if connection_turns_today(principal) >= limit:
                 _fail("story_chat_connection_daily_limit", 429, limit=limit)
         # The person's own pictures, seen by the model as bounded previews (#726).
-        attached = read_photos(
-            principal, project_id, row["payload"], body.get("photos"), "turn"
-        )
+        attached = read_photos(principal, project_id, row["payload"], photo_ids, "turn")
         chat = story_chat_advice.turn_chat(chat, text)
         with llm_tracing.observe(
             "story-chat-turn",

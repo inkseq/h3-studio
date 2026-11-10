@@ -163,6 +163,39 @@ class PhotoTurnTests(unittest.TestCase):
         self.assertEqual(user["photos"], [first, second])
         self.assertEqual(user["text"], "what do you see?")
 
+    def test_streamed_photo_turn_calls_model_once_and_replays_stored_result(self):
+        from test_story_chat_stream import StreamingModel, events
+
+        photo = self.add_photo()
+        self.model.plans.append({"reply": "An orange scarf.", "actions": []})
+        body = {
+            "turn_id": "turn-photo-stream",
+            "text": "Describe it",
+            "photos": [photo],
+        }
+        before = len(self.model.calls)
+        with patch.object(
+            self.model,
+            "generate_stream",
+            StreamingModel.generate_stream.__get__(self.model),
+            create=True,
+        ):
+            response = self.client.post(
+                f"/v1/story-chats/{self.pid}/turns/stream", json=body
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        emitted = events(response.text)
+        self.assertIn(("reply", {"text": "An orange scarf."}), emitted)
+        self.assertEqual(emitted[-1][0], "done")
+        self.assertEqual(len(self.model.calls), before + 1)
+        images = self.model.calls[-1]["messages"][-1]["images"]
+        self.assertEqual(len(images), 1)
+        self.assertEqual(images[0]["mime"], "image/jpeg")
+        replay = self.client.post(f"/v1/story-chats/{self.pid}/turns", json=body)
+        self.assertEqual(replay.status_code, 200, replay.text)
+        self.assertEqual(replay.json()["turn"], emitted[-1][1]["turn"])
+        self.assertEqual(len(self.model.calls), before + 1)
+
     def test_unknown_unreadable_or_inky_photos_are_refused_before_the_model(self):
         before = self.project()["version"]
         calls = len(self.model.calls)
