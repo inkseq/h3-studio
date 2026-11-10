@@ -12,6 +12,7 @@ from studio_platform.host_policy import (
     HostPolicyStore,
     automatic_deny,
     bound_observation,
+    deny_failed_rental,
     recent_start_failures,
     failure,
     observation,
@@ -342,6 +343,86 @@ class HostPolicyTests(ledger.LedgerCase):
                 self.assertEqual(
                     automatic_deny([before, good, stalled], "19492", now=4000), until
                 )
+
+    def denied(self, node, now, history=()):
+        node["payload"]["tenant_id"] = self.scope.tenant_id
+        with (
+            patch(
+                "studio_platform.host_policy.original_nodes",
+                return_value=list(history),
+            ),
+            self.repo.transaction() as connection,
+        ):
+            return deny_failed_rental(
+                self.repo, self.scope.tenant_id, connection, node, now=now
+            )
+
+    def stored(self, machine_id="19492"):
+        host = self.service.list(self.owner, admin=True, machine_id=machine_id)[
+            "hosts"
+        ][0]["policy"]
+        return host["manual"], host["reason_code"], host["expires_at"]
+
+    def test_a_rental_that_never_started_denies_its_host_at_once(self):
+        # Owner, 2026-11-10: a slow or unreachable host is not rented again.
+        node = rental("a", 1000, failed=True)
+        self.assertTrue(self.denied(node, 1000))
+        self.assertEqual(self.stored(), ("deny", "automatic_start_failure", None))
+        # Seen again, the same rental changes nothing.
+        self.assertFalse(self.denied(node, 1002))
+        [event] = self.service.audit(self.owner)["events"]
+        self.assertEqual(
+            (event["actor_id"], event["reason_code"]),
+            ("system:host-failure", "automatic_start_failure"),
+        )
+        # Only the ordinary admin write releases it.
+        self.assertTrue(
+            self.service.policy(self.owner, self.body("default"), "release")["changed"]
+        )
+        self.assertEqual(self.stored()[0], "default")
+
+    def test_many_hosts_failing_to_start_at_once_are_not_denied(self):
+        # Three fresh hosts in an hour is our own image or registry: the
+        # first two are denied, then the brake holds and raises one alert.
+        def fresh(machine, at):
+            node = rental("node-" + machine, at, failed=True)
+            node["payload"]["host_observation"] = physical(machine=machine, at=at)
+            return node
+
+        results = [
+            self.denied(fresh(str(19500 + i), 1000 + i), 1000 + i) for i in range(4)
+        ]
+        self.assertEqual(results, [True, True, False, False])
+        with self.repo.engine.connect() as connection:
+            alerts = list(
+                connection.execute(
+                    select(outbox.c.payload).where(
+                        outbox.c.event_type == "capacity.health_alert"
+                    )
+                ).scalars()
+            )
+        self.assertEqual(
+            [(row["code"], row["diagnosis"], row["failed_hosts"]) for row in alerts],
+            [("capacity_start_failures_upstream", "start_failures_upstream", 3)],
+        )
+        self.assertEqual(self.stored("19502")[0], "default")
+        # An hour later the window is clear and a single failure denies again.
+        self.assertTrue(self.denied(fresh("19510", 1000 + 3700), 1000 + 3700))
+
+    def test_a_host_that_started_and_failed_twice_in_a_day_is_denied(self):
+        first = rental("a", 1000, ready=900, stalled=True)
+        second = rental("b", 5000, ready=4900, stalled=True)
+        # One such failure is not enough,
+        self.assertFalse(self.denied(first, 1000))
+        self.assertEqual(self.stored()[0], "default")
+        # the second within a day is, and it has no end either.
+        self.assertTrue(self.denied(second, 5000, history=[first]))
+        self.assertEqual(self.stored(), ("deny", "automatic_repeated_failure", None))
+
+    def test_a_failed_start_never_overrides_an_admin_prefer(self):
+        self.service.policy(self.owner, self.body("prefer"), "prefer")
+        self.assertFalse(self.denied(rental("a", 1000, failed=True), 1000))
+        self.assertEqual(self.stored()[0], "prefer")
 
     def test_recent_start_failure_lasts_an_hour_or_until_a_good_start(self):
         failed = rental("a", 1000, failed=True)

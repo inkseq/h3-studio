@@ -305,9 +305,10 @@ class HostSelectionTests(ledger.LedgerCase):
         )
         self.assertEqual(self.client.applied, [result["node_id"]])
 
-    def test_a_host_that_never_became_reachable_is_tried_after_the_others(self):
+    def test_a_host_that_never_became_reachable_is_denied_for_good(self):
         # #1198: dstack gave up waiting for the instance. That is a start
-        # failure of the host, and the next start tries another host first.
+        # failure of the host. Owner, 2026-11-10: it is denied at once and
+        # never rented again on its own; only an admin clears it.
         self.two_offers()
         preview = self.preview()
         self.assertEqual(
@@ -349,17 +350,49 @@ class HostSelectionTests(ledger.LedgerCase):
                 "qualified_start_failure": True,
             },
         )
-        # After the lane's own five-minute cooldown the other host goes first.
+        policy = self.hosts.list(self.owner, admin=True, machine_id="19493")["hosts"][
+            0
+        ]["policy"]
+        self.assertEqual(
+            [policy[key] for key in ("manual", "effective", "reason_code")],
+            ["deny", "deny", "automatic_start_failure"],
+        )
+        self.assertIsNone(policy["expires_at"])
+        # After the lane's own five-minute cooldown only the other host is offered,
         self.now += 301
         self.assertEqual(
-            [offer["offer_id"] for offer in self.preview()["offers"]],
-            ["54321", "12345"],
+            [offer["offer_id"] for offer in self.preview()["offers"]], ["54321"]
         )
-        # One failure is an order, never a deny: an hour later it is as before.
+        # and a day later it is the same: the deny has no end.
         self.service.policy["expires_at"] = None
-        self.now += 3300
+        self.now += 86400
         self.assertEqual(
-            [offer["offer_id"] for offer in self.preview()["offers"]],
+            [offer["offer_id"] for offer in self.preview()["offers"]], ["54321"]
+        )
+        # It says nothing about the supplier's other machines.
+        with self.repo.engine.connect() as connection:
+            suppliers = denied_suppliers(
+                HostPolicyStore(self.repo, self.settings.tenant_id),
+                connection,
+                [],
+                [{"machine_id": "19493", "host_id": "777"}],
+            )
+        self.assertEqual(suppliers, set())
+        # An admin puts it back.
+        self.hosts.policy(
+            self.owner,
+            {
+                "provider": "vastai",
+                "machine_id": "19493",
+                "policy": "default",
+                "reason_code": "operator_host_default",
+                "expected_revision": policy["revision"],
+                "expected_snapshot": policy["snapshot"],
+            },
+            "restore-host",
+        )
+        self.assertEqual(
+            sorted(offer["offer_id"] for offer in self.preview()["offers"]),
             ["12345", "54321"],
         )
 

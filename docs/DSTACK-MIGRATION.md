@@ -234,12 +234,34 @@ policy authority. Recover an unknown response with the same key/body after
 checking current identity, never issue a second policy command blindly.
 
 Manual denial applies to new allocation decisions; it does not terminate or
-rebind an already accepted rental/job. Two explicitly qualified provider
-startup failures within 24 hours produce a seven-day temporary denial, expiring
-by the ordinary policy read clock without a new polling/reconciliation loop.
-Manual preference cannot override an active temporary denial. Owner stop,
-business cancellation, unknown model loading, unrelated transport uncertainty
-and missing measurements do not count as confirmed provider startup failures.
+rebind an already accepted rental/job.
+
+A denied host is never rented again on its own; only an admin clears it
+(owner, 2026-11-10). Three things deny a host, each stored and audited like an
+admin change, with a `system:` actor:
+
+- a measured slow model download (`automatic_slow_download`), which also
+  keeps the supplier's other machines out, because they share its network;
+- one rental that never started: the instance never became reachable, the
+  runner never answered, or the runtime never came up
+  (`automatic_start_failure`), that machine only;
+- a rental that started and failed later, the second time within 24 hours
+  (`automatic_repeated_failure`), that machine only.
+
+A host an admin marked preferred is stopped but never denied automatically.
+When three or more distinct hosts fail the same way within an hour the cause
+is taken to be ours (image, registry, download source): no further host is
+denied and one alert is raised (`capacity_download_upstream_slow`,
+`capacity_start_failures_upstream`).
+
+Failed starts do not pause automatic start: each one denies its host and cools
+its lane. Automatic start pauses only for the loop that is ours, a machine
+that was ready and was never given work.
+
+History written before this rule can still produce the older derived
+seven-day denial from two qualified failures; it shows with its end time.
+Owner stop, business cancellation, unrelated transport uncertainty and missing
+measurements do not count as failures of the host.
 
 Use dstack 0.22.3's supported `profile.instance_types` for selected Vast bundle
 IDs. An authenticated fresh raw offer mapping must prove each bundle's physical

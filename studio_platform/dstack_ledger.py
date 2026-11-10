@@ -254,7 +254,7 @@ class LedgerDstackStore:
             "dstack_observation_phase_invalid",
             422,
         )
-        allocation_event, cold_event = None, None
+        allocation_event, cold_event, newly_failed = None, None, False
         with self.repo.transaction() as connection:
             self.repo._lock_capacity(connection)
             node, intent = self._node(connection, intent_id)
@@ -398,6 +398,7 @@ class LedgerDstackStore:
                     and not binding.get("stop_started")
                     and not binding.get("first_runtime_ready_at")
                 ):
+                    newly_failed = "host_failure" not in payload
                     payload.setdefault("host_failure", failed)
             # A stale error, stop intent or expired window cannot leave a ready projection.
             value["ready"] = bool(
@@ -458,6 +459,16 @@ class LedgerDstackStore:
                 "reason_code": value.get("reason_code"),
                 "manifest_digest": binding["manifest_digest"],
             }
+            if newly_failed:
+                from .host_policy import deny_failed_rental
+
+                deny_failed_rental(
+                    self.repo,
+                    self.tenant_id,
+                    connection,
+                    dict(node, payload=payload),
+                    now=self.repo.clock(),
+                )
             self._advance(connection, intent, value)
             if removal is not None:
                 # Record physical closure independently from invoices. Unknown

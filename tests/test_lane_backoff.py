@@ -62,7 +62,12 @@ class LaneBackoffTests(unittest.TestCase):
             start_loop([(200, "a", "modal-dialout"), (400, "b", "vastai")])
         )
         self.assertTrue(start_loop([(200, "a", None), (400, "b", "vastai")]))
-        self.assertTrue(start_loop([(t, str(t), "vastai") for t in range(4)]))
+        # Failed starts never pause demand, however many: each one denies its
+        # host and cools its lane (staging stopped itself this way, 2026-11-10).
+        self.assertFalse(start_loop([(t, str(t), "vastai") for t in range(4)]))
+        self.assertFalse(
+            start_loop([(t, str(t), ("vastai", "lium")[t % 2]) for t in range(8)])
+        )
         self.assertFalse(start_loop([(200, "a", None)]))
 
 

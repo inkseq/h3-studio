@@ -178,6 +178,7 @@ class Scenario:
     expect_capacity: bool = True  # capacity and budget allow work to start
     # Hosts the speed gate denies, and health alert codes raised (#903).
     expect_slow_denies: int | None = None
+    expect_denies: dict | None = None  # automatic deny reason -> hosts denied
     expect_alerts: tuple = ()
     expected_failure: str | None = None  # known controller bug, with reason
     # Policy idle_shutdown_seconds; lookahead starts use the start rules' boot.
@@ -2042,9 +2043,12 @@ class World(LedgerCase):
                     outbox.c.event_type == "operator.host_policy_updated"
                 )
             ).scalars()
-            denies = sum(
-                row.get("reason_code") == "automatic_slow_download" for row in denies
+            by_reason = Counter(
+                row.get("reason_code")
+                for row in denies
+                if str(row.get("reason_code")).startswith("automatic_")
             )
+            denies = by_reason["automatic_slow_download"]
             alerts = Counter(
                 row.get("code")
                 for row in connection.execute(
@@ -2053,8 +2057,14 @@ class World(LedgerCase):
                     )
                 ).scalars()
             )
-        if denies:
-            self.reasons["host_deny:automatic_slow_download"] = denies
+        for reason, count in by_reason.items():
+            self.reasons["host_deny:" + reason] = count
+        for reason, count in (self.scenario.expect_denies or {}).items():
+            if by_reason[reason] != count:
+                self.violate(
+                    "host_denies",
+                    "%s: %d denied, expected %d" % (reason, by_reason[reason], count),
+                )
         for code, count in alerts.items():
             self.reasons["alert:" + str(code)] = count
         expected = self.scenario.expect_slow_denies

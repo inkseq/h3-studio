@@ -40,7 +40,20 @@ ADMIN_REASONS = {*REASONS.items(), ("deny", BAD_OUTPUT)}
 # A measured slow download denies the host until an admin restores it (owner,
 # 2026-10-31). Stored as the manual policy so the existing admin write clears it.
 AUTOMATIC_SLOW_DOWNLOAD = "automatic_slow_download"
-STORED_REASONS = {*ADMIN_REASONS, ("deny", AUTOMATIC_SLOW_DOWNLOAD)}
+# A denied host is never rented again on its own; only an admin clears it
+# (owner, 2026-11-10). One rental that never started is enough; a host that
+# started and then failed is denied on its second failure within a day.
+AUTOMATIC_START_FAILURE = "automatic_start_failure"
+AUTOMATIC_REPEATED_FAILURE = "automatic_repeated_failure"
+# These say nothing about the supplier's other machines; a measured slow
+# download does, because machines of one supplier share its network.
+MACHINE_ONLY_REASONS = {AUTOMATIC_START_FAILURE, AUTOMATIC_REPEATED_FAILURE}
+STORED_REASONS = {
+    *ADMIN_REASONS,
+    ("deny", AUTOMATIC_SLOW_DOWNLOAD),
+    ("deny", AUTOMATIC_START_FAILURE),
+    ("deny", AUTOMATIC_REPEATED_FAILURE),
+}
 # Providers whose physical host is positively bound, and how (#900). A Vast
 # machine id or a Lium executor id names the host; an instance or pod does not.
 # RunPod and CloudRift place a pod on a host the renter cannot choose, so a
@@ -94,6 +107,8 @@ UPSTREAM_BRAKE_HOSTS = 3
 UPSTREAM_BRAKE_SECONDS = 3600
 SLOW_STOP_EVENT = "dstack.download_slow_stop"
 UPSTREAM_ALERT = "capacity_download_upstream_slow"
+START_FAILURE_EVENT = "dstack.start_failure_stop"
+START_FAILURES_ALERT = "capacity_start_failures_upstream"
 
 
 def finite(value, *, minimum=0, maximum=9_000_000_000_000):
@@ -318,10 +333,45 @@ def slow_stop_braked(connection, tenant, node_id, physical, now):
     brake counts distinct hosts stopped for slowness within the window, this
     one included.
     """
+    return _upstream_braked(
+        connection,
+        tenant,
+        node_id,
+        physical,
+        now,
+        event=SLOW_STOP_EVENT,
+        alert=UPSTREAM_ALERT,
+        diagnosis="download_upstream_slow",
+        count="slow_hosts",
+    )
+
+
+def start_failure_braked(connection, tenant, node_id, physical, now):
+    """Journal one failed start; True when many hosts fail to start at once.
+
+    Several fresh hosts failing the same way within the hour point at our own
+    image or registry, not at the hosts: stop denying and raise one alert.
+    """
+    return _upstream_braked(
+        connection,
+        tenant,
+        node_id,
+        physical,
+        now,
+        event=START_FAILURE_EVENT,
+        alert=START_FAILURES_ALERT,
+        diagnosis="start_failures_upstream",
+        count="failed_hosts",
+    )
+
+
+def _upstream_braked(
+    connection, tenant, node_id, physical, now, *, event, alert, diagnosis, count
+):
     connection.execute(
         insert(outbox).values(
             id=str(uuid.uuid4()),
-            event_type=SLOW_STOP_EVENT,
+            event_type=event,
             aggregate_id=node_id,
             payload={
                 "tenant_id": tenant,
@@ -333,7 +383,7 @@ def slow_stop_braked(connection, tenant, node_id, physical, now):
     )
     rows = connection.execute(
         select(outbox.c.payload).where(
-            outbox.c.event_type == SLOW_STOP_EVENT,
+            outbox.c.event_type == event,
             outbox.c.created_at >= now - UPSTREAM_BRAKE_SECONDS,
             outbox.c.payload["tenant_id"].as_string() == tenant,
         )
@@ -351,7 +401,7 @@ def slow_stop_braked(connection, tenant, node_id, physical, now):
             outbox.c.event_type == "capacity.health_alert",
             outbox.c.created_at >= now - UPSTREAM_BRAKE_SECONDS,
             outbox.c.payload["tenant_id"].as_string() == tenant,
-            outbox.c.payload["code"].as_string() == UPSTREAM_ALERT,
+            outbox.c.payload["code"].as_string() == alert,
         )
         .limit(1)
     ).first()
@@ -364,11 +414,11 @@ def slow_stop_braked(connection, tenant, node_id, physical, now):
                 aggregate_id=node_id,
                 payload={
                     "version": 1,
-                    "code": UPSTREAM_ALERT,
-                    "diagnosis": "download_upstream_slow",
+                    "code": alert,
+                    "diagnosis": diagnosis,
                     "resource_id": node_id,
                     "since": now,
-                    "slow_hosts": len(hosts),
+                    count: len(hosts),
                     "event_id": identity,
                     "tenant_id": tenant,
                 },
@@ -424,12 +474,15 @@ def denied_suppliers(store, connection, nodes, offers, *, now=None):
     for item in offers:
         if item.get("host_id"):
             machines[item["machine_id"]] = item["host_id"]
-    return {
-        supplier
-        for machine, supplier in machines.items()
-        if store.read(connection, machine, nodes=nodes, now=now)[0]["effective"]
-        == "deny"
-    }
+    denied = set()
+    for machine, supplier in machines.items():
+        policy = store.read(connection, machine, nodes=nodes, now=now)[0]
+        if (
+            policy["effective"] == "deny"
+            and policy["reason_code"] not in MACHINE_ONLY_REASONS
+        ):
+            denied.add(supplier)
+    return denied
 
 
 def _rental_outcome(node, *, now):
@@ -508,6 +561,46 @@ def recent_start_failures(nodes, *, now, provider=VASTAI.id):
         for host, at in failed.items()
         if at >= now - START_FAILURE_RETRY_LAST_SECONDS and at > ready.get(host, 0)
     }
+
+
+def deny_failed_rental(repo, tenant, connection, node, *, now):
+    """Deny the bound host of a rental that just failed; True when denied.
+
+    The caller holds the capacity lock and passes the node as it will be
+    stored. A rental that never started denies its host at once, unless many
+    hosts fail to start within the hour (start_failure_braked). A rental that
+    started and failed later denies its host on the second such failure
+    within a day. Either deny stays until an admin clears it.
+    """
+    outcome = _rental_outcome(node, now=now)
+    if outcome is None or outcome[2] is None:
+        return False
+    machine_id, provider, (_, start), _ = outcome
+    if start:
+        physical = bound_observation(node, now=now)
+        if start_failure_braked(connection, tenant, node["intent_id"], physical, now):
+            return False
+        reason = AUTOMATIC_START_FAILURE
+    else:
+        nodes = [
+            row
+            for row in original_nodes(connection, tenant)
+            if row["intent_id"] != node["intent_id"]
+        ]
+        if (
+            automatic_deny([*nodes, node], machine_id, now=now, provider=provider)
+            is None
+        ):
+            return False
+        reason = AUTOMATIC_REPEATED_FAILURE
+    return HostPolicyStore(repo, tenant).deny_failed_host(
+        connection,
+        machine_id,
+        node_id=node["intent_id"],
+        now=now,
+        provider=provider,
+        reason_code=reason,
+    )
 
 
 def capacity_failure(node, *, now):
@@ -616,7 +709,38 @@ class HostPolicyStore:
     def deny_slow_download(
         self, connection, machine_id, *, node_id, now, provider=VASTAI.id
     ):
-        """Persistently deny one host after a measured slow download.
+        """Persistently deny one host after a measured slow download."""
+        return self._deny_automatic(
+            connection,
+            machine_id,
+            node_id=node_id,
+            now=now,
+            provider=provider,
+            reason_code=AUTOMATIC_SLOW_DOWNLOAD,
+            actor="system:download-speed-gate",
+            key="slow-download",
+        )
+
+    def deny_failed_host(
+        self, connection, machine_id, *, node_id, now, provider, reason_code
+    ):
+        """Persistently deny one host whose rental failed (never retried)."""
+        require(reason_code in MACHINE_ONLY_REASONS, "host_policy_reason_invalid")
+        return self._deny_automatic(
+            connection,
+            machine_id,
+            node_id=node_id,
+            now=now,
+            provider=provider,
+            reason_code=reason_code,
+            actor="system:host-failure",
+            key="host-failure",
+        )
+
+    def _deny_automatic(
+        self, connection, machine_id, *, node_id, now, provider, reason_code, actor, key
+    ):
+        """Store a deny that only an admin clears.
 
         The caller holds the capacity lock. An existing manual deny or prefer
         is kept; a default policy is replaced and audited like an admin change.
@@ -625,11 +749,11 @@ class HostPolicyStore:
         # A host an admin chose to prefer is stopped but never auto-denied (#903).
         if old["manual"] in {"deny", "prefer"}:
             return False
-        value.update(manual="deny", reason_code=AUTOMATIC_SLOW_DOWNLOAD)
+        value.update(manual="deny", reason_code=reason_code)
         row = {
             "version": old["revision"] + 1,
             "payload": value,
-            "actor": "system:download-speed-gate",  # Not an admin principal.
+            "actor": actor,  # Not an admin principal.
             "updated_at": now,
         }
         if old["revision"]:
@@ -643,7 +767,7 @@ class HostPolicyStore:
                 insert(operator_policy).values(id=self.key(machine_id, provider), **row)
             )
         new = self.read(connection, machine_id, now=now, provider=provider)[0]
-        command_id, actor = str(uuid.uuid4()), "system:download-speed-gate"
+        command_id = str(uuid.uuid4())
         receipt = {
             "state": "completed",
             "changed": True,
@@ -658,7 +782,7 @@ class HostPolicyStore:
                 actor=actor,
                 # One receipt per policy revision: a node denied again after an
                 # admin restore must not collide with its earlier receipt.
-                idempotency_key=f"slow-download-{node_id}-{old['revision']}",
+                idempotency_key=f"{key}-{node_id}-{old['revision']}",
                 request_hash=request_hash(
                     {
                         "kind": "host_policy",
@@ -669,7 +793,7 @@ class HostPolicyStore:
                 kind="host_policy",
                 state="completed",
                 payload={"result": receipt},
-                reason_code=AUTOMATIC_SLOW_DOWNLOAD,
+                reason_code=reason_code,
                 created_at=now,
                 updated_at=now,
             )
@@ -686,7 +810,7 @@ class HostPolicyStore:
                     "machine_id": machine_id,
                     "actor_id": actor,
                     "actor_owner": None,
-                    "reason_code": AUTOMATIC_SLOW_DOWNLOAD,
+                    "reason_code": reason_code,
                     "old": {k: old[k] for k in fields},
                     "new": {k: new[k] for k in fields},
                     "command_id": command_id,
