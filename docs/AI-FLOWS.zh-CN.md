@@ -78,8 +78,11 @@ flowchart TD
 |---|---|
 | 角色、地点、道具卡 | [`card_picture_styles.md`](../studio_platform/prompts/card_picture_styles.md)；故事里已有卡片图时，第一张作为画风参考，见 [`card_picture_match.md`](../studio_platform/prompts/card_picture_match.md) |
 | 镜头首帧 | [`first_frame.md`](../studio_platform/prompts/first_frame.md) |
+| 用用户附上的照片当素材（#726） | [`card_picture_photo.md`](../studio_platform/prompts/card_picture_photo.md)，排在卡片图之后编号 |
 
 某张卡片的图读不出来时，首帧照样画，只是这张卡只发文字。
+
+快速创作里附上的照片（每条消息最多 4 张）会以缩小后的预览图随这一条消息发给 Gemini，助手能看到照片内容：可以把照片放到对应卡片上，也可以提议用照片当素材画一张新卡片图（最多 3 张，出图照常确认、照常扣积分）。照片读不出来时这一轮不发送，什么都不改。照片本身只存在故事素材里，不另存副本。
 
 ## 生成音色
 

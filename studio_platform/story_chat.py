@@ -463,6 +463,7 @@ def apply_plan(project, chat, plan, *, model_fresh=True):
     # Created without "after": the chat's scene unless that breaks reading order.
     appended = set()
     pictures = []  # cards the person may confirm a picture for (advice only)
+    sources = {}  # card -> attached photos to draw its picture from (#726)
     new_story = None  # an idea for a separate story the person may start (advice only)
     touched = set()  # existing cards (and "project" for the title) this plan writes
 
@@ -664,6 +665,22 @@ def apply_plan(project, chat, plan, *, model_fresh=True):
         elif tool == "propose_image":
             ident = resolve(item.get("ref"), {"character", "location", "prop"})
             pictures.append(ident)
+            if item.get("photos"):
+                from .story_chat_photos import (
+                    MAX_SOURCE_PHOTOS,
+                    PhotoError,
+                    photo_entities,
+                )
+
+                try:
+                    found = photo_entities(
+                        project, item["photos"], MAX_SOURCE_PHOTOS, removed
+                    )
+                except PhotoError as error:
+                    raise StoryChatError(
+                        "story_chat_card_missing", 409, ref=error.detail.get("ref")
+                    ) from None
+                sources[ident] = [photo["id"] for photo in found]
         elif tool == "propose_generate":
             wanted = item.get("shots")
             if wanted == ["all"]:
@@ -752,6 +769,10 @@ def apply_plan(project, chat, plan, *, model_fresh=True):
             **(proposal or {"kind": "generate", "shot_ids": []}),
             "picture_card_ids": pictures,
         }
+        if any(card in sources for card in pictures):
+            proposal["picture_sources"] = {
+                card: sources[card] for card in pictures if card in sources
+            }
         if not proposal["shot_ids"]:
             proposal["kind"] = "image"
     if proposal and proposal.get("shot_ids"):
@@ -836,7 +857,9 @@ def prompt_messages(project, chat, text):
     return history
 
 
-def append_turn(chat, turn_id, text, plan, changes, proposal, actor=None, via=None):
+def append_turn(
+    chat, turn_id, text, plan, changes, proposal, actor=None, via=None, photos=()
+):
     value = copy.deepcopy(chat)
     at = now_iso()
     value["turns"] = value.get("turns", 0) + 1
@@ -852,6 +875,9 @@ def append_turn(chat, turn_id, text, plan, changes, proposal, actor=None, via=No
         user["actor"] = actor
     if via:
         user["via"] = via
+    if photos:
+        # Ids of the story's own image entities the model saw with this message (#726).
+        user["photos"] = list(photos)
     value["messages"] = value.get("messages", []) + [
         user,
         {

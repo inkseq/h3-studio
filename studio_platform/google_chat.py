@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import sys
 import time
 from pathlib import Path
@@ -19,6 +20,10 @@ MAX_MESSAGE_CHARS = 60000
 # The story assistant's rules plus the script rules (#1115) run to about 6.7k characters.
 MAX_INSTRUCTION_CHARS = 9000
 MAX_TOTAL_CHARS = 100000
+# Photos the person attached to the latest message (#726): bounded previews only.
+MAX_IMAGES = 4
+MAX_IMAGE_BYTES = 1024 * 1024
+IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MODELS = {"gemma-4-31b-it": "Gemma 4 31B IT", "gemini-3.8-flash": "Gemini 3.8 Flash"}
 DEFAULT_INSTRUCTION = prompt_text("quick_chat_default")
 
@@ -66,7 +71,7 @@ def payload(
         expected = "user" if index % 2 == 0 else "model"
         if (
             not isinstance(message, dict)
-            or set(message) != {"role", "text"}
+            or set(message) - {"images"} != {"role", "text"}
             or message.get("role") != expected
             or not isinstance(message.get("text"), str)
             or not message["text"].strip()
@@ -78,7 +83,12 @@ def payload(
                 422,
             )
         total += len(message["text"])
-        contents.append({"role": expected, "parts": [{"text": message["text"]}]})
+        parts = [{"text": message["text"]}]
+        if "images" in message:
+            parts += _image_parts(
+                model, message["images"], last=index == len(messages) - 1
+            )
+        contents.append({"role": expected, "parts": parts})
     if contents[-1]["role"] != "user" or total > MAX_TOTAL_CHARS:
         raise ChatError(
             "history_limit",
@@ -101,6 +111,38 @@ def payload(
     if thinking:
         config["thinkingConfig"] = {"thinkingLevel": thinking}
     return {"contents": contents, "generationConfig": config}
+
+
+def _image_parts(model, images, last):
+    """Inline pictures for the latest user message only; never history."""
+    if (
+        not last
+        or not model.startswith("gemini")
+        or not isinstance(images, list)
+        or not 1 <= len(images) <= MAX_IMAGES
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"mime", "data"}
+            or item["mime"] not in IMAGE_TYPES
+            or not isinstance(item["data"], bytes)
+            or not 0 < len(item["data"]) <= MAX_IMAGE_BYTES
+            for item in images
+        )
+    ):
+        raise ChatError(
+            "invalid_images",
+            f"每条消息最多附{MAX_IMAGES}张图片，且只随最新一条发送。",
+            422,
+        )
+    return [
+        {
+            "inlineData": {
+                "mimeType": item["mime"],
+                "data": base64.b64encode(item["data"]).decode("ascii"),
+            }
+        }
+        for item in images
+    ]
 
 
 class GoogleChatClient:
@@ -207,7 +249,12 @@ class GoogleChatClient:
                 "json_mode": json_mode,
                 "thinking": thinking,
             },
-            metadata={"instruction": digest(instruction), "turns": len(messages)},
+            metadata={
+                "instruction": digest(instruction),
+                "turns": len(messages),
+                # Picture bytes never enter the trace; only how many were sent.
+                "images": len(messages[-1].get("images") or []),
+            },
         ) as traced:
             result = self._generate(model, body)
             usage = result["usage"]

@@ -1,0 +1,1 @@
+Picture {number} is a photo the person added. Use what it shows (a person, an object, a place, clothing) as material for this picture, as the change request asks, redrawn to fit this picture's style and framing. Do not copy any text, logo or watermark from it.

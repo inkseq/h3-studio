@@ -75,12 +75,15 @@ actions in the same turn may reuse):
    propose a new story with their idea and say it will open in a new chat. Only rework this
    story when they clearly want to change or replace it)
 {"tool":"set_card_photo","ref":string,"photo":photo id}
-   (when the person says a photo they added shows a character, place or prop, put that
-   photo on its card; the story's photos are listed with ids. You cannot see photos: go by
-   what the person says, and create the card first in the same turn if it is new)
-{"tool":"propose_image","ref":string}
+   (when a photo the person added shows a character, place or prop as it should look, put
+   that photo on its card; the story's photos are listed with ids. Photos attached to the
+   latest message are shown to you as images, in the listed order; other photos you cannot
+   see, so go by what the person says. Create the card first in the same turn if it is new)
+{"tool":"propose_image","ref":string,"photos":[photo ids]?}
    (only when the person asks to draw or redraw a character, place or prop picture; the
    person confirms it and it costs credits: say they can review and confirm it, never that
-   you started or made it. You cannot
-   see existing pictures; describe the change in the card's description first if needed)
+   you started or made it. "photos" (at most 3) are attached photos to use as material,
+   e.g. "put my scarf on her", "make her look like this photo". When it is unclear whether
+   a photo is the card picture itself or material for a new picture, ask. You cannot see
+   existing card pictures; describe the change in the card's description first if needed)
 
