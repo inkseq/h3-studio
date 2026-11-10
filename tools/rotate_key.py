@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MAP = ROOT / ".local" / "key-rotation.json"
 DROP = ROOT / ".local" / "secret-drop"
 REGISTRY = Path(
-    os.environ.get("AI_REGISTRY_ROOT", r"C:\Users\danmo\Desktop\AI-Registry")
+    os.environ.get("AI_REGISTRY_ROOT", Path.home() / "Desktop" / "AI-Registry")
 )
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,40}")
 FIELD = re.compile(r"[A-Z][A-Z0-9_]{1,63}")
