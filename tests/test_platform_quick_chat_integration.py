@@ -527,10 +527,42 @@ class QuickChatIntegrationTests(LedgerCase):
         self.assertEqual(
             self.client.get(base).json()["session"]["version"], before["version"]
         )
+        # A blocked take says it waits for resume admission, and a script can
+        # find the original submission and item again from the takes read.
+        item = rejected["items"][0]
+        self.assertEqual(rejected["submission_id"], rejected["id"])
+        self.assertEqual(rejected["next_action"], "resume_admission")
+        self.assertEqual(rejected["resume_admission_item_ids"], [item["id"]])
+        self.assertEqual(
+            (item["item_id"], item["submission_id"], item["next_action"]),
+            (item["id"], rejected["id"], "resume_admission"),
+        )
+        takes = self.client.get(base + "/takes").json()["takes"]
+        take = next(t for t in takes if t["id"] == item["id"])
+        self.assertEqual(
+            {
+                key: take[key]
+                for key in (
+                    "item_id",
+                    "submission_id",
+                    "revision_id",
+                    "status",
+                    "resume_admission_available",
+                    "next_action",
+                )
+            },
+            {
+                "item_id": item["id"],
+                "submission_id": rejected["id"],
+                "revision_id": revision["id"],
+                "status": "admission_blocked",
+                "resume_admission_available": True,
+                "next_action": "resume_admission",
+            },
+        )
         # Explicit resume uses the same original item; response loss never
         # recaptures materials that have been changed since its first preflight.
         self.material_aba(base, "legacy-first_frame")
-        item = rejected["items"][0]
         fresh = self.write(
             base + "/revisions/" + revision["id"] + "/preflights",
             {
@@ -573,6 +605,8 @@ class QuickChatIntegrationTests(LedgerCase):
             accepted["composer_reset"]["preserved_binding_ids"], ["legacy-first_frame"]
         )
         self.assertEqual(accepted["composer_snapshot"], checked["composer_snapshot"])
+        self.assertIsNone(accepted["next_action"])
+        self.assertEqual(accepted["resume_admission_item_ids"], [])
         with self.repo.engine.connect() as conn:
             self.assertEqual(len(conn.execute(select(jobs.c.id)).all()), 1)
 
