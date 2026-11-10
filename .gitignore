@@ -59,6 +59,9 @@ inventory.json
 !tools/
 !tools/ci_media_tools.py
 !tools/fetch_chisel.py
+!tools/secret_scan.py
+!tools/rotate_key.py
+!tools/key-rotation.example.json
 !tools/ci_test_shards.py
 !tools/simulate_capacity.py
 !tools/langfuse_evals.py
@@ -1201,3 +1204,4 @@ inventory.json
 !studio_platform/spending_by_provider.py
 !studio_platform/payment_revenue.py
 !tests/test_admin_money.py
+!.gitleaks.toml

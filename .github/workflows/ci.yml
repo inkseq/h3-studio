@@ -588,6 +588,23 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+  secret-scan:
+    # Every push and PR: new commits only, with a pinned, sha256-checked
+    # gitleaks binary. Findings are redacted in the log (#976).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Scan new commits for credentials
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: python tools/secret_scan.py --base "$BASE"
+
   dependency-audit:
     needs: changes
     if: needs.changes.outputs.python == 'true'

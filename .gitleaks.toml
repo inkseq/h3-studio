@@ -1,0 +1,32 @@
+# gitleaks rules for this repository (#976): the upstream defaults plus a narrow
+# allowlist of values that are public by design. Used by tools/secret_scan.py.
+# Mark an obvious test fixture with a trailing `gitleaks:allow` comment instead
+# of widening these rules.
+title = "inkseq h3-studio"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Content digests and commit ids, which look random but are not secrets"
+regexTarget = "secret"
+regexes = [
+  '''^[0-9a-f]{40}$''',
+  '''^[0-9a-f]{64}$''',
+]
+
+[[allowlists]]
+description = "PostHog project keys are public client identifiers"
+regexTarget = "secret"
+regexes = ['''^phc_[A-Za-z0-9]{20,64}$''']
+
+[[allowlists]]
+description = "Synced frontend source manifest: file digests only"
+paths = ['''^inkseq-web/source-manifest\.json$''']
+
+[[allowlists]]
+description = "EC2 RunInstances idempotency token, not a credential"
+condition = "AND"
+regexTarget = "match"
+paths = ['''^deploy/platform/ec2/launch-spec\.json$''']
+regexes = ['''ClientToken''']
