@@ -153,9 +153,13 @@ class JobLedger:
         )
         try:
             with self.transaction() as connection:
-                from .identity import account_status, lock_account_gate
+                from .identity import (
+                    ADMISSION_GATE_WAIT_SECONDS,
+                    account_status,
+                    lock_account_gate,
+                )
 
-                lock_account_gate(connection)
+                lock_account_gate(connection, wait_seconds=ADMISSION_GATE_WAIT_SECONDS)
                 account = account_status(connection, scope.tenant_id, scope.owner_id)
                 if account != "active":
                     raise Conflict(
@@ -318,9 +322,13 @@ class JobLedger:
         spending_settings_version=None,
     ):
         with self.transaction() as connection:
-            from .identity import account_status, lock_account_gate
+            from .identity import (
+                ADMISSION_GATE_WAIT_SECONDS,
+                account_status,
+                lock_account_gate,
+            )
 
-            lock_account_gate(connection)
+            lock_account_gate(connection, wait_seconds=ADMISSION_GATE_WAIT_SECONDS)
             state = account_status(connection, scope.tenant_id, scope.owner_id)
             if state != "active":
                 raise Conflict(
