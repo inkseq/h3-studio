@@ -225,7 +225,7 @@ def credit_items(connection, tenant):
 
 
 def model_items(settings, now):
-    from .execution_profiles import read_profiles
+    from .execution_profiles import profile_problems, read_profiles
     from .execution_policy import authority_current
     from .h3_profile_support import limits
 
@@ -236,6 +236,11 @@ def model_items(settings, now):
         path = Path(path)
         before = path.stat()
         policies = read_profiles(path)
+        skipped = [
+            "model_limits:entry_skipped:%s/%s:%s"
+            % (p["profile_id"], p["recipe_id"], p["reason"])
+            for p in profile_problems(path)
+        ]
         raw = path.read_bytes()
         after = path.stat()
         if (before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
@@ -276,7 +281,7 @@ def model_items(settings, now):
                 mode=mode,
             )
         )
-    return rows, []
+    return rows, skipped
 
 
 def switch_items(app, connection):
