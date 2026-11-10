@@ -109,3 +109,29 @@ def with_photos(messages, photos):
             "images": model_images(photos),
         }
     ]
+
+
+def shown(message, lookup):
+    """A stored message for the person's own view: its photos with their picture paths.
+
+    The stored ids stay as they are; a photo since taken out of the story is left out,
+    so the bubble shows only pictures that still open.
+    """
+    from .story_chat import retained
+
+    if not message.get("photos"):
+        return message
+    files = []
+    for ident in message["photos"]:
+        entity = lookup.get(ident) or {}
+        path = (entity.get("data") or {}).get("cloudContentPath")
+        if (
+            entity.get("type") == "image"
+            and not retained(entity)
+            and isinstance(path, str)
+            and path.startswith("/v1/assets/")
+        ):
+            files.append(
+                {"id": ident, "name": str(entity.get("title", ""))[:80], "url": path}
+            )
+    return {**message, "photo_files": files}

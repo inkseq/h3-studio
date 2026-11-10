@@ -146,6 +146,13 @@ function proposalQuotes(message, { cards, labels, messages, quotes, started }) {
   }
 }
 
+// The photos sent with a message, shown on its bubble after a reload too
+// (inkseq-design#457). Only the story's own asset paths are shown as pictures.
+const sentPhotos = (message) =>
+  (Array.isArray(message.photo_files) ? message.photo_files : [])
+    .filter((file) => typeof file?.url === 'string' && file.url.startsWith('/v1/assets/'))
+    .map((file) => ({ kind: 'image', name: String(file.name || ''), url: file.url }));
+
 export function fromServer(view, labels = {}) {
   const cards = cardsFromServer(view);
   const messages = [],
@@ -158,7 +165,7 @@ export function fromServer(view, labels = {}) {
         id: message.id,
         role: 'user',
         text: message.text,
-        attachments: [],
+        attachments: sentPhotos(message),
         chips: [],
       });
       continue;

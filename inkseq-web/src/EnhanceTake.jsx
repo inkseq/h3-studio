@@ -10,7 +10,7 @@ import { CreditUsageBar, creditShortfall, useCredits } from './CreditsUI.jsx';
 import { useCloud } from './use-cloud.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import { useI18n } from './i18n/I18nProvider.jsx';
-import { batchEnhanceTakes, enhanceable, rememberUseCopy } from './enhance-take.js';
+import { batchEnhanceTakes, enhanceable } from './enhance-take.js';
 import { enhanceAllPlan, howManyFit } from './shot-status.js';
 import './enhance-take.css';
 
@@ -228,7 +228,7 @@ async function planAll(entityIds, tier) {
 // The whole story (h3-studio#893): every shot whose chosen take is an original with no copy at
 // that size yet. Shots left out are listed with why. A shot already being enhanced is never sent
 // again, and a second press finds its copy and leaves it out.
-export function EnhanceAllButton({ shots, projectId }) {
+export function EnhanceAllButton({ shots }) {
   const { t } = useI18n(),
     c = useCloud(),
     [open, setOpen] = useState(false);
@@ -241,14 +241,12 @@ export function EnhanceAllButton({ shots, projectId }) {
         <Sparkles size={14} />
         <span className="label">{t('enhance.allButton')}</span>
       </Button>
-      {open && (
-        <EnhanceAllDialog shots={shots} projectId={projectId} onClose={() => setOpen(false)} />
-      )}
+      {open && <EnhanceAllDialog shots={shots} onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-function EnhanceAllDialog({ shots, projectId, onClose }) {
+function EnhanceAllDialog({ shots, onClose }) {
   const { t } = useI18n(),
     c = useCloud(),
     balance = useCredits(c.account)?.available,
@@ -258,7 +256,6 @@ function EnhanceAllDialog({ shots, projectId, onClose }) {
       Object.fromEntries(TIERS.map((value) => [value, enhanceAllPlan(shots, value, true)])),
     ),
     [plans, setPlans] = useState({}),
-    [useCopy, setUseCopy] = useState(true),
     [busy, setBusy] = useState(false),
     [started, setStarted] = useState(0),
     [failed, setFailed] = useState(false);
@@ -297,8 +294,6 @@ function EnhanceAllDialog({ shots, projectId, onClose }) {
     try {
       for (const row of sending) {
         await cloud.submitEnhance(row.plan);
-        if (useCopy)
-          rememberUseCopy(projectId, row.target.shot.id, row.target.take.asset.entity.id);
         count += 1;
       }
       onClose(count);
@@ -316,6 +311,7 @@ function EnhanceAllDialog({ shots, projectId, onClose }) {
           .map((target) => ({ shot: target.shot, reason: 'unavailable' }))
       : []),
   ];
+  const total = list ? ready.length : plan.targets.length;
   return (
     <Dialog title={t('enhance.allTitle')} onClose={() => onClose(started)} busy={busy}>
       <Segmented
@@ -326,8 +322,8 @@ function EnhanceAllDialog({ shots, projectId, onClose }) {
       />
       <small className="muted">{t('enhance.tier.' + tier + 'Note')}</small>
       <p className="sb-confirm-note">
-        {t('enhance.allCount', {
-          count: list ? ready.length : plan.targets.length,
+        {t('enhance.allCount' + (total === 1 ? '.one' : ''), {
+          count: total,
           skipped: skipped.length,
         })}
       </p>
@@ -347,14 +343,7 @@ function EnhanceAllDialog({ shots, projectId, onClose }) {
           {fit ? t('enhance.allFit', { fit, count: ready.length }) : t('enhance.allNone')}
         </p>
       )}
-      <label className="enhance-use-copy">
-        <input
-          type="checkbox"
-          checked={useCopy}
-          onChange={(event) => setUseCopy(event.target.checked)}
-        />
-        {t('enhance.allUseCopy')}
-      </label>
+      <p className="sb-confirm-note">{t('enhance.allUseCopy')}</p>
       <p className="sb-confirm-note">
         {list ? t('enhance.batchTiming') : failed ? '' : t('enhance.checking')}
       </p>

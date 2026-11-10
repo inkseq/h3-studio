@@ -10,9 +10,10 @@ import hashlib
 import re
 from urllib.parse import urlsplit
 
-from sqlalchemy import inspect, insert, select
+from sqlalchemy import insert, select
 
 from .repository import Conflict, documents
+from .schema_version import table_exists
 
 
 def owner_reference_gate(connection, tenant, owner):
@@ -37,7 +38,7 @@ def owner_reference_gate(connection, tenant, owner):
 
 
 def _objects(connection):
-    if not inspect(connection).has_table("platform_quick_chat_objects"):
+    if not table_exists(connection, "platform_quick_chat_objects"):
         return None
     from .quick_chat import objects
 
@@ -167,7 +168,7 @@ def assert_content_available(
                 .in_(("trashed", "purging", "purged")),
             )
         ).scalars()
-        if inspect(connection).has_table(documents.name)
+        if table_exists(connection, documents.name)
         else ()
     )
     for payload in selected:
@@ -211,7 +212,7 @@ def assert_project_renditions_available(connection, tenant, owner, project_id):
 def _assert_project_available(connection, tenant, owner, project_id, history_states):
     from .universal_trash import active_target
 
-    if inspect(connection).has_table(documents.name) and active_target(
+    if table_exists(connection, documents.name) and active_target(
         connection,
         tenant,
         owner,
@@ -236,7 +237,7 @@ def _assert_project_available(connection, tenant, owner, project_id, history_sta
         ):
             raise Conflict("quick_chat_session_not_active")
         return
-    if not inspect(connection).has_table(documents.name):
+    if not table_exists(connection, documents.name):
         return
     project = connection.execute(
         select(documents.c.payload).where(
@@ -319,7 +320,7 @@ def assert_reference_payload(connection, tenant, owner, value):
     from .assets import asset_table
     from .repository import artifacts as artifact_table, jobs
 
-    if assets and inspect(connection).has_table(asset_table.name):
+    if assets and table_exists(connection, asset_table.name):
         if connection.execute(
             select(asset_table.c.id)
             .where(
@@ -329,7 +330,7 @@ def assert_reference_payload(connection, tenant, owner, value):
             .limit(1)
         ).first():
             raise Conflict("foreign_content_reference")
-    if artifacts and inspect(connection).has_table(artifact_table.name):
+    if artifacts and table_exists(connection, artifact_table.name):
         if connection.execute(
             select(artifact_table.c.id)
             .join(jobs, jobs.c.id == artifact_table.c.job_id)

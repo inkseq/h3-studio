@@ -940,7 +940,7 @@ function StoryboardLayoutA({ selected, setSelected, pickAsset, onNewScene, filmC
                   </span>
                 </Button>
               )}
-              <EnhanceAllButton shots={state.shots} projectId={state.project.id} />
+              <EnhanceAllButton shots={state.shots} />
               <span className="sb-film-primary">
                 {filmControl && React.cloneElement(filmControl, { primary: count > 0 })}
               </span>

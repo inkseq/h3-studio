@@ -6,6 +6,7 @@ treated as known, exported, dropped, rewritten or silently stamped.
 """
 
 import re
+import weakref
 
 from sqlalchemy import MetaData, Table, inspect
 
@@ -26,6 +27,25 @@ CREDIT_REVISIONS = frozenset({CREDIT_REVISION, *PAYMENT_REVISIONS})
 IDENTITY_REVISIONS = frozenset({IDENTITY_REVISION, *CREDIT_REVISIONS})
 KNOWN_REVISIONS = frozenset({BASELINE_REVISION, WORKFLOW_REVISION, *IDENTITY_REVISIONS})
 WORKFLOW_REVISIONS = frozenset({WORKFLOW_REVISION, *IDENTITY_REVISIONS})
+
+
+_PRESENT = weakref.WeakKeyDictionary()
+
+
+def table_exists(connection, name):
+    """has_table, remembered per engine once true (#1102).
+
+    A storyboard check asked the catalog the same question hundreds of times per
+    shot. The application only ever adds tables, so a seen table stays seen; an
+    absent one is asked again every time.
+    """
+    seen = _PRESENT.setdefault(connection.engine, set())
+    if name in seen:
+        return True
+    if not inspect(connection).has_table(name):
+        return False
+    seen.add(name)
+    return True
 
 
 class SchemaVersionError(Exception):

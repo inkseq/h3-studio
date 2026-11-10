@@ -7,12 +7,32 @@ so the suite stays green while the bug stays visible. Fix the rule, and the
 scenario reports ``unexpected_pass``: then delete its ``expected_failure``.
 """
 
-from capacity_sim import Event, JobBatch, MachineScript, Scenario, incident_scenarios
+from capacity_sim import (
+    Event,
+    Host,
+    JobBatch,
+    MachineScript,
+    Scenario,
+    incident_scenarios,
+)
 
 # Boot of a healthy machine: 60 s allocation + 30 s runtime + 300 s download
 # + 60 s model load, about 7.5 minutes before the first claim.
 FAST = MachineScript()
 GUARD = {"task_limit_microusd": 20_000_000, "max_runtime_seconds": 7200}
+# The provider hands out an instance that never becomes reachable; dstack ends
+# the run two minutes later (staging, 2026-11-10, #1198).
+UNREACHABLE = MachineScript(
+    allocate_after=10,
+    running_after=86400,
+    terminal_at=110,
+    price=0.5,
+    run_fields={
+        "latest_job_submission": {
+            "termination_reason": "waiting_instance_limit_exceeded"
+        }
+    },
+)
 
 SCENARIOS = [
     Scenario(
@@ -45,6 +65,25 @@ SCENARIOS = [
         max_machines=1,
         jobs=[JobBatch(0, 4)],
         machines=[MachineScript(load_fails=True), MachineScript(no_capacity=True)],
+    ),
+    Scenario(
+        "unreachable_host_cheapest",
+        "The cheapest host never becomes reachable; a dearer one is healthy.",
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 4), JobBatch(2 * 3600, 2)],
+        hosts=[Host("19901", [UNREACHABLE]), Host("19902", [MachineScript()])],
+        # Tried once, skipped while the failure is fresh, denied on a second.
+        expect_host_rentals={"19901": 2},
+    ),
+    Scenario(
+        "unreachable_host_retry_works",
+        "The only host is unreachable on its first rental and fine on the next.",
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 4)],
+        hosts=[Host("19901", [UNREACHABLE, MachineScript()])],
+        expect_starts=2,
     ),
     Scenario(
         "lost_create_reply",

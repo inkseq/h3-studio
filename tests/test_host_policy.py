@@ -12,6 +12,7 @@ from studio_platform.host_policy import (
     HostPolicyStore,
     automatic_deny,
     bound_observation,
+    recent_start_failures,
     failure,
     observation,
     offer_metadata,
@@ -42,6 +43,32 @@ def physical(machine="19492", instance="1234567", at=1000):
         "identity_confirmed": True,
         "physical_id_source": "vast_machine_id",
     }
+
+
+def rental(identity, at, *, failed=False, ready=None, stalled=False):
+    """One original Vast rental of host 19492: how its start and its run went."""
+    payload = {
+        "capacity_backend": "dstack-v1",
+        "host_observation": physical(at=at),
+        "dstack": {"backend": "vastai", "provider_instance_id": "1234567"},
+    }
+    if failed:
+        payload["host_failure"] = {
+            "version": 1,
+            "stage": "provisioning",
+            "reason_code": "provider_provisioning_timeout",
+            "at": at,
+            "qualified_start_failure": True,
+        }
+    if ready is not None:
+        payload["dstack"]["first_runtime_ready_at"] = ready
+    if stalled:
+        payload["capacity_watchdog"] = {
+            "version": 1,
+            "reason": "capacity_no_progress",
+            "at": at,
+        }
+    return {"intent_id": identity, "desired_state": "stopped", "payload": payload}
 
 
 class HostPolicyTests(ledger.LedgerCase):
@@ -293,6 +320,49 @@ class HostPolicyTests(ledger.LedgerCase):
         self.assertIsNone(automatic_deny([nodes[0], malformed], "19492", now=1200))
         self.assertIsNone(automatic_deny([nodes[0], nodes[0]], "19492", now=1200))
 
+    def test_a_good_start_between_two_start_failures_is_not_a_pair(self):
+        # #1198: a slow image pull can time out once on a host that works.
+        first, last = rental("a", 1000, failed=True), rental("c", 3000, failed=True)
+        until = 3000 + 7 * 86400
+        self.assertEqual(automatic_deny([first, last], "19492", now=4000), until)
+        good = rental("b", 2000, ready=2100)
+        self.assertIsNone(automatic_deny([first, good, last], "19492", now=4000))
+        # A good start before the first failure or after the second is no excuse.
+        for ready in (900, 3100):
+            with self.subTest(ready=ready):
+                other = rental("b", 800, ready=ready)
+                self.assertEqual(
+                    automatic_deny([first, other, last], "19492", now=4000), until
+                )
+        # A machine that started and then stopped making progress is a
+        # different problem: a good start in between does not clear the pair.
+        stalled = rental("c", 3000, stalled=True)
+        for before in (first, rental("a", 1000, stalled=True)):
+            with self.subTest(before=sorted(before["payload"])):
+                self.assertEqual(
+                    automatic_deny([before, good, stalled], "19492", now=4000), until
+                )
+
+    def test_recent_start_failure_lasts_an_hour_or_until_a_good_start(self):
+        failed = rental("a", 1000, failed=True)
+        self.assertEqual(recent_start_failures([failed], now=1000 + 3600), {"19492"})
+        self.assertEqual(recent_start_failures([failed], now=1000 + 3601), set())
+        self.assertEqual(
+            recent_start_failures([failed], now=1100, provider="lium"), set()
+        )
+        self.assertEqual(
+            recent_start_failures([failed, rental("b", 2000, ready=2100)], now=2200),
+            set(),
+        )
+        self.assertEqual(
+            recent_start_failures([failed, rental("b", 500, ready=600)], now=1100),
+            {"19492"},
+        )
+        # Only a start counts; a run that stalled later does not reorder hosts.
+        self.assertEqual(
+            recent_start_failures([rental("a", 1000, stalled=True)], now=1100), set()
+        )
+
 
 EXECUTOR = "0453b369-1111-4222-8333-444455556666"
 POD = "758e7d2d-17da-4ed0-95a5-057b33483ad8"
@@ -348,6 +418,26 @@ class LiumHostIdentityTests(ledger.LedgerCase):
                 },
             },
         }
+
+    def test_a_lium_executor_that_failed_to_start_is_a_recent_failure(self):
+        from studio_platform.host_policy import lium_observation
+
+        node = self.node(lium_observation(lium_provisioning(), {}, 1000))
+        self.assertEqual(
+            recent_start_failures([node], now=1100, provider="lium"), set()
+        )
+        node["payload"]["host_failure"] = {
+            "version": 1,
+            "stage": "provisioning",
+            "reason_code": "provider_provisioning_timeout",
+            "at": 1000,
+            "qualified_start_failure": True,
+        }
+        self.assertEqual(
+            recent_start_failures([node], now=1100, provider="lium"), {EXECUTOR}
+        )
+        self.assertEqual(recent_start_failures([node], now=1100), set())
+        self.assertIsNone(automatic_deny([node], EXECUTOR, now=1100, provider="lium"))
 
     def test_vast_policy_key_is_unchanged(self):
         from studio_platform.repository import request_hash

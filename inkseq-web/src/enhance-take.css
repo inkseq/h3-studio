@@ -14,8 +14,3 @@
   color: var(--ink);
   font-weight: 600;
 }
-.enhance-use-copy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}

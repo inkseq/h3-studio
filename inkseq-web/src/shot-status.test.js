@@ -8,7 +8,6 @@ import {
   liveTake,
   shotState,
 } from './shot-status.js';
-import { copiesToUse, rememberUseCopy } from './enhance-take.js';
 
 // A take as storyboard-domain builds it; `trashed` drops its library entity, as the trash does.
 const take = (id, status = 'done', extra = {}) => ({
@@ -92,28 +91,4 @@ test('how many fit in the balance, in order; unknown prices promise nothing', ()
   assert.equal(howManyFit([300], 250), 0);
   assert.equal(howManyFit([100, null], 250), null);
   assert.equal(howManyFit([100], undefined), null);
-});
-
-test('a copy asked for with "use it when done" is chosen once finished', () => {
-  const memory = new Map(),
-    storage = {
-      getItem: (k) => memory.get(k) ?? null,
-      setItem: (k, v) => memory.set(k, v),
-    };
-  rememberUseCopy('p', 's1', 'a', storage);
-  rememberUseCopy('p', 's2', 'b', storage);
-  const shots = [
-    { id: 's1', versions: [take('a'), copy('ah', 'a', '1080p', 'running')], chosen: 'a' },
-    { id: 's2', versions: [take('b'), take('c')], chosen: 'c' },
-  ];
-  // Not finished yet; s2 moved to another take, so it is forgotten.
-  assert.deepEqual(copiesToUse('p', shots, chosenTake, liveTake, storage), []);
-  shots[0].versions[1].status = 'done';
-  assert.deepEqual(copiesToUse('p', shots, chosenTake, liveTake, storage), [
-    { shot: 's1', version: 'ah' },
-  ]);
-  // Once the copy is chosen, the request is done.
-  shots[0].chosen = 'ah';
-  assert.deepEqual(copiesToUse('p', shots, chosenTake, liveTake, storage), []);
-  assert.equal(JSON.parse(memory.get('inkseq.enhanceUseCopy')).length, 0);
 });

@@ -7,6 +7,7 @@ physical identity participates in automatic policy; legacy unknowns stay unknown
 from __future__ import annotations
 
 import copy
+import itertools
 import math
 import re
 
@@ -52,6 +53,16 @@ START_FAILURES = {
     "provider_image_pull_failed",
     "provider_runner_timeout",
 }
+# dstack termination reason -> (stage, reason) of a start the host failed:
+# the instance never became reachable, or its runner never answered (#1198).
+DSTACK_START_FAILURES = {
+    "waiting_instance_limit_exceeded": (
+        "provisioning",
+        "provider_provisioning_timeout",
+    ),
+    "waiting_runner_limit_exceeded": ("runtime_start", "provider_runner_timeout"),
+}
+START_FAILURE_RETRY_LAST_SECONDS = 3600
 HOST_FIELDS = {
     "version",
     "provider",
@@ -421,43 +432,82 @@ def denied_suppliers(store, connection, nodes, offers, *, now=None):
     }
 
 
+def _rental_outcome(node, *, now):
+    """(host, provider, latest failure (at, start stage) or None, ready at or None)."""
+    physical = bound_observation(node, now=now)
+    if not physical:
+        return None
+    payload = node.get("payload", {})
+    found = []
+    try:
+        item = failure(payload.get("host_failure"), now=now)
+        if item["qualified_start_failure"]:
+            found.append((item["at"], True))
+    except (ValueError, KeyError):
+        pass
+    recovered = capacity_failure(node, now=now)
+    if recovered is not None:
+        found.append((recovered["at"], recovered["stage"] == "runtime_start"))
+    ready = payload.get("dstack", {}).get("first_runtime_ready_at")
+    return (
+        physical["machine_id"],
+        physical["provider"],
+        # Several observations/reasons from one original rental count once.
+        max(found) if found else None,
+        ready if finite(ready, minimum=1, maximum=now) else None,
+    )
+
+
 def automatic_deny(nodes, machine_id, *, now, provider=VASTAI.id):
     """Derive fixed seven-day intervals from distinct original failed rentals.
 
     A stopped-by-owner row, a model-load problem, missing identity, or repeated
     observations of one rental can never count as a second startup failure.
+    Two start failures with a good start of the same host between them are not
+    a pair: a slow image pull can time out once on a host that works (#1198).
     """
-    events = []
+    events, readies = {}, []
     for node in nodes:
-        physical = bound_observation(node, now=now)
-        payload = node.get("payload", {})
-        if (
-            not physical
-            or physical["machine_id"] != machine_id
-            or physical["provider"] != provider
+        outcome = _rental_outcome(node, now=now)
+        if outcome is None or outcome[:2] != (machine_id, provider):
+            continue
+        if outcome[2] is not None and outcome[2][0] >= now - 8 * 86400:
+            events[node["intent_id"]] = outcome[2]
+        if outcome[3] is not None:
+            readies.append(outcome[3])
+    events = sorted(events.values())
+    expires = None
+    for (before, before_start), (at, start) in itertools.pairwise(events):
+        if at - before > 86400 or (
+            start and before_start and any(before < ready < at for ready in readies)
         ):
             continue
-        try:
-            item = failure(payload.get("host_failure"), now=now)
-            if item["qualified_start_failure"] and item["at"] >= now - 8 * 86400:
-                events.append((item["at"], node["intent_id"]))
-        except (ValueError, KeyError):
-            pass
-        recovered = capacity_failure(node, now=now)
-        if recovered is not None and recovered["at"] >= now - 8 * 86400:
-            events.append((recovered["at"], node["intent_id"]))
-    # Several observations/reasons from one original rental still count once.
-    events = sorted(
-        (at, node)
-        for node, at in {node: at for at, node in sorted(set(events))}.items()
-    )
-    expires = None
-    for index, (at, _) in enumerate(events):
-        if index and at - events[index - 1][0] <= 86400:
-            until = at + 7 * 86400
-            if now < until:
-                expires = max(expires or 0, until)
+        until = at + 7 * 86400
+        if now < until:
+            expires = max(expires or 0, until)
     return expires
+
+
+def recent_start_failures(nodes, *, now, provider=VASTAI.id):
+    """Hosts whose last rental failed to start within the last hour (#1198).
+
+    The next start tries another host first. This is an order, not a deny: the
+    only host on offer is still rented again, and often works the second time.
+    """
+    failed, ready = {}, {}
+    for node in nodes:
+        outcome = _rental_outcome(node, now=now)
+        if outcome is None or outcome[1] != provider:
+            continue
+        if outcome[2] is not None and outcome[2][1]:
+            failed[outcome[0]] = max(failed.get(outcome[0], 0), outcome[2][0])
+        if outcome[3] is not None:
+            ready[outcome[0]] = max(ready.get(outcome[0], 0), outcome[3])
+    return {
+        host
+        for host, at in failed.items()
+        if at >= now - START_FAILURE_RETRY_LAST_SECONDS and at > ready.get(host, 0)
+    }
 
 
 def capacity_failure(node, *, now):

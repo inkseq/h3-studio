@@ -245,7 +245,7 @@ class HostSelectionTests(ledger.LedgerCase):
         self.capacity.observe(result["node_id"])
         self.capacity.readiness.assert_not_called()
 
-    def test_prefer_keeps_ordinary_native_fallback_on_the_same_start(self):
+    def two_offers(self):
         native_plan = self.client.plan
 
         def two(spec):
@@ -275,6 +275,9 @@ class HostSelectionTests(ledger.LedgerCase):
                 },
             ],
         }
+
+    def test_prefer_keeps_ordinary_native_fallback_on_the_same_start(self):
+        self.two_offers()
         policy = self.hosts.list(self.owner, admin=True, machine_id="19494")["hosts"][
             0
         ]["policy"]
@@ -295,13 +298,70 @@ class HostSelectionTests(ledger.LedgerCase):
             [offer["offer_id"] for offer in preview["offers"]], ["54321", "12345"]
         )
         result = self.start(preview)
-        # This is the native membership selector, not a promise that dstack's
-        # price ordering will try the preferred host before the cheaper one.
+        # The reviewed native Vast patch tries the hosts in this order.
         self.assertEqual(
             self.store.load(result["node_id"])["run_spec"]["profile"]["instance_types"],
             ["54321", "12345"],
         )
         self.assertEqual(self.client.applied, [result["node_id"]])
+
+    def test_a_host_that_never_became_reachable_is_tried_after_the_others(self):
+        # #1198: dstack gave up waiting for the instance. That is a start
+        # failure of the host, and the next start tries another host first.
+        self.two_offers()
+        preview = self.preview()
+        self.assertEqual(
+            [offer["offer_id"] for offer in preview["offers"]], ["12345", "54321"]
+        )
+        result = self.start(preview)
+        run = self.client.runs[self.store.load(result["node_id"])["run_name"]]
+        run.update(
+            status="provisioning",
+            latest_job_submission={
+                "job_provisioning_data": {
+                    "backend": "vastai",
+                    "instance_id": "1234567",
+                    "instance_type": {"resources": {"gpus": [{"name": "RTX5090"}]}},
+                }
+            },
+        )
+        self.capacity.observe(result["node_id"])
+        self.now += 600
+        run["status"] = "failed"
+        run["latest_job_submission"]["termination_reason"] = (
+            "waiting_instance_limit_exceeded"
+        )
+        self.capacity.observe(result["node_id"])
+        with self.repo.engine.connect() as conn:
+            payload = conn.execute(
+                select(operator_nodes.c.payload).where(
+                    operator_nodes.c.intent_id == result["node_id"]
+                )
+            ).scalar_one()
+        self.assertEqual(payload["host_observation"]["machine_id"], "19493")
+        self.assertEqual(
+            payload["host_failure"],
+            {
+                "version": 1,
+                "stage": "provisioning",
+                "reason_code": "provider_provisioning_timeout",
+                "at": self.now,
+                "qualified_start_failure": True,
+            },
+        )
+        # After the lane's own five-minute cooldown the other host goes first.
+        self.now += 301
+        self.assertEqual(
+            [offer["offer_id"] for offer in self.preview()["offers"]],
+            ["54321", "12345"],
+        )
+        # One failure is an order, never a deny: an hour later it is as before.
+        self.service.policy["expires_at"] = None
+        self.now += 3300
+        self.assertEqual(
+            [offer["offer_id"] for offer in self.preview()["offers"]],
+            ["12345", "54321"],
+        )
 
     def test_ten_candidates_keep_deny_identity_price_and_resource_guards(self):
         base = self.client.plan({})["job_plans"][0]["offers"][0]

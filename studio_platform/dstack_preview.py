@@ -135,6 +135,7 @@ class DstackPreview:
             FRESH_SECONDS,
             HostPolicyStore,
             denied_suppliers,
+            recent_start_failures,
             selection,
         )
 
@@ -190,7 +191,9 @@ class DstackPreview:
                 != "deny"
             ]
             # instance_types freezes membership; the reviewed native Vast
-            # patch also preserves the explicit preferred-first order.
+            # patch also preserves the explicit order: preferred hosts first,
+            # a host whose last start just failed after the others (#1198).
+            failed = recent_start_failures(nodes, now=self.repo.clock())
             offers = sorted(
                 allowed,
                 key=lambda r: (
@@ -199,7 +202,8 @@ class DstackPreview:
                         by_offer[r["offer_id"]]["machine_id"],
                         nodes=nodes,
                     )[0]["effective"]
-                    != "prefer"
+                    != "prefer",
+                    by_offer[r["offer_id"]]["machine_id"] in failed,
                 ),
             )[:MAX_HOST_CANDIDATES]
             require(offers, "dstack_no_compatible_host_offers")
@@ -230,6 +234,7 @@ class DstackPreview:
             HostPolicyStore,
             host_id,
             original_nodes,
+            recent_start_failures,
             selection,
         )
 
@@ -259,9 +264,17 @@ class DstackPreview:
                 return policy["effective"] == "deny"
 
             allowed = [offer for offer in offers if not denied(offer)]
+            require(
+                allowed or len(allowed) == len(offers),
+                "dstack_no_compatible_host_offers",
+            )
+            # Lium takes the cheapest executor in the selector, so one whose
+            # last start just failed is left out while another is offered.
+            failed = recent_start_failures(nodes, now=now, provider=LIUM.id)
+            healthy = [o for o in allowed if o.get("offer_id") not in failed]
+            allowed = healthy or allowed
             if len(allowed) == len(offers):
                 return request, offers, None
-            require(allowed, "dstack_no_compatible_host_offers")
             approved = [
                 {"offer_id": offer["offer_id"], "machine_id": offer["offer_id"]}
                 for offer in allowed[:MAX_HOST_CANDIDATES]

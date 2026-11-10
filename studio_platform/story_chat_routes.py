@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from .google_chat import ChatError, GoogleChatClient
 from . import llm_tracing, story_chat_advice, story_chat_undo
 from .repository import Conflict
-from .story_chat_photos import with_photos
+from .story_chat_photos import shown, with_photos
 from .story_chat import (
     INKY_DAILY_TURNS,
     INKY_FOCUS,
@@ -204,6 +204,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         from .story_risk import presented_proposal
 
         cache = {}
+        lookup = {entity["id"]: entity for entity in project.get("entities", [])}
         return [
             {
                 **message,
@@ -212,7 +213,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 ),
             }
             if isinstance(message.get("proposal"), dict)
-            else message
+            else shown(message, lookup)
             for message in messages
         ]
 

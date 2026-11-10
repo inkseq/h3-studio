@@ -119,6 +119,40 @@ class DerivationAdmissionTests(IsolatedTests):
         other = self.service.derive("owner", self.parent["id"], 1, 3)
         self.assertNotEqual(other["id"], first["id"])
 
+    def test_the_reuse_lookup_reads_trash_state_only_for_the_match(self):
+        # About ten statements per project asset, per excerpt, per shot (#1102).
+        first = self.service.derive("owner", self.parent["id"], 0, 3)
+        self.service.derive("owner", self.parent["id"], 1, 3)
+        with mock.patch.object(
+            self.service, "_removed", wraps=self.service._removed
+        ) as removed:
+            again = self.service.derive("owner", self.parent["id"], 0, 3)
+        self.assertEqual(again["id"], first["id"])
+        self.assertEqual(removed.call_count, 1)
+
+    def test_a_table_is_looked_up_once_it_exists_and_again_while_absent(self):
+        from sqlalchemy import event, text
+
+        from studio_platform.schema_version import table_exists
+
+        asked = []
+        event.listen(
+            self.engine, "before_cursor_execute", lambda *args: asked.append(args[2])
+        )
+        with self.engine.begin() as conn:
+            self.assertFalse(table_exists(conn, "later_table"))
+            self.assertFalse(table_exists(conn, "later_table"))
+            absent = len(asked)
+            conn.execute(text("CREATE TABLE later_table (id INTEGER)"))
+        with self.engine.connect() as conn:
+            before = len(asked)
+            self.assertTrue(table_exists(conn, "later_table"))
+            first = len(asked) - before
+            self.assertTrue(table_exists(conn, "later_table"))
+            self.assertEqual(len(asked) - before, first)
+        self.assertGreaterEqual(absent, 2)
+        self.assertGreaterEqual(first, 1)
+
     def test_interrupted_derivative_is_recoverable_without_new_asset(self):
         with mock.patch.object(
             media,

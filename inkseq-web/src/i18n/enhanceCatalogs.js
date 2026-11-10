@@ -30,6 +30,7 @@ export const enhanceCatalogs = {
     'enhance.allHelp': 'Make a sharper copy of every chosen take that doesn’t have one yet.',
     'enhance.allTitle': 'Enhance the whole story',
     'enhance.allCount': '{count} shots will be enhanced, {skipped} left out.',
+    'enhance.allCount.one': '1 shot will be enhanced, {skipped} left out.',
     'enhance.allShot': 'Shot {n}',
     'enhance.skip.empty': 'no video yet',
     'enhance.skip.busy': 'still being made',
@@ -39,7 +40,8 @@ export const enhanceCatalogs = {
     'enhance.skip.unavailable': 'can’t be enhanced right now',
     'enhance.allFit': 'Your credits cover the first {fit} of these {count}.',
     'enhance.allNone': 'Your credits don’t cover any of these yet.',
-    'enhance.allUseCopy': 'Use each sharper copy in the film when it’s done',
+    'enhance.allUseCopy':
+      'The film will use each sharper copy when it’s done. The originals stay in the takes.',
     'enhance.allStart': 'Enhance {count}',
     'enhance.allStartFirst': 'Enhance the first {count}',
     'enhance.allPartial':
@@ -72,6 +74,7 @@ export const enhanceCatalogs = {
     'enhance.allHelp': '为每个还没有清晰版的已选镜次生成清晰版。',
     'enhance.allTitle': '提升整个故事的清晰度',
     'enhance.allCount': '将提升 {count} 个镜头，跳过 {skipped} 个。',
+    'enhance.allCount.one': '将提升 1 个镜头，跳过 {skipped} 个。',
     'enhance.allShot': '镜头 {n}',
     'enhance.skip.empty': '还没有视频',
     'enhance.skip.busy': '正在生成',
@@ -81,7 +84,7 @@ export const enhanceCatalogs = {
     'enhance.skip.unavailable': '暂时无法提升',
     'enhance.allFit': '你的积分够提升前 {fit} 个（共 {count} 个）。',
     'enhance.allNone': '你的积分还不够提升其中任何一个。',
-    'enhance.allUseCopy': '清晰版完成后，成片里改用清晰版',
+    'enhance.allUseCopy': '清晰版完成后，成片会改用清晰版，原片仍保留在镜次里。',
     'enhance.allStart': '提升 {count} 个',
     'enhance.allStartFirst': '先提升前 {count} 个',
     'enhance.allPartial':
