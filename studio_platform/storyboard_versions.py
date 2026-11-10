@@ -7,6 +7,7 @@ without an authoring snapshot remain explicitly unknown.
 import copy
 import json
 import secrets
+import time
 import uuid
 
 from sqlalchemy import insert, select, update
@@ -887,8 +888,17 @@ class StoryboardVersions:
         }
 
     def preflight(self, principal, project_id, body, key):
+        from .storyboard_preflight_plans import PreflightTimer
+
+        timer = PreflightTimer()
+        return timer.run(
+            lambda: self._preflight(principal, project_id, body, key, timer)
+        )
+
+    def _preflight(self, principal, project_id, body, key, timer):
         from .quick_chat import key_check
         from .generation_admission import reject_managed
+        from .storyboard_preflight_plans import plan_items
 
         key_check(key)
         if (
@@ -904,8 +914,10 @@ class StoryboardVersions:
             or len(set(body["shot_ids"])) != len(body["shot_ids"])
         ):
             raise ValueError("Invalid storyboard preflight / 分镜预检参数无效")
-        record = self.access.project(principal, project_id, "jobs:write")
+        with timer.phase("load"):
+            record = self.access.project(principal, project_id, "jobs:write")
         reject_managed(record["payload"])
+        caps = setting = None
         scope = Scope(self.tenant, principal.owner, project_id)
         ident = "storyboard-" + request_hash(
             {
@@ -927,19 +939,23 @@ class StoryboardVersions:
                 if value.get("blocked"):
                     return self._public_preflight(value, principal)
             else:
-                project_row = self._document(
-                    conn,
-                    Scope(self.tenant, principal.owner, "__projects"),
-                    "project",
-                    project_id,
-                )
+                with timer.phase("load"):
+                    project_row = self._document(
+                        conn,
+                        Scope(self.tenant, principal.owner, "__projects"),
+                        "project",
+                        project_id,
+                    )
                 if (
                     not project_row
                     or project_row["version"] != body["expected_version"]
                 ):
                     raise Conflict("document_version_conflict")
+                # Every shot plans from this one authorized load (#1130).
+                record = dict(project_row)
                 project = project_row["payload"]
-                caps = self.admission.capabilities_provider()
+                with timer.phase("capabilities"):
+                    caps = self.admission.capabilities_provider()
                 if not version_matches(
                     body.get("capabilities_version", caps["capabilities_version"]),
                     caps["capabilities_version"],
@@ -948,9 +964,11 @@ class StoryboardVersions:
                 self.app.state.quick_chat._copies_allowed(
                     principal, body["copies"], conn
                 )
-                setting = preferences(
-                    self.repo, self.tenant, principal.owner, conn=conn
-                )
+                with timer.phase("defaults"):
+                    setting = preferences(
+                        self.repo, self.tenant, principal.owner, conn=conn
+                    )
+                materialize_start = time.perf_counter()
                 # Bound materialization using the existing configured byte quota,
                 # not a second hidden business copies limit.
                 minimum = sum(
@@ -1042,93 +1060,21 @@ class StoryboardVersions:
                         "Preflight exceeds configured document byte quota / 预检超出配置的文档字节限额"
                     )
                 self._put(conn, scope, "storyboard_preflight", ident, value)
+                timer.ms["materialize"] += (
+                    time.perf_counter() - materialize_start
+                ) * 1000
         # Each plan is authoritative in the original plan table. A crash between
         # plan commit and projection commit recovers that exact ID, never redraws.
-        for item in value["items"]:
-            if item.get("plan"):
-                continue
-            try:
-                plan = self.repo.get_plan(scope, item["plan_id"])
-                result = self.admission.planning.retained_plan(plan, principal)
-            except NotFound:
-                current = self.access.project(principal, project_id, "jobs:write")
-                try:
-                    if (
-                        preferences(self.repo, self.tenant, principal.owner)["version"]
-                        != value["settings_version"]
-                    ):
-                        raise Conflict("storyboard_defaults_changed")
-                    result = self.admission.preflight(
-                        principal,
-                        current["payload"],
-                        item["shot_id"],
-                        expected_version=value["project_version"],
-                        seed_override=item["seed"],
-                        plan_id=item["plan_id"],
-                    )
-                except (Conflict, ValueError) as error:
-                    # Only deterministic validation/source conflicts close an
-                    # unpaid preflight. Storage/network/runtime unknowns retain
-                    # their original operation for explicit reconciliation.
-                    if isinstance(error, Conflict) and str(error) not in {
-                        "storyboard_defaults_changed",
-                        "document_version_conflict",
-                        "shot_version_conflict",
-                    }:
-                        raise
-                    with self.repo.transaction() as conn:
-                        owner_reference_gate(conn, self.tenant, principal.owner)
-                        latest = self._document(
-                            conn, scope, "storyboard_preflight", ident
-                        )
-                        payload = copy.deepcopy(latest["payload"])
-                        payload["blocked"] = (
-                            "source_changed"
-                            if isinstance(error, Conflict)
-                            else "invalid_generation_input"
-                        )
-                        self._put(
-                            conn,
-                            scope,
-                            "storyboard_preflight",
-                            ident,
-                            payload,
-                            latest["version"] + 1,
-                            True,
-                        )
-                    return self.get_preflight(principal, project_id, ident)
-                plan = self.repo.get_plan(scope, item["plan_id"])
-            runtime = (
-                plan["execution_plan"].get("expected_runtime_s")
-                if plan["execution_plan"].get("quote_known") is True
-                else None
-            )
-            with self.repo.transaction() as conn:
-                owner_reference_gate(conn, self.tenant, principal.owner)
-                latest = self._document(conn, scope, "storyboard_preflight", ident)
-                payload = copy.deepcopy(latest["payload"])
-                target = next(
-                    v for v in payload["items"] if v["plan_id"] == item["plan_id"]
-                )
-                target.update(plan=result, machine_seconds=runtime)
-                if (
-                    len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
-                    > self.settings.max_project_bytes
-                ):
-                    payload = copy.deepcopy(latest["payload"])
-                    payload["blocked"] = "preflight_document_size_exceeded"
-                self._put(
-                    conn,
-                    scope,
-                    "storyboard_preflight",
-                    ident,
-                    payload,
-                    latest["version"] + 1,
-                    True,
-                )
-                if payload.get("blocked"):
-                    return self._public_preflight(payload, principal)
-        return self.get_preflight(principal, project_id, ident)
+        return plan_items(
+            self,
+            principal,
+            project_id,
+            scope,
+            ident,
+            value,
+            (record, caps, setting),
+            timer,
+        )
 
 
 def register_routes(app):

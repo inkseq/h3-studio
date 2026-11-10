@@ -4,6 +4,8 @@ Extracted from the existing API and aligned with the preserved Quick Chat
 admission boundary. This module does not own a queue, permissions or GPU calls.
 """
 
+from typing import NamedTuple
+
 from .capabilities import capabilities
 from .generation_draft import plan_body, read_draft
 from .repository import Scope, Conflict, BudgetExceeded
@@ -22,6 +24,14 @@ def managed_project(project):
 def reject_managed(project):
     if managed_project(project):
         raise Conflict("quick_chat_managed_resource")
+
+
+class PreflightReads(NamedTuple):
+    """Loads shared by every shot of one storyboard preflight (#1102, #1130)."""
+
+    record: dict
+    capabilities: dict
+    setting: dict
 
 
 class GenerationAdmission:
@@ -111,9 +121,16 @@ class GenerationAdmission:
         expected_version=None,
         seed_override=None,
         plan_id=None,
+        reads=None,
     ):
+        """Plan one shot. ``reads`` carries one storyboard preflight's shared
+        loads; the version, shot source and defaults fences still run here."""
         project_id = project["id"]
-        record = self.access.project(principal, project_id, "jobs:write")
+        if reads is None:
+            record = self.access.project(principal, project_id, "jobs:write")
+        else:
+            self.access.authorize(principal, project_id, "jobs:write")
+            record = reads.record
         if expected_version is None and not managed_project(project):
             raise Conflict("document_version_conflict")
         if expected_version is not None and record["version"] != expected_version:
@@ -123,12 +140,18 @@ class GenerationAdmission:
         ):
             raise Conflict("shot_version_conflict")
         queue_refresh(principal, project_id)
-        current_capabilities = self.capabilities_provider()
+        current_capabilities = (
+            self.capabilities_provider() if reads is None else reads.capabilities
+        )
         render_project, defaults_version = project, None
         if not managed_project(project):
             from .storyboard_versions import preferences, effective_project
 
-            setting = preferences(self.repo, self.settings.tenant_id, principal.owner)
+            setting = (
+                preferences(self.repo, self.settings.tenant_id, principal.owner)
+                if reads is None
+                else reads.setting
+            )
             defaults_version = setting["version"]
             render_project, _ = effective_project(project, shot_id, setting["defaults"])
         from .quality_authoring import project as resolve_quality_project
@@ -140,10 +163,10 @@ class GenerationAdmission:
             render_project, shot_id, capabilities=current_capabilities
         )
         if any(draft["inputs"].values()):
-            self.access.project(principal, project_id, "assets:read")
+            self.access.authorize(principal, project_id, "assets:read")
 
         def derive(asset_id, start, end):
-            self.access.project(principal, project_id, "assets:write")
+            self.access.authorize(principal, project_id, "assets:write")
             self.assets.get(principal.owner, asset_id, project_id)
             receipt = self.assets.derive(principal.owner, asset_id, start, end)
             if receipt["status"] != "ready":
@@ -153,7 +176,7 @@ class GenerationAdmission:
         def validate_frame(asset_id, artifact_id):
             # Editable document provenance is a preview only. Admission checks
             # the owner/project-scoped immutable receipt before using the image.
-            self.access.project(principal, project_id, "assets:read")
+            self.access.authorize(principal, project_id, "assets:read")
             asset = self.assets.get(principal.owner, asset_id, project_id)
             selection = asset.get("selection", {})
             if (
@@ -178,7 +201,13 @@ class GenerationAdmission:
         def written(resolved):
             return self.model_prompt(render_project, shot_id, draft, resolved)
 
-        latest = self.access.project(principal, project_id, "jobs:write")
+        if reads is None:
+            latest = self.access.project(principal, project_id, "jobs:write")
+        else:
+            # An unchanged version is an unchanged payload: every project write
+            # bumps it. Re-reading the number skips reloading the whole story.
+            version = self.access.project_version(principal, project_id, "jobs:write")
+            latest = {"version": version, "payload": record["payload"]}
         if expected_version is not None and latest["version"] != expected_version:
             raise Conflict("document_version_conflict")
         if source_snapshot(project, shot_id) != source_snapshot(
