@@ -49,6 +49,7 @@ from studio_platform.repository import (
     attempts,
     instance_intents,
     jobs,
+    outbox,
     registered_workers,
     request_hash,
 )
@@ -160,6 +161,9 @@ class Scenario:
     demand_enabled: bool = True
     expect_all_done: bool = True
     expect_capacity: bool = True  # capacity and budget allow work to start
+    # Hosts the speed gate denies, and health alert codes raised (#903).
+    expect_slow_denies: int | None = None
+    expect_alerts: tuple = ()
     expected_failure: str | None = None  # known controller bug, with reason
     # Policy idle_shutdown_seconds; lookahead starts use the start rules' boot.
     idle_shutdown_seconds: float = 600
@@ -1973,6 +1977,36 @@ class World(LedgerCase):
             self._flagged_spend = True
             self.violate("test_cap_exceeded", "billed past the task cap")
 
+    def _check_host_policy(self):
+        """Count speed-gate denies and health alerts; check what the scenario expects."""
+        with self.repo.engine.connect() as connection:
+            denies = connection.execute(
+                select(outbox.c.payload).where(
+                    outbox.c.event_type == "operator.host_policy_updated"
+                )
+            ).scalars()
+            denies = sum(
+                row.get("reason_code") == "automatic_slow_download" for row in denies
+            )
+            alerts = Counter(
+                row.get("code")
+                for row in connection.execute(
+                    select(outbox.c.payload).where(
+                        outbox.c.event_type == "capacity.health_alert"
+                    )
+                ).scalars()
+            )
+        if denies:
+            self.reasons["host_deny:automatic_slow_download"] = denies
+        for code, count in alerts.items():
+            self.reasons["alert:" + str(code)] = count
+        expected = self.scenario.expect_slow_denies
+        if expected is not None and denies != expected:
+            self.violate("slow_denies", "%d denied, expected %d" % (denies, expected))
+        for code in self.scenario.expect_alerts:
+            if not alerts.get(code):
+                self.violate("alert_missing", code)
+
     def _billed_microusd(self):
         return sum(
             m.billed_seconds / 3600 * m.script.price * 1_000_000
@@ -2015,6 +2049,7 @@ class World(LedgerCase):
                 "jobs_not_done",
                 ", ".join("%s=%d" % item for item in sorted(statuses.items())),
             )
+        self._check_host_policy()
         machines = [m for m in self.client.machines.values() if m.script is not HISTORY]
         self._check_expected_counts(machines)
         return {

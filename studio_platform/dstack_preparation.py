@@ -418,7 +418,28 @@ def _live_download(binding, now, fresh_seconds):
     return None
 
 
-def download_timebox_due(binding, now, *, fresh_seconds=30):
+def speed_gate(value=None):
+    """The download speed gate from a capacity policy value (#903).
+
+    Missing or unreadable settings keep the documented defaults, so the gate
+    never turns off because a settings row could not be read.
+    """
+    value = value if isinstance(value, dict) else {}
+    rate, window = (
+        value.get("min_download_mb_per_second"),
+        value.get("download_measure_seconds"),
+    )
+    return {
+        "min_rate": rate * 1000**2
+        if type(rate) is int and 5 <= rate <= 1000
+        else MIN_DOWNLOAD_BYTES_PER_SECOND,
+        "measure_seconds": window
+        if type(window) is int and 60 <= window <= 1800
+        else DOWNLOAD_MEASURE_SECONDS,
+    }
+
+
+def download_timebox_due(binding, now, *, fresh_seconds=30, gate=None):
     value = _live_download(binding, now, fresh_seconds)
     return bool(
         value is not None
@@ -427,7 +448,7 @@ def download_timebox_due(binding, now, *, fresh_seconds=30):
     )
 
 
-def download_rate(value):
+def download_rate(value, measure_seconds=DOWNLOAD_MEASURE_SECONDS):
     """Measured wire bytes/s once the window has elapsed, else None."""
     if not isinstance(value, dict) or "bytes_received" not in value:
         return None
@@ -437,14 +458,17 @@ def download_rate(value):
         else value["completed_at"]
     )
     span = end - value["received_started_at"]
-    if span < DOWNLOAD_MEASURE_SECONDS:
+    if span < measure_seconds:
         return None
     return (value["bytes_received"] - value["received_started_bytes"]) / span
 
 
-def download_too_slow(binding, now, *, fresh_seconds=30):
-    rate = download_rate(_live_download(binding, now, fresh_seconds))
-    return rate is not None and rate < MIN_DOWNLOAD_BYTES_PER_SECOND
+def download_too_slow(binding, now, *, fresh_seconds=30, gate=None):
+    gate = gate or speed_gate()
+    rate = download_rate(
+        _live_download(binding, now, fresh_seconds), gate["measure_seconds"]
+    )
+    return rate is not None and rate < gate["min_rate"]
 
 
 # Measured on staging, 2026-10-31 to 11-05: 8 healthy machines were ready 43 to 270 s after the
@@ -466,7 +490,7 @@ def model_load_stalled(binding, now):
     )
 
 
-def download_startup_credit(binding, now):
+def download_startup_credit(binding, now, gate=None):
     """Seconds of measured on-pace download excluded from the cold-start window.
 
     Only hosts that report live wire bytes earn credit. It ends at completion
@@ -475,8 +499,9 @@ def download_startup_credit(binding, now):
     value = _download_watch(binding, now)
     if value is None or "bytes_received" not in value:
         return 0
-    rate = download_rate(value)
-    if rate is not None and rate < MIN_DOWNLOAD_BYTES_PER_SECOND:
+    gate = gate or speed_gate()
+    rate = download_rate(value, gate["measure_seconds"])
+    if rate is not None and rate < gate["min_rate"]:
         return 0
     end = (
         value["last_progress_at"]

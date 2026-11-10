@@ -377,18 +377,27 @@ class DstackOperator(DstackPreview, DstackRegistration, DstackCommands):
         )
         if reason_code != DOWNLOAD_TOO_SLOW:
             return payload
-        from .host_policy import HostPolicyStore, bound_observation
+        from .host_policy import HostPolicyStore, bound_observation, slow_stop_braked
 
         physical = bound_observation(current, now=now)
         if (
             physical is not None
             and physical['provider_instance_id'] == intent['provider_instance_id']
+            # Many slow hosts at once point upstream: stop, do not deny (#903).
+            and not slow_stop_braked(
+                connection,
+                self.settings.tenant_id,
+                current['intent_id'],
+                physical,
+                now,
+            )
         ):
             HostPolicyStore(self.repo, self.settings.tenant_id).deny_slow_download(
                 connection,
                 physical['machine_id'],
                 node_id=current['intent_id'],
                 now=now,
+                provider=physical['provider'],
             )
         return payload if payload is not None else copy.deepcopy(current['payload'])
 

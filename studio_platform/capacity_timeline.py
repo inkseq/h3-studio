@@ -486,6 +486,23 @@ class CapacityRecorder:
         except (KeyError, TypeError):
             rate = None
         slow = rate is not None and rate < MIN_DOWNLOAD_BYTES_PER_SECOND
+        if rate is not None and self._changed(key, "measured", True):
+            # Every host's measured rate, fast or slow, once per machine, so
+            # the speed gate can be calibrated on the real spread (#903).
+            host = binding.get("host_observation")
+            host = host if isinstance(host, dict) else {}
+            self._entry(
+                key,
+                "measured",
+                "download_measured",
+                now,
+                True,
+                {
+                    "rate_bytes_per_s": round(rate),
+                    "provider": _code(host.get("provider") or binding.get("backend")),
+                    "host_id": _code(host.get("machine_id")),
+                },
+            )
         milestone = 4 if complete else min(3, int(4 * done / total))
         value = [milestone, complete, stalled, slow and not complete]
         if not self._changed(key, "download", value):

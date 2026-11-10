@@ -16,7 +16,7 @@ from .operator_capacity import (
 from .repository import (
     request_hash,
 )
-from .providers.registry import VASTAI
+from .providers.registry import LIUM, VASTAI
 
 from .dstack_operator_contract import (
     BACKEND_MARKER,
@@ -218,6 +218,73 @@ class DstackPreview:
             )
         return replace(request, host_selection=selected), offers, store
 
+    def _lium_host_selection(self, request, offers, demand_job_id):
+        """Drop planned Lium executors an admin or the speed gate denied (#900).
+
+        A Lium offer names its executor, the physical host. Only when one is
+        denied is a selector frozen (dstack instance_types), so the remaining
+        executors are the only ones the run may take; otherwise nothing changes.
+        """
+        from .host_policy import (
+            FRESH_SECONDS,
+            HostPolicyStore,
+            host_id,
+            original_nodes,
+            selection,
+        )
+
+        store = HostPolicyStore(self.repo, self.settings.tenant_id)
+        now = self.repo.clock()
+        with self.repo._budget_read() as connection:
+            nodes = original_nodes(connection, self.settings.tenant_id)
+            excluded = set()
+            if demand_job_id is not None:
+                from .dstack_demand_start import excluded_download_machines
+
+                # Executors this job already stopped for a slow download.
+                excluded = excluded_download_machines(
+                    connection, self.settings.tenant_id, demand_job_id
+                )
+
+            def denied(offer):
+                try:
+                    executor = host_id(LIUM.id, offer.get("offer_id"))
+                except OperatorError:
+                    return False  # Not an executor id: nothing to match a deny.
+                if executor in excluded:
+                    return True
+                policy = store.read(
+                    connection, executor, nodes=nodes, now=now, provider=LIUM.id
+                )[0]
+                return policy["effective"] == "deny"
+
+            allowed = [offer for offer in offers if not denied(offer)]
+            if len(allowed) == len(offers):
+                return request, offers, None
+            require(allowed, "dstack_no_compatible_host_offers")
+            approved = [
+                {"offer_id": offer["offer_id"], "machine_id": offer["offer_id"]}
+                for offer in allowed[:MAX_HOST_CANDIDATES]
+            ]
+            selected = selection(
+                {
+                    "version": 1,
+                    "provider": LIUM.id,
+                    "observed_at": now,
+                    "expires_at": now + FRESH_SECONDS,
+                    "policy_snapshot": store.admission_snapshot(
+                        connection, approved, now=now, provider=LIUM.id
+                    ),
+                    "offers": approved,
+                },
+                now=now,
+            )
+        return (
+            replace(request, host_selection=selected),
+            allowed[:MAX_HOST_CANDIDATES],
+            store,
+        )
+
     def _preview_for_owner(self, owner, body, *, demand_job_id=None):
         self._enabled()
         continuing = self.policy.get("lifecycle_version") == 2
@@ -360,11 +427,13 @@ class DstackPreview:
                 self.capacity.plan(candidate, self.config["ssh_public_key"]),
                 candidate,
             )
-            if offers and backend == VASTAI.id:
+            if offers and backend in {VASTAI.id, LIUM.id}:
                 try:
-                    candidate, offers, store = self._vast_host_selection(
-                        candidate, offers, demand_job_id
-                    )
+                    candidate, offers, store = (
+                        self._vast_host_selection
+                        if backend == VASTAI.id
+                        else self._lium_host_selection
+                    )(candidate, offers, demand_job_id)
                 except OperatorError as error:
                     if (
                         error.code != "dstack_no_compatible_host_offers"
@@ -444,9 +513,12 @@ class DstackPreview:
             if request.host_selection is not None:
                 from .host_policy import selection
 
+                from .host_policy import selection_provider
+
+                provider = selection_provider(request.host_selection)
                 require(
                     store.admission_snapshot(
-                        connection, request.host_selection["offers"]
+                        connection, request.host_selection["offers"], provider=provider
                     )
                     == request.host_selection["policy_snapshot"],
                     "host_policy_changed",
@@ -466,6 +538,7 @@ class DstackPreview:
                     profile_id=profile["id"],
                     observed_at=request.host_selection["observed_at"],
                     expires_at=expires,
+                    provider=provider,
                 )
                 for offer in offers:
                     offer["host_history"] = histories[offer["offer_id"]]

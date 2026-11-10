@@ -326,6 +326,25 @@ class DstackCommands:
             ):
                 self.capacity.client.reusable_hosts_confirmed(approved)
             selection(host_selection, now=self.repo.clock())
+        elif host_selection is not None:
+            # A Lium selector only excludes denied executors (#900); dstack
+            # applies it, and the policy must not have changed since preview.
+            from .host_policy import HostPolicyStore, selection, selection_provider
+
+            host_selection = selection(host_selection, now=now)
+            require(
+                selection_provider(host_selection) == profile["backend"]
+                and HostPolicyStore(
+                    self.repo, self.settings.tenant_id
+                ).admission_snapshot(
+                    connection,
+                    host_selection["offers"],
+                    now=now,
+                    provider=profile["backend"],
+                )
+                == host_selection["policy_snapshot"],
+                "host_policy_changed",
+            )
         return host_selection
 
     def _reserve_start_intent(

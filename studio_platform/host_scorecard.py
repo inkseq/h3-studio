@@ -16,15 +16,19 @@ from sqlalchemy import case, cast, func, insert, select, update
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .host_policy import (
+    ADMIN_REASONS,
+    HOST_SOURCES,
     HostPolicyStore,
-    REASONS,
     bound_observation,
     capacity_failure,
     failure,
     finite,
-    numeric_id,
+    host_id,
+    host_provider,
+    host_sort_key,
     original_nodes,
 )
+from .providers.registry import VASTAI
 from .operator_capacity import operator_commands, operator_policy, require, safe_id
 from .repository import artifacts, attempts, jobs, outbox, request_hash
 
@@ -317,19 +321,24 @@ class OperatorHosts:
         all_nodes=None,
         confirmed=False,
         failed=None,
+        provider=VASTAI.id,
     ):
         physical = [(node, bound_observation(node, now=now)) for node in nodes]
         physical = [
             (node, value)
             for node, value in physical
-            if value and value["machine_id"] == machine
+            if value
+            and value["machine_id"] == machine
+            and value["provider"] == provider
         ]
         latest = max(
             (value for _, value in physical),
             key=lambda v: v["observed_at"],
             default=None,
         )
-        policy = self.store.read(connection, machine, nodes=all_nodes, now=now)[0]
+        policy = self.store.read(
+            connection, machine, nodes=all_nodes, now=now, provider=provider
+        )[0]
         failures, diagnostics, failed_nodes = [], [], set()
         execution_failures = []
         from .dstack_preparation import DIAGNOSTICS, NORMAL
@@ -489,12 +498,14 @@ class OperatorHosts:
             "quoted_hourly_microusd",
         )
         return {
-            "provider": "vastai",
+            "provider": provider,
             "machine_id": machine,
             "identity_confirmed": bool(latest or confirmed),
-            "physical_id_source": "vast_machine_id"
+            "physical_id_source": HOST_SOURCES[provider]
             if latest or confirmed
-            else "operator_supplied_numeric",
+            else "operator_supplied_numeric"
+            if provider == VASTAI.id
+            else "operator_supplied_id",
             "policy": policy,
             "runs": len(physical),
             "failure_count": len(failed_nodes),
@@ -531,11 +542,22 @@ class OperatorHosts:
             "groups": list(groups.values()),
         }
 
-    def list(self, principal, *, limit=100, offset=0, admin=False, machine_id=None):
+    def list(
+        self,
+        principal,
+        *,
+        limit=100,
+        offset=0,
+        admin=False,
+        machine_id=None,
+        provider=VASTAI.id,
+    ):
+        """One provider's hosts per page; Vast stays the default (#900)."""
         owner = self._authorize(principal, admin=admin)
         self._page(limit, offset)
+        host_provider(provider)
         if machine_id is not None:
-            numeric_id(machine_id)
+            host_id(provider, machine_id)
         now = self.repo.clock()
         with self.repo._budget_read() as connection:
             all_nodes = original_nodes(connection, self.settings.tenant_id)
@@ -548,21 +570,27 @@ class OperatorHosts:
                 value["machine_id"]
                 for node in nodes
                 if (value := bound_observation(node, now=now))
+                and value["provider"] == provider
             }
             if admin:
-                found |= self.store.known_policy_ids(connection)
+                found |= {
+                    machine
+                    for kind, machine in self.store.known_policy_ids(connection)
+                    if kind == provider
+                }
                 if machine_id is not None:
                     found.add(machine_id)
             elif machine_id is not None:
                 require(machine_id in found, "host_not_found", 404)
             if machine_id is not None:
                 found &= {machine_id}
-            ids = sorted(found, key=int)
+            ids = sorted(found, key=lambda machine: host_sort_key((provider, machine)))
             page = ids[offset : offset + limit]
             selected_nodes = [
                 n
                 for n in nodes
                 if (value := bound_observation(n, now=now))
+                and value["provider"] == provider
                 and value["machine_id"] in page
             ]
             samples = self._successful(connection, selected_nodes, now=now)
@@ -577,6 +605,7 @@ class OperatorHosts:
                     now=now,
                     all_nodes=all_nodes,
                     failed=failed,
+                    provider=provider,
                 )
                 for machine in page
             ]
@@ -584,7 +613,7 @@ class OperatorHosts:
             "account": owner,
             "admin": admin,
             "as_of": now,
-            "provider": "vastai",
+            "provider": provider,
             "hosts": hosts,
             "limit": limit,
             "offset": offset,
@@ -613,16 +642,25 @@ class OperatorHosts:
             pass
 
     def histories(
-        self, connection, owner, offers, *, profile_id, observed_at, expires_at
+        self,
+        connection,
+        owner,
+        offers,
+        *,
+        profile_id,
+        observed_at,
+        expires_at,
+        provider=VASTAI.id,
     ):
         now = self.repo.clock()
         all_nodes = original_nodes(connection, self.settings.tenant_id)
         nodes = [n for n in all_nodes if n["payload"]["owner_id"] == owner]
-        selected = {numeric_id(row["machine_id"]) for row in offers}
+        selected = {host_id(provider, row["machine_id"]) for row in offers}
         nodes = [
             n
             for n in nodes
             if (value := bound_observation(n, now=now))
+            and value["provider"] == provider
             and value["machine_id"] in selected
         ]
         samples = self._successful(connection, nodes, now=now)
@@ -638,11 +676,12 @@ class OperatorHosts:
                 all_nodes=all_nodes,
                 confirmed=True,
                 failed=failed,
+                provider=provider,
             )
             for machine in selected
         }
         return {
-            numeric_id(row["offer_id"]): [
+            row["offer_id"]: [
                 {
                     **copy.deepcopy(summaries[row["machine_id"]]),
                     "offer_id": row["offer_id"],
@@ -667,10 +706,10 @@ class OperatorHosts:
                 "expected_revision",
                 "expected_snapshot",
             }
-            and body["provider"] == "vastai"
+            and body["provider"] in HOST_SOURCES
             and isinstance(body["policy"], str)
-            and body["policy"] in REASONS
-            and body["reason_code"] == REASONS[body["policy"]]
+            and isinstance(body["reason_code"], str)
+            and (body["policy"], body["reason_code"]) in ADMIN_REASONS
             and type(body["expected_revision"]) is int
             and body["expected_revision"] >= 0
             and isinstance(body["expected_snapshot"], str)
@@ -679,7 +718,8 @@ class OperatorHosts:
             "host_policy_request_invalid",
             422,
         )
-        machine = numeric_id(body["machine_id"])
+        provider = body["provider"]
+        machine = host_id(provider, body["machine_id"])
         actor = _actor(self.settings.tenant_id, owner)
         digest = request_hash({"kind": "host_policy", "body": body})
         with self.repo.transaction() as connection:
@@ -698,13 +738,17 @@ class OperatorHosts:
                     "operator_idempotency_conflict",
                 )
                 return copy.deepcopy(old_command["payload"]["result"])
-            old, value = self.store.read(connection, machine)
+            old, value = self.store.read(connection, machine, provider=provider)
             require(
                 old["revision"] == body["expected_revision"]
                 and old["snapshot"] == body["expected_snapshot"],
                 "host_policy_conflict",
             )
-            changed = old["manual"] != body["policy"]
+            # A deny whose reason changes (e.g. to bad output) is a change too.
+            changed = (old["manual"], value["reason_code"]) != (
+                body["policy"],
+                body["reason_code"],
+            )
             now, command_id, event_id = self.repo.clock(), str(uuid.uuid4()), None
             if changed:
                 value.update(manual=body["policy"], reason_code=body["reason_code"])
@@ -717,21 +761,23 @@ class OperatorHosts:
                 if old["revision"]:
                     connection.execute(
                         update(operator_policy)
-                        .where(operator_policy.c.id == self.store.key(machine))
+                        .where(
+                            operator_policy.c.id == self.store.key(machine, provider)
+                        )
                         .values(**row)
                     )
                 else:
                     connection.execute(
                         insert(operator_policy).values(
-                            id=self.store.key(machine), **row
+                            id=self.store.key(machine, provider), **row
                         )
                     )
                 event_id = str(uuid.uuid4())
-            new = self.store.read(connection, machine)[0]
+            new = self.store.read(connection, machine, provider=provider)[0]
             receipt = {
                 "state": "completed",
                 "changed": changed,
-                "host": {"provider": "vastai", "machine_id": machine},
+                "host": {"provider": provider, "machine_id": machine},
                 "policy": new,
                 "audit_event_id": event_id,
                 "command_id": command_id,
@@ -759,7 +805,7 @@ class OperatorHosts:
                         aggregate_id=machine,
                         payload={
                             "tenant_id": self.settings.tenant_id,
-                            "provider": "vastai",
+                            "provider": provider,
                             "machine_id": machine,
                             "actor_id": principal.actor_id,
                             "actor_owner": owner,

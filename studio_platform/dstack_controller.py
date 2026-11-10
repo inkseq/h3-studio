@@ -24,7 +24,7 @@ from .dstack_capacity import (
     terminal_review_candidate,
     request_from_document,
 )
-from .capacity_policy import cold_unadmitted_runtime, window_open
+from .capacity_policy import cold_unadmitted_runtime, speed_gate, window_open
 from .capacity_reasons import static_error_code
 from .demand_wakeup import IDLE_SAFETY_SECONDS
 from .dstack_preparation import download_timebox_due, download_too_slow
@@ -646,6 +646,7 @@ class DstackController:
                             fresh_seconds=self.service.policy[
                                 "observation_fresh_seconds"
                             ],
+                            gate=speed_gate(self.service),
                         )
                         or not cold_unadmitted_runtime(
                             binding,
@@ -964,6 +965,7 @@ class DstackController:
                     binding,
                     now,
                     fresh_seconds=self.service.policy["observation_fresh_seconds"],
+                    gate=speed_gate(self.service),
                 )
                 and self._request_stop(current, reason_code=code)
             ):
