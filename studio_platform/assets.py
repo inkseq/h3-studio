@@ -1068,7 +1068,9 @@ class AssetService(AssetSourcePreparation):
             self.journal._available(conn, owner, record, acquire_gate=False)
             return record
 
-    def list(self, owner, project_id):
+    def list(self, owner, project_id, *, wanted=lambda record: True):
+        """wanted filters stored records before the per-record trash and deletion
+        reads (about ten statements each), so a lookup pays only for its matches."""
         with self.engine.connect() as conn:
             rows = conn.execute(
                 select(asset_table.c.record)
@@ -1081,32 +1083,29 @@ class AssetService(AssetSourcePreparation):
                 .order_by(asset_table.c.created.desc())
                 .limit(500)
             ).scalars()
-            result = []
-            for raw in rows:
-                record = json.loads(raw)
-                keys = [
-                    record[role]["key"]
-                    for role in ASSET_OBJECT_ROLES
-                    if record.get(role, {}).get("key")
-                ]
-                from .universal_trash import active_target
+            return [
+                self.public(record)
+                for record in map(json.loads, rows)
+                if wanted(record) and not self._removed(conn, owner, project_id, record)
+            ]
 
-                if active_target(
-                    conn,
-                    self.tenant,
-                    owner,
-                    {"kind": "asset", "project_id": project_id, "id": record["id"]},
-                ):
-                    continue
-                if content_is_deleted(
-                    conn, self.tenant, owner, asset_id=record["id"]
-                ) or any(
-                    content_is_deleted(conn, self.tenant, owner, object_key=key)
-                    for key in keys
-                ):
-                    continue
-                result.append(self.public(record))
-            return result
+    def _removed(self, conn, owner, project_id, record):
+        """In the trash, or deleted for good, by asset or by any stored object."""
+        from .universal_trash import active_target
+
+        target = {"kind": "asset", "project_id": project_id, "id": record["id"]}
+        if active_target(conn, self.tenant, owner, target):
+            return True
+        keys = [
+            record[role]["key"]
+            for role in ASSET_OBJECT_ROLES
+            if record.get(role, {}).get("key")
+        ]
+        return content_is_deleted(
+            conn, self.tenant, owner, asset_id=record["id"]
+        ) or any(
+            content_is_deleted(conn, self.tenant, owner, object_key=key) for key in keys
+        )
 
     def finalize_purge(self, connection, owner, *, asset_ids, artifact_specs, now):
         """Release proven-absent originals in the lifecycle final transaction.
@@ -1273,14 +1272,18 @@ class AssetService(AssetSourcePreparation):
             parent = self.get(owner, asset_id)
         except AssetNotFound:
             return None
-        for record in self.list(owner, parent["project_id"]):
-            if (
+
+        def same_excerpt(record):
+            return (
                 record.get("parent_id") == asset_id
                 and record.get("selection") == {"start": start, "end": end}
                 and record.get("status") == "ready"
-            ):
-                return record  # list() already returns the public, untrashed view
-        return None
+            )
+
+        # list() returns the public, untrashed view. Every shot asks this for each
+        # of its excerpts, so only the matches pay for the trash checks (#1102).
+        matches = self.list(owner, parent["project_id"], wanted=same_excerpt)
+        return next(filter(same_excerpt, matches), None)
 
     def artifact_frame(
         self, owner, project_id, actor_id, artifact_id, job_id, metadata, body, key

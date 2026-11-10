@@ -6,7 +6,7 @@ No schema initialization, storage I/O, task creation, automatic expiry or settle
 import copy
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, StrictBool
-from sqlalchemy import select, insert, update, inspect
+from sqlalchemy import select, insert, update
 from .repository import (
     documents,
     jobs,
@@ -15,6 +15,7 @@ from .repository import (
     request_hash,
 )
 from .content_lifecycle import owner_reference_gate, assert_reference_payload
+from .schema_version import table_exists
 
 TRASH_SCOPE = "__trash"
 TERMINAL = {"succeeded", "failed", "cancelled"}
@@ -67,7 +68,7 @@ def target_key(target):
 
 
 def active_target(conn, tenant, owner, target):
-    if not inspect(conn).has_table(documents.name):
+    if not table_exists(conn, documents.name):
         return None
     row = (
         conn.execute(
@@ -89,7 +90,7 @@ def assert_authoring_available(conn, tenant, owner, value):
         or not isinstance(value.get("id"), str)
     ):
         return
-    if not inspect(conn).has_table(documents.name):
+    if not table_exists(conn, documents.name):
         return
     entities = {e.get("id"): e for e in value["entities"] if isinstance(e, dict)}
     for payload in conn.execute(

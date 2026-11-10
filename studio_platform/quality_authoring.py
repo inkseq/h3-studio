@@ -42,8 +42,11 @@ def _storyboard(value):
     return _dict(_dict(_dict(value).get("journey")).get("storyboard"))
 
 
-def normalize(settings, repo, principal, value, *, stored=False, partial=False):
-    internal = is_admin(principal, repo, settings)
+def normalize(
+    settings, repo, principal, value, *, stored=False, partial=False, internal=None
+):
+    if internal is None:
+        internal = is_admin(principal, repo, settings)
     body = copy.deepcopy(value)
     if (
         partial
@@ -245,6 +248,7 @@ def project(settings, repo, principal, value, *, stored=False, baseline=None):
     without reinterpreting historical routing or permitting new raw selections.
     """
     result = copy.deepcopy(value)
+    internal = None  # One account lookup per story, not one per shot (#1102).
     previous_entities = {
         entity.get("id"): entity
         for entity in _entities(baseline)
@@ -274,7 +278,11 @@ def project(settings, repo, principal, value, *, stored=False, baseline=None):
             entity["data"]["h3"] = _restore_selectors(h3, previous)
             continue
         selected = _selectors(h3)
-        resolved, _ = normalize(settings, repo, principal, selected, stored=stored)
+        if internal is None:
+            internal = is_admin(principal, repo, settings)
+        resolved, _ = normalize(
+            settings, repo, principal, selected, stored=stored, internal=internal
+        )
         if stored and "controls" in h3:
             from .creator_controls import controls
 
