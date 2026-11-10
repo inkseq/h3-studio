@@ -26,7 +26,10 @@ SHOT_FIELDS = {
     "look",
     "camera",
     "dialogueTrack",
+    "cardImages",
 }
+# Pictures a shot picks per card (#504): at most two, the card's own, in send order.
+MAX_CARD_IMAGES = 2
 # A shot's look and camera move (#1043): closed lists; absent or empty is Auto, which adds nothing.
 LOOKS = {
     "film": "Live-action cinema, natural skin, shallow depth of field, soft film grain.",
@@ -179,6 +182,18 @@ def contract():
                             "properties": {"entityId": ident, "clipStart": start},
                         },
                     },
+                    "cardImages": {
+                        "type": "object",
+                        "maxProperties": 40,
+                        "propertyNames": ident,
+                        "additionalProperties": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 2,
+                            "uniqueItems": True,
+                            "items": ident,
+                        },
+                    },
                     "dialogueTrack": {
                         "anyOf": [
                             {"type": "null"},
@@ -226,6 +241,7 @@ def contract():
             "For storyboard shots, present shot.data.cast is the exact override (including an empty list); only absent cast inherits the scene. Explicit storyboard.place=null clears inherited place.",
             "Empty cast lookId uses default look. Empty location versionId uses default version. Existing explicit IDs never silently select a different variant.",
             "Voice/ambient/extra video or audio uses a three-second selected source clip; server asset derivation and real inspection remain authoritative.",
+            "cardImages picks, per character/location/prop card id, which of that card's current pictures (look, location version or prop imageIds) a REF shot sends, 1-2 in order. Absent uses the card's main picture. A picked picture no longer on the card is skipped with a note; if none is left the main picture is sent.",
             "dialogueTrack is a finished speech track for the whole shot: on native-role profiles it replaces voice samples, location ambience and extra audio, is sent from 0 for the shot's full length, and sets audio_conditioning=soundtrack so the model keeps it exactly and moves mouths to it.",
             "Exact h3.deploymentProfileId/recipeId/controls are retained. quality is authoring intent, not permission or automatic profile/model replacement.",
             "continuePrevious requires an owned saved last-frame asset from the immediate previous selected video artifact; admission verifies the original receipt.",
@@ -275,6 +291,36 @@ def _clip(value, lookup, *, sample=True):
     duration = metadata.get("source_duration") if isinstance(metadata, dict) else None
     if type(duration) in (int, float) and start + 3 > duration + 0.01:
         raise ValueError("声音三秒选段超出原文件")
+
+
+def _card_images(value, lookup):
+    """Shape and types only: a picture later removed from its card is skipped at compile."""
+    if not isinstance(value, dict) or len(value) > 40:
+        raise ValueError("镜头参考图选择无效")
+    for card, images in value.items():
+        _id(card)
+        if lookup.get(card, {}).get("type") not in {"character", "location", "prop"}:
+            raise ValueError("镜头参考图选择的卡片不存在或类型错误")
+        if not isinstance(images, list) or not 1 <= len(images) <= MAX_CARD_IMAGES:
+            raise ValueError("每张卡片最多选择2张参考图")
+        _ids(images)
+        for ident in images:
+            _reference(lookup, ident, "image")
+
+
+def picked_images(value, card, images, notes):
+    """The pictures this shot sends for one card: its picks still on the card, or the main one."""
+    chosen = (value.get("cardImages") or {}).get(card["id"])
+    if not chosen:
+        return images[:1]
+    kept = [ident for ident in chosen if ident in images]
+    if len(kept) < len(chosen):
+        notes.append(
+            card["title"]
+            + "：所选参考图已不在卡片上，"
+            + ("只发送其余所选图" if kept else "改用主图")
+        )
+    return kept or images[:1]
 
 
 def validate(project, lookup):
@@ -411,6 +457,7 @@ def validate(project, lookup):
                 for v in lookup[place["locationId"]]["data"].get("versions", [])
             ):
                 raise ValueError("镜头场景版本不存在")
+        _card_images(value.get("cardImages", {}), lookup)
         if value.get("dialogueTrack") is not None:
             track = value["dialogueTrack"]
             _fields(track, {"entityId"}, "台词音轨")
@@ -828,9 +875,9 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             track = None
         for character, look in cast:
             images = look_images(look) if look else []
-            if images:
+            for image in picked_images(value, character, images, notes):
                 add(
-                    images[0],
+                    image,
                     character["title"] + " · " + look["name"],
                     role={
                         "kind": "character",
@@ -838,7 +885,7 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
                         "variant": look.get("name", ""),
                     },
                 )
-            else:
+            if not images:
                 notes.append(character["title"] + "没有造型主图，只使用文字描述")
             if track:
                 continue  # The finished dialogue track carries every voice.
@@ -862,9 +909,9 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
                 if location_version
                 else location["data"].get("referenceAssetIds", [])
             )
-            if images:
+            for image in picked_images(value, location, images, notes):
                 add(
-                    images[0],
+                    image,
                     "场景",
                     role={
                         "kind": "place",
@@ -874,9 +921,11 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
                 )
         for ident in value.get("propIds", []):
             prop = lookup[ident]
-            if prop["data"].get("imageIds"):
+            for image in picked_images(
+                value, prop, prop["data"].get("imageIds", []), notes
+            ):
                 add(
-                    prop["data"]["imageIds"][0],
+                    image,
                     "道具 · " + prop["title"],
                     role={"kind": "prop", "name": prop["title"]},
                 )
