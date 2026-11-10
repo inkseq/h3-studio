@@ -49,6 +49,8 @@ export const storyChatCatalogs = {
       'The picture could not be made from this description. Nothing was charged; try describing it differently.',
     'storyChat.openedWorks': 'Opened in Works',
     'storyChat.failed': "That didn't go through ({reason}). Nothing changed; send it again.",
+    'storyChat.turnUnknown':
+      'The reply could not be confirmed. The assistant may still be working. Reopen this story to check the result; do not resend this message.',
     'storyChat.notReady': 'Chat creation is not switched on here yet.',
     'storyChat.preview': 'Preview with sample replies — nothing is saved or charged.',
     'storyChat.untitled': 'New story',
@@ -189,6 +191,8 @@ export const storyChatCatalogs = {
     'storyChat.pictureRefused': '按这个描述没能画出来，没有扣积分。换个说法再试试。',
     'storyChat.openedWorks': '已在作品中打开',
     'storyChat.failed': '没成功（{reason}）。什么都没改，可以再发一次。',
+    'storyChat.turnUnknown':
+      '暂时无法确认回复，助手可能还在处理。请重新打开这个故事查看结果，不要重复发送这条消息。',
     'storyChat.notReady': '这里还没开启聊天创作。',
     'storyChat.preview': '预览：回复是示例，不会保存也不会扣费。',
     'storyChat.untitled': '新故事',

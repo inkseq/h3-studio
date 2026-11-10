@@ -5,8 +5,6 @@
 // A model turn can take 10–30 s; never give up before the server does.
 export const TURN_TIMEOUT_MS = 120000;
 const POLL_MS = 3000;
-// The route answered without a stream (an older server): the turn never ran.
-export const NO_STREAM = Symbol('story-chat-no-stream');
 // The stream stopped before `done` or `error`: the turn may still be running on the server.
 export const DROPPED = Symbol('story-chat-stream-dropped');
 
@@ -66,10 +64,10 @@ function turnEvent({ event, data }, { refuse, onReply, onProgress }) {
 }
 
 // Read one turn's stream: the `done` body, the server's refusal thrown as the plain POST's
-// error, NO_STREAM or DROPPED.
+// error, or DROPPED. A successful non-stream response does not prove nonexecution.
 export async function readTurn(response, { signal, refuse }, handlers = {}) {
   const type = response.headers.get('Content-Type') || '';
-  if (!response.body || !type.startsWith('text/event-stream')) return NO_STREAM;
+  if (!response.body || !type.startsWith('text/event-stream')) return DROPPED;
   let outcome = null;
   const parser = sseParser((event) => {
     outcome ||= turnEvent(event, { refuse, ...handlers });
@@ -82,7 +80,7 @@ export async function readTurn(response, { signal, refuse }, handlers = {}) {
       parser.push(value);
     }
   } catch (error) {
-    // A deadline or a cancelled page is the request's own error; a dropped stream falls back.
+    // A deadline or a cancelled page is the request's own error; otherwise reconcile reads.
     if (signal?.aborted) throw error;
     return DROPPED;
   } finally {
@@ -109,23 +107,35 @@ async function storedTurn(api, chatPath, turnId, deadline, { wait = pause, now =
   return DROPPED;
 }
 
-// Send one turn through the stream. The plain POST with the SAME turn id is the fallback: at
-// once when the stream route is missing, or after a dropped stream once the wait is over. The
-// server replays a stored turn by id, so the fallback never applies a turn twice.
-export async function sendTurn(api, chatPath, body, options = {}) {
-  const turns = chatPath + '/turns';
-  const post = { method: 'POST', body, timeoutMs: TURN_TIMEOUT_MS };
-  const { now = Date.now } = options;
-  const deadline = now() + TURN_TIMEOUT_MS;
-  let value = NO_STREAM;
+// Only a missing route proves the streaming handler did not accept this turn.
+async function streamOrPlain(api, turns, post, options) {
   try {
-    value = await api.request(turns + '/stream', {
+    return await api.request(turns + '/stream', {
       ...post,
       read: (response, context) => readTurn(response, context, options),
     });
   } catch (failure) {
     if (failure?.status !== 404 && failure?.status !== 405) throw failure;
+    return api.request(turns, post);
+  }
+}
+
+// The original worker can outlive the connection and our read-only wait. A stored turn can
+// be recovered, but the same id does not prevent a second model call while it is in flight.
+export async function sendTurn(api, chatPath, body, options = {}) {
+  const post = { method: 'POST', body, timeoutMs: TURN_TIMEOUT_MS };
+  const deadline = (options.now || Date.now)() + TURN_TIMEOUT_MS;
+  let value;
+  try {
+    value = await streamOrPlain(api, chatPath + '/turns', post, options);
+  } catch (failure) {
+    if (failure?.status) throw failure;
+    value = DROPPED;
   }
   if (value === DROPPED) value = await storedTurn(api, chatPath, body.turn_id, deadline, options);
-  return value === NO_STREAM || value === DROPPED ? api.request(turns, post) : value;
+  if (value === DROPPED)
+    throw Object.assign(new Error('The turn result is not confirmed.'), {
+      detail: { detail: { code: 'story_chat_turn_unknown', turn_id: body.turn_id } },
+    });
+  return value;
 }

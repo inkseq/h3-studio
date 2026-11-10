@@ -632,6 +632,7 @@ export default function StoryChat({ account, mode = 'preview', projectId = null 
           t(count === 1 ? 'storyChat.liveQuote.one' : 'storyChat.liveQuote', { count }),
         failed: (failure) => {
           const code = failure.detail?.detail?.code;
+          if (code === 'story_chat_turn_unknown') return t('storyChat.turnUnknown');
           if (code === 'image_billing_unavailable') return t('storyChat.pictureUnavailable');
           if (code === 'image_not_returned') return t('storyChat.pictureRefused');
           return t('storyChat.failed', { reason: failure.message });

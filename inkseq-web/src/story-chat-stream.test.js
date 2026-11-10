@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCloudClient } from './cloud-client.js';
 import { applyEvent, emptyChat } from './story-chat-model.js';
-import { DROPPED, NO_STREAM, readTurn, sendTurn, sseParser } from './story-chat-stream.js';
+import { DROPPED, readTurn, sendTurn, sseParser } from './story-chat-stream.js';
 
 const encoder = new TextEncoder();
 const sse = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -74,12 +74,13 @@ test('a streamed turn reports the reply and progress, then resolves with the don
   assert.deepEqual(steps, ['thinking', 'applying']);
 });
 
-test('a stream that ends or fails early is dropped; a non-stream answer never ran', async () => {
+test('an incomplete or non-stream answer has an unknown outcome', async () => {
   const context = { signal: new AbortController().signal, refuse: () => assert.fail() };
   assert.equal(await readTurn(streamResponse([sse('reply', { text: 'a' })]), context), DROPPED);
   assert.equal(await readTurn(streamResponse(['event: done\ndata: {"a"'], {}), context), DROPPED);
   assert.equal(await readTurn(streamResponse([], { fail: true }), context), DROPPED);
-  assert.equal(await readTurn(streamResponse(['{}'], { type: 'text/html' }), context), NO_STREAM);
+  assert.equal(await readTurn(streamResponse(['{}'], { type: 'text/html' }), context), DROPPED);
+  assert.equal(await readTurn(new Response(null, { status: 200 }), context), DROPPED);
 });
 
 // The plain POST's refusal and the stream's `error` event become the same error.
@@ -149,8 +150,6 @@ test('a missing stream route falls back to the plain POST with the same turn id'
       ],
     );
   }
-  const api = fakeApi(() => streamResponse(['<html>'], { type: 'text/html' }));
-  assert.deepEqual(await sendTurn(api, '/v1/story-chats/p1', body), { posted: 'turn-9' });
 });
 
 test('other refusals of the stream route are not retried', async () => {
@@ -178,25 +177,39 @@ test('a dropped stream waits for the stored turn instead of asking the model aga
   );
 });
 
-test('a dropped stream that never stores its turn asks once more with the same turn id', async () => {
-  let clock = 0;
-  const api = fakeApi(() => streamResponse([], { fail: true }));
-  const value = await sendTurn(api, '/v1/story-chats/p1', body, {
-    wait: async (ms) => {
-      clock += ms;
+test('unknown turns are reconciled with reads and never reposted after the wait expires', async () => {
+  for (const response of [
+    () => streamResponse([], { fail: true }),
+    () => streamResponse(['<html>'], { type: 'text/html' }),
+    () => streamResponse(['{}'], { type: 'application/json' }),
+    () => new Response(null, { status: 200 }),
+    () => {
+      throw new TypeError('connection lost before headers');
     },
-    now: () => clock,
-  });
-  assert.deepEqual(value, { posted: 'turn-9' });
-  const posts = api.calls.filter((call) => call.method === 'POST');
-  assert.deepEqual(
-    posts.map((call) => [call.path, call.body.turn_id]),
-    [
-      ['/v1/story-chats/p1/turns/stream', 'turn-9'],
-      ['/v1/story-chats/p1/turns', 'turn-9'],
-    ],
-  );
-  assert.ok(api.calls.length > 3);
+  ]) {
+    let clock = 0;
+    const api = fakeApi(response);
+    await assert.rejects(
+      sendTurn(api, '/v1/story-chats/p1', body, {
+        wait: async (ms) => {
+          clock += ms;
+        },
+        now: () => clock,
+      }),
+      (error) => {
+        assert.deepEqual(error.detail.detail, {
+          code: 'story_chat_turn_unknown',
+          turn_id: body.turn_id,
+        });
+        return true;
+      },
+    );
+    assert.deepEqual(
+      api.calls.filter((call) => call.method === 'POST').map((call) => call.path),
+      ['/v1/story-chats/p1/turns/stream'],
+    );
+    assert.ok(api.calls.length > 3);
+  }
 });
 
 test('the chat shows the reply being written until the server view replaces it', () => {
