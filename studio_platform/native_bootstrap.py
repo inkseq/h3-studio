@@ -78,6 +78,7 @@ BOOT_FAILURE_CODES = frozenset(
         "model_download_disk_headroom",
         "model_download_failed",
         "model_download_timeout",
+        "model_download_stalled",
         "model_download_cache_limit",
         "model_download_progress_invalid",
         "model_download_stop_unconfirmed",

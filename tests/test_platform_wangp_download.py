@@ -807,6 +807,100 @@ class DownloadTests(unittest.TestCase):
                 if p.is_file():
                     p.unlink()
 
+    def partial_path(self, filename, etag="etag"):
+        relative = Path(filename)
+        folder = self.models / ".cache" / "huggingface" / "download" / relative.parent
+        folder.mkdir(parents=True, exist_ok=True)
+        name = fetch._short_hash(relative.name + ".metadata")
+        return folder / f"{name}.{etag}.incomplete"
+
+    def test_file_bytes_reads_the_sdk_partial_for_that_file_only(self):
+        self.partial_path("second/config.json").write_bytes(b"{")
+        self.partial_path("tiny.bin").write_bytes(b"sa")
+        (self.partial_path("tiny.bin").parent / "other.etag.incomplete").write_bytes(
+            b"zzzz"
+        )
+        self.assertEqual(fetch.file_bytes(self.models, "tiny.bin"), 2)
+        self.assertEqual(fetch.file_bytes(self.models, "second/config.json"), 1)
+        (self.models / "tiny.bin").write_bytes(b"safe")
+        self.assertEqual(fetch.file_bytes(self.models, "tiny.bin"), 4)
+        self.assertEqual(fetch.file_bytes(self.models, "missing.bin"), 0)
+
+    def test_stalled_file_fails_fast_while_other_files_complete(self):
+        released = threading.Event()
+        self.addCleanup(released.set)
+        now = [0.0]
+        calls = []
+
+        def stalling_sdk(**kwargs):
+            calls.append(kwargs["filename"])
+            if kwargs["filename"] != "tiny.bin":
+                return self.sdk(**kwargs)
+            # Some bytes arrive, then the transfer hangs with no progress. The
+            # owner would kill this process; here the test releases the thread.
+            self.partial_path("tiny.bin").write_bytes(b"sa")
+            released.wait(10)
+            raise OSError("signed https://example.invalid/secret url")
+
+        def ticking_clock():
+            now[0] += 30  # Each watchdog tick sees 30 s pass.
+            return now[0]
+
+        original_write = fetch.write_progress
+
+        def write_and_release(path, value):
+            original_write(path, value)
+            if value["state"] == "failed":
+                released.set()  # Stands in for the owner killing this child.
+
+        with (
+            patch.dict(os.environ, {"HF_HUB_DISABLE_XET": "1"}),
+            patch.object(fetch, "write_progress", side_effect=write_and_release),
+            self.assertRaisesRegex(ValueError, "^model_download_stalled$"),
+        ):
+            self.run_fetch(
+                downloader=stalling_sdk,
+                tick_seconds=0.01,
+                stall_seconds=120,
+                clock=ticking_clock,
+            )
+        value = json.loads(self.progress.read_text())
+        self.assertEqual(value["state"], "failed")
+        self.assertEqual(value["code"], "model_download_stalled")
+        self.assertNotIn("example.invalid", self.progress.read_text())
+        # The stalled transfer was not retried in-process (its SDK lock is held).
+        self.assertEqual(calls.count("tiny.bin"), 1)
+
+    def test_slow_but_moving_file_is_not_a_stall(self):
+        now = [0.0]
+
+        def slow_sdk(**kwargs):
+            if kwargs["filename"] == "tiny.bin":
+                partial = self.partial_path("tiny.bin")
+                for size in range(1, 4):
+                    partial.write_bytes(b"s" * size)
+                    seen = now[0]
+                    deadline = time.monotonic() + 5
+                    while now[0] < seen + 30 and time.monotonic() < deadline:
+                        time.sleep(0.002)
+                partial.unlink()
+            return self.sdk(**kwargs)
+
+        def ticking_clock():
+            now[0] += 30
+            return now[0]
+
+        with patch.dict(os.environ, {"HF_HUB_DISABLE_XET": "1"}):
+            self.run_fetch(
+                downloader=slow_sdk,
+                tick_seconds=0.005,
+                stall_seconds=120,
+                clock=ticking_clock,
+            )
+        value = json.loads(self.progress.read_text())
+        self.assertEqual(value["state"], "downloaded_unverified")
+        self.assertEqual(value["files_complete"], 2)
+
     def test_total_missing_disk_preflight_prevents_sdk_calls(self):
         sdk = Mock()
         with patch.object(
@@ -977,6 +1071,79 @@ class DownloadTests(unittest.TestCase):
             self.run_child(launch, stop=stop, progress=progress)
         stop.assert_called_once()
         progress.assert_not_called()
+
+    def stalled_receipt(self):
+        value = self.receipt()
+        value.update(
+            state="failed",
+            code="model_download_stalled",
+            files_complete=1,
+            bytes_complete=4,
+        )
+        return value
+
+    def test_first_stall_relaunches_the_child_once_and_resumes(self):
+        children = []
+
+        def launch(command, **kwargs):
+            path = command[command.index("--progress") + 1]
+            if not children:
+                fetch.write_progress(path, self.stalled_receipt())
+                child = NS(poll=Mock(return_value=None), name="stalled")
+            else:
+                fetch.write_progress(path, self.receipt())
+                child = NS(poll=lambda: 0, wait=lambda **_: 0, name="resumed")
+            children.append(child)
+            return child
+
+        stop = Mock()
+        value = self.run_child(launch, stop=stop)
+        self.assertEqual(value["state"], "downloaded_unverified")
+        self.assertEqual([c.name for c in children], ["stalled", "resumed"])
+        stop.assert_called_once_with(children[0])
+        self.assertFalse((self.root / "download-state/failure.json").exists())
+
+    def test_second_stall_fails_with_the_stalled_code(self):
+        children = []
+
+        def launch(command, **kwargs):
+            fetch.write_progress(
+                command[command.index("--progress") + 1], self.stalled_receipt()
+            )
+            children.append(NS(poll=Mock(return_value=None)))
+            return children[-1]
+
+        stop = Mock()
+        with self.assertRaisesRegex(ValueError, "^model_download_stalled$"):
+            self.run_child(launch, stop=stop)
+        self.assertEqual(len(children), 2)
+        self.assertEqual(stop.call_args_list, [((c,),) for c in children])
+        failure = json.loads((self.root / "download-state/failure.json").read_text())
+        self.assertEqual(
+            failure["download_failure"],
+            {"error_code": "model_download_stalled", "stop_status": "confirmed"},
+        )
+
+    def test_stall_reported_at_child_exit_also_relaunches(self):
+        children = []
+
+        def launch(command, **kwargs):
+            path = command[command.index("--progress") + 1]
+            final = self.stalled_receipt() if not children else self.receipt()
+            earlier = self.receipt()
+            earlier.update(state="downloading", files_complete=0, bytes_complete=0)
+            fetch.write_progress(path, earlier)
+
+            def exited():
+                fetch.write_progress(path, final)
+                return 1 if final["state"] == "failed" else 0
+
+            children.append(NS(poll=exited, wait=lambda **_: 0))
+            return children[-1]
+
+        value = self.run_child(launch, stop=Mock())
+        self.assertEqual(value, self.receipt())
+        self.assertEqual(len(children), 2)
 
     def test_failure_receipt_stops_and_reaps_child_while_sdk_peer_still_runs(self):
         value = self.receipt()

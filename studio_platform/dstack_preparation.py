@@ -66,6 +66,7 @@ REASONS = {
     "dstack_never_allocated": "启动失败，已核实未分配机器",
     "dstack_allocation_requires_reconciliation": "启动分配结果尚未确认，保留原记录等待核对",
     "model_download_timeout": "权重下载超时",
+    "model_download_stalled": "权重下载长时间没有进展",
     "model_download_failed": "权重下载失败",
     "ModelDownloadFailed": "权重下载失败",
     "model_download_size_mismatch": "下载文件大小与清单不符",
