@@ -87,6 +87,19 @@ event time is filtered by the exact configured account and mode. An imported
 but unmounted credential is not runtime readiness; 005 cannot authorize LIVE
 writes. OFF/readiness is not proof that a real-card loop has passed.
 
+## Revenue summary (#485)
+
+`GET /v1/admin/revenue?days=7|30|90` (human admins only, read-only) reports the
+orders paid in the period, with `live` and `test` blocks kept apart so Stripe
+test mode never reads as revenue. Each block has `orders`, `orders_by_pack`,
+`gross_cents` (tax-inclusive, from the processed signed checkout event),
+`tax_cents`, `refunded_cents`, `disputed_count`, `open_disputes`,
+`paying_users`, `first_time_payers`, `credits_sold` and `net_estimate_cents`.
+The net figure is an estimate with the fee terms of the admin margin estimate;
+an open dispute counts as lost until it closes. `credits_used` (captures in the
+period) and `credits_outstanding` (every balance, free grants included) cover
+the whole tenant. `provider_cost_usd` stays null until a measured cost exists.
+
 ## Inkseq-owned customer receipts (#307)
 
 `GET /v1/billing/payments` always returns `receipt_url: null`. For confirmed paid,

@@ -436,9 +436,13 @@ def register_routes(app):
     @app.get("/v1/admin/provider-balances")
     def provider_balances(request: Request):
         human(request, admin=True)
+        from .spending_by_provider import with_ledger
         from .providers.balances import read_stored
 
-        return response(read_stored(settings))
+        with repo._budget_read() as connection:
+            return response(
+                with_ledger(read_stored(settings), connection, repo.clock())
+            )
 
     @app.get("/v1/admin/settings-inventory")
     def settings_inventory(request: Request):

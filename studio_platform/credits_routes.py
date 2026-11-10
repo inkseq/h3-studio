@@ -263,6 +263,13 @@ class CreditAPI:
                 },
             }
 
+    def admin_revenue(self, principal, days):
+        from .payment_revenue import report
+
+        with self.repo._budget_read() as connection:
+            self._actor(connection, principal)
+            return report(connection, self.settings.tenant_id, self.repo.clock(), days)
+
     def _policy(self, connection, value):
         where = and_(
             documents.c.tenant_id == self.settings.tenant_id,
@@ -529,6 +536,10 @@ def register_routes(app):
     @app.get("/v1/admin/credits/prices")
     def admin_prices(request: Request):
         return response(service.admin_prices(request.state.principal))
+
+    @app.get("/v1/admin/revenue")
+    def admin_revenue(request: Request, days: int = Query(30)):
+        return response(service.admin_revenue(request.state.principal, days))
 
     @app.post("/v1/admin/credits/prices")
     def publish(

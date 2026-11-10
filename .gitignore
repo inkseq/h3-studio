@@ -1196,3 +1196,6 @@ inventory.json
 !studio_platform/speech_requests.py
 !tests/test_speech_credit_core.py
 !tests/test_speech_billing.py
+!studio_platform/spending_by_provider.py
+!studio_platform/payment_revenue.py
+!tests/test_admin_money.py
