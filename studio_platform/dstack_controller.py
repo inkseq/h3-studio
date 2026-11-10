@@ -25,6 +25,7 @@ from .dstack_capacity import (
     request_from_document,
 )
 from .capacity_policy import cold_unadmitted_runtime, window_open
+from .capacity_reasons import static_error_code
 from .demand_wakeup import IDLE_SAFETY_SECONDS
 from .dstack_preparation import download_timebox_due, download_too_slow
 from .dstack_operator import (
@@ -1230,7 +1231,10 @@ class DstackController:
                     closed_since_health = True
             except Exception as error:
                 _logger.warning(
-                    "dstack_controller_observation_failed error_type=%s",
+                    "dstack_controller_observation_failed node_id=%s "
+                    "error_code=%s error_type=%s",
+                    node.get("intent_id"),
+                    static_error_code(error),
                     type(error).__name__,
                 )
                 code = (

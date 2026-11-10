@@ -1,8 +1,10 @@
 """Staging test limits projected from the original reservation ledger.
 
-V2 is scoped to an immutable acceptance task, not a daily counter. V1 remains
-readable for original runs; no historical attribution or invoice is rewritten.
-Layered owner/shared reservations are counted only once.
+V2 is scoped to an immutable acceptance task id. Demand starts derive that id
+per Sydney day from the configured one (``demand_task_id``), so the cap is a
+window, not one counter that never resets (#1140). V1 remains readable for
+original runs; no historical attribution or invoice is rewritten. Layered
+owner/shared reservations are counted only once.
 """
 
 from datetime import datetime, time, timedelta, timezone
@@ -42,6 +44,23 @@ TASK = re.compile(r"[A-Za-z0-9_.:\-]{1,100}")
 
 def valid_task_id(value):
     return isinstance(value, str) and TASK.fullmatch(value) is not None
+
+
+def demand_task_id(demand, now):
+    """The task id a demand start funds from now: configured id + Sydney day.
+
+    A running machine keeps the id frozen in its own guard, so a day change
+    never moves its funding; only new starts draw on the new day's cap. The
+    configured id stays the operator's batch name and the queued job's
+    admission record. None when no id is configured; an id with no room for
+    the day suffix is returned invalid, so the caller refuses it.
+    """
+    base = demand.get("test_task_id") if isinstance(demand, dict) else None
+    if base is None:
+        return None
+    start, _ = day_window(now)
+    day = datetime.fromtimestamp(start, ZoneInfo("Australia/Sydney"))
+    return "%s:%s" % (base, day.strftime("%Y%m%d"))
 
 
 def guard_limit(guard):
@@ -193,6 +212,7 @@ def _removed_estimate(row, now):
     proof = binding.get("provider_removal_proof")
     at = proof.get("observed_at") if isinstance(proof, dict) else None
     estimate = binding.get("estimated_cost_microusd")
+    # Not added below, but a malformed allowance is still untrusted evidence.
     extra = payload.get("extra_reservation_microusd", 0)
     hourly = payload.get("hourly_cost_microusd")
     started = row["create_started_at"]
@@ -227,8 +247,10 @@ def _removed_estimate(row, now):
         return None
     # A native cost may be zero or stop updating before physical removal.
     # Cover the original elapsed rental at its accepted rate until that proof.
+    # The per-machine transport allowance covers an open run's unknowns; a
+    # proven-removed machine no longer holds it (#1140, #1068 item 1).
     floor = math.ceil(hourly * (at - started) / 3600)
-    return max(estimate, floor) + extra
+    return max(estimate, floor)
 
 
 def projected_cost(

@@ -277,6 +277,31 @@ SCENARIOS = [
         ],
     ),
     Scenario(
+        "demand_owner_profile_added",
+        "A job owner's own profile is listed while its journaled jobs wait.",
+        # #1159 (staging 11-09, the qa-admin v9 FL profile): the jobs' demand
+        # journals were written for the other owner's profile they fell back
+        # to. The new profile is now preferred for them, and a journal keyed
+        # to the old one read policy_changed for good. Both jobs are refused
+        # by the test cap first so each one holds a journal.
+        hours=4,
+        test_guard={"task_limit_microusd": 50_000_000, "max_runtime_seconds": 7200},
+        spent_fraction=0.99,
+        owner_profiles=("superdan",),
+        jobs=[JobBatch(0, 2, owner="supervan", actual_runtime_s=600)],
+        events=[
+            Event(
+                20 * 60,
+                "edit_demand_config",
+                {
+                    "test_task_id": "sim-task-2",
+                    "profile_ids": ["fl-superdan", "fl-supervan"],
+                    "profile_owners": {"fl-supervan": "supervan"},
+                },
+            )
+        ],
+    ),
+    Scenario(
         "lookahead_fl_30_min_jobs",
         "Start rules (lookahead v1) with 24 queued 30-minute FL jobs.",
         hours=6,

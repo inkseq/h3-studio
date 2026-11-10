@@ -37,6 +37,7 @@ from studio_platform.dstack_capacity import DstackError
 from studio_platform.dstack_controller import DstackController
 from studio_platform.dstack_demand_policy import policy_key
 from studio_platform.dstack_operator import DstackOperator
+from studio_platform.dstack_test_budget import ACCOUNT, demand_task_id
 from studio_platform.fleet import SlotConfig
 from studio_platform.inference.wangp_contract import HostReadiness
 from studio_platform.operator_capacity import operator_nodes, operator_policy
@@ -811,8 +812,6 @@ class World(LedgerCase):
             max_instances=scenario.max_machines, max_physical_gpus=scenario.max_machines
         )
         if guard:
-            from studio_platform.dstack_test_budget import ACCOUNT
-
             # The staging shape of DailyTestBudgetTests, with the task guard
             # template giving the admin defaults (cap and runtime window).
             self.settings.public_origin = "https://staging.inkseq.com"
@@ -920,7 +919,9 @@ class World(LedgerCase):
             )
         if guard and scenario.spent_fraction:
             spent = int(guard["task_limit_microusd"] * scenario.spent_fraction)
-            self._seed_history(1, task=demand["test_task_id"], actual=spent)
+            # Spent from the task window the simulation starts in (#1140).
+            task = demand_task_id(demand, self.now + 86400)
+            self._seed_history(1, task=task, actual=spent)
             self._prespent = spent
         # History predates the audited capacity policy (and its tenant daily
         # cap on unsettled exposure); the simulation starts a day later.
@@ -1304,13 +1305,31 @@ class World(LedgerCase):
 
     def _edit_demand_config(self, value):
         demand = self.config["policy"]["demand_start"]
+        value = dict(value)
+        # {profile id: owner} for newly listed profiles owned by someone else
+        # than the first profile's owner (#1159).
+        owners = value.pop("profile_owners", {})
         known = {profile["id"] for profile in self.config["profiles"]}
         for profile_id in value.get("profile_ids", ()):
             if profile_id not in known:
                 # A newly listed profile: same machine type, another id.
-                self.config["profiles"].append(
-                    dict(copy.deepcopy(self.config["profiles"][0]), id=profile_id)
-                )
+                profile = dict(copy.deepcopy(self.config["profiles"][0]), id=profile_id)
+                owner = owners.get(profile_id)
+                if owner is not None and owner != profile["owner_id"]:
+                    account = owner + "-budget"
+                    self.repo.configure_budget(
+                        account,
+                        tenant_id=self.scope.tenant_id,
+                        owner_id=owner,
+                        limit_microusd=10_000_000_000,
+                    )
+                    profile["owner_id"] = owner
+                    accounts = [account]
+                    if self.scenario.test_guard:
+                        profile["project_id"] = "project-inkseq-staging-" + owner
+                        accounts = [ACCOUNT, account]
+                    profile["budget_account_ids"] = accounts
+                self.config["profiles"].append(profile)
         if value.get("test_task_id", demand.get("test_task_id")) != demand.get(
             "test_task_id"
         ):
@@ -1879,6 +1898,12 @@ class World(LedgerCase):
         if not guard:
             return
         billed = self._billed_microusd()
+        window = demand_task_id(self.config["policy"]["demand_start"], self.now)
+        if window != self._spend_window:
+            if self._spend_window is not None:
+                # A new Sydney day is a fresh task cap (#1140).
+                self._prespent = -billed
+            self._spend_window = window
         limit = self._task_limit
         if billed + self._prespent > limit and not self._flagged_spend:
             self._flagged_spend = True
@@ -2017,6 +2042,7 @@ class World(LedgerCase):
             False,
         )
         self._prespent, self._task_limit, self._demand_reason = 0, 0, None
+        self._spend_window = None
         try:
             self.build()
             self.start = self.now
