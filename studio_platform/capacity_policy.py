@@ -11,6 +11,19 @@ def _finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def speed_gate(service):
+    """The tenant's download speed gate from the admin capacity policy (#903).
+
+    One settings read; any failure keeps the documented default gate.
+    """
+    from .dstack_preparation import speed_gate as gate
+
+    try:
+        return gate(service._admin_limits()["value"])
+    except Exception:
+        return gate()
+
+
 def window_open(intent, node, now):
     deadline = intent.get("hard_deadline")
     if deadline is not None:

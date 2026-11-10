@@ -285,6 +285,19 @@ SCENARIOS = [
         jobs=[JobBatch(0, 24, actual_runtime_s=600)],
     ),
     Scenario(
+        "upstream_download_slowdown",
+        "Every host downloads at 30 MB/s for the first hour: a CDN, not the hosts.",
+        # #903: one 180 s average cannot tell a slow host from a slow
+        # upstream. Each slow host is stopped and replaced; the first two are
+        # denied, then the brake stops denying and raises one alert. Healthy
+        # hosts follow and finish the queue.
+        hours=4,
+        jobs=[JobBatch(0, 2, actual_runtime_s=300)],
+        machines=[MachineScript(download_seconds=52e9 / 30e6)] * 3,
+        expect_slow_denies=2,
+        expect_alerts=("capacity_download_upstream_slow",),
+    ),
+    Scenario(
         "slow_ticks_fresh_30",
         "Ticks 9 to 100 s apart, 30 s input transfer, 30 s readiness proof.",
         hours=4,

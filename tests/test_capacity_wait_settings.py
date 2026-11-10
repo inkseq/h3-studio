@@ -43,6 +43,7 @@ class WaitPolicyTests(unittest.TestCase):
         for changes in (
             {"fair_share": False},
             {"modal_trigger_seconds": 180},
+            {"min_download_mb_per_second": 30, "download_measure_seconds": 300},
             capacity.OPTIONAL_DEFAULTS,
         ):
             with self.subTest(changes=changes):
@@ -67,6 +68,8 @@ class WaitPolicyTests(unittest.TestCase):
             {"first_video_max_seconds": 29},
             {"next_video_interval_seconds": 3601},
             {"modal_trigger_seconds": 0},
+            {"min_download_mb_per_second": 4},
+            {"download_measure_seconds": 59},
             {"first_video_max_seconds": 120, "modal_trigger_seconds": 180},
             {"unknown_wait": 300},
         ):
@@ -131,7 +134,8 @@ class WaitRouteTests(unittest.TestCase):
             row = rows["capacity." + key]
             self.assertEqual(row["revision"], stored["version"])
             self.assertEqual(row["source"], "database:spending_settings")
-            self.assertEqual(row["effective"], key == "fair_share")
+            # Implemented controls take effect; pending ones are listed only.
+            self.assertEqual(row["effective"], key not in capacity.PENDING_FIELDS)
             self.assertNotIn("pending:" + key, inventory["unavailable"])
 
 

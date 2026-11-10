@@ -75,6 +75,16 @@ OFFER_METADATA_FIELDS = {"country", "region", "advertised_download_mbps"}
 HOST_METADATA_FIELDS = OFFER_METADATA_FIELDS - {"region"}
 
 
+# An upstream (CDN or region) slowdown makes every host look slow. Once this
+# many distinct hosts are slow-stopped within the window, later slow hosts are
+# still stopped and replaced, but no longer denied, and one alert is raised
+# per window (#903).
+UPSTREAM_BRAKE_HOSTS = 3
+UPSTREAM_BRAKE_SECONDS = 3600
+SLOW_STOP_EVENT = "dstack.download_slow_stop"
+UPSTREAM_ALERT = "capacity_download_upstream_slow"
+
+
 def finite(value, *, minimum=0, maximum=9_000_000_000_000):
     return (
         type(value) in (int, float)
@@ -290,6 +300,73 @@ def lium_observation(provisioning, binding, now):
         return None
 
 
+def slow_stop_braked(connection, tenant, node_id, physical, now):
+    """Journal one slow-download stop; True when the upstream brake applies.
+
+    Every slow stop of a bound host is recorded (node, provider, host). The
+    brake counts distinct hosts stopped for slowness within the window, this
+    one included.
+    """
+    connection.execute(
+        insert(outbox).values(
+            id=str(uuid.uuid4()),
+            event_type=SLOW_STOP_EVENT,
+            aggregate_id=node_id,
+            payload={
+                "tenant_id": tenant,
+                "provider": physical["provider"],
+                "machine_id": physical["machine_id"],
+            },
+            created_at=now,
+        )
+    )
+    rows = connection.execute(
+        select(outbox.c.payload).where(
+            outbox.c.event_type == SLOW_STOP_EVENT,
+            outbox.c.created_at >= now - UPSTREAM_BRAKE_SECONDS,
+            outbox.c.payload["tenant_id"].as_string() == tenant,
+        )
+    ).scalars()
+    hosts = {
+        (row.get("provider"), row.get("machine_id"))
+        for row in rows
+        if isinstance(row, dict)
+    }
+    if len(hosts) < UPSTREAM_BRAKE_HOSTS:
+        return False
+    alerted = connection.execute(
+        select(outbox.c.id)
+        .where(
+            outbox.c.event_type == "capacity.health_alert",
+            outbox.c.created_at >= now - UPSTREAM_BRAKE_SECONDS,
+            outbox.c.payload["tenant_id"].as_string() == tenant,
+            outbox.c.payload["code"].as_string() == UPSTREAM_ALERT,
+        )
+        .limit(1)
+    ).first()
+    if alerted is None:
+        identity = str(uuid.uuid4())
+        connection.execute(
+            insert(outbox).values(
+                id=identity,
+                event_type="capacity.health_alert",
+                aggregate_id=node_id,
+                payload={
+                    "version": 1,
+                    "code": UPSTREAM_ALERT,
+                    "diagnosis": "download_upstream_slow",
+                    "resource_id": node_id,
+                    "since": now,
+                    "slow_hosts": len(hosts),
+                    "event_id": identity,
+                    "tenant_id": tenant,
+                },
+                created_at=now,
+            )
+        )
+    return True
+
+
 def failure(value, *, now):
     require(
         isinstance(value, dict)
@@ -491,11 +568,12 @@ class HostPolicyStore:
     ):
         """Persistently deny one host after a measured slow download.
 
-        The caller holds the capacity lock. An existing manual deny is kept;
-        any other policy is replaced and audited like an admin change.
+        The caller holds the capacity lock. An existing manual deny or prefer
+        is kept; a default policy is replaced and audited like an admin change.
         """
         old, value = self.read(connection, machine_id, now=now, provider=provider)
-        if old["manual"] == "deny":
+        # A host an admin chose to prefer is stopped but never auto-denied (#903).
+        if old["manual"] in {"deny", "prefer"}:
             return False
         value.update(manual="deny", reason_code=AUTOMATIC_SLOW_DOWNLOAD)
         row = {

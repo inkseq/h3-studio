@@ -180,6 +180,18 @@ class HostPolicyTests(ledger.LedgerCase):
             )
         self.assertEqual(len(self.service.audit(self.owner)["events"]), 3)
 
+    def test_slow_download_never_overrides_an_admin_prefer(self):
+        # #903 item 4: a preferred host is only stopped, never auto-denied.
+        self.service.policy(self.owner, self.body("prefer"), "prefer")
+        store = HostPolicyStore(self.repo, self.scope.tenant_id)
+        with self.repo.transaction() as conn:
+            self.assertFalse(
+                store.deny_slow_download(conn, "19492", node_id="node-one", now=1000)
+            )
+        host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]
+        self.assertEqual(host["policy"]["effective"], "prefer")
+        self.assertEqual(len(self.service.audit(self.owner)["events"]), 1)
+
     def test_unknown_lookup_is_not_fabricated_and_policy_audit_replay(self):
         host = self.service.list(self.owner, admin=True, machine_id="19492")["hosts"][0]
         self.assertFalse(host["identity_confirmed"])

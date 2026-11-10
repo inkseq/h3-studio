@@ -130,6 +130,7 @@ def sanitized_event(event, hint=None):
                 "capacity_download_overdue",
                 "capacity_start_blocked",
                 "capacity_collect_stuck",
+                "capacity_download_upstream_slow",
             }
             or type(tags.get("diagnosis")) is not str
             or tags["diagnosis"]
@@ -146,6 +147,7 @@ def sanitized_event(event, hint=None):
                 "download_unobserved",
                 "start_blocked",
                 "collect_stuck",
+                "download_upstream_slow",
             }
             or "detail" in tags
             and (
