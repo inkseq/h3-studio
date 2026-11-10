@@ -1,5 +1,6 @@
 import { EmptyState, Note } from './ui/Note.jsx';
 import { Disclosure } from './ui/Disclosure.jsx';
+import { Field } from './ui/Field.jsx';
 import { Button } from './ui/Button.jsx';
 import { Chip } from './ui/Chip.jsx';
 import { Segmented } from './ui/Segmented.jsx';
@@ -470,8 +471,7 @@ export function MachineRow({
 function TestTaskField({ value, onChange, disabled = false }) {
   const { t } = useI18n();
   return (
-    <label className="qc-field">
-      {t('settings.testTaskId')}
+    <Field label={t('settings.testTaskId')} help={t('settings.testTaskHelp')}>
       <input
         aria-label={t('settings.testTaskId')}
         maxLength="100"
@@ -481,8 +481,7 @@ function TestTaskField({ value, onChange, disabled = false }) {
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
       />
-      <small className="muted">{t('settings.testTaskHelp')}</small>
-    </label>
+    </Field>
   );
 }
 function StartDialog({

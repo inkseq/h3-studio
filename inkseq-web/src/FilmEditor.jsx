@@ -29,6 +29,7 @@ import { Clapperboard, EyeOff, Gauge, Undo2, Unlink, Volume2, VolumeX } from 'lu
 import { store } from './store.js';
 import { useStoryboardMediaUrl } from './StoryboardMedia.jsx';
 import { cutFps } from './video-cut-model.js';
+import { chapterShots, shotsAspect } from './delivery-model.js';
 import { captionProblems, captionStatus, captionTrack, orderedCues } from './caption-model.js';
 import {
   addCue,
@@ -107,6 +108,9 @@ function FilmPlayhead({ player, pps }) {
 }
 
 const SIZES = { '9:16': [720, 1280], '16:9': [1280, 720], '1:1': [960, 960], '4:3': [960, 720] };
+// A clip whose file cannot play (an expired link, a dropped connection) shows black for its
+// time instead of throwing out of the player (Remotion throws when no onError is given).
+const keepPlaying = () => {};
 
 // The whole cut as one Remotion composition: each included clip is a Sequence that plays
 // its source from the trimmed in-point, so the preview matches the exporter frame for frame.
@@ -135,6 +139,7 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
                   trimBefore={part.startFrame}
                   pauseWhenBuffering
                   muted
+                  onError={keepPlaying}
                   style={{ width: '100%', height: '100%', objectFit: 'contain' }}
                 />
               </Sequence>
@@ -146,6 +151,7 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
               playbackRate={clip.rate}
               pauseWhenBuffering
               muted
+              onError={keepPlaying}
               style={{ width: '100%', height: '100%', objectFit: 'contain' }}
             />
           ) : (
@@ -176,6 +182,7 @@ function Cut({ clips, sources, cues = [], audio = [] }) {
               trimBefore={a.trimBefore}
               playbackRate={a.rate}
               pauseWhenBuffering
+              onError={keepPlaying}
               volume={(f) => a.volume * envelope(f, a.frames, a.fadeIn, a.fadeOut)}
             />
           </Sequence>
@@ -368,10 +375,13 @@ function TimelineClip({
             }}
           />
         ))}
-      <span className="film-tclip-label">
-        <b>{clip.index + 1}</b>
-        {width >= 72 && <span>{clip.name}</span>}
-      </span>
+      {/* The number needs room for its pill; a sliver of a clip shows only its picture. */}
+      {width >= 30 && (
+        <span className="film-tclip-label">
+          <b>{clip.index + 1}</b>
+          {width >= 72 && <span>{clip.name}</span>}
+        </span>
+      )}
       {clip.rate !== 1 && width >= 30 && (
         <span className="film-tclip-rate">{t('editor.rate', { rate: clip.rate })}</span>
       )}
@@ -491,7 +501,7 @@ export default function FilmEditor({
     }),
   );
   const busy = !!s.busy;
-  const aspect = project.journey?.delivery?.aspect || project.journey?.brief?.aspect || '16:9',
+  const aspect = shotsAspect(project, chapterShots(project, chapterId)),
     [width, height] = SIZES[aspect] || SIZES['16:9'];
   const onUrl = useCallback(
     (id, url) => setSources((old) => (old[id] === url ? old : { ...old, [id]: url })),
@@ -732,7 +742,7 @@ export default function FilmEditor({
       window.removeEventListener('keydown', late);
     };
   }, []);
-  const addAudio = async (asset, file, { wholeFilm = false } = {}) => {
+  const addAudio = async (asset, file, { wholeFilm = false, at = null } = {}) => {
     let duration = asset.data.metadata?.duration ?? asset.data.metadata?.duration_s;
     if (!Number.isFinite(duration) && file) duration = await probeDuration(file);
     edit((p) => {
@@ -740,7 +750,7 @@ export default function FilmEditor({
         p,
         chapterId,
         p.entities.find((e) => e.id === asset.id),
-        wholeFilm ? 0 : playhead(),
+        wholeFilm ? 0 : (at ?? playhead()),
         duration,
       );
       // Music for the whole film starts at 0 and stops where the film ends.
@@ -1126,6 +1136,11 @@ export default function FilmEditor({
                   edit((p) => trimTrack(p, chapterId, id, side, delta, cutTimeline))
                 }
                 onRemove={(id) => edit((p) => removeTrack(p, chapterId, id))}
+                sources={sources}
+                busy={busy}
+                onDropFiles={
+                  onUploadAudio ? (files, at) => void uploadAudio(files, { at }) : undefined
+                }
               />
               <CaptionLane
                 cues={rawCues}

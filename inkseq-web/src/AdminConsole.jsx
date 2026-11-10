@@ -7,6 +7,7 @@ import { ChevronDown, History } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { apiDate, formatCredits } from './credits.js';
 import { rememberSupportView } from './support-view.js';
+import { AdminRevenue } from './AdminRevenue.jsx';
 import './admin.css';
 
 // Reads a cursor-paged list; 404 means the endpoint is not deployed on this server yet.
@@ -257,14 +258,34 @@ export function AdminPricing({ api, active }) {
       live = false;
     };
   }, [api, active]);
-  if (state === 'missing') return <p className="muted">{t('admin.notDeployed')}</p>;
-  if (state === 'error') return <p role="alert">{t('admin.pricingError')}</p>;
-  if (!data) return <p role="status">{t('settings.loading')}</p>;
+  const revenue = <AdminRevenue api={api} active={active} />;
+  if (state === 'missing')
+    return (
+      <>
+        {revenue}
+        <p className="muted">{t('admin.notDeployed')}</p>
+      </>
+    );
+  if (state === 'error')
+    return (
+      <>
+        {revenue}
+        <p role="alert">{t('admin.pricingError')}</p>
+      </>
+    );
+  if (!data)
+    return (
+      <>
+        {revenue}
+        <p role="status">{t('settings.loading')}</p>
+      </>
+    );
   const estimate = data.margin_estimate || {},
     tiers = estimate.tiers || {},
     a = estimate.assumptions || {};
   return (
     <>
+      {revenue}
       <div className="card-box">
         <h4>{t('admin.pricingTiers')}</h4>
         <div className="margin-table">

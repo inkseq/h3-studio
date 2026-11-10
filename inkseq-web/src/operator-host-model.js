@@ -6,9 +6,28 @@ export const hostPolicyOptions = [
   { value: 'prefer', label: '优先选用', reason: 'operator_host_preferred' },
   { value: 'deny', label: '禁止选用', reason: 'operator_host_denied' },
 ];
-export const physicalHostId = (value) =>
-  (typeof value === 'string' && /^[1-9][0-9]{0,17}$/.test(value)) ||
-  (Number.isSafeInteger(value) && value > 0);
+// Hosts are keyed on provider + physical id (h3-studio#900): a Vast machine id or a
+// Lium executor id. A Lium host can also be denied for bad output.
+export const hostProviders = ['vastai', 'lium'];
+const HOST_SOURCES = { vastai: 'vast_machine_id', lium: 'lium_executor_id' };
+const POLICY_ONLY_SOURCES = { vastai: 'operator_supplied_numeric', lium: 'operator_supplied_id' };
+const EXECUTOR = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const knownHostProvider = (value) => hostProviders.includes(value);
+export const physicalHostId = (value, provider = 'vastai') =>
+  provider === 'lium'
+    ? typeof value === 'string' && EXECUTOR.test(value)
+    : provider === 'vastai' &&
+      ((typeof value === 'string' && /^[1-9][0-9]{0,17}$/.test(value)) ||
+        (Number.isSafeInteger(value) && value > 0));
+// One choice per policy and reason, so the editor is a single select.
+export const hostPolicyChoices = [
+  ...hostPolicyOptions.map((option) => ({ ...option, key: option.value, policy: option.value })),
+  { key: 'deny_bad_output', policy: 'deny', reason: 'operator_host_bad_output' },
+];
+export const hostPolicyChoice = (policyValue) =>
+  hostPolicyChoices.find(
+    (choice) => choice.policy === policyValue.manual && choice.reason === policyValue.reason_code,
+  )?.key ?? policyValue.manual;
 export const hostText = (value, locale = 'zh') =>
   typeof value === 'string' &&
   value.trim().length > 0 &&
@@ -21,6 +40,7 @@ const HOST_REASONS = [
   'operator_host_default',
   'operator_host_preferred',
   'operator_host_denied',
+  'operator_host_bad_output',
   'automatic_slow_download',
 ];
 export const hostReasonText = (value, locale = 'zh') =>
@@ -119,13 +139,13 @@ export function validHostPolicy(value) {
   );
 }
 export function hostPolicyBody(host, selection) {
-  const option = hostPolicyOptions.find((value) => value.value === selection);
-  if (!validHostSummary(host, { allowPolicyOnly: true }) || !option) return null;
+  const choice = hostPolicyChoices.find((value) => value.key === selection);
+  if (!validHostSummary(host, { allowPolicyOnly: true }) || !choice) return null;
   return {
-    provider: 'vastai',
+    provider: host.provider,
     machine_id: String(host.machine_id),
-    policy: option.value,
-    reason_code: option.reason,
+    policy: choice.policy,
+    reason_code: choice.reason,
     expected_revision: host.policy.revision,
     expected_snapshot: host.policy.snapshot,
   };
@@ -135,13 +155,13 @@ export function validHostPolicyBody(body) {
     body &&
     Object.keys(body).sort().join(',') ===
       'expected_revision,expected_snapshot,machine_id,policy,provider,reason_code' &&
-    body.provider === 'vastai' &&
-    physicalHostId(body.machine_id) &&
+    knownHostProvider(body.provider) &&
+    physicalHostId(body.machine_id, body.provider) &&
     typeof body.machine_id === 'string' &&
     count(body.expected_revision) &&
     snapshot(body.expected_snapshot) &&
-    hostPolicyOptions.some(
-      (option) => option.value === body.policy && option.reason === body.reason_code,
+    hostPolicyChoices.some(
+      (choice) => choice.policy === body.policy && choice.reason === body.reason_code,
     )
   );
 }
@@ -152,7 +172,7 @@ export function hostPolicyReceipt(value, body) {
     typeof value.command_id === 'string' &&
     !!value.command_id &&
     typeof value.changed === 'boolean' &&
-    value.host?.provider === 'vastai' &&
+    value.host?.provider === body.provider &&
     String(value.host.machine_id) === body.machine_id &&
     validHostPolicy(value.policy) &&
     value.policy.manual === body.policy &&
@@ -165,11 +185,12 @@ export function hostPolicyReceipt(value, body) {
         value.policy.snapshot === body.expected_snapshot)
   );
 }
-export function validHostPage(value, account, { admin = false } = {}) {
+export function validHostPage(value, account, { admin = false, provider = 'vastai' } = {}) {
   return (
     value?.account === account &&
     value.admin === admin &&
-    value.provider === 'vastai' &&
+    value.provider === provider &&
+    (admin || provider === 'vastai') &&
     nonnegative(value.as_of) &&
     count(value.offset) &&
     count(value.limit) &&
@@ -179,16 +200,19 @@ export function validHostPage(value, account, { admin = false } = {}) {
     Array.isArray(value.hosts) &&
     value.hosts.length <= value.limit &&
     new Set(value.hosts.map((host) => String(host?.machine_id))).size === value.hosts.length &&
-    value.hosts.every((host) => validHostSummary(host, { allowPolicyOnly: admin }))
+    value.hosts.every(
+      (host) => host?.provider === provider && validHostSummary(host, { allowPolicyOnly: admin }),
+    )
   );
 }
 export function validHostSummary(host, { allowPolicyOnly = false } = {}) {
+  const provider = host?.provider;
   const observed =
-    host?.identity_confirmed === true && host.physical_id_source === 'vast_machine_id';
+    host?.identity_confirmed === true && host.physical_id_source === HOST_SOURCES[provider];
   const policyOnly =
     allowPolicyOnly &&
     host?.identity_confirmed === false &&
-    host.physical_id_source === 'operator_supplied_numeric' &&
+    host.physical_id_source === POLICY_ONLY_SOURCES[provider] &&
     host.runs === 0 &&
     host.failure_count === 0 &&
     host.last_observed_at === null &&
@@ -197,8 +221,8 @@ export function validHostSummary(host, { allowPolicyOnly = false } = {}) {
     host.groups?.length === 0 &&
     host.rentals?.length === 0;
   return (
-    host?.provider === 'vastai' &&
-    physicalHostId(host.machine_id) &&
+    knownHostProvider(provider) &&
+    physicalHostId(host.machine_id, provider) &&
     (observed || policyOnly) &&
     validHostPolicy(host.policy) &&
     count(host.runs) &&
@@ -288,8 +312,8 @@ export function validHostAudit(value, account) {
         typeof event.id === 'string' &&
         !!event.id &&
         nonnegative(event.created_at) &&
-        event.provider === 'vastai' &&
-        physicalHostId(event.machine_id) &&
+        knownHostProvider(event.provider) &&
+        physicalHostId(event.machine_id, event.provider) &&
         [event.old, event.new].every(
           (row) => row && policy(row.manual) && count(row.revision) && snapshot(row.snapshot),
         ) &&

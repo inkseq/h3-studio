@@ -1318,3 +1318,13 @@
     grid-template-columns: 1fr 1fr;
   }
 }
+/* Its own card under the assistant list (h3-studio#635). */
+.feedback-settings {
+  margin-top: 20px;
+}
+/* Same box as the checkbox it stands in for, so nothing moves when the setting arrives. */
+.feedback-settings-wait {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--r-sm);
+}

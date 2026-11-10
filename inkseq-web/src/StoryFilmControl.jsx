@@ -17,6 +17,7 @@ import {
 import { FilmRunView, filmProblem } from './StoryFilmView.jsx';
 import { store } from './store.js';
 import { storyShots } from './storyboard-domain.js';
+import { shotsAspect } from './delivery-model.js';
 import {
   chapterForShot,
   generatedAudioOption,
@@ -314,7 +315,17 @@ export default function StoryFilmControl({
               <Button
                 disabled={!newAllowed || dirty || !Number.isInteger(serverVersion)}
                 onClick={() =>
-                  call(() => controller.preflight({ resolution, burn_subtitles: captions }))
+                  call(() =>
+                    controller.preflight({
+                      resolution,
+                      // The film's frame follows the shots, not the story brief (#1114).
+                      aspect: shotsAspect(
+                        workspaceState.project,
+                        storyShots(workspaceState.project),
+                      ),
+                      burn_subtitles: captions,
+                    }),
+                  )
                 }
               >
                 {t('film.preflight')}

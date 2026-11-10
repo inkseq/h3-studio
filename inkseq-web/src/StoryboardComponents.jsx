@@ -1,4 +1,6 @@
 import { Disclosure } from './ui/Disclosure.jsx';
+import { defaultCopies } from './picture-defaults.js';
+import { useSpeechText } from './use-speech-text.js';
 import { TakeNextStep } from './TakeNextStep.jsx';
 import {
   UserRound,
@@ -38,6 +40,7 @@ import { useDragMove } from './ui/useDragMove.js';
 import { Badge, Chip, Note } from './ui/Note.jsx';
 import './profile-editor.css';
 import { TrashMenu, TrashButton, RenameDialog } from './UniversalTrash.jsx';
+import { Menu, MenuItem } from './ui/Menu.jsx';
 import { WorkbenchTakes, WorkbenchCopies } from './StoryboardWorkbench.jsx';
 import { AssistantBadge } from './AssistantConnections.jsx';
 import { useI18n } from './i18n/I18nProvider.jsx';
@@ -50,6 +53,7 @@ import React, {
   useSyncExternalStore,
 } from 'react';
 import { useOptimisticChoice } from './optimistic-choice.js';
+import { ShotCardPictures } from './ShotCardPictures.jsx';
 import { useQuery } from '@tanstack/react-query';
 import { openKey, useCardGrid } from './card-grid.js';
 import { assetLabel, secondsLabel, shotName } from './storyboard-a11y.js';
@@ -92,7 +96,7 @@ import { ShotLook } from './ShotLook.jsx';
 import { ShotCardPrompt } from './ShotCardPrompt.jsx';
 import { VoicePicker } from './VoicePicker.jsx';
 import { BibleDots, ProfileBible } from './ProfileBible.jsx';
-import { BibleImportExport } from './BibleImport.jsx';
+import { StagePage } from './StagePage.jsx';
 import { characterGroups } from './story-bible.js';
 import { ShotCardPlan, ShotPlanPanel } from './ShotPlan.jsx';
 import { useShotReadiness } from './shot-readiness.js';
@@ -214,6 +218,7 @@ function Tile({ asset, used, onClick, onZoom, dragId, draggable = true, gridCard
           target={{ kind: 'entity', project_id: state.project.id, id: asset.entity.id }}
           onRename={() => setRenaming(true)}
           onEdit={() => setRenaming(true)}
+          onMedia
         />
       )}
       {renaming && (
@@ -512,15 +517,13 @@ function ChooseFiles({ kind, exclude, title, onPick, onFiles, onClose }) {
 /* ---------- library ---------- */
 
 // The panel beside the storyboard holds everything, so any of it can be dragged onto a shot. As a
-// whole page it holds one half: page 'world' the people, places and props, page 'files' the files.
-export function AssetLibrary({
-  onPick,
-  selectedShot,
-  compact,
-  collapsed = false,
-  onToggle,
-  page = null,
-}) {
+// whole page it holds one half: page 'world' the people, places and props, page 'files' the files
+// (StagePage.jsx).
+export function AssetLibrary({ page = null, ...props }) {
+  return page ? <StagePage page={page} /> : <PanelLibrary {...props} />;
+}
+
+function PanelLibrary({ onPick, selectedShot, compact, collapsed = false, onToggle }) {
   const { t: tr } = useI18n();
   const { TYPE_LABEL } = displayLabels(tr);
   const ALL_TABS = [
@@ -532,19 +535,11 @@ export function AssetLibrary({
     ['audio', tr('storyboard.copy51'), Music],
     ['inbox', tr('storyboard.detail13'), Inbox],
   ];
-  const LIB_TABS = ALL_TABS.filter(
-    ([k]) => !page || ['character', 'location', 'prop'].includes(k) === (page === 'world'),
-  );
+  const LIB_TABS = ALL_TABS;
 
   const { state, dispatch, db } = useStore();
-  // Each page keeps its own category and search.
-  const place = page || 'panel',
-    [tabs, setTabs] = useState({}),
-    [searches, setSearches] = useState({}),
-    tab = tabs[place] || LIB_TABS[0][0],
-    q = searches[place] || '',
-    setTab = (value) => setTabs((old) => ({ ...old, [place]: value })),
-    setQ = (value) => setSearches((old) => ({ ...old, [place]: value }));
+  const [tab, setTab] = useState(LIB_TABS[0][0]),
+    [q, setQ] = useState('');
   const [wide, setWide] = useState(false),
     [zoom, setZoom] = useState(null),
     [newProfileType, setNewProfileType] = useState(null);
@@ -592,9 +587,7 @@ export function AssetLibrary({
       count: state.assets.length,
     });
   const newProfileLabel = tr('storyboard.mixed16', { kind: TYPE_LABEL[tab] }),
-    heading = tr(
-      page === 'world' ? 'stage.world' : page === 'files' ? 'stage.library' : 'storyboard.copy41',
-    );
+    heading = tr('storyboard.copy41');
   return (
     <aside
       className={
@@ -610,15 +603,11 @@ export function AssetLibrary({
           <>
             <b>{heading}</b>
             <small>
-              {page === 'world'
-                ? profileCount
-                : page === 'files'
-                  ? fileCount
-                  : tr('storyboard.libraryCounts', { profiles: profileCount, assets: fileCount })}
+              {tr('storyboard.libraryCounts', { profiles: profileCount, assets: fileCount })}
             </small>
           </>
         )}
-        {page ? null : onToggle ? (
+        {onToggle ? (
           <Button
             variant="ghost"
             size="sm"
@@ -637,18 +626,11 @@ export function AssetLibrary({
         )}
       </div>
       <div className="row tight">
-        {page === 'world' ? (
-          <Button size="sm" onClick={() => setNewProfileType(tab)}>
-            <Plus size={14} />
-            {newProfileLabel}
-          </Button>
-        ) : (
-          <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
-            <Upload size={14} />
-            {tr('storyboard.copy42')}
-          </Button>
-        )}
-        {isProfileTab && !page && (
+        <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
+          <Upload size={14} />
+          {tr('storyboard.copy42')}
+        </Button>
+        {isProfileTab && (
           // #232 (#8): one "+" that creates whatever category is open.
           <Button
             variant="ghost"
@@ -676,20 +658,8 @@ export function AssetLibrary({
       </div>
       <input
         className="lib-search"
-        aria-label={tr(
-          page === 'world'
-            ? 'stage.searchWorld'
-            : page === 'files'
-              ? 'stage.searchFiles'
-              : 'storyboard.detail72',
-        )}
-        placeholder={
-          page === 'world'
-            ? tr('stage.searchWorld')
-            : page === 'files'
-              ? tr('stage.searchFiles')
-              : tr('storyboard.detail73')
-        }
+        aria-label={tr('storyboard.detail72')}
+        placeholder={tr('storyboard.detail73')}
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
@@ -744,7 +714,6 @@ export function AssetLibrary({
                 <ProfileCard
                   key={p.id}
                   p={p}
-                  draggable={!page}
                   used={usedP.has(p.id)}
                   onOpen={() => dispatch({ type: 'openProfile', id: p.id })}
                   onAdd={selectedShot ? () => onPick({ profile: p.id }) : null}
@@ -766,14 +735,13 @@ export function AssetLibrary({
               );
             })}
           </div>
-          {page === 'world' && <BibleImportExport />}
           <div className="lib-tip">
             {tab === 'character'
-              ? tr(page === 'world' ? 'stage.worldCharacterTip' : 'storyboard.detail18')
+              ? tr('storyboard.detail18')
               : tab === 'location'
                 ? tr('storyboard.detail19')
                 : tr('storyboard.detail20')}
-            {tr(page === 'world' ? 'stage.worldTip' : 'storyboard.mixed20')}
+            {tr('storyboard.mixed20')}
           </div>
         </>
       )}
@@ -793,11 +761,8 @@ export function AssetLibrary({
                 key={a.id}
                 asset={a}
                 gridCard
-                // The full-page library has no shot or profile to drop on (audit 2026-11-09).
-                draggable={!page}
                 used={usedA.has(a.id)}
-                // On its own page there is no shot to add to: a click just looks at the file.
-                onClick={page ? () => setZoom(a) : () => onPick?.({ asset: a.id })}
+                onClick={() => onPick?.({ asset: a.id })}
                 onZoom={setZoom}
               />
             ))}
@@ -806,12 +771,10 @@ export function AssetLibrary({
 
       {tab === 'inbox' && (
         <div className="inbox">
-          {!page && (
-            <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
-              <Upload size={14} />
-              {tr('storyboard.copy44')}
-            </Button>
-          )}
+          <Button size="sm" onClick={() => uploadInput.current.click()} disabled={state.busy}>
+            <Upload size={14} />
+            {tr('storyboard.copy44')}
+          </Button>
           {!inbox.length && <p className="muted">{tr('storyboard.copy45')}</p>}
           {inbox.map((a) => (
             <InboxRow key={a.id} a={a} />
@@ -866,7 +829,7 @@ export function AssetLibrary({
   );
 }
 
-function InboxRow({ a }) {
+export function InboxRow({ a }) {
   const { t: tr } = useI18n();
   const { TYPE_LABEL } = displayLabels(tr);
   const { state, dispatch, db } = useStore();
@@ -1738,9 +1701,12 @@ function usualSettings(shots, db, locale) {
     for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
     return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0];
   };
+  // A story with a default picture marks shots that differ from it (#891).
+  const defaults = db.state.project.pictureDefaults;
   const value = {
     mode: top(shots.map((s) => expand(s, db, locale).mode)),
-    quality: top(shots.map((s) => s.quality)),
+    quality: defaults?.set ? defaults.quality : top(shots.map((s) => s.quality)),
+    aspect: defaults?.set ? defaults.aspect : top(shots.map((s) => s.aspect)),
   };
   usualCache.set(shots, value);
   return value;
@@ -1889,6 +1855,7 @@ export function ShotCard({
             {shot.quality !== usual.quality && (
               <span className="q">{QUALITY_LABEL[shot.quality]}</span>
             )}
+            {shot.aspect !== usual.aspect && <span className="q">{shot.aspect}</span>}
             {warnings.length > 0 && (
               <Tooltip tap content={warnings.join('\n')}>
                 <Button
@@ -2116,7 +2083,8 @@ function focusPlanField(root, key, tr) {
 
 // Next to Generate: what the plan still lacks, each a link to its field. It only informs;
 // generating is never blocked by it (audit 2026-11-09). One line, so nothing moves as items
-// get done.
+// get done: the next item as a link, the rest behind "+N" (no sideways scroll in the panel,
+// layout audit 2026-11-10).
 function PlanMissing({ shot, editorRef }) {
   const { t: tr } = useI18n();
   const { dispatch } = useStore();
@@ -2146,11 +2114,28 @@ function PlanMissing({ shot, editorRef }) {
           ? tr('plan.missing', { done: items.length - open.length, total: items.length })
           : tr('plan.allDone')}
       </span>
-      {open.map((item) => (
-        <Button key={item.key} variant="link" size="sm" onClick={() => go(item)}>
-          {tr('plan.check.' + item.key)}
+      {open[0] && (
+        <Button variant="link" size="sm" className="ed-missing-next" onClick={() => go(open[0])}>
+          {tr('plan.check.' + open[0].key)}
         </Button>
-      ))}
+      )}
+      {open.length > 1 && (
+        <Menu
+          label={tr('plan.missingMore', { count: open.length - 1 })}
+          align="start"
+          trigger={
+            <Button variant="link" size="sm" className="ed-missing-more">
+              +{open.length - 1}
+            </Button>
+          }
+        >
+          {open.slice(1).map((item) => (
+            <MenuItem key={item.key} onSelect={() => go(item)}>
+              {tr('plan.check.' + item.key)}
+            </MenuItem>
+          ))}
+        </Menu>
+      )}
     </div>
   );
 }
@@ -2161,7 +2146,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   const { state, dispatch, db } = useStore();
   const shot = state.shots.find((s) => s.id === shotId);
   const missing = useShotReadiness(shot, tr);
-  const [copies, setCopies] = useState('1');
+  const firstCopies = defaultCopies(state);
+  const [copies, setCopies] = useState(firstCopies);
   // Hooks stay above the early return below (rules of hooks).
   const [regenerating, setRegenerating] = useState(false);
   const [preview, setPreview] = useState(null),
@@ -2173,8 +2159,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
     setPicker(null);
     setSaving(false);
     setMsg('');
-    setCopies('1');
-  }, [shotId, state.contextId]);
+    setCopies(firstCopies);
+  }, [shotId, state.contextId, firstCopies]);
   // Text boxes grow with what is typed, like a chat composer; size them for saved text too.
   const editorRef = useRef(null),
     mediaRef = useRef(null);
@@ -2184,6 +2170,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   useEffect(() => {
     editorRef.current?.querySelectorAll('textarea').forEach((node) => growTextarea(node));
   });
+  // Spoken lines edit as 「台词」; saving keeps the video model's tags (h3-studio#1113).
+  const speech = useSpeechText(shot?.prompt);
   const [shownQuality, chooseQuality] = useOptimisticChoice(shot?.quality, (quality) =>
     dispatch({ type: 'update', id: shotId, patch: { quality } }),
   );
@@ -2192,6 +2180,7 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
   // Resolution and labels follow the pressed quality too, not only the toggle (#1032).
   const info = expand({ ...shot, quality: shownQuality }, db, locale);
   const upd = (patch) => dispatch({ type: 'update', id: shot.id, patch });
+  const pickThumb = (id) => <AssetThumb asset={db.asset(id)} size={28} />;
   // One new take: a fresh seed only matters when the seed is locked; HD switches the tier first.
   const regenerate = async (patch) => {
     if (patch.newSeed && !shot.seedLock) delete patch.newSeed;
@@ -2412,8 +2401,8 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
           </span>
           <textarea
             rows={2}
-            value={shot.prompt}
-            onChange={(e) => upd({ prompt: e.target.value })}
+            value={speech.shown}
+            onChange={(e) => upd({ prompt: speech.edit(e.target.value, e.target.selectionEnd) })}
             placeholder={tr('storyboard.finish11')}
           />
         </label>
@@ -2478,6 +2467,14 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                             </option>
                           ))}
                         </select>
+                        <ShotCardPictures
+                          shot={shot}
+                          cardId={p.id}
+                          name={p.name}
+                          images={variantOf(p, c.variant)?.images || []}
+                          thumb={pickThumb}
+                          onChange={upd}
+                        />
                       </div>
                       <IconButton
                         size="xs"
@@ -2525,6 +2522,14 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                               </option>
                             ))}
                           </select>
+                          <ShotCardPictures
+                            shot={shot}
+                            cardId={p.id}
+                            name={p.name}
+                            images={variantOf(p, shot.place.variant)?.images || []}
+                            thumb={pickThumb}
+                            onChange={upd}
+                          />
                         </div>
                         <IconButton
                           size="xs"
@@ -2551,6 +2556,14 @@ export function ShotEditor({ shotId, onClose, inline, wide, onWide }) {
                             {p.name}
                           </Button>
                           <small>{tr('storyboard.copy88')}</small>
+                          <ShotCardPictures
+                            shot={shot}
+                            cardId={p.id}
+                            name={p.name}
+                            images={p.variants[0]?.images || []}
+                            thumb={pickThumb}
+                            onChange={upd}
+                          />
                         </div>
                         <IconButton
                           size="xs"

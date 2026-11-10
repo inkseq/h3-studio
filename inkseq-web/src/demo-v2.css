@@ -488,13 +488,15 @@ small {
 }
 
 /* ---------- dock: player + timeline ---------- */
+/* Side padding matches the board above (22px), so the player starts on the board's left edge;
+   the smaller bottom padding lets the default 150px dock show the whole time bar. */
 .dock {
   flex: none;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 16px;
   background: var(--surface);
-  padding: 12px 16px;
+  padding: 12px 22px 8px;
   overflow: hidden;
   border-top: 1px solid var(--line);
 }
@@ -968,6 +970,23 @@ span.ref {
   font-size: 12px;
   gap: 2px;
 }
+/* Which card pictures a reference shot sends (h3-studio#504): same size picked or not. */
+.card-picks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.card-pick {
+  padding: 1px;
+  border: 2px solid transparent;
+  border-radius: var(--r);
+  background: none;
+  opacity: 0.55;
+}
+.card-pick.on {
+  border-color: var(--accent);
+  opacity: 1;
+}
 .castitem small {
   color: var(--muted);
   font-size: 11px;
@@ -1327,6 +1346,31 @@ span.ref {
 }
 .tile.used:hover .tile-used {
   display: none;
+}
+/* The tile's "…" menu floats over the picture's top-right corner (it used to fall below the
+   picture, where the tile cut it off). Hover or focus shows it; touch screens always do. */
+.tile > .item-menu {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity var(--ease);
+}
+.tile:is(:hover, :focus-within) > .item-menu,
+.tile > .item-menu:has([aria-expanded='true']) {
+  opacity: 1;
+}
+.tile:has(> .item-menu) .tile-zoom {
+  right: calc(var(--h-md) + 7px);
+}
+@media (hover: none) {
+  .tile > .item-menu {
+    opacity: 1;
+  }
+  .tile.used:has(> .item-menu) .tile-used {
+    right: calc(var(--h-md) + 7px);
+  }
 }
 .tile-play {
   position: absolute;
@@ -3191,7 +3235,7 @@ h4,
   .dock {
     height: auto !important;
     grid-template-columns: 1fr;
-    padding: 8px 10px;
+    padding: 8px 12px;
   }
   .dock .screen,
   .dock-right > small {
@@ -3290,14 +3334,21 @@ h4,
 .card-meta > * {
   flex: none;
 }
+/* Every chip shows whole (layout audit 2026-11-10: a faded strip cut names mid-word). Chips
+   wrap; a chip longer than the card shortens with an ellipsis. Cards in one row share a height. */
 .who {
-  flex-wrap: nowrap;
-  overflow: hidden;
+  flex-wrap: wrap;
   min-height: 20px;
-  mask-image: linear-gradient(90deg, var(--black) 85%, transparent);
+  min-width: 0;
 }
 .who .chip {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 .wall .card {
   display: flex;
@@ -3696,16 +3747,23 @@ h4,
   color: var(--warn-ink);
   background: var(--warn);
 }
-/* What the plan still lacks, beside Generate: one line that scrolls, so nothing moves. */
+/* What the plan still lacks, beside Generate: one line, so nothing moves. The next item is a
+   link that shortens with an ellipsis; the rest sit behind "+N". */
 .ed-missing {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   min-height: var(--h-sm);
-  overflow-x: auto;
+  min-width: 0;
   white-space: nowrap;
   font-size: var(--fs-sm);
-  scrollbar-width: thin;
+}
+.ed-missing > .ed-missing-next {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
 }
 .ed-missing-head {
   flex: none;

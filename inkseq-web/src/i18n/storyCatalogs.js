@@ -692,3 +692,27 @@ export const storyCatalogs = {
       '本机模式支持编辑、画布、上传、关联、撤销及备份。登录云模式后可保存项目版本、同步私有素材、逐镜预检和管理队列。是否可以执行以服务连接状态为准；模拟服务会明确标注。章节 CPU 粗剪与显式音轨 MP4/FLAC 导出按服务能力启用；字幕支持手动确认后导出 SRT；服务支持时可明确选择烧进本次章节成片，默认关闭。AI 自动写剧本、人物/场景图生成、AI 音乐、多人实时协作与 Marble 3D 编辑尚未接通。连线或切换视图不会提交生成。',
   },
 };
+
+// Story settings → Default picture (h3-studio#891).
+Object.assign(storyCatalogs.en, {
+  'pictureDefaults.title': 'Default picture',
+  'pictureDefaults.help':
+    'New shots start with these. Shots you already have keep their own settings until you apply these to all of them.',
+  'pictureDefaults.quality': 'Quality',
+  'pictureDefaults.copies': 'Takes per generation',
+  'pictureDefaults.keepAudio': 'Keep the sound the video is made with',
+  'pictureDefaults.applyAll': 'Apply to all {count} shots',
+  'pictureDefaults.applyHelp': 'A shot can still be set differently afterwards.',
+  'pictureDefaults.applied': 'Applied to every shot. Undo puts them back.',
+});
+Object.assign(storyCatalogs.zh, {
+  'pictureDefaults.title': '默认画面',
+  'pictureDefaults.help':
+    '新镜头会用这些设置。已有的镜头保留自己的设置，除非你把它们应用到所有镜头。',
+  'pictureDefaults.quality': '画质',
+  'pictureDefaults.copies': '每次生成几条',
+  'pictureDefaults.keepAudio': '保留视频生成时的声音',
+  'pictureDefaults.applyAll': '应用到全部 {count} 个镜头',
+  'pictureDefaults.applyHelp': '之后仍可单独修改某个镜头。',
+  'pictureDefaults.applied': '已应用到每个镜头，撤销可以恢复。',
+});

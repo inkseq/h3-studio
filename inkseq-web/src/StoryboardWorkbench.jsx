@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { defaultCopies } from './picture-defaults.js';
 import { Disclosure } from './ui/Disclosure.jsx';
 import { Columns2, MoreHorizontal, Pencil, RefreshCw, Sparkles, Star, Trash2 } from 'lucide-react';
 import { profileLabel } from './model-visibility.js';
@@ -651,15 +652,17 @@ export function WorkbenchBulk({ ids, onClear, onSelectAll, onSelectPending, pend
   const { t, locale } = useI18n(),
     { state, dispatch } = useStoryboardUI(),
     trash = useTrash(),
-    [copies, setCopies] = useState('1'),
+    // Takes per generation start at the story's default (#891), within the account's limit.
+    firstCopies = defaultCopies(state),
+    [copies, setCopies] = useState(firstCopies),
     [scene, setScene] = useState(''),
     [profile, setProfile] = useState(''),
     [more, setMore] = useState(false);
   useEffect(() => {
-    setCopies('1');
+    setCopies(firstCopies);
     setScene('');
     setProfile('');
-  }, [state.contextId]);
+  }, [state.contextId, firstCopies]);
   useEffect(() => {
     if (!ids.length) setMore(false);
   }, [ids.length]);

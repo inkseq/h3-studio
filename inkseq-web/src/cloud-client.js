@@ -221,6 +221,25 @@ function refusalMessage(status, detail, expectedAccount, maintenance) {
       : detail?.messages?.[uiLocale(expectedAccount)] || reason;
 }
 
+// A refused request: tell the app what changed (session, credits, terms, maintenance) and
+// return the error with the server's status and detail.
+function refusedError(status, detail, { expectedAccount, anonymous, onUnauthorized }) {
+  if (detail?.code === 'account_context_changed') {
+    onUnauthorized();
+    return new CloudError(ui('client.contextChanged', expectedAccount), { status: 401 });
+  }
+  if (status === 401 && !anonymous) onUnauthorized();
+  const short = insufficientCredits(status, detail);
+  if (short) announce(INSUFFICIENT_CREDITS, short);
+  if (termsRequired(status, detail)) announce(TERMS_REQUIRED, null);
+  // A release window refuses new work with its end time (#453): say when, and let the
+  // banner re-check now instead of at its next poll.
+  const maintenance = maintenanceRefusal(detail);
+  if (maintenance) announce(MAINTENANCE_CHANGED, maintenance);
+  const localized = refusalMessage(status, detail, expectedAccount, maintenance);
+  return new CloudError(localized, { status, detail });
+}
+
 // A request that never got a response: timed out, aborted or offline.
 function transportError(error, { timedOut, multipart, method, blob, expectedAccount }) {
   if (timedOut)
@@ -286,6 +305,7 @@ export function createCloudClient({
       signal,
       // A slower call (e.g. a model turn or picture) may ask for a longer deadline.
       timeoutMs: requestTimeoutMs,
+      read,
     } = {},
   ) {
     const multipart = typeof FormData !== 'undefined' && body instanceof FormData;
@@ -304,6 +324,7 @@ export function createCloudClient({
       ...(expectedAccount && !anonymous ? { 'X-Expected-Account': expectedAccount } : {}),
       ...(currentSupportView() ? { 'X-Support-View': currentSupportView().id } : {}),
     };
+    const refusal = { expectedAccount, anonymous, onUnauthorized };
     let timedOut = false,
       releaseRead = null;
     const duration = requestDuration(requestTimeoutMs, blob, multipart, {
@@ -357,14 +378,6 @@ export function createCloudClient({
           } catch {
             detail = null;
           }
-          if (detail?.code === 'account_context_changed') {
-            onUnauthorized();
-            throw new CloudError(ui('client.contextChanged', expectedAccount), { status: 401 });
-          }
-          if (response.status === 401 && !anonymous) onUnauthorized();
-          const short = insufficientCredits(response.status, detail);
-          if (short) announce(INSUFFICIENT_CREDITS, short);
-          if (termsRequired(response.status, detail)) announce(TERMS_REQUIRED, null);
           // This closed response proves admission refused before a reservation.
           // Only the human's explicit approval permits one exact-key retry.
           if (
@@ -396,18 +409,20 @@ export function createCloudClient({
               continue;
             }
           }
-          // A release window refuses new work with its end time (#453): say when, and let the
-          // banner re-check now instead of at its next poll.
-          const maintenance = maintenanceRefusal(detail);
-          if (maintenance) announce(MAINTENANCE_CHANGED, maintenance);
-          const localized = refusalMessage(response.status, detail, expectedAccount, maintenance);
-          throw new CloudError(localized, { status: response.status, detail });
+          throw refusedError(response.status, detail, refusal);
         }
-        const result = blob
-          ? await response.blob()
-          : response.status === 204
-            ? null
-            : await response.json();
+        // A caller may read the body itself (e.g. a streamed story chat turn, #1083); a refusal
+        // it finds in the stream becomes the same error as a refused response.
+        const result = read
+          ? await read(response, {
+              signal: controller.signal,
+              refuse: (status, detail) => refusedError(status, detail, refusal),
+            })
+          : blob
+            ? await response.blob()
+            : response.status === 204
+              ? null
+              : await response.json();
         if (current !== epoch) throw accountChanged();
         if (method !== 'GET' && !anonymous) announce(CREDITS_CHANGED);
         return result;

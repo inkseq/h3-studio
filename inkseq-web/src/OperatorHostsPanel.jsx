@@ -6,17 +6,25 @@ import { FloatingMessage } from './floating-notice.js';
 import React, { useEffect, useRef, useState, useEffectEvent } from 'react';
 import {
   failureLabel,
-  hostPolicyOptions,
+  hostPolicyChoice,
+  hostPolicyChoices,
+  hostProviders,
   hostReasonText,
   hostText,
   knownNumber,
+  physicalHostId,
   secondsLabel,
   validHostSummary,
 } from './operator-host-model.js';
+import { Segmented } from './ui/Segmented.jsx';
 import { money, time } from './p4-operator-model.js';
 import './v2/ops-adapter.css';
 const localizedPolicy = (value, t) =>
-  t('operator.policy.' + (['default', 'prefer', 'deny'].includes(value) ? value : 'unknown'));
+  t(
+    'operator.policy.' +
+      (['default', 'prefer', 'deny', 'deny_bad_output'].includes(value) ? value : 'unknown'),
+  );
+const providerLabel = (value, t) => t('operatorPanel.provider.' + value);
 
 function SampleGroups({ groups = [] }) {
   const { t, locale } = useI18n();
@@ -153,7 +161,12 @@ export function HostRecord({ host, children }) {
     >
       <header className="p4-between">
         <div>
-          <h3>{t('operatorPanel.hostTarget', { id: host.machine_id })}</h3>
+          <h3>
+            {t('operatorPanel.hostTarget', {
+              id: host.machine_id,
+              provider: providerLabel(host.provider, t),
+            })}
+          </h3>
           <small>
             {host.identity_confirmed ? t('operator.status79') : t('operator.status80')} ·{' '}
             {t('operatorPanel.lastObserved', { time: time(host.last_observed_at, locale) })}
@@ -378,7 +391,7 @@ function PolicyReview({ host, selection, current, busy, onClose, onConfirm }) {
 }
 function HostEditor({ host, busy, onSave }) {
   const { t, locale } = useI18n();
-  const [selection, setSelection] = useState(host.policy.manual),
+  const [selection, setSelection] = useState(hostPolicyChoice(host.policy)),
     [review, setReview] = useState(null),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
@@ -427,14 +440,14 @@ function HostEditor({ host, busy, onSave }) {
               setNotice('');
             }}
           >
-            {hostPolicyOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {t('operator.policy.' + option.value)}
+            {hostPolicyChoices.map((choice) => (
+              <option key={choice.key} value={choice.key}>
+                {t('operator.policy.' + choice.key)}
               </option>
             ))}
           </select>
         </label>
-        <Button type="submit" disabled={busy || selection === host.policy.manual}>
+        <Button type="submit" disabled={busy || selection === hostPolicyChoice(host.policy)}>
           {t('operator.copy177')}
         </Button>
         <small>
@@ -459,7 +472,7 @@ function HostEditor({ host, busy, onSave }) {
     </>
   );
 }
-function HostLookup({ controller, target, busy }) {
+function HostLookup({ controller, target, busy, provider }) {
   const { t } = useI18n();
   const [input, setInput] = useState(''),
     [loading, setLoading] = useState(false),
@@ -472,14 +485,14 @@ function HostLookup({ controller, target, busy }) {
     [],
   );
   const machine = input.trim(),
-    valid = /^[1-9][0-9]{0,17}$/.test(machine),
-    current = target && String(target.machine_id) === machine;
+    valid = physicalHostId(machine, provider),
+    current = target && target.provider === provider && String(target.machine_id) === machine;
   async function lookup() {
     const request = ++generation.current;
     setLoading(true);
     setError('');
     try {
-      await controller.readHostTarget(machine);
+      await controller.readHostTarget(machine, provider);
     } catch (error) {
       if (generation.current === request) setError(error.message);
     } finally {
@@ -498,8 +511,8 @@ function HostLookup({ controller, target, busy }) {
           {t('operator.copy178')}
           <input
             aria-label={t('operator.status127')}
-            inputMode="numeric"
-            maxLength="18"
+            inputMode={provider === 'vastai' ? 'numeric' : 'text'}
+            maxLength="36"
             value={input}
             disabled={busy || loading}
             onChange={(event) => {
@@ -542,12 +555,13 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
       generationRef.current++;
     };
   }, [controller, state.account, admin]);
-  async function read(offset = 0) {
+  const provider = (admin && value?.provider) || 'vastai';
+  async function read(offset = 0, kind = provider) {
     const current = generation.current;
     setLoading(true);
     setError('');
     try {
-      await controller.readHosts({ admin, offset });
+      await controller.readHosts({ admin, offset, provider: kind });
       if (admin) await controller.readHostAudit();
     } catch (error) {
       if (generation.current === current) setError(error.message);
@@ -578,11 +592,27 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
         </p>
       )}
       {admin && (
+        <Segmented
+          label={t('operatorPanel.providerSwitch')}
+          options={hostProviders.map((kind) => ({
+            value: kind,
+            label: providerLabel(kind, t),
+          }))}
+          value={provider}
+          disabled={blocked}
+          onChange={(kind) => {
+            generation.current++;
+            void read(0, kind);
+          }}
+        />
+      )}
+      {admin && (
         <HostLookup
-          key={state.account}
+          key={state.account + ':' + provider}
           controller={controller}
           target={state.hostTarget}
           busy={blocked}
+          provider={provider}
         />
       )}{' '}
       {value ? (
@@ -590,7 +620,7 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
           <small>{t('operatorPanel.readHosts', { time: time(value.as_of, locale) })}</small>
           {value.hosts.length ? (
             value.hosts.map((host) => (
-              <HostRecord key={host.machine_id} host={host}>
+              <HostRecord key={host.provider + ':' + host.machine_id} host={host}>
                 {admin && (
                   <HostEditor
                     host={host}
@@ -619,6 +649,7 @@ export default function OperatorHostsPanel({ controller, state, admin = false, b
             <ul>
               {state.hostAudits.events.map((event) => (
                 <li key={event.id}>
+                  {providerLabel(event.provider, t)} ·{' '}
                   {t('operatorPanel.hostNumber', { id: event.machine_id })} ·{' '}
                   {localizedPolicy(event.old.manual, t)} → {localizedPolicy(event.new.manual, t)}
                   <small>

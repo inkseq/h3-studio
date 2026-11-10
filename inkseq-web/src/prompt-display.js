@@ -1,13 +1,9 @@
-// The video model's way of writing a spoken line, e.g. `(S1) <d>[Chinese] 今天吃牛。</d>`, shown
-// as "名字：台词" wherever a shot's text is only read (audit 2026-11-09, Script P0). The stored
-// text keeps the model's form: it is what the person edits and what generation sends.
+// The video model's way of writing a spoken line, e.g. `(S1) <d>[Chinese] 今天吃牛。</d>`, cut
+// into parts, and which character each speaker number stands for. Editors show the lines
+// without tags through speech-edit.js (h3-studio#1113).
 
 // An optional speaker number, then the line with an optional language tag.
 const LINE = /(?:\((S[1-9]\d?)\)\s*)?<d>\s*(?:\[[^\]\r\n]{0,40}\]\s*)?([\s\S]*?)\s*<\/d>/gi;
-const CJK = /[\u3000-\u303f\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff\uff00-\uffef\uac00-\ud7af]/;
-// Where a sentence ends: a line after one of these stands on its own.
-const SENTENCE_END = /(^|[\n。！？!?；;])\s*$/;
-const ENDS_IN_COLON = /[：:]\s*$/;
 
 /**
  * The text cut into plain text and spoken lines, in order:
@@ -24,20 +20,6 @@ export function promptParts(text) {
   }
   if (at < source.length) parts.push({ kind: 'text', text: source.slice(at) });
   return parts;
-}
-
-export const hasModelLines = (text) => /<d>/i.test(String(text ?? ''));
-
-/**
- * Speaker number → character name, from each character's `bible.speaker` only: a name shown
- * beside a line must be one the person set, never a guess.
- */
-export function speakerNames(profiles = []) {
-  const names = new Map();
-  for (const p of profiles)
-    if (p.type === 'character' && p.bible?.speaker && p.name)
-      names.set(p.bible.speaker.toUpperCase(), p.name);
-  return names;
 }
 
 // The last sentence before a line: where its speaker is usually named.
@@ -85,39 +67,5 @@ export function inferSpeakers(texts, characters) {
   }
   const out = new Map();
   for (const [code, ids] of seen) if (ids.size === 1) out.set(code, [...ids][0]);
-  return out;
-}
-
-/**
- * The text as a person reads it: a line that stands on its own becomes "名字：台词"; a line
- * inside a sentence becomes `说道：“台词”`, with the speaker's name added only when the
- * sentence does not already name them. Unknown speakers never show their number.
- */
-export function readablePrompt(text, names = new Map()) {
-  let out = '';
-  for (const part of promptParts(text)) {
-    if (part.kind === 'text') {
-      out += part.text;
-      continue;
-    }
-    const said = part.text.trim();
-    const wide = CJK.test(said) || CJK.test(out.slice(-12));
-    const colon = wide ? '：' : ': ';
-    const quoted = `“${said}”`;
-    const name = names.get(part.code) || '';
-    if (SENTENCE_END.test(out)) {
-      out += name ? name + colon + said : quoted;
-      continue;
-    }
-    if (ENDS_IN_COLON.test(out)) {
-      out += quoted;
-      continue;
-    }
-    const sentence = sentenceBefore(out);
-    const known = name && characterAliases(name).some((n) => sentence.includes(n));
-    out = out.replace(/\s+$/, '');
-    if (name && !known) out += wide ? `（${name}）` : ` (${name})`;
-    out += colon + quoted;
-  }
   return out;
 }

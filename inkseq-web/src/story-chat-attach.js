@@ -3,7 +3,7 @@
 // card is added exactly as the server's card pictures do (story_chat_images.py: the
 // character's default look, the location's default version, the prop's imageIds), so it is
 // a reference input for generation. Everything else lands in the story's library, ready in
-// Works. Until the model can see attachments itself, the message tells it what was added.
+// Works. The message says what went where, and photos are sent so the model sees them.
 
 export const ACCEPT = 'image/*,video/*,audio/*,.txt,.md,text/plain,text/markdown';
 export const CARD_KINDS = { character: 'character', place: 'location', prop: 'prop' };
@@ -61,6 +61,15 @@ export function attachActions(project, { assetId, title, cardId }) {
     });
   return actions;
 }
+
+// The photos the assistant sees with the message: the story's own image entities, at most
+// four (the server's limit, h3-studio#726). Video and audio stay notes only.
+export const MAX_TURN_PHOTOS = 4;
+export const turnPhotos = (items) =>
+  items
+    .filter((item) => item.kind === 'image' && item.assetId)
+    .slice(0, MAX_TURN_PHOTOS)
+    .map((item) => 'asset-' + item.assetId);
 
 // What the message says was added, so the assistant can use it (until it sees the files).
 export function attachmentNote(items, t) {

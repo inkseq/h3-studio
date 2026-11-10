@@ -1,4 +1,5 @@
-/* Story-bible sections in the profile editor and the checklist dots on profile cards. */
+/* Story-bible sections in the profile editor and the checklist dots on the storyboard panel's
+   profile cards. */
 .bible {
   display: grid;
   gap: var(--sp-4);
@@ -169,19 +170,6 @@
   border-radius: 1px;
   background: var(--warn);
 }
-.bible-group {
-  display: grid;
-  gap: var(--sp-2);
-  padding: var(--sp-2);
-  border: 1px dashed var(--line-2);
-  border-radius: var(--r-lg);
-}
-.bible-group-head {
-  display: flex;
-  gap: var(--sp-2);
-  align-items: baseline;
-  font-size: var(--fs-sm);
-}
 .bible-speaker {
   font-size: var(--fs-2xs);
   padding: 0 6px;
@@ -189,11 +177,6 @@
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 600;
-}
-.bible-io {
-  display: flex;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
 }
 .bible-import-list {
   display: grid;

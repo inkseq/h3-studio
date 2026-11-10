@@ -1,6 +1,8 @@
 import { segmentsTotal } from './shot-segments.js';
 import { storyboardPresentation } from './i18n/legacyPresentation.js';
 import { translate } from './i18n/locale.js';
+import { shotState } from './shot-status.js';
+import { takeQuality } from './enhance-take.js';
 export const TYPE_LABEL = { character: '人物', location: '场景', prop: '道具' };
 export const VARIANT_LABEL = { character: '造型', location: '版本', prop: '图片' };
 export const KIND_LABEL = { image: '图片', video: '动作视频', audio: '声音' };
@@ -63,59 +65,54 @@ export function queuePositions(shots) {
     ]),
   );
 }
+// The card's status line, from the one shared shot status (shot-status.js, h3-studio#892).
 export function shotStatus(shot, position, locale = 'zh') {
-  const latest = shot.versions.at(-1);
-  if (
-    latest &&
-    [
-      'planned',
-      'waiting_capacity',
-      'queued',
-      'claimed',
-      'submitting',
-      'submission_unknown',
-    ].includes(latest.status)
-  )
+  const state = shotState(shot),
+    take = state.take;
+  if (state.id === 'queued')
     return {
       id: 'queued',
       label: position
         ? translate(locale, 'legacy.queuePosition', { position })
-        : latest.status === 'submission_unknown'
+        : take.status === 'submission_unknown'
           ? translate(locale, 'legacy.visible27')
           : translate(locale, 'legacy.visible28'),
       tone: 'wait',
     };
-  if (latest && ['generating', 'running', 'collecting', 'checking'].includes(latest.status))
+  if (state.id === 'generating')
     return {
       id: 'gen',
       label:
-        latest.status === 'collecting'
+        take.status === 'collecting'
           ? translate(locale, 'legacy.visible29')
-          : Number.isFinite(latest.progress)
+          : Number.isFinite(take.progress)
             ? translate(locale, 'legacy.generatingProgress', {
-                progress: Math.round(latest.progress * 100),
+                progress: Math.round(take.progress * 100),
               })
             : translate(locale, 'legacy.visible30'),
       tone: 'busy',
     };
-  if (latest?.status === 'failed')
+  if (state.id === 'failed')
     return { id: 'failed', label: translate(locale, 'legacy.visible31'), tone: 'warn' };
-  if (!shot.versions.length)
+  if (state.id === 'empty')
     return { id: 'empty', label: translate(locale, 'legacy.visible32'), tone: 'muted' };
-  if (latest?.id !== shot.chosen && ['done', 'succeeded'].includes(latest?.status))
-    return { id: 'pick', label: translate(locale, 'legacy.visible33'), tone: 'warn' };
-  const chosen = chosenVersion(shot);
-  return chosen
-    ? {
-        id: 'ok',
-        label: translate(locale, 'legacy.selectedQuality', {
-          quality: ['draft', 'final'].includes(chosen.quality)
-            ? translate(locale, 'storyboard.labels.QUALITY_LABEL.' + chosen.quality)
-            : translate(locale, 'legacy.projection7'),
-        }),
-        tone: 'good',
-      }
-    : { id: 'empty', label: translate(locale, 'legacy.visible34'), tone: 'muted' };
+  if (state.id === 'pick')
+    return take
+      ? { id: 'pick', label: translate(locale, 'legacy.visible33'), tone: 'warn' }
+      : { id: 'pick', label: translate(locale, 'legacy.visible34'), tone: 'warn' };
+  // Chosen: its real size (480P/768P/1080P/2K, #890), else the old draft/final words.
+  const quality =
+    takeQuality(take) ||
+    (['draft', 'final'].includes(take.quality)
+      ? translate(locale, 'storyboard.labels.QUALITY_LABEL.' + take.quality)
+      : translate(locale, 'legacy.projection7'));
+  return {
+    id: state.id === 'hd' ? 'hd' : 'ok',
+    label: translate(locale, state.id === 'hd' ? 'legacy.selectedHd' : 'legacy.selectedQuality', {
+      quality,
+    }),
+    tone: 'good',
+  };
 }
 export function segments(shots) {
   let t = 0;

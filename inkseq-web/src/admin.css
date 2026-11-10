@@ -18,6 +18,26 @@
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
+.admin-revenue-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.admin-revenue-head h4 {
+  margin: 0;
+}
+.admin-revenue dd small {
+  font-size: 12px;
+  font-weight: 400;
+}
+.admin-revenue-line {
+  display: block;
+  min-height: 1.4em;
+  margin-top: 8px;
+}
 .admin-fold,
 .cap-fold {
   border: 1px solid var(--line);

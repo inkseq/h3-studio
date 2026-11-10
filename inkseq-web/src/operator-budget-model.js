@@ -40,7 +40,13 @@ export function budgetLabel(budget, locale = 'zh') {
     (budget?.owner_id
       ? translate(
           locale,
-          budget.project_id ? 'operatorPanel.projectBudget' : 'operatorPanel.ownerBudget',
+          budget.project_id
+            ? 'operatorPanel.projectBudget'
+            : budget.id?.includes('-gpu-')
+              ? 'operatorPanel.ownerGpuBudget'
+              : budget.id?.includes('-job-')
+                ? 'operatorPanel.ownerJobBudget'
+                : 'operatorPanel.ownerBudget',
           { owner: budget.owner_id, project: budget.project_id },
         )
       : translate(

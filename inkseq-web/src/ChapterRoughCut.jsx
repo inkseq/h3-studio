@@ -15,6 +15,7 @@ import {
 } from './cloud-model.js';
 import ArtifactResult from './ArtifactResult.jsx';
 import { burnCaptionStatus } from './caption-model.js';
+import { chapterShots, shotsAspect } from './delivery-model.js';
 import './roughcut.css';
 
 const run = (promise) => promise.catch(() => {});
@@ -27,7 +28,7 @@ export default function ChapterRoughCut({ project, chapterId, onFix }) {
   const options = c.renderOptions[chapterId] ||
       c.renderPlans[chapterId]?.options || {
         resolution: '720P',
-        aspect: project.journey?.delivery?.aspect || project.journey?.brief?.aspect || '9:16',
+        aspect: shotsAspect(project, chapterShots(project, chapterId)),
         burn_subtitles: false,
       },
     setOptions = (next) => cloud.setRenderOptions(chapterId, next);

@@ -9,6 +9,7 @@ import {
 import {
   hostPolicyBody,
   hostPolicyReceipt,
+  physicalHostId,
   validHostAudit,
   validHostPage,
   validHostPolicyBody,
@@ -453,28 +454,32 @@ export function createP4OperatorController({
     }
     return finishBilling(value, operation, account, version);
   }
-  async function readHosts({ admin = false, offset = 0 } = {}) {
+  async function readHosts({ admin = false, offset = 0, provider } = {}) {
     const account = state.account,
       version = epoch,
       key = admin ? 'admin' : 'owner',
       request = ++hostReading[key],
       field = admin ? 'adminHosts' : 'hosts',
+      kind = admin ? (provider ?? state.adminHosts?.provider ?? 'vastai') : 'vastai',
       prior = state[field];
     if (!account || (admin && state.snapshot?.operator?.admin !== true))
       throw Error(message('copy11'));
     if (
       !Number.isSafeInteger(offset) ||
       offset < 0 ||
-      (offset && (prior?.has_more !== true || offset !== prior.offset + prior.limit))
+      (offset &&
+        (prior?.has_more !== true ||
+          prior.provider !== kind ||
+          offset !== prior.offset + prior.limit))
     )
       throw Error(message('copy12'));
     try {
-      const value = await client.hosts({ admin, offset });
+      const value = await client.hosts({ admin, offset, provider: kind });
       guard(account, version);
       if (admin && state.snapshot?.operator?.admin !== true)
         throw Object.assign(Error(message('copy13')), { status: 403 });
       if (request !== hostReading[key]) throw Error(message('copy14'));
-      if (!validHostPage(value, account, { admin }) || value.offset !== offset)
+      if (!validHostPage(value, account, { admin, provider: kind }) || value.offset !== offset)
         throw Error(message('copy15'));
       if (offset && state[field] !== prior) throw Error(message('copy12'));
       emit({
@@ -509,24 +514,24 @@ export function createP4OperatorController({
       throw error;
     }
   }
-  async function readHostTarget(machine_id) {
+  async function readHostTarget(machine_id, provider = 'vastai') {
     const account = state.account,
       version = epoch,
       request = ++hostReading.target;
     if (
       state.snapshot?.operator?.admin !== true ||
       typeof machine_id !== 'string' ||
-      !/^[1-9][0-9]{0,17}$/.test(machine_id)
+      !physicalHostId(machine_id, provider)
     )
       throw Error(message('copy16'));
     try {
-      const value = await client.hosts({ admin: true, machine_id, offset: 0 });
+      const value = await client.hosts({ admin: true, machine_id, offset: 0, provider });
       guard(account, version);
       if (state.snapshot?.operator?.admin !== true)
         throw Object.assign(Error(message('copy17')), { status: 403 });
       if (
         request !== hostReading.target ||
-        !validHostPage(value, account, { admin: true }) ||
+        !validHostPage(value, account, { admin: true, provider }) ||
         value.hosts.length !== 1 ||
         String(value.hosts[0].machine_id) !== machine_id
       )
@@ -718,10 +723,13 @@ export function createP4OperatorController({
         }
       if (operation.method === 'updateHostPolicy')
         try {
-          await readHosts({ admin: true });
+          await readHosts({ admin: true, provider: operation.body.provider });
           await readHostAudit();
-          if (String(state.hostTarget?.machine_id) === operation.body.machine_id)
-            await readHostTarget(operation.body.machine_id);
+          if (
+            String(state.hostTarget?.machine_id) === operation.body.machine_id &&
+            state.hostTarget?.provider === operation.body.provider
+          )
+            await readHostTarget(operation.body.machine_id, operation.body.provider);
         } catch {
           // A failed refresh already shows in the controller state; the next poll retries.
         }

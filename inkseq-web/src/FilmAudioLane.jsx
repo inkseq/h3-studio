@@ -3,6 +3,7 @@ import { Button } from './ui/Button.jsx';
 import { Menu, MenuCheckboxItem, MenuItem, MenuSeparator } from './ui/Menu.jsx';
 import { Music, Plus, Trash2, Upload, Volume2, VolumeX } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
+import { peaksPath, usePeaks } from './audio-peaks.js';
 
 // Seconds ↔ pixels along the clip track, measured from the rendered clip cards so the sound
 // lane lines up with clips of any width (cards have a minimum width).
@@ -27,7 +28,19 @@ const STEP = 0.1,
   BIG_STEP = 1;
 const secs = (value) => (Math.round(value * 10) / 10).toFixed(1);
 
-function Block({ block, x, selected, onSelect, onMove, onTrim, onRemove, pxPerSecond }) {
+// The part of the file this block plays, drawn behind its name (#232, items 19–20).
+function Waveform({ url, from, to }) {
+  const peaks = usePeaks(url),
+    path = peaks && peaksPath(peaks.peaks, peaks.duration, from, to);
+  if (!path) return null;
+  return (
+    <svg className="film-audio-wave" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden>
+      <path d={path} vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+function Block({ block, url, x, selected, onSelect, onMove, onTrim, onRemove, pxPerSecond }) {
   const { t } = useI18n();
   const drag = useRef(null),
     [dx, setDx] = useState({ kind: null, value: 0 });
@@ -111,6 +124,7 @@ function Block({ block, x, selected, onSelect, onMove, onTrim, onRemove, pxPerSe
         setDx({ kind: null, value: 0 });
       }}
     >
+      <Waveform url={url} from={Number(track.start)} to={Number(track.end)} />
       {!fixed && (
         <span
           className="film-audio-trim start"
@@ -156,9 +170,12 @@ export default function FilmAudioLane({
   onRemove,
   fadeMax = 0,
   onFade,
+  sources = {},
+  onDropFiles,
 }) {
   const { t } = useI18n();
   const [wholeFilm, setWholeFilm] = useState(false),
+    [dropping, setDropping] = useState(false),
     file = useRef(null);
   const current = blocks.find((b) => b.track.id === selected);
   if (part === 'lane') {
@@ -173,17 +190,38 @@ export default function FilmAudioLane({
         rows[row] = b.placement.end;
         return { ...b, row };
       });
+    // Sound files dropped from the computer land where they are dropped (#232, items 19–20).
+    const files = (event) =>
+      Array.from(event.dataTransfer?.files || []).filter((f) => f.type.startsWith('audio/'));
+    const carriesFiles = (event) => event.dataTransfer?.types?.includes('Files');
     return (
       <div
-        className="film-audio-lane"
+        className={'film-audio-lane' + (dropping ? ' dropping' : '')}
         style={{ width, height: Math.max(1, rows.length) * 30 + 8 }}
         onPointerDown={(event) => event.target === event.currentTarget && onSelect(null)}
+        onDragOver={(event) => {
+          if (!onDropFiles || busy || !carriesFiles(event)) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'copy';
+          setDropping(true);
+        }}
+        onDragLeave={() => setDropping(false)}
+        onDrop={(event) => {
+          setDropping(false);
+          if (!onDropFiles || busy || !carriesFiles(event)) return;
+          event.preventDefault();
+          const dropped = files(event);
+          if (!dropped.length) return;
+          const left = event.currentTarget.getBoundingClientRect().left;
+          onDropFiles(dropped, Math.max(0, (event.clientX - left) / pxPerSecond));
+        }}
       >
         {!placed.length && <span className="film-audio-empty muted">{t('editor.noAudio')}</span>}
         {placed.map((block) => (
           <div key={block.track.id} className="film-audio-row" style={{ top: 4 + block.row * 30 }}>
             <Block
               block={block}
+              url={block.asset ? sources[block.asset.id] : null}
               x={x}
               pxPerSecond={pxPerSecond}
               selected={selected === block.track.id}

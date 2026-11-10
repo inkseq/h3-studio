@@ -222,7 +222,7 @@ export const operatorCatalogs = {
     'operator.copy175': 'Back',
     'operator.copy176': 'Manual host policy',
     'operator.copy177': 'Review policy changes',
-    'operator.copy178': 'Physical machine_id · Manual entry',
+    'operator.copy178': 'Physical host ID (Vast machine_id or Lium executor) · Manual entry',
     'operator.copy179':
       "Enter only the provider's physical machine_id, not an offer or instance ID. Lookup does not rent machines or invent historical observations.",
     'operator.copy180':
@@ -369,6 +369,7 @@ export const operatorCatalogs = {
     'operator.policy.default': 'Use default rules',
     'operator.policy.prefer': 'Prefer this host',
     'operator.policy.deny': 'Do not select',
+    'operator.policy.deny_bad_output': 'Do not select (bad output)',
     'operator.policy.unknown': 'Policy needs reconciliation',
     'operator.reason.operator_queue_cleared': 'Administrator cleared queue',
     'operator.reason.operator_request_cancelled': 'Administrator cancelled request',
@@ -645,7 +646,7 @@ export const operatorCatalogs = {
     'operator.copy175': '返回',
     'operator.copy176': '人工主机策略',
     'operator.copy177': '检查策略修改',
-    'operator.copy178': '物理 machine_id · 人工录入',
+    'operator.copy178': '物理主机 ID（Vast machine_id 或 Lium executor）· 人工录入',
     'operator.copy179':
       '仅填写供应商物理 machine_id，不能把 offer 或实例编号当成物理身份。查询不会租机，也不补造历史观测。',
     'operator.copy180': '本次没有已记录的物理主机；历史未知身份不补猜，不能当作供应商零库存。',
@@ -788,6 +789,7 @@ export const operatorCatalogs = {
     'operator.policy.default': '按默认规则',
     'operator.policy.prefer': '优先选用',
     'operator.policy.deny': '禁止选用',
+    'operator.policy.deny_bad_output': '禁止选用（出片有问题）',
     'operator.policy.unknown': '规则待核对',
     'operator.reason.operator_queue_cleared': '管理员清理队列',
     'operator.reason.operator_request_cancelled': '管理员取消请求',

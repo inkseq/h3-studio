@@ -46,6 +46,8 @@ import { storyPreview } from './story-preview.js';
 import AgentConnect from './AgentConnect.jsx';
 import AgentLink from './AgentLink.jsx';
 import ProjectActivity from './ProjectActivity.jsx';
+import { StoryPictureDefaults, readPictureDefaults } from './StoryPictureDefaults.jsx';
+import { setPictureDefaults } from './picture-defaults.js';
 import { locateEntity } from './agent-navigation.js';
 import { cloudController as cloud } from './cloud-controller.js';
 import StoryboardConnected from './StoryboardConnected.jsx';
@@ -751,7 +753,13 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
                   setError(t('story.copy94'));
                   return;
                 }
-                const next = { title, logline: String(f.get('logline')).trim() };
+                // The default picture saves with the title, as one change (#891).
+                const next = {
+                  title,
+                  logline: String(f.get('logline')).trim(),
+                  journey: { ...p.journey },
+                };
+                setPictureDefaults(next, readPictureDefaults(e.currentTarget));
                 if (store.updateProject(next) === false) {
                   setError(store.getState().notice);
                   return;
@@ -765,6 +773,7 @@ export default function SeriesApp({ sidebarView, onSidebarView, preview = null }
               <Field label={t('story.copy95')}>
                 <textarea name="logline" rows={4} maxLength={2000} defaultValue={p.logline} />
               </Field>
+              <StoryPictureDefaults project={p} />
               {state.workspace.mode === 'cloud' && (
                 <div className="story-settings-actions">
                   <Button onClick={() => open({ type: 'manage-items' })}>

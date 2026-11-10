@@ -3,7 +3,6 @@
 // same shape. The preview lists what each card would change; applying is one batch, so a
 // refused field leaves the story as it was instead of half imported.
 import React, { useRef, useState } from 'react';
-import { Download, Upload } from 'lucide-react';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { useStoryboardUI as useStore } from './storyboard-ui-context.jsx';
 import { Button } from './ui/Button.jsx';
@@ -13,7 +12,9 @@ import { exportBible, importActions, importPlan } from './story-bible.js';
 
 const MAX_BYTES = 2_000_000;
 
-export function BibleImportExport() {
+// The page's "⋯" menu runs `choose` (pick a file) and `download`; `node` holds the hidden file
+// field and the dialogs, so nothing on the page moves when an import starts or fails.
+export function useBibleIO() {
   const { t } = useI18n();
   const { state, dispatch, db } = useStore();
   const input = useRef(null);
@@ -70,16 +71,8 @@ export function BibleImportExport() {
   const fields = (item) =>
     item.changes.map((key) => t('bible.field.' + key)).join(t('bible.listSep'));
 
-  return (
-    <div className="bible-io">
-      <Button size="sm" variant="ghost" onClick={() => input.current?.click()}>
-        <Upload size={13} aria-hidden="true" />
-        {t('bible.import')}
-      </Button>
-      <Button size="sm" variant="ghost" onClick={download}>
-        <Download size={13} aria-hidden="true" />
-        {t('bible.export')}
-      </Button>
+  const node = (
+    <>
       <input
         ref={input}
         type="file"
@@ -90,7 +83,17 @@ export function BibleImportExport() {
           e.target.value = '';
         }}
       />
-      {error && !plan && <Note tone="warn">{error}</Note>}
+      {error && !plan && (
+        // A file that cannot be read says so in a dialog instead of a line that pushes the page.
+        <Dialog title={t('bible.importTitle')} onClose={() => setError('')}>
+          <Note tone="warn" role="alert">
+            {error}
+          </Note>
+          <DialogActions>
+            <Button onClick={() => setError('')}>{t('bible.cancel')}</Button>
+          </DialogActions>
+        </Dialog>
+      )}
       {plan && (
         <Dialog title={t('bible.importTitle')} onClose={() => setPlan(null)} busy={applying} wide>
           <p className="muted">{t('bible.importHelp')}</p>
@@ -150,6 +153,7 @@ export function BibleImportExport() {
           </DialogActions>
         </Dialog>
       )}
-    </div>
+    </>
   );
+  return { choose: () => input.current?.click(), download, node };
 }

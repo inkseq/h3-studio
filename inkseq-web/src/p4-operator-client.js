@@ -3,7 +3,12 @@ import { CloudError } from './cloud-client.js';
 import { translateForAccount } from './i18n/locale.js';
 import { validBudgetPage } from './operator-budget-model.js';
 import { validAdminJobs } from './operator-jobs-model.js';
-import { validHostAudit, validHostPage } from './operator-host-model.js';
+import {
+  knownHostProvider,
+  physicalHostId,
+  validHostAudit,
+  validHostPage,
+} from './operator-host-model.js';
 import { validBillingPage } from './operator-billing-model.js';
 
 const ROOT = '/v1/operator/dstack',
@@ -93,10 +98,12 @@ export function createP4OperatorClient(options = {}) {
     },
     cancelJobs: (body, key) =>
       api.request('/v1/operator/admin/jobs/cancel', { method: 'POST', body, key }),
-    async hosts({ admin = false, offset = 0, limit = 100, machine_id } = {}) {
+    async hosts({ admin = false, offset = 0, limit = 100, machine_id, provider = 'vastai' } = {}) {
       if (
-        machine_id !== undefined &&
-        (!admin || typeof machine_id !== 'string' || !/^[1-9][0-9]{0,17}$/.test(machine_id))
+        (!admin && provider !== 'vastai') ||
+        !knownHostProvider(provider) ||
+        (machine_id !== undefined &&
+          (!admin || typeof machine_id !== 'string' || !physicalHostId(machine_id, provider)))
       )
         throw new CloudError(message('machineId'));
       const value = await api.request(
@@ -106,10 +113,11 @@ export function createP4OperatorClient(options = {}) {
           limit +
           '&offset=' +
           offset +
+          (admin && provider !== 'vastai' ? '&provider=' + id(provider) : '') +
           (machine_id ? '&machine_id=' + id(machine_id) : ''),
       );
       if (
-        !validHostPage(value, account, { admin }) ||
+        !validHostPage(value, account, { admin, provider }) ||
         (machine_id &&
           (value.hosts.length !== 1 || String(value.hosts[0].machine_id) !== machine_id))
       )

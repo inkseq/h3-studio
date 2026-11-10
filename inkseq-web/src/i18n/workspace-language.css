@@ -10,9 +10,6 @@
   .qc-dialog {
     max-width: calc(100vw - 24px);
   }
-  .qc-field {
-    min-width: 0;
-  }
   .qc-dialog input,
   .qc-dialog select {
     max-width: 100%;

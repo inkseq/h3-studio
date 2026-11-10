@@ -321,3 +321,86 @@ test('confirmed pictures are drawn one at a time, in order', async () => {
     [...quote.action.requests, single.id],
   );
 });
+
+test('a picture drawn from attached photos sends them with that card only', async () => {
+  const { createLiveChat, fromServer } = await import('./story-chat-client.js');
+  const ids = ['character-0123456789abcdef', 'location-0123456789abcde1'];
+  const view = {
+    version: 4,
+    project_id: 'p1',
+    messages: [
+      {
+        id: 'turn-abcdef0123456789-a',
+        role: 'assistant',
+        text: 'Confirm.',
+        changes: [],
+        proposal: {
+          kind: 'image',
+          shot_ids: [],
+          picture_card_ids: ids,
+          picture_sources: { [ids[0]]: ['asset-scarf'] },
+        },
+      },
+    ],
+    cards: {
+      characters: [{ id: ids[0], name: 'Zib', text: '' }],
+      places: [{ id: ids[1], name: 'Field', text: '' }],
+      props: [],
+      shots: [],
+    },
+  };
+  const calls = [];
+  const api = {
+    async request(path, options = {}) {
+      if (path.endsWith('/images')) calls.push(options.body);
+      return view;
+    },
+  };
+  const chat = createLiveChat({ api, projectId: 'p1', labels: {} });
+  const [quote] = Object.values(fromServer(view, {}).quotes);
+  await chat.settle(quote, true, [], () => {});
+  assert.deepEqual(calls[0].photo_ids, ['asset-scarf']);
+  assert.equal('photo_ids' in calls[1], false);
+});
+
+test('generation advice shows per shot in order, never stale or unknown advice (#628)', async () => {
+  const { fromServer, riskWarnings } = await import('./story-chat-client.js');
+  const shot = (id, order) => ({ id, order, text: 'x', seconds: 5, start: 0, end: 5 });
+  const view = (review) => ({
+    version: 1,
+    messages: [
+      {
+        id: 't1-a',
+        role: 'assistant',
+        text: 'Ready.',
+        proposal: { kind: 'generate', shot_ids: ['s1', 's2'], risk_review: review },
+      },
+    ],
+    cards: { shots: [shot('s2', 2), shot('s1', 1)] },
+  });
+  const review = {
+    version: 1,
+    status: 'warnings',
+    warnings: [
+      { shot_id: 's2', code: 'plot_density', source: 'model', suggestion: ' Split it. ' },
+      { shot_id: 's1', code: 'speech_too_dense', source: 'rule', suggestion: 'Fewer lines.' },
+      { shot_id: 's1', code: 'speech_too_dense', source: 'model', suggestion: 'Again.' },
+      { shot_id: 's1', code: 'made_up', source: 'model', suggestion: 'No.' },
+      { shot_id: 'other', code: 'action_density', source: 'rule', suggestion: 'No.' },
+    ],
+  };
+  const quote = Object.values(fromServer(view(review)).quotes)[0];
+  assert.deepEqual(quote.risks, [
+    { shotId: 's1', order: 1, code: 'speech_too_dense', suggestion: 'Fewer lines.' },
+    { shotId: 's2', order: 2, code: 'plot_density', suggestion: 'Split it.' },
+  ]);
+  assert.deepEqual(
+    Object.values(fromServer(view({ ...review, status: 'stale' })).quotes)[0].risks,
+    [],
+  );
+  assert.deepEqual(Object.values(fromServer(view(undefined)).quotes)[0].risks, []);
+  assert.deepEqual(
+    riskWarnings({ version: 2, status: 'warnings', warnings: review.warnings }, []),
+    [],
+  );
+});
