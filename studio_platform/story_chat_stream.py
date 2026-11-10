@@ -28,9 +28,32 @@ def sse(event, data):
         "event: "
         + event
         + "\ndata: "
-        + json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+        + json.dumps(data, ensure_ascii=True, separators=(",", ":"))
         + "\n\n"
     )
+
+
+def _unicode_escape(partial, index):
+    digits = partial[index + 2 : index + 6]
+    if len(digits) != 4:
+        return None
+    try:
+        value = int(digits, 16)
+        end = index + 6
+        if 0xD800 <= value <= 0xDBFF:
+            # A UTF-16 pair is one character; wait for the complete low half.
+            if partial[end : end + 2] != "\\u" or len(partial) < end + 6:
+                return None
+            low = int(partial[end + 2 : end + 6], 16)
+            if not 0xDC00 <= low <= 0xDFFF:
+                return None
+            value = 0x10000 + ((value - 0xD800) << 10) + low - 0xDC00
+            end += 6
+        elif 0xDC00 <= value <= 0xDFFF:
+            return None
+        return chr(value), end
+    except ValueError:
+        return None
 
 
 def reply_so_far(partial):
@@ -65,14 +88,11 @@ def reply_so_far(partial):
             break
         code = partial[index + 1]
         if code == "u":
-            digits = partial[index + 2 : index + 6]
-            if len(digits) < 4:
+            decoded = _unicode_escape(partial, index)
+            if decoded is None:
                 break
-            try:
-                out.append(chr(int(digits, 16)))
-            except ValueError:
-                break
-            index += 6
+            char, index = decoded
+            out.append(char)
             continue
         out.append(escapes.get(code, code))
         index += 2

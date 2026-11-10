@@ -38,14 +38,26 @@ class StreamingModel(ScriptedModel):
 
 class ReplyExtractionTests(unittest.TestCase):
     def test_partial_reply_is_read_safely(self):
-        full = json.dumps({"reply": 'Line "one"\nCafé ☕ done', "chips": []})
+        full = json.dumps({"reply": 'Line "one"\nCafé ☕ 😀 done', "chips": []})
         seen = [reply_so_far(full[:end]) for end in range(len(full) + 1)]
         self.assertIsNone(seen[0])
-        self.assertEqual(seen[-1], 'Line "one"\nCafé ☕ done')
+        self.assertEqual(seen[-1], 'Line "one"\nCafé ☕ 😀 done')
         # Every prefix is a prefix of the final text: no half escapes.
         for value in seen:
             if value is not None:
-                self.assertTrue('Line "one"\nCafé ☕ done'.startswith(value), value)
+                self.assertTrue('Line "one"\nCafé ☕ 😀 done'.startswith(value), value)
+                sse("reply", {"text": value}).encode("utf-8")
+
+    def test_unicode_surrogate_pair_waits_for_both_halves(self):
+        self.assertEqual(reply_so_far('{"reply":"a\\ud83d'), "a")
+        self.assertEqual(reply_so_far('{"reply":"a\\ud83d\\ude0'), "a")
+        self.assertEqual(reply_so_far('{"reply":"a\\ud83d\\ude00'), "a😀")
+        self.assertEqual(reply_so_far('{"reply":"a\\ud83d\\u0041'), "a")
+        self.assertEqual(reply_so_far('{"reply":"a\\ude00'), "a")
+
+    def test_sse_is_utf8_safe_even_for_unpaired_surrogate_in_final_data(self):
+        wire = sse("done", {"text": "\ud800"}).encode("utf-8")
+        self.assertEqual(events(wire.decode()), [("done", {"text": "\ud800"})])
 
     def test_no_reply_key_or_non_string(self):
         self.assertIsNone(reply_so_far('{"chips": []}'))
@@ -71,7 +83,7 @@ class ReplyExtractionTests(unittest.TestCase):
         text = "".join(stream_turn(crashing))
         self.assertNotIn("PRIVATE", text)
         self.assertIn("story_chat_failed", text)
-        self.assertEqual(sse("x", {"a": "é"}), 'event: x\ndata: {"a":"é"}\n\n')
+        self.assertEqual(events(sse("x", {"a": "é"})), [("x", {"a": "é"})])
 
 
 class StoryChatStreamTests(unittest.TestCase):
