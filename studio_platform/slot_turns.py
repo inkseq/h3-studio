@@ -162,11 +162,15 @@ def selected_job_turn(contexts, tenant, owner, project, job_id, *, run_selected)
             else slot.spec.provider == 'modal'
         )
     )
-    claimed, pooled = False, []
+    claimed, pooled, refused = False, [], {}
     for slot in candidates:
         if slot.spec.pool != job["pool"]:
             continue
         pooled.append(slot)
+        reason = _refusal(contexts, slot, job)
+        if reason is not None:
+            refused[slot.spec.worker_id] = reason
+            continue
         if not slot.lock.acquire(blocking=False):
             continue
         try:
@@ -177,7 +181,7 @@ def selected_job_turn(contexts, tenant, owner, project, job_id, *, run_selected)
             slot.lock.release()
     fresh = contexts.repo.get_job(scope, job_id)
     if not claimed and fresh["status"] == "queued":
-        _count_refusal(contexts, pooled, fresh)
+        _count_refusal(contexts, pooled, fresh, refused)
     now = contexts.repo.clock()
     deadline = max(fresh["not_before"], fresh["lease_expires_at"] or now)
     return {
@@ -187,7 +191,29 @@ def selected_job_turn(contexts, tenant, owner, project, job_id, *, run_selected)
     }
 
 
-def _count_refusal(contexts, slots, job):
+def _refusal(contexts, slot, job):
+    """Why a turn on this slot cannot claim this queued job (#1199), else None.
+
+    Read-only, before the slot lock: a job that cannot claim must not hold the
+    lock the claimable job needs. None, or any error, runs the turn as before.
+    """
+    try:
+        if (
+            job["status"] != "queued"
+            or job.get("lease_worker_id")
+            or slot.spec.backend in LOCAL_BACKENDS
+        ):
+            return None
+        with contexts.repo.engine.connect() as connection:
+            reason = slot.runner.control.queued_turn_refusal(
+                connection, slot.spec.worker_id, job
+            )
+    except Exception:
+        return None
+    return reason if isinstance(reason, str) else None
+
+
+def _count_refusal(contexts, slots, job, refused=None):
     """Why no slot took a queued job this turn (#1140 item 4); never raises."""
     from .capacity_reasons import count
 
@@ -195,6 +221,10 @@ def _count_refusal(contexts, slots, job):
         return count("claim", "no_worker_for_pool")
     try:
         for slot in slots:
+            known = (refused or {}).get(slot.spec.worker_id)
+            if known is not None:
+                count("claim", known, slot.spec.worker_id)
+                continue
             control = getattr(slot.runner, "control", None)
             if control is None:
                 continue

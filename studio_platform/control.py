@@ -1014,6 +1014,53 @@ class WorkerControl:
                 break  # Same fairness order as a real claim on this worker.
         return "matching_capacity_unavailable"
 
+    def queued_turn_refusal(self, connection, worker_id, job):
+        """Why a worker turn could not claim this queued job now; None = run it.
+
+        Read-only and advisory (#1199). Every queued job polls every slot of its
+        pool; a full turn under the slot lock for a job that cannot claim made
+        the one job that can lose the lock and left a ready GPU idle. Whatever
+        needs the turn's own writes (expiry, drain, recovery hold) or cannot be
+        proven here returns None, and the real claim still fences every race.
+        """
+        if job["status"] != "queued" or job["lease_worker_id"] is not None:
+            return None
+        now = self.repo.clock()
+        worker = self._worker(connection, worker_id)
+        if worker["expires_at"] <= now or worker["state"] == "unknown":
+            return None  # The turn marks it unknown for reconciliation.
+        if job["not_before"] > now:
+            return "queue_backoff"
+        reason = self.claim_reason(connection, worker, job)
+        if reason == "worker_capacity_stopping":
+            return None  # The claim records the drain request.
+        if reason is not None:
+            return reason
+        ordered, _ = self.queue.ordered_candidates(
+            connection,
+            job["pool"],
+            purpose="generate",
+            dispatch_backend=worker["spec"].get("dispatch_backend", "legacy"),
+            job_filter=self._claim_filter(connection, worker, job["pool"], "generate"),
+        )
+        for candidate in ordered:
+            if candidate["id"] == job["id"]:
+                return None
+            current = self.repo._job(connection, candidate["id"])
+            if (
+                current["status"] != "queued"
+                or current["not_before"] > now
+                or current["lease_worker_id"] is not None
+                or self.claim_reason(connection, worker, current) is not None
+            ):
+                continue
+            if current["current_attempt_id"] and not self._proven_unsubmitted_queue(
+                connection, current
+            ):
+                return None  # The claim parks a malformed requeue; let it.
+            return "not_first_in_order"
+        return "not_in_claim_order"
+
     def claim(
         self,
         worker_id,
