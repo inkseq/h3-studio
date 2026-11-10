@@ -243,6 +243,163 @@ class GateTests(unittest.TestCase):
         self.assertIsNone(gate.model_prompt(value, "shot", draft(), windows))
 
 
+def frame_draft(first=True, last=False):
+    value = draft()
+    value["inputs"].update(
+        images=[],
+        audios=[],
+        first_frame={"asset_id": "f"} if first else None,
+        last_frame={"asset_id": "l"} if last else None,
+    )
+    value["storyboard"]["prompt_parts"][:2] = [
+        {"kind": "place", "entity_id": "pen", "text": "草地与石砌牛圈（海边草地）"},
+        {
+            "kind": "cast",
+            "entity_id": "herd",
+            "text": "三身牧牛人（三个头共用一个身体）",
+        },
+    ]
+    value["storyboard"]["references"] = []
+    return value
+
+
+def frame_project():
+    value = project()
+    value["entities"][2]["data"]["storyboard"] = {"mode": "fl"}
+    return value
+
+
+def frame_good(last=False):
+    ending = " The clip ends exactly on <Picture 2>." if last else ""
+    return NL.join(
+        [
+            "integrated_multimodal_description:",
+            "<Picture 1> is the first frame at 00:00.000; the clip continues from it."
+            + ending,
+            "A grounded cinematic style. The three-headed herdsman stands by the "
+            "stone cattle pen at dusk. The left head (S1) shouts " + LINE1,
+            "and closes its lips; the middle head (S2) hesitates " + LINE2,
+            "and closes its lips.",
+            "overall_soundscape:",
+            "Wind and surf.",
+            "non_diegetic_music:",
+            "N/A",
+        ]
+    )
+
+
+class FrameTests(unittest.TestCase):
+    def setUp(self):
+        h3_prompt._CACHE.clear()
+        self.value = frame_project()
+        self.shot = self.value["entities"][2]
+
+    def test_first_frame_shot_gets_frame_facts_with_card_text(self):
+        facts = h3_prompt.source(self.value, self.shot, frame_draft())
+        self.assertEqual(facts["format"], "frames")
+        self.assertEqual(facts["first_frame"], "<Picture 1>")
+        self.assertIsNone(facts["last_frame"])
+        self.assertEqual(facts["counts"], {"Picture": 1, "Audio": 0, "Video": 0})
+        self.assertEqual(
+            [(c["kind"], c["name"]) for c in facts["cards"]],
+            [("place", "草地与石砌牛圈"), ("character", "三身牧牛人")],
+        )
+        self.assertIn("三个头共用一个身体", facts["cards"][1]["description"])
+        both = h3_prompt.source(self.value, self.shot, frame_draft(last=True))
+        self.assertEqual(
+            (both["first_frame"], both["last_frame"]), ("<Picture 1>", "<Picture 2>")
+        )
+        last_only = h3_prompt.source(self.value, self.shot, frame_draft(False, True))
+        self.assertEqual(last_only["last_frame"], "<Picture 1>")
+        text_only = h3_prompt.source(self.value, self.shot, frame_draft(False))
+        self.assertEqual(text_only["counts"]["Picture"], 0)
+
+    def test_frame_shot_with_other_references_is_not_rewritten(self):
+        extra = frame_draft()
+        extra["inputs"]["audios"] = [{"asset_id": "c"}]
+        self.assertIsNone(h3_prompt.source(self.value, self.shot, extra))
+        written = dict(self.shot, data={**self.shot["data"], "prompt": frame_good()})
+        self.assertIsNone(h3_prompt.source(self.value, written, frame_draft()))
+
+    def test_frame_checks(self):
+        facts = h3_prompt.source(self.value, self.shot, frame_draft())
+        self.assertEqual(h3_prompt.problems(frame_good(), facts), [])
+        named = frame_good().replace("The three-headed herdsman", "三身牧牛人")
+        self.assertIn(
+            "Chinese text outside <d> lines", h3_prompt.problems(named, facts)
+        )
+        self.assertTrue(
+            any(
+                item.startswith("must start with integrated")
+                for item in h3_prompt.problems(good(), facts)
+            )
+        )
+        self.assertIn(
+            "<Picture 2> was not sent",
+            h3_prompt.problems(frame_good(last=True), facts),
+        )
+        both = h3_prompt.source(self.value, self.shot, frame_draft(last=True))
+        self.assertIn(
+            "<Picture 2> is never cited", h3_prompt.problems(frame_good(), both)
+        )
+        self.assertEqual(h3_prompt.problems(frame_good(last=True), both), [])
+        lost = frame_good().replace("先问问", "问问")
+        self.assertTrue(any("<d> line" in i for i in h3_prompt.problems(lost, facts)))
+
+    def test_latin_card_names_must_become_identities(self):
+        self.value["entities"][0]["title"] = "Geryon"
+        facts = h3_prompt.source(self.value, self.shot, frame_draft())
+        kept = frame_good().replace("The three-headed herdsman", "Geryon")
+        self.assertIn(
+            "call Geryon by a generic English identity, not the name",
+            h3_prompt.problems(kept, facts),
+        )
+        self.assertEqual(h3_prompt.problems(frame_good(), facts), [])
+
+    def test_rewrite_uses_the_frame_instruction(self):
+        facts = h3_prompt.source(self.value, self.shot, frame_draft())
+        calls = []
+
+        class Client(FakeClient):
+            def generate(self, model, messages, **kwargs):
+                calls.append(kwargs["instruction"])
+                return super().generate(model, messages, **kwargs)
+
+        client = Client(frame_good())
+        self.assertEqual(h3_prompt.rewrite(client, facts), frame_good())
+        self.assertEqual(calls, [h3_prompt.FRAME_INSTRUCTION])
+        request = json.loads(client.calls[0][0]["text"])
+        self.assertNotIn("format", request)
+        self.assertNotIn("counts", request)
+        self.assertEqual(request["first_frame"], "<Picture 1>")
+
+    def test_gate_rewrites_frame_shots_for_h3(self):
+        gate = GateTests.admission(
+            None, "h3-pruned-rank8-int8-sage2-cu130-wgp9cb2-taomate5-v9"
+        )
+        gate.prompt_client = FakeClient(frame_good())
+        body = {"controls": {"duration": 6}}
+        self.assertEqual(
+            gate.model_prompt(self.value, "shot", frame_draft(), body), frame_good()
+        )
+
+    def test_compiled_first_last_storyboard_shot_feeds_the_rewrite(self):
+        from studio_platform.generation_draft import read_draft
+        from test_platform_storyboard import cap, storyboard_project
+
+        value = storyboard_project()
+        shot = next(e for e in value["entities"] if e["id"] == "shot-one")
+        shot["data"]["storyboard"]["mode"] = "fl"
+        shot["data"]["h3"]["recipeId"] = "h3-base-fl2va-v1"
+        compiled, issues = read_draft(value, "shot-one", capabilities=cap())
+        self.assertEqual(issues, [])
+        facts = h3_prompt.source(value, shot, compiled)
+        self.assertEqual(
+            (facts["first_frame"], facts["last_frame"]), ("<Picture 1>", "<Picture 2>")
+        )
+        self.assertEqual([c["name"] for c in facts["cards"]], ["站台", "林岚", "铁剑"])
+
+
 class FramingTests(unittest.TestCase):
     def test_turbo_frame_goes_inside_detailed_description(self):
         v7 = "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
@@ -253,6 +410,15 @@ class FramingTests(unittest.TestCase):
         self.assertIn(compiler.CLEAN_FRAME + NL + "overall_soundscape:", framed)
         self.assertTrue(framed.startswith("subject_definitions:"))
         self.assertEqual(compiler._authored_prompt(framed, v7), good())
+
+    def test_turbo_frame_goes_inside_the_frame_format_body(self):
+        v7 = "h3-pruned-rank8-int8-sdpa-p4-29gib-taomate5-v7"
+        framed = compiler.turbo_prompt(frame_good())
+        self.assertIn(
+            "integrated_multimodal_description:" + NL + compiler.FILM_FRAME, framed
+        )
+        self.assertIn(compiler.CLEAN_FRAME + NL + "overall_soundscape:", framed)
+        self.assertEqual(compiler._authored_prompt(framed, v7), frame_good())
 
 
 if __name__ == "__main__":
