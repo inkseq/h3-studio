@@ -191,12 +191,20 @@ def write_parameter(ssm, spec, value):
     return previous
 
 
-def run_host_script(ssm, host, script_path, *, sleep=time.sleep, polls=120):
-    """Run one private host script through SSM; only its status is reported."""
+def host_script(script_path):
+    """Read a real host step; empty SSM programs are not installation proof."""
     try:
         commands = Path(script_path).read_text(encoding="utf-8")
     except OSError:
         raise RotationError("rotation_host_script_unreadable") from None
+    if not commands.strip():
+        raise RotationError("rotation_host_script_empty")
+    return commands
+
+
+def run_host_script(ssm, host, script_path, *, sleep=time.sleep, polls=120):
+    """Run one private host script through SSM; only its status is reported."""
+    commands = host_script(script_path)
     try:
         sent = ssm.send_command(
             InstanceIds=[host["instance_id"]],
@@ -276,6 +284,12 @@ def execute(
     sleep=time.sleep,
 ):
     now = now or datetime.now(timezone.utc)
+    # Refuse missing steps before importing a key or replacing the parameter.
+    # run_host_script reads again just before sending, so a later edit cannot
+    # turn an empty program's SSM Success into verification.
+    for host in spec.get("hosts", {}).values():
+        host_script(host["install"])
+        host_script(host["verify"])
     profile = new_profile(spec, now)
     path = prepare_drop(name, spec, drop)
     say(f"Step 1: create a new key at {spec['console_url']}")

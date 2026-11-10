@@ -154,6 +154,33 @@ class RotateKeyTests(unittest.TestCase):
         self.assertEqual(len(ssm.sent), 1)
         self.assertTrue((self.root / "drop" / "everyframe.env").exists())
 
+    def test_empty_host_steps_refuse_before_import_or_parameter_write(self):
+        for script in ("install.sh", "verify.sh"):
+            for content in ("", " \t\r\n"):
+                with self.subTest(script=script, content=repr(content)):
+                    path = self.root / script
+                    path.write_text(content)
+                    ssm = FakeSSM(current="{}")
+                    with self.assertRaisesRegex(
+                        rk.RotationError, "rotation_host_script_empty"
+                    ):
+                        self.run_execute(ssm)
+                    self.assertEqual(self.imports, [])
+                    self.assertEqual(ssm.puts, [])
+                    self.assertEqual(ssm.sent, [])
+                    self.assertFalse((self.root / "drop").exists())
+                    self.assertEqual(list((self.root / "inbox").iterdir()), [])
+                    path.write_text("echo private host step\n")
+
+    def test_host_step_emptied_after_preflight_is_not_sent(self):
+        path = self.root / "install.sh"
+        self.assertTrue(rk.host_script(path).strip())
+        path.write_text(" \t\n")
+        ssm = FakeSSM()
+        with self.assertRaisesRegex(rk.RotationError, "rotation_host_script_empty"):
+            rk.run_host_script(ssm, self.spec["hosts"]["staging"], path)
+        self.assertEqual(ssm.sent, [])
+
     def test_production_needs_typed_confirmation(self):
         spec = {
             **self.spec,
