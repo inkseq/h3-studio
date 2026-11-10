@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 import threading
+import time
 import unittest
 from unittest.mock import patch
 import uuid
@@ -609,6 +610,118 @@ class AccountSessionTests(LedgerCase):
         self.assertEqual(set(self.provider.revokes), original_ids)
         self.assertIn(fresh, self.provider.active)
         self.assertTrue(self.service.turn(self.scope.tenant_id, ident)["done"])
+
+    # #1145: parallel reads on one valid cookie never read as signed out.
+    READERS = 12
+
+    def parallel(self, token):
+        barrier = threading.Barrier(self.READERS)
+
+        def read(_):
+            barrier.wait(5)
+            try:
+                return "ok" if self.auth.session(token) is not None else "signed_out"
+            except SessionUnavailable:
+                return "unavailable"
+
+        with ThreadPoolExecutor(self.READERS) as pool:
+            return list(pool.map(read, range(self.READERS)))
+
+    def test_password_session_parallel_reads_all_succeed(self):
+        token = self.auth.login("superdan", "")
+        # Past the hourly slide so every reader also tries the renewal write.
+        self.now += 3601
+        self.assertEqual(set(self.parallel(token)), {"ok"})
+
+    def test_hosted_session_slow_provider_parallel_checks_all_succeed(self):
+        token = self.hosted()
+        self.assertIsNotNone(self.auth.session(token))
+        self.now += 3601  # Expired provider cache and due renewal.
+        original = self.provider.list_sessions
+
+        def slow(*args, **kwargs):
+            time.sleep(0.05)
+            return original(*args, **kwargs)
+
+        with patch.object(self.provider, "list_sessions", side_effect=slow):
+            self.assertEqual(set(self.parallel(token)), {"ok"})
+
+    def test_hosted_session_provider_failures_are_unavailable_not_signed_out(self):
+        token = self.hosted()
+        self.assertIsNotNone(self.auth.session(token))
+        self.now += 60
+        for failure in (
+            TimeoutError("PRIVATE timeout"),
+            RuntimeError("PRIVATE 502 Bad Gateway"),
+            ConnectionError("PRIVATE reset"),
+        ):
+            with (
+                self.subTest(failure=type(failure).__name__),
+                patch.object(self.provider, "list_sessions", side_effect=failure),
+            ):
+                self.assertEqual(set(self.parallel(token)), {"unavailable"})
+        self.assertIsNotNone(self.auth.session(token))
+
+    def test_checker_failure_outside_provider_io_is_unavailable(self):
+        token = self.hosted()
+        self.assertIsNotNone(self.auth.session(token))
+        self.now += 60
+        with patch.object(
+            self.auth, "session_checker", side_effect=TimeoutError("PRIVATE")
+        ):
+            with self.assertRaises(SessionUnavailable) as caught:
+                self.auth.session(token)
+        self.assertNotIn("PRIVATE", str(caught.exception))
+
+    def test_concurrent_provider_check_cache_writes_do_not_fail(self):
+        token = self.hosted()
+        self.now += 1
+        with self.repo.engine.connect() as conn:
+            self.assertIsNone(
+                read(conn, self.scope.tenant_id, "provider_check", digest(token))
+            )
+        # First-ever checks race to create the cache record.
+        self.assertEqual(set(self.parallel(token)), {"ok"})
+
+    def test_http_parallel_reads_never_401_and_outage_is_503_retry_after(self):
+        from fastapi.testclient import TestClient
+        from studio_platform.api import COOKIE, create_app
+        from studio_platform.settings import Settings
+
+        app = create_app(
+            Settings(
+                Path(self.temp.name) / "session-http-1145",
+                database_url=self.url,
+                tenant_id=self.scope.tenant_id,
+                auth_mode="local-test",
+                deployment_target="staging",
+            ),
+            repository=self.repo,
+        )
+        app.state.auth.clock = lambda: self.now
+        self.auth = app.state.auth
+        self.service = AccountSessions(self.repo, self.auth, self.settings, self.workos)
+        self.auth.session_checker = self.service.check
+        token = self.hosted()
+        with TestClient(app, base_url="https://testserver") as client:
+            client.cookies.set(COOKIE, token)
+
+            def get(_):
+                return client.get("/v1/projects")
+
+            self.now += 60
+            with ThreadPoolExecutor(6) as pool:
+                codes = {r.status_code for r in pool.map(get, range(6))}
+            self.assertNotIn(401, codes)
+            self.now += 60
+            with patch.object(
+                self.provider, "list_sessions", side_effect=TimeoutError("PRIVATE")
+            ):
+                with ThreadPoolExecutor(6) as pool:
+                    replies = list(pool.map(get, range(6)))
+            self.assertEqual({r.status_code for r in replies}, {503})
+            self.assertTrue(all(r.headers["retry-after"] == "3" for r in replies))
+            self.assertTrue(all("PRIVATE" not in r.text for r in replies))
 
 
 if __name__ == "__main__":

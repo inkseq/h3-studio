@@ -6,6 +6,7 @@ import re
 import uuid
 
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from .auth import (
     Principal,
@@ -191,14 +192,20 @@ class AccountSessions:
                 return False
             if live[binding["sid"]]["expires_at"] <= self.auth.clock():
                 return False
-            write(
-                conn,
-                self.tenant,
-                "provider_check",
-                token_hash,
-                {"fingerprint": fingerprint, "checked_at": self.auth.clock()},
-                self.auth.clock(),
-            )
+            try:
+                with conn.begin_nested():
+                    write(
+                        conn,
+                        self.tenant,
+                        "provider_check",
+                        token_hash,
+                        {"fingerprint": fingerprint, "checked_at": self.auth.clock()},
+                        self.auth.clock(),
+                    )
+            except IntegrityError:
+                # A parallel read on the same cookie created the cache record
+                # first; the session is still verified (#1145).
+                pass
         return True
 
     def revoke_all(self, principal, body, key):
