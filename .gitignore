@@ -54,11 +54,14 @@ inventory.json
 !tests/fixtures/inky/eval-cases.json
 !tests/fixtures/inky/images/
 !tests/fixtures/inky/images/*.jpg
+!tests/fixtures/story-chat/
+!tests/fixtures/story-chat/eval-conversations.json
 !tools/
 !tools/ci_media_tools.py
 !tools/fetch_chisel.py
 !tools/ci_test_shards.py
 !tools/simulate_capacity.py
+!tools/langfuse_evals.py
 !tools/ci_test_timings.json
 !tools/check_aws_release_account.py
 !tools/h3_pro6000_pilot_runtime.py
@@ -1110,6 +1113,7 @@ inventory.json
 !studio_platform/llm_tracing.py
 !deploy/platform/langfuse_credentials.py
 !tools/import_langfuse_credentials.py
+!tests/test_langfuse_evals.py
 !tests/test_llm_tracing.py
 !tests/test_langfuse_deployment.py
 !deploy/platform/langfuse-staging-read-policy.json
