@@ -764,6 +764,44 @@ class CreationHistoryStorageTests(LedgerCase):
         self.assertEqual(len(markers), 2)
         self.assertEqual(self.financial_snapshot(), financial)
 
+    def test_accounted_artifacts_cost_one_read_not_a_transaction_each(self):
+        # #1192: every upload walked every artifact of the tenant.
+        from sqlalchemy import event, update
+
+        self.prepared(settled=True)
+        owner = self.scope.owner_id
+        before = self.assets.usage(owner)["accounted_bytes"]
+        statements = []
+
+        def seen(conn, cursor, statement, parameters, context, executemany):
+            statements.append(statement)
+
+        engine = self.assets.journal.engine
+        event.listen(engine, "before_cursor_execute", seen)
+        try:
+            self.assertEqual(self.assets.usage(owner)["accounted_bytes"], before)
+        finally:
+            event.remove(engine, "before_cursor_execute", seen)
+        marker_reads = [s for s in statements if artifact_accounting.name in s]
+        # One read of the markers per scope, and no write.
+        self.assertEqual(len(marker_reads), 2)
+        self.assertFalse(
+            [
+                s
+                for s in statements
+                if s.lstrip().upper().startswith(("INSERT", "UPDATE"))
+            ]
+        )
+        # A marker that disagrees with the stored object is still a conflict.
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(artifact_accounting).values(
+                    size_bytes=artifact_accounting.c.size_bytes + 1
+                )
+            )
+        with self.assertRaises(Conflict):
+            self.assets.usage(owner)
+
     def test_finalizer_rejects_unbound_or_wrong_hash_before_any_accounting_changes(
         self,
     ):

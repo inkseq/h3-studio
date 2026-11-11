@@ -253,6 +253,21 @@ class AssetUploadJournal:
                         .where(*clauses)
                     )
                 )
+                # Every upload and every collection comes through here. One
+                # read of what is already accounted keeps the walk below to
+                # the objects that are new: it used to open a transaction for
+                # every object of the tenant, 25 to 84 s per small upload on
+                # a long history (#1192).
+                marked = {
+                    row.object_id: (row.size_bytes, row.sha256)
+                    for row in conn.execute(
+                        select(
+                            artifact_accounting.c.object_id,
+                            artifact_accounting.c.size_bytes,
+                            artifact_accounting.c.sha256,
+                        ).where(artifact_accounting.c.scope == scope)
+                    )
+                }
             from .artifact_renditions import physical_objects
 
             rows = [
@@ -267,6 +282,14 @@ class AssetUploadJournal:
                 )
             ]
             for artifact_id, spec, artifact_owner in rows:
+                try:
+                    known = artifact_identity(spec, artifact_owner)
+                except AssetConflict:
+                    known = (
+                        None  # The locked path below decides, deleted content first.
+                    )
+                if known is not None and marked.get(known[0]) == known[1:]:
+                    continue  # Same evidence already counted, deleted or not.
                 try:
                     with self.engine.begin() as conn:
                         owner_reference_gate(conn, self.tenant, artifact_owner)
