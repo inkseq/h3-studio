@@ -26,7 +26,11 @@ function retryAllowed() {
 export default function Landing() {
   const { t } = useI18n();
   const active = usePageActive(),
-    [login, setLogin] = useState(false);
+    // Sign-in is its own page (owner, 2026-11-11: no dialog in front of it). The username
+    // form, for test and admin accounts, opens from the footer link or /?signin=username.
+    [login, setLogin] = useState(
+      () => new URLSearchParams(window.location.search).get('signin') === 'username',
+    );
   useEffect(() => {
     if (active) document.title = t('landing.pageTitle');
   }, [active, t]);
@@ -108,7 +112,7 @@ export default function Landing() {
           {t('landing.pricing')}
         </a>
         <LanguageSwitcher />
-        <Button className="landing-link" disabled={opening} onClick={() => setLogin(true)}>
+        <Button className="landing-link" disabled={opening} onClick={() => start('sign-in')}>
           {t('landing.signIn')}
         </Button>
         <Button
@@ -185,6 +189,19 @@ export default function Landing() {
               {t('landing.v2.pricingLink')}
             </a>
           </div>
+          {hostedSignInEnabled(c.auth) && (
+            <small className="muted">
+              <a
+                href="/?signin=username"
+                onClick={(event) => {
+                  event.preventDefault();
+                  setLogin(true);
+                }}
+              >
+                {t('signIn.useUsername')}
+              </a>
+            </small>
+          )}
         </section>
       </main>
       <PublicFooter />
@@ -192,6 +209,7 @@ export default function Landing() {
         <Login
           title={t('landing.signInTitle')}
           lead={t('landing.signInLead')}
+          usernameOnly
           onClose={() => setLogin(false)}
           onDone={() => setLogin(false)}
         />
