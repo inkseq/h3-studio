@@ -59,6 +59,46 @@ from .asset_operation import asset_operation_lock
 from . import scratch_retention
 from .content_lifecycle import content_is_deleted, owner_reference_gate
 
+UPLOAD_SLOW_MS = 2000
+
+
+class UploadTiming:
+    """Where one upload spent its time: phase durations only, no names or keys.
+
+    A small upload should answer in about two seconds (#1192). One line per
+    upload, a warning when it took longer, says which phase to look at.
+    """
+
+    def __init__(self):
+        self.started, self.ms = time.perf_counter(), {}
+
+    @contextmanager
+    def phase(self, name):
+        began = time.perf_counter()
+        try:
+            yield
+        finally:
+            spent = (time.perf_counter() - began) * 1000
+            self.ms[name] = self.ms.get(name, 0) + spent
+
+    def log(self, kind, status, size):
+        total = (time.perf_counter() - self.started) * 1000
+        logging.getLogger(__name__).log(
+            logging.WARNING if total >= UPLOAD_SLOW_MS else logging.INFO,
+            "asset_upload_timing kind=%s status=%s bytes=%d total_ms=%d %s",
+            kind,
+            status,
+            size if type(size) is int else 0,
+            total,
+            " ".join(f"{name}_ms={int(value)}" for name, value in self.ms.items()),
+        )
+
+
+@contextmanager
+def _untimed(name):
+    yield
+
+
 MIB = 1024 * 1024
 metadata = MetaData()
 asset_table = Table(
@@ -423,7 +463,9 @@ class AssetService(AssetSourcePreparation):
             "selection": selection,
             "status": "validating",
         }
-        receipt = self.journal.create(owner, asset)
+        timing = UploadTiming()
+        with timing.phase("create"):
+            receipt = self.journal.create(owner, asset)
         receipt["suffix"] = suffix
         receipt["storage_binding"] = self.storage_binding
         if isinstance(self.store, S3ObjectStore) and self.store.config.provider == "r2":
@@ -431,10 +473,14 @@ class AssetService(AssetSourcePreparation):
         try:
             # A kill during receiving must still identify the exact original
             # storage/staging contract; an old unbound receipt is never guessed.
-            self.journal.save(receipt)
+            with timing.phase("create"):
+                self.journal.save(receipt)
             directory = self._stage(receipt)
             directory.mkdir(mode=0o700)
-            with (directory / "receiving").open("xb") as target:
+            with (
+                timing.phase("receive"),
+                (directory / "receiving").open("xb") as target,
+            ):
                 count, checksum = _copy(source, target, self.max_bytes, None)
                 target.flush()
                 os.fsync(target.fileno())
@@ -453,12 +499,13 @@ class AssetService(AssetSourcePreparation):
             receipt["fingerprint"] = hashlib.sha256(
                 json.dumps(fingerprint, sort_keys=True).encode()
             ).hexdigest()
-            legacy = self.journal.legacy_match(receipt, client_asset_id)
-            existing = (
-                {"asset": legacy}
-                if legacy
-                else self.journal.bind(receipt, client_asset_id)
-            )
+            with timing.phase("bind"):
+                legacy = self.journal.legacy_match(receipt, client_asset_id)
+                existing = (
+                    {"asset": legacy}
+                    if legacy
+                    else self.journal.bind(receipt, client_asset_id)
+                )
             if existing:
                 # Only this newly received exact duplicate is removed, after its
                 # fingerprint matches the prior receipt. No stored object is removed.
@@ -467,8 +514,12 @@ class AssetService(AssetSourcePreparation):
                 receipt["asset"]["status"] = "duplicate"
                 self.journal.save(receipt)
                 self._release(receipt)
+                timing.log(asset["kind"], "duplicate", count)
                 return self.public(existing["asset"])
-            return self._run_locked(receipt)
+            try:
+                return self._run_locked(receipt, timing=timing)
+            finally:
+                timing.log(asset["kind"], receipt["asset"].get("status"), count)
         except Exception:
             if receipt["busy"]:
                 receipt["asset"].update(
@@ -678,27 +729,34 @@ class AssetService(AssetSourcePreparation):
         with self._operation(receipt["id"]):
             return self._run_locked(receipt, interrupted=interrupted)
 
-    def _run_locked(self, receipt, *, interrupted=False):
+    def _run_locked(self, receipt, *, interrupted=False, timing=None):
+        phase = timing.phase if timing is not None else _untimed
         try:
             receipt["asset"].update(status="validating")
             receipt["asset"].pop("error", None)
             self.journal.save(receipt)
             if not receipt.get("prepared"):
+                waited = time.perf_counter()
                 with media.PROCESSING_ADMISSION.acquire(
                     "video"
                     if receipt.get("frame_extraction")
                     else receipt["asset"]["kind"]
                 ):
-                    if receipt.get("derivation"):
-                        self._prepare_derivation(receipt)
-                    if receipt.get("frame_extraction"):
-                        self._prepare_artifact_frame(receipt)
-                    self._prepare(receipt)
-            for role in ASSET_OBJECT_ROLES:
-                if role in receipt["objects"]:
-                    self._write_object(receipt, role, interrupted=interrupted)
+                    if timing is not None:
+                        timing.ms["admission"] = (time.perf_counter() - waited) * 1000
+                    with phase("prepare"):
+                        if receipt.get("derivation"):
+                            self._prepare_derivation(receipt)
+                        if receipt.get("frame_extraction"):
+                            self._prepare_artifact_frame(receipt)
+                        self._prepare(receipt)
+            with phase("store"):
+                for role in ASSET_OBJECT_ROLES:
+                    if role in receipt["objects"]:
+                        self._write_object(receipt, role, interrupted=interrupted)
             receipt["asset"]["status"] = "ready"
-            self.journal.save(receipt)
+            with phase("finish"):
+                self.journal.save(receipt)
         except Exception as error:
             uncertain = any(
                 s["phase"] in {"putting", "put_unknown", "verifying", "multipart"}

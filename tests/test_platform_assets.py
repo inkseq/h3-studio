@@ -112,6 +112,29 @@ class AssetTests(OfflineTest):
         self.assertEqual(restarted.resume("owner", first["id"])["status"], "ready")
         self.assertEqual(restarted.usage("owner")["accounted_bytes"], used)
 
+    def test_each_upload_logs_where_its_time_went_and_nothing_else(self):
+        # #1192: one line per upload with phase durations only.
+        with self.assertLogs("studio_platform.assets", level="INFO") as logs:
+            first = self.upload()
+            self.upload()
+        lines = [line for line in logs.output if "asset_upload_timing" in line]
+        self.assertEqual(len(lines), 2)
+        self.assertRegex(
+            lines[0],
+            r"asset_upload_timing kind=image status=ready bytes=\d+ total_ms=\d+ "
+            r"create_ms=\d+ receive_ms=\d+ bind_ms=\d+ admission_ms=\d+ "
+            r"prepare_ms=\d+ store_ms=\d+ finish_ms=\d+$",
+        )
+        # The same file again is a duplicate: received and matched, not stored.
+        self.assertRegex(
+            lines[1],
+            r"kind=image status=duplicate bytes=\d+ total_ms=\d+ "
+            r"create_ms=\d+ receive_ms=\d+ bind_ms=\d+$",
+        )
+        for line in lines:
+            self.assertNotIn(first["id"], line)
+            self.assertNotIn("owner", line)
+
     def test_frontend_composite_client_id_is_distinct_from_storage_paths(self):
         client_id = "shot-one:file_1234-abcd"
         first = self.upload(client=client_id)
