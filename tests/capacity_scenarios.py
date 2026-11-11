@@ -101,6 +101,7 @@ SCENARIOS = [
         jobs=[JobBatch(0, 1, engine_fails=True), JobBatch(60, 4)],
         expect_failed={"wangp_generation_tensor_shape_mismatch": 1},
         expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
+        expect_effective_denies=0,
     ),
     Scenario(
         "silent_request_two_machines",
@@ -114,6 +115,7 @@ SCENARIOS = [
         expect_failed={"capacity_lost_retries_exhausted": 1},
         expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
         expect_alerts=("capacity_request_silent",),
+        expect_effective_denies=0,
     ),
     Scenario(
         "silent_requests_many_hosts",
@@ -129,6 +131,26 @@ SCENARIOS = [
         expect_failed={"capacity_lost_retries_exhausted": 3},
         expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
         expect_alerts=("capacity_request_silent",),
+        expect_effective_denies=0,
+    ),
+    Scenario(
+        "silent_host_cheapest",
+        "The cheapest host goes silent on every job; another host is fine.",
+        # Review of #1214: two rentals of one host are one machine. After the
+        # first silence the retry goes to the other host and finishes there,
+        # so the job is not ended as a suspect request and that loss counts
+        # against the host. An hour later the host is tried again, goes silent
+        # again and is denied; that job finishes on the other host too.
+        hours=5,
+        max_machines=1,
+        jobs=[JobBatch(0, 2), JobBatch(90 * 60, 1)],
+        hosts=[
+            Host("19961", [MachineScript(silent=True, price=0.5)]),
+            Host("19962", [MachineScript()]),
+        ],
+        expect_host_rentals={"19961": 2},
+        expect_denies={"automatic_repeated_failure": 1},
+        expect_effective_denies=1,
     ),
     Scenario(
         "lost_create_reply",

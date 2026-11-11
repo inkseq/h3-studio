@@ -152,22 +152,33 @@ thread is still alive, the controller reclaims the attempt as
 failure class instead of being requeued (another machine would fail the same
 way), its credit hold is released, and the machine is stopped because its GPU
 state is unproven. The stop is not a host failure and counts toward no deny.
-Only this reason may end a job before two requeues; the reclaim checks the
-note of the exact attempt under the row lock. Before this, the same request
+This reason, and silence on a second host (below), are the only ways a job
+ends before two requeues; the reclaim checks the note of the exact attempt
+under the row lock. Before this, the same request
 waited ten silent minutes on each of three machines (staging, 2026-11-10).
 
 Scenario: `engine_rejects_one_request`.
 
 **A request that goes silent (#1214).** With no word from the engine at all,
 the attempt is reclaimed as `capacity_no_progress` after the silence window
-and requeued once. Silence again on a second, different machine ends the job
-there (`capacity_lost_retries_exhausted`, hold released) and raises one alert,
+and requeued once. The retry is offered other hosts first: a host whose last
+rental failed after ready is ordered last for an hour. Silence again on a
+second, different physical host ends the job there
+(`capacity_lost_retries_exhausted`, hold released) and raises one alert,
 `capacity_request_silent`: the request is the suspect, so it does not take a
-third machine. Silence twice on the same machine, or after a different kind
-of loss, keeps the ordinary count of two requeues. Neither loss counts
-against its host.
+third machine. Two rentals of one host are one machine: silence there twice,
+or silence after a different kind of loss, keeps the ordinary count of two
+requeues.
 
-Scenarios: `silent_request_two_machines`, `silent_requests_many_hosts`.
+What such a loss says about the host follows the job's verdict. It counts
+against the host when the job then ended elsewhere, and when the same job was
+lost on that host twice. It does not count when the request proved to be the
+cause, and not while the job is still open, except that a host which already
+has one proven loss is denied on its next loss without waiting. The stored
+deny and the deny derived from history use the same rule.
+
+Scenarios: `silent_request_two_machines`, `silent_requests_many_hosts`,
+`silent_host_cheapest`.
 
 ## Recorded capacity timeline (staging and production)
 
@@ -280,7 +291,10 @@ Scenario(
 - `JobBatch(engine_fails=True)` makes every job of the batch fail inside the
   engine a minute after submission, thread alive, on any machine;
   `expect_failed={code: jobs}` names the jobs that must end failed with that code.
-  `JobBatch(silent=True)`: accepted, then never heard from, on any machine.
+  `JobBatch(silent=True)`: accepted, then never heard from, on any machine;
+  `MachineScript(silent=True)`: the same for every job on that machine.
+  `expect_effective_denies=n`: hosts that end the run denied in effect,
+  stored or derived.
 - `hosts` instead of `machines` gives the provider a market of named physical
   hosts (`Host("19901", [MachineScript(...), ...])`): every plan offers all of
   them, cheapest first, a create lands on the first one the frozen selector

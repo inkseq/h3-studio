@@ -174,7 +174,9 @@ def diagnose(entries, now):
             )
         )
         # No machine was ever allocated: there is nothing to remove (#1214).
-        unallocated = "no_allocation_confirmed" in codes
+        unallocated = (
+            "no_allocation_confirmed" in codes or reason == "dstack_never_allocated"
+        )
         pending = next(
             (
                 (c, n)

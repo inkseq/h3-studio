@@ -134,8 +134,10 @@ def history(job):
 
 
 def silent_again(earlier, attempt):
-    """The job's last loss was silence too, on another machine; `attempt` is
-    the attempt row or the record of the loss being judged."""
+    """The job's last loss was silence too, on another rental; `attempt` is
+    the attempt row or the record of the loss being judged. Whether the two
+    rentals are different physical hosts is checked where the job is ended
+    (another_host); the stored history only shows the workers."""
     if attempt.get("reason", SILENT) != SILENT or not earlier:
         return False
     previous = earlier[-1]
@@ -146,40 +148,79 @@ def silent_again(earlier, attempt):
     )
 
 
-def request_suspect(connection, intent_id, *, pending=False):
-    """A machine's lost attempt belonged to a job that proved to be the cause.
+def _host(connection, worker_id):
+    """(provider, machine) of the rented machine behind a dstack worker, or None."""
+    from .operator_capacity import operator_nodes
 
-    Such a loss says nothing about the host. True when a job lost on this
-    machine later ended because the engine rejected it or because it went
-    silent on a second machine as well. With ``pending``, a job that is still
-    open counts too: its verdict is not in yet, so its loss is no evidence.
+    value = worker_id[7:] if worker_id.startswith("dstack-") else ""
+    if len(value) != 32:
+        return None
+    intent = "-".join((value[:8], value[8:12], value[12:16], value[16:20], value[20:]))
+    payload = connection.execute(
+        select(operator_nodes.c.payload).where(operator_nodes.c.intent_id == intent)
+    ).scalar()
+    seen = payload.get("host_observation") if isinstance(payload, dict) else None
+    if not isinstance(seen, dict) or not seen.get("machine_id"):
+        return None
+    return seen.get("provider"), seen["machine_id"]
+
+
+def another_host(connection, earlier, attempt):
+    """Both rentals are known and sit on different physical hosts.
+
+    Two rentals of one host are one machine: silence there twice says the
+    host is bad, not the job. An unknown host proves nothing.
     """
-    worker = "dstack-" + intent_id.replace("-", "")
+    before = _host(connection, earlier["worker_id"])
+    current = _host(connection, attempt["worker_id"])
+    return before is not None and current is not None and before != current
+
+
+def lost_jobs(connection, intent_ids):
+    """{machine: [(job, verdict)]} for the attempts lost on these machines.
+
+    ``suspect``: the job proved to be the cause (the engine rejected it, or it
+    went silent on a second host as well). ``open``: the job has not ended, so
+    there is no verdict. ``ended``: the job finished or failed for another
+    reason; that loss is evidence about the machine.
+    """
+    workers = {"dstack-" + ident.replace("-", ""): ident for ident in intent_ids}
+    found = {ident: [] for ident in intent_ids}
+    if not workers:
+        return found
     lost = connection.execute(
-        select(attempts.c.job_id, attempts.c.id).where(
-            attempts.c.worker_id == worker, attempts.c.status == "attempt_lost"
+        select(attempts.c.worker_id, attempts.c.job_id, attempts.c.id).where(
+            attempts.c.worker_id.in_(list(workers)),
+            attempts.c.status == "attempt_lost",
         )
     ).all()
-    for job_id, attempt_id in lost:
-        job = (
-            connection.execute(select(jobs).where(jobs.c.id == job_id))
-            .mappings()
-            .first()
-        )
+    if not lost:
+        return found
+    rows = {
+        row["id"]: dict(row)
+        for row in connection.execute(
+            select(jobs).where(jobs.c.id.in_({item.job_id for item in lost}))
+        ).mappings()
+    }
+    for worker_id, job_id, attempt_id in lost:
+        job = rows.get(job_id)
         try:
-            _, records = history(dict(job))
-        except (Conflict, TypeError):
+            _, records = history(job)
+        except (Conflict, TypeError, KeyError):
             continue
         if not any(row["attempt_id"] == attempt_id for row in records):
             continue
-        if pending and job["status"] not in {"succeeded", "failed", "cancelled"}:
-            return True
         last = records[-1]
         if last["state"] == "exhausted" and (
             last["reason"] == ENGINE_FAILED or silent_again(records[:-1], last)
         ):
-            return True
-    return False
+            verdict = "suspect"
+        elif job["status"] not in {"succeeded", "failed", "cancelled"}:
+            verdict = "open"
+        else:
+            verdict = "ended"
+        found[workers[worker_id]].append((job_id, verdict))
+    return found
 
 
 def engine_failure(job, attempt, now):
@@ -449,7 +490,11 @@ def reclaim(
             engine_code = engine_failure(job, attempt, now)
             if engine_code is None:
                 raise Conflict("capacity_reclaim_not_due")
-        repeated = reason == SILENT and silent_again(records, attempt)
+        repeated = (
+            reason == SILENT
+            and silent_again(records, attempt)
+            and another_host(conn, records[-1], attempt)
+        )
         exhausted = count >= MAX_RECLAIMS or engine_code is not None or repeated
         record = dict(
             version=1,

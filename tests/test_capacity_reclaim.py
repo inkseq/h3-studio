@@ -408,14 +408,23 @@ class CapacityReclaimTests(LedgerCase):
                 ).mappings()
             ]
 
+    def on_hosts(self, **hosts):
+        """Which physical host each worker's rental sits on, for the reclaim."""
+        return patch(
+            "studio_platform.capacity_reclaim._host",
+            side_effect=lambda connection, worker: hosts.get(worker),
+        )
+
     def test_silence_on_a_second_machine_ends_the_job_with_one_alert(self):
         # #1214: the job is the suspect, not the machines; no third machine.
+        hosts = {"worker": ("vastai", "host-a"), "worker-1": ("vastai", "host-b")}
         claim = self.running()
         held = self.holds()
-        self.assertEqual(self.silent(claim)["state"], "requeued")
-        self.assertEqual(self.alerts(), [])
-        claim = self.running(claim.job, worker="worker-1")
-        receipt = self.silent(claim)
+        with self.on_hosts(**hosts):
+            self.assertEqual(self.silent(claim)["state"], "requeued")
+            self.assertEqual(self.alerts(), [])
+            claim = self.running(claim.job, worker="worker-1")
+            receipt = self.silent(claim)
         self.assertEqual((receipt["state"], receipt["count"]), ("exhausted", 1))
         job = self.repo.get_job(self.scope, claim.job["id"])
         self.assertEqual(
@@ -440,6 +449,25 @@ class CapacityReclaimTests(LedgerCase):
         )
         self.assertEqual(len(self.alerts()), 1)
 
+    def test_two_rentals_of_one_host_are_one_machine(self):
+        # Review of #1214: a bad host rented twice must not end a good job.
+        # The job keeps its third attempt, which can land on another host.
+        for hosts in (
+            {"worker": ("vastai", "host-a"), "worker-1": ("vastai", "host-a")},
+            {"worker": ("vastai", "host-a")},  # the second host is unknown
+            {},
+        ):
+            claim = self.running(self.job())
+            with self.on_hosts(**hosts):
+                self.assertEqual(self.silent(claim)["state"], "requeued")
+                claim = self.running(claim.job, worker="worker-1")
+                receipt = self.silent(claim)
+            self.assertEqual((receipt["state"], receipt["count"]), ("requeued", 2))
+            self.assertEqual(
+                self.repo.get_job(self.scope, claim.job["id"])["status"], "queued"
+            )
+        self.assertEqual(self.alerts(), [])
+
     def test_silence_twice_on_the_same_machine_or_after_another_loss_keeps_the_count(
         self,
     ):
@@ -456,35 +484,37 @@ class CapacityReclaimTests(LedgerCase):
         self.assertEqual(self.silent(other)["state"], "requeued")
         self.assertEqual(self.alerts(), [])
 
-    def test_a_loss_caused_by_the_request_is_no_evidence_about_the_host(self):
-        from studio_platform.capacity_reclaim import request_suspect
+    def test_what_the_jobs_lost_on_a_machine_say_about_it(self):
+        from studio_platform.capacity_reclaim import lost_jobs
 
         nodes = ["00000000-0000-4000-8000-00000000000%d" % index for index in range(4)]
         workers = ["dstack-" + node.replace("-", "") for node in nodes]
 
-        def suspect(node, **options):
+        def verdicts():
             with self.repo.engine.connect() as conn:
-                return request_suspect(conn, node, **options)
+                found = lost_jobs(conn, nodes)
+            return [[verdict for _, verdict in found[node]] for node in nodes]
 
+        self.assertEqual(verdicts(), [[], [], [], []])
         claim = self.running(worker=workers[0])
-        self.silent(claim)
-        # The job is open: no verdict yet, so an earlier loss waits.
-        self.assertFalse(suspect(nodes[0]))
-        self.assertTrue(suspect(nodes[0], pending=True))
-        claim = self.running(claim.job, worker=workers[1])
-        self.silent(claim)
-        # Silent on a second machine: both losses belong to the request.
-        self.assertTrue(suspect(nodes[0]))
-        self.assertTrue(suspect(nodes[1]))
+        with self.on_hosts(
+            **{workers[0]: ("vastai", "host-a"), workers[1]: ("vastai", "host-b")}
+        ):
+            self.silent(claim)
+            # The job is open: there is no verdict yet.
+            self.assertEqual(verdicts(), [["open"], [], [], []])
+            claim = self.running(claim.job, worker=workers[1])
+            self.silent(claim)
+        # Silent on a second host: both losses belong to the request.
+        self.assertEqual(verdicts(), [["suspect"], ["suspect"], [], []])
         # A job that was lost once and then delivered elsewhere was fine:
-        # that loss does count against its host.
+        # that loss is evidence about the machine.
         other = self.running(self.job(), worker=workers[2])
         self.silent(other)
         done = self.running(other.job, worker=workers[3])
         self.queue.begin_collection(done.lease)
         self.queue.complete(done.lease, [VALID_ARTIFACT], actual_cost_microusd=0)
-        self.assertFalse(suspect(nodes[2], pending=True))
-        self.assertFalse(suspect(nodes[3], pending=True))
+        self.assertEqual(verdicts()[2:], [["ended"], []])
 
     def test_timeout_uses_positive_progress_and_runtime_floor(self):
         claim = self.running()

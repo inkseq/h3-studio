@@ -404,8 +404,13 @@ class TimelineCliTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith("stopped: dstack_never_allocated"))
         self.assertIn("closed: the provider had no machine; nothing was charged", lines)
         self.assertFalse(any("still waiting" in line for line in lines))
-        # A machine that was allocated still waits for its removal.
+        # The same holds when only the stop reason says so (the review path).
         del entries[2]
+        self.assertFalse(
+            any("still waiting" in line for line in diagnose(entries, 14_000))
+        )
+        # A machine that was allocated still waits for its removal.
+        entries[1]["detail"]["reason"] = "dstack_idle_expired"
         self.assertTrue(
             any(
                 line.startswith("still waiting for: provider removal")

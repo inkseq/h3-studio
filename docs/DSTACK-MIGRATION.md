@@ -256,10 +256,13 @@ denied and one alert is raised (`capacity_download_upstream_slow`,
 
 A failure after ready counts against the host only when it is evidence about
 the host (#1214). It does not count when the job lost there turned out to be
-the cause (the engine rejected it, or it went silent on a second machine as
-well), and an earlier loss does not count while its job is still open and has
-no verdict yet. A host is therefore denied when it loses work that then
-succeeds, or simply ends, elsewhere.
+the cause (the engine rejected it, or it went silent on a second physical
+host as well), and not while that job is still open, with two exceptions: the
+same job lost twice on one host, and a new loss on a host that already lost a
+job which then ended elsewhere. A host whose last rental failed after ready is
+ordered last for an hour, so the retry is tried elsewhere first and the
+verdict is clear. The stored deny and the derived seven-day deny follow the
+same rule.
 
 Failed starts do not pause automatic start: each one denies its host and cools
 its lane. Automatic start pauses only for the loop that is ours, a machine
