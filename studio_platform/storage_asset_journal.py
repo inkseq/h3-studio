@@ -9,6 +9,7 @@ import hashlib
 import re
 import time
 import uuid
+import weakref
 
 from sqlalchemy import (
     BigInteger,
@@ -19,6 +20,8 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    cast,
+    func,
     insert,
     inspect,
     select,
@@ -105,6 +108,10 @@ def validate_client_asset_id(value):
             "客户端素材ID须为1–128个ASCII字母、数字、点、下划线、冒号或短横线"
         )
     return value
+
+
+# Per engine: scope to the artifact and marker state its last complete walk saw.
+_WALKED = weakref.WeakKeyDictionary()
 
 
 class AssetUploadJournal:
@@ -239,20 +246,21 @@ class AssetUploadJournal:
             return
         from .repository import artifacts, jobs
 
+        walked = _WALKED.setdefault(self.engine, {})
         for scope, _, _ in self._scopes(owner):
             clauses = [jobs.c.tenant_id == self.tenant]
             if scope != self._scopes(owner)[0][0]:
                 clauses.append(jobs.c.owner_id == owner)
+            produced = artifacts.join(jobs, artifacts.c.job_id == jobs.c.id)
             with self.engine.connect() as conn:
-                rows = list(
-                    conn.execute(
-                        select(artifacts.c.id, artifacts.c.metadata, jobs.c.owner_id)
-                        .select_from(
-                            artifacts.join(jobs, artifacts.c.job_id == jobs.c.id)
-                        )
-                        .where(*clauses)
-                    )
-                )
+                written = cast(artifacts.c.metadata, Text)
+                if conn.dialect.name == "postgresql":
+                    written = func.md5(written)
+                evidence = conn.execute(
+                    select(artifacts.c.id, written, jobs.c.owner_id)
+                    .select_from(produced)
+                    .where(*clauses)
+                ).all()
                 # Every upload and every collection comes through here. One
                 # read of what is already accounted keeps the walk below to
                 # the objects that are new: it used to open a transaction for
@@ -268,6 +276,26 @@ class AssetUploadJournal:
                         ).where(artifact_accounting.c.scope == scope)
                     )
                 }
+                # Markers are only ever added and a deletion is final, so a
+                # walk that found nothing to do finds nothing again until an
+                # artifact or a marker changes. Uploads, usage reads and every
+                # collection come through here; reading and walking every
+                # artifact's metadata each time was the largest single step
+                # left in a small upload (#1192).
+                state = hashlib.sha256(
+                    repr(
+                        (sorted(map(tuple, evidence)), sorted(marked.items()))
+                    ).encode()
+                ).hexdigest()
+                if walked.get(scope) == state:
+                    continue
+                rows = list(
+                    conn.execute(
+                        select(artifacts.c.id, artifacts.c.metadata, jobs.c.owner_id)
+                        .select_from(produced)
+                        .where(*clauses)
+                    )
+                )
             from .artifact_renditions import physical_objects
 
             rows = [
@@ -339,6 +367,8 @@ class AssetUploadJournal:
                         ).one()
                     if (row.size_bytes, row.sha256) != (size, sha):
                         raise AssetConflict("产物配额证据冲突") from None
+            # Reached only when the whole walk raised nothing.
+            walked[scope] = state
 
     def _change(self, conn, owner, byte_delta, active_delta):
         for scope, cap, active_cap in self._scopes(owner):
