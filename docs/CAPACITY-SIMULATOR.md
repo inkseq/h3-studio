@@ -144,8 +144,11 @@ Scenarios: `collect_fails_then_machine_removed` and `collect_keeps_failing`.
 **A request the engine rejects (#1214).** When the engine publishes a failure
 and its generation thread stays alive, the host cannot prove a stop and answers
 `unknown`; it now attaches the closed failure class. The worker turn writes it
-once on the job (`engine_failure`), and the next controller pass reclaims the
-attempt as `capacity_engine_failed`: the job ends at once with the engine's
+once on the job (`engine_failure`, internal: not in the public job view). An
+ordinary failure exits its thread within moments and is then read as failed
+with the stop proven, machine kept. When the note is a minute old and the
+thread is still alive, the controller reclaims the attempt as
+`capacity_engine_failed`: the job ends at once with the engine's
 failure class instead of being requeued (another machine would fail the same
 way), its credit hold is released, and the machine is stopped because its GPU
 state is unproven. The stop is not a host failure and counts toward no deny.

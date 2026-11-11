@@ -230,7 +230,8 @@ class GenerationRead:
             visible["result"] = {
                 key: value
                 for key, value in visible["result"].items()
-                if key not in {"capacity_reclaims", "capacity_progress"}
+                if key
+                not in {"capacity_reclaims", "capacity_progress", "engine_failure"}
             }
         visible.update(
             **public_quote(job["execution_plan"]),

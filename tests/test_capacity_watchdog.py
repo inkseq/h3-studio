@@ -331,7 +331,14 @@ class NodeWatchdogTests(LedgerCase):
         self.now += 45
         code = "wangp_generation_tensor_shape_mismatch"
         record_engine_failure(self.repo, queue, claim.lease, code)
+        # Inside the grace an ordinary failure may still prove its stop.
         self.now += 15
+        controller.tick()
+        self.assertEqual(self.client.stopped, [])
+        self.assertEqual(
+            self.repo.get_job(self.scope, original["id"])["status"], "running"
+        )
+        self.now += 45
         result = controller.tick()["nodes"][0]
         self.assertEqual(result["code"], "capacity_engine_failed")
         self.assertEqual(len(self.client.stopped), 1)

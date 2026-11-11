@@ -35,6 +35,10 @@ REASONS = {
 # The engine published its own failure for this attempt (#1214). Another
 # machine would fail the same way, so the job ends on the first such loss.
 ENGINE_FAILED = "capacity_engine_failed"
+# An ordinary failure is published a moment before its thread exits; the next
+# worker turn then reads it as failed with the stop proven and the machine is
+# kept. Only a thread still alive this long after the note is the stuck case.
+ENGINE_FAILURE_GRACE_SECONDS = 60
 FIELDS = {
     "version",
     "job_id",
@@ -135,6 +139,7 @@ def engine_failure(job, attempt, now):
         or not finite(note.get("at"))
         or not finite(started)
         or not started <= note["at"] <= now
+        or now - note["at"] < ENGINE_FAILURE_GRACE_SECONDS
     ):
         return None
     return safe_failure_code(note.get("code"))

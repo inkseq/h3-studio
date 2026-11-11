@@ -286,11 +286,17 @@ class CapacityReclaimTests(LedgerCase):
             self.reclaim(claim, reason="capacity_engine_failed")
         self.note_engine_failure(claim)
         job = self.repo.get_job(self.scope, claim.job["id"])
+        # An ordinary failure exits its thread within moments and is then read
+        # as failed with the stop proven; only a note a minute old is stuck.
+        self.assertIsNone(timeout_reason(job, attempt, self.now + 59))
+        self.now += 59
+        with self.assertRaisesRegex(Conflict, "not_due"):
+            self.reclaim(claim, reason="capacity_engine_failed")
         self.assertEqual(
-            timeout_reason(job, attempt, self.now + 5),
+            timeout_reason(job, attempt, self.now + 1),
             ("capacity_engine_failed", None),
         )
-        self.now += 5
+        self.now += 1
         receipt = self.reclaim(claim, reason="capacity_engine_failed")
         self.assertEqual((receipt["state"], receipt["count"]), ("exhausted", 0))
         job = self.repo.get_job(self.scope, claim.job["id"])
@@ -318,6 +324,7 @@ class CapacityReclaimTests(LedgerCase):
         self.assertEqual(self.reclaim(claim)["count"], 1)
         claim = self.running(claim.job, worker="worker-1")
         self.note_engine_failure(claim, "wangp_generation_cuda_out_of_memory")
+        self.now += 60
         receipt = self.reclaim(claim, reason="capacity_engine_failed")
         self.assertEqual((receipt["state"], receipt["count"]), ("exhausted", 1))
         job = self.repo.get_job(self.scope, claim.job["id"])
@@ -508,3 +515,22 @@ class CapacityReclaimTests(LedgerCase):
         self.assertNotIn("capacity_reclaims", view["result"])
         self.assertEqual(quality_job(view)["capacity_reclaim_count"], 1)
         self.assertEqual(view["error_code"], "capacity_owner_recovery")
+        # The engine's note names an attempt and a time: internal, while the
+        # job runs and after it ends. The failure class is public as error_code.
+        claim = self.running(claim.job, worker="worker-1")
+        self.note_engine_failure(claim)
+        reader = GenerationRead(
+            self.repo, SimpleNamespace(tenant_id=self.scope.tenant_id)
+        )
+        row = self.repo.get_job(self.scope, claim.job["id"])
+        self.assertIn("engine_failure", row["result"])
+        self.assertNotIn(
+            "engine_failure", reader.public_job(row, cancellation={})["result"]
+        )
+        self.now += 60
+        self.reclaim(claim, reason="capacity_engine_failed")
+        view = reader.public_job(
+            self.repo.get_job(self.scope, claim.job["id"]), cancellation={}
+        )
+        self.assertNotIn("engine_failure", view["result"])
+        self.assertEqual(view["error_code"], "wangp_generation_tensor_shape_mismatch")
