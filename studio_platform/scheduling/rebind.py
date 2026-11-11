@@ -19,6 +19,7 @@ from .decide import (
     ECONOMY_WARMS_MACHINE_AT as ECONOMY_WARMS_MACHINE_AT,
     HOSTED_BALANCE_RESERVE_USD as HOSTED_BALANCE_RESERVE_USD,
     HOSTED_BALANCE_WARN_USD,
+    HOSTED_STALL_SECONDS,
     HOSTED_WARMS_MACHINE_AT as HOSTED_WARMS_MACHINE_AT,
     HOSTED_WINDOW_SECONDS,
     SCENARIOS,
@@ -269,20 +270,42 @@ def balance_allows_hosted():
     return SCENARIOS["low_vendor_balance"].offload(_balance["usd"])
 
 
-def live_configurations(connection, now):
-    """Hosted configurations with a registered, live slot."""
+def live_configurations(connection, now, *, mid_turn=False):
+    """Hosted configurations with a registered, live slot.
+
+    `mid_turn` also counts a slot that is submitting or polling at this
+    moment: it is back within seconds, so nothing should start because of it.
+    """
     from ..repository import registered_workers
 
+    states = (
+        ("ready", "busy", "leased", "reconciling") if mid_turn else ("ready", "busy")
+    )
     return {
         spec.get("configuration_id")
         for spec in connection.execute(
             select(registered_workers.c.spec).where(
                 registered_workers.c.pool == POOL,
-                registered_workers.c.state.in_(("ready", "busy")),
+                registered_workers.c.state.in_(states),
                 registered_workers.c.expires_at > now,
             )
         ).scalars()
     }
+
+
+def hosted_draining(connection, tenant, now):
+    """Whether a hosted render was submitted within the stall limit."""
+    from ..repository import attempts, jobs
+
+    latest = connection.execute(
+        select(func.max(attempts.c.submission_started_at))
+        .select_from(attempts.join(jobs, attempts.c.job_id == jobs.c.id))
+        .where(
+            jobs.c.tenant_id == tenant,
+            attempts.c.worker_id.like("dbos-everyframe-%"),
+        )
+    ).scalar_one()
+    return latest is not None and now - latest < HOSTED_STALL_SECONDS
 
 
 def rebind(repo, connection, job, model_id, now):
@@ -326,18 +349,32 @@ def offload(service, connection, queued, now):
         return queued
     live = live_configurations(connection, now)
     used = used_in_window(connection, settings.tenant_id, now)
+
+    def target(job):
+        return next(
+            (
+                model_id
+                for model_id in chain(job["request"])
+                if MODELS[model_id].configuration_id in live
+            ),
+            None,
+        )
+
     # A job that already went through the hosted chain stays on our machines.
-    fresh = [item for item in queued if "hosted_tried" not in item[0]["execution_plan"]]
+    # One no live model can take is left out here, so that it neither uses a
+    # place in the window nor stands in front of work that can go.
+    fresh = [
+        item
+        for item in queued
+        if "hosted_tried" not in item[0]["execution_plan"] and target(item[0])
+    ]
     economy = [item for item in fresh if tier_of(item[0]) == "economy"]
     clicks = [item for item in fresh if tier_of(item[0]) != "economy"]
     moved = set()
 
     def move(job):
-        for model_id in chain(job["request"]):
-            if MODELS[model_id].configuration_id in live:
-                if rebind(service.repo, connection, job, model_id, now):
-                    moved.add(job["id"])
-                break
+        if rebind(service.repo, connection, job, target(job), now):
+            moved.add(job["id"])
 
     for job, _ in hosted_offload(
         clicks, tier_of, tiers, used, now, per_window=window, first=first
@@ -374,22 +411,32 @@ def hold_for_hosted(settings, connection, job, now):
     before.
 
     With the hosted API first the job waits for as long as a live hosted model
-    can still take it, a full window included.
+    can still take it, a full window included, unless hosted has stopped
+    submitting renders.
     """
     if not getattr(settings, "everyframe_enabled", False):
         return False
     tiers, window, first = _routing(settings.data_dir)
-    models = chain(job["request"])
-    if not tiers or not window or not balance_allows_hosted() or not models:
+    if (
+        not tiers
+        or not window
+        or not balance_allows_hosted()
+        or not chain(job["request"])
+    ):
         return False
     tier = tier_of(job)
     if first:
-        live = live_configurations(connection, now)
+        live = live_configurations(connection, now, mid_turn=True)
         return SCENARIOS["hosted_first"].hold(
             job,
             tier,
             tiers,
-            any(MODELS[model_id].configuration_id in live for model_id in models),
+            any(
+                MODELS[model_id].configuration_id in live
+                for model_id in chain(job["request"])
+            ),
+            hosted_draining(connection, settings.tenant_id, now),
+            now,
         )
     if tier == "economy":
         # Auto-queue never hurries: no machine until the backlog pays for one.

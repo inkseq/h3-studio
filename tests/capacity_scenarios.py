@@ -64,7 +64,7 @@ HOSTED = [
     ),
     Scenario(
         "hosted_first_demand_off",
-        "Hosted first with automatic machine starts off: jobs still go hosted.",
+        "Hosted first, machine starts switched off: work already queued goes hosted.",
         hours=1,
         jobs=[JobBatch(0, 3)],
         hosted=HOSTED_FIRST,

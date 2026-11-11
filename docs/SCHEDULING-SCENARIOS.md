@@ -30,7 +30,7 @@ Six signals:
 | 9 | `hosted_fallback` | Confirmed refusal/failure or known-cost deadline moves to the next model, then original machine route. Unknown submission is not repeated | `WorkerRunner._reroute` / `_past_deadline`, `rebind.next_plan` | Built |
 | 10 | `window_full` | A full environment or owner share prevents further hosted offload. Machine hold still follows rows 1, 2 and 5 | `decide.hosted_offload`, original `hold_for_hosted` order | Not yet seen live |
 | 11 | `backlog_finished` | Idle stop only with fresh safe-to-stop proof; active work, unknown obligations, holds, funding and original ownership still apply | `DstackController._reconcile_observed_node` / `dstack_capacity.idle_action` | Built |
-| 12 | `hosted_first` | Routing file says `"hosted_first": true`: a job a live hosted model can take is routed on the tick that sees it, with no tier wait, and holds its machine for as long as hosted can still take it (a full window included). Rows 1, 2, 4 and 5 then do not start or warm machines; rows 8 and 9 still do. Requests no hosted model renders use machines as before | `rebind.hosted_first` / `offload` / `hold_for_hosted` | Simulator only |
+| 12 | `hosted_first` | Routing file says `"hosted_first": true`: a job a live hosted model can take is routed on the tick that sees it, with no tier wait, and holds its machine for as long as hosted can still take it (a full window included), unless the job is 30 min old and hosted has submitted nothing for 30 min. Rows 1, 2, 4 and 5 then do not start or warm machines; rows 8 and 9 still do. Requests no hosted model renders use machines as before | `rebind.hosted_first` / `offload` / `hold_for_hosted` | Simulator only |
 
 ### One primary behavioral check per row
 

@@ -116,6 +116,9 @@ HOSTED_WARMS_MACHINE_AT = 5
 # Economy shots waiting at which a machine of ours is cheaper than Vivix: at
 # USD 0.016 each 768P clip saves about USD 0.007, so about 36 pay for a boot.
 ECONOMY_WARMS_MACHINE_AT = 40
+# With the hosted API first, a job this old may start a machine once hosted
+# has submitted nothing for as long: the route is live but not taking work.
+HOSTED_STALL_SECONDS = 1800
 # Below this vendor balance hosted stops; jobs stay on our machines.
 HOSTED_BALANCE_RESERVE_USD = 1.0
 HOSTED_BALANCE_WARN_USD = 10.0
@@ -189,15 +192,17 @@ SCENARIOS = {
         "dstack_controller.DstackController._reconcile_observed_node / dstack_capacity.idle_action",
     ),
     # The hosted API first (#1222): what a live hosted model can still take is
-    # routed at once and never starts or warms a machine of ours.
+    # routed at once and never starts or warms a machine of ours, unless the
+    # hosted route has stopped taking work.
     "hosted_first": Scenario(
         12,
         "scheduling.rebind.offload / hold_for_hosted",
-        hold=lambda job, tier, enabled_tiers, takeable: (
+        hold=lambda job, tier, enabled_tiers, takeable, draining, now: (
             takeable
             and tier in enabled_tiers
             and WAIT_LIMITS.get(tier) is not None
             and "hosted_tried" not in job["execution_plan"]
+            and (draining or now - job["created_at"] < HOSTED_STALL_SECONDS)
         ),
     ),
 }

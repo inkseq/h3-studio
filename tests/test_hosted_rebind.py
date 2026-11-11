@@ -21,7 +21,8 @@ from studio_platform.providers.hosted_models import (
     PROVIDER,
     RECIPES,
 )
-from studio_platform.repository import attempts, jobs
+from studio_platform.queue import TaskQueue
+from studio_platform.repository import attempts, jobs, registered_workers
 from studio_platform.scheduling.decide import (
     hosted_has_first_claim,
     hosted_offload,
@@ -895,14 +896,33 @@ class RebindLedgerTests(LedgerCase):
             )
         self.assertFalse(held(job, now))
         self.now = late
-        self.hosted_control()  # Live from here on.
-        # Held however long it has waited and however busy hosted has been.
+        control, worker = self.hosted_control()  # Live from here on.
+        # Held however busy hosted has been, and while its slot is mid-turn.
         with mock.patch.object(
             rebind_module,
             "used_in_window",
             return_value={"someone": rebind_module.HOSTED_WARMS_MACHINE_AT + 20},
         ):
+            self.assertTrue(held(job, now + 1))
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == worker)
+                .values(state="reconciling")
+            )
+        self.assertTrue(held(job, now + 1))
+        # Old work is held only while hosted is still submitting renders.
+        stall = rebind_module.HOSTED_STALL_SECONDS
+        self.assertTrue(held(job, now + stall - 1))
+        self.assertFalse(held(job, now + stall))
+        with mock.patch.object(rebind_module, "hosted_draining", return_value=True):
             self.assertTrue(held(job, late))
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == worker)
+                .values(state="ready")
+            )
         back = dict(job, execution_plan={**job["execution_plan"], "hosted_tried": []})
         self.assertFalse(held(back, now))
         rebind_module._balance["usd"] = rebind_module.HOSTED_BALANCE_RESERVE_USD - 0.01
@@ -917,6 +937,60 @@ class RebindLedgerTests(LedgerCase):
         with self.repo.transaction() as connection:
             self.assertEqual(offload(service, connection, [(job, {})], now), [])
         self.assertEqual(self.row(created["id"])["pool"], POOL)
+
+    def test_work_no_live_model_takes_does_not_stand_in_front_of_work_that_can_go(
+        self,
+    ):
+        blocked = [self.row(self.queued_job(key="b%d" % i)["id"]) for i in range(3)]
+        wanted = self.row(self.queued_job(key="wanted")["id"])
+        tier = get_tier(wanted["request"], execution=wanted["execution_plan"])
+        self.now = wanted["created_at"] + 121
+        self.hosted_control()
+        service = self.service(tiers=(tier,))
+        folder = Path(service.settings.data_dir) / "runtime-secrets"
+        (folder / "everyframe-routing.json").write_text(
+            json.dumps({"tiers": [tier], "per_window": 2}), encoding="utf-8"
+        )
+        ids = {row["id"] for row in blocked}
+        real = rebind_module.chain
+        with (
+            mock.patch.object(
+                rebind_module,
+                "chain",
+                side_effect=lambda request: () if request["marker"] else real(request),
+            ),
+            self.repo.transaction() as connection,
+        ):
+            queued = [
+                (dict(row, request={**row["request"], "marker": row["id"] in ids}), {})
+                for row in (*blocked, wanted)
+            ]
+            left = offload(service, connection, queued, self.now)
+        self.assertEqual({item[0]["id"] for item in left}, ids)
+        self.assertEqual(self.row(wanted["id"])["pool"], POOL)
+
+    def test_the_stall_clock_reads_the_last_hosted_submission(self):
+        created = self.queued_job()
+        with self.repo.engine.connect() as connection:
+            self.assertFalse(
+                rebind_module.hosted_draining(
+                    connection, self.scope.tenant_id, self.now
+                )
+            )
+        with self.repo.transaction() as connection:
+            rebind(self.repo, connection, self.row(created["id"]), TURBO.id, self.now)
+        control, worker = self.hosted_control()
+        claim = control.claim(worker, POOL, lease_seconds=30)
+        TaskQueue(self.repo).begin_submission(claim.lease)
+        stall = rebind_module.HOSTED_STALL_SECONDS
+        with self.repo.engine.connect() as connection:
+            for later, expected in ((stall - 1, True), (stall, False)):
+                self.assertEqual(
+                    rebind_module.hosted_draining(
+                        connection, self.scope.tenant_id, self.now + later
+                    ),
+                    expected,
+                )
 
     def test_hosted_beside_our_machines_still_waits_the_tier_limit(self):
         created = self.queued_job()
