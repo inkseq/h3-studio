@@ -97,6 +97,7 @@ def sanitized_event(event, hint=None):
                 "capacity_no_progress",
                 "capacity_runtime_exceeded",
                 "capacity_collection_failed",
+                "capacity_engine_failed",
                 "capacity_owner_recovery",
                 "capacity_provider_removed",
             }

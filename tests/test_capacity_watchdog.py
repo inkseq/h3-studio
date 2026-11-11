@@ -311,6 +311,48 @@ class NodeWatchdogTests(LedgerCase):
             self.assertTrue(_ended_for_replacement(connection, node))
         self.assertFalse(_ended_with_proof(node))
 
+    def test_published_engine_failure_ends_the_job_and_stops_the_node_at_once(self):
+        # #1214: no ten-minute wait, no second machine, no blame on the host.
+        from studio_platform.capacity_watchdog import record_engine_failure
+        from studio_platform.host_policy import capacity_failure
+
+        node_id, controller = self.ready()
+        original = self.job()
+        queue = TaskQueue(self.repo)
+        claim = queue.claim("dstack-test-slot", "test-pool")
+        queue.begin_submission(claim.lease)
+        queue.record_submitted(claim.lease, "original-task")
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == "dstack-test-slot")
+                .values(state="leased", current_job_id=original["id"])
+            )
+        self.now += 45
+        code = "wangp_generation_tensor_shape_mismatch"
+        record_engine_failure(self.repo, queue, claim.lease, code)
+        self.now += 15
+        result = controller.tick()["nodes"][0]
+        self.assertEqual(result["code"], "capacity_engine_failed")
+        self.assertEqual(len(self.client.stopped), 1)
+        job = self.repo.get_job(self.scope, original["id"])
+        self.assertEqual((job["status"], job["error_code"]), ("failed", code))
+        node, intent = self.node(node_id)
+        self.assertEqual(
+            node["payload"]["capacity_watchdog"]["reason"], "capacity_engine_failed"
+        )
+        with self.repo.engine.connect() as connection:
+            self.assertTrue(fenced_node_stop(connection, node, intent))
+        self.assertIsNone(
+            capacity_failure(dict(node, desired_state="stopped"), now=self.now)
+        )
+        # Polling again changes nothing and stops nothing twice.
+        controller.tick()
+        self.assertEqual(len(self.client.stopped), 1)
+        self.assertEqual(
+            self.repo.get_job(self.scope, original["id"])["error_code"], code
+        )
+
     def test_alerts_and_node_stop_event_are_not_repeated_by_polling(self):
         node_id, controller, original, claim = self.lost()
         report = Mock()

@@ -30,7 +30,11 @@ REASONS = {
     "capacity_collection_failed",
     "capacity_owner_recovery",
     "capacity_provider_removed",
+    "capacity_engine_failed",
 }
+# The engine published its own failure for this attempt (#1214). Another
+# machine would fail the same way, so the job ends on the first such loss.
+ENGINE_FAILED = "capacity_engine_failed"
 FIELDS = {
     "version",
     "job_id",
@@ -102,8 +106,12 @@ def history(job):
                 and row["count"] == requeued
                 or row["state"] == "exhausted"
                 and index == len(records) - 1
-                and requeued == MAX_RECLAIMS
-                and row["count"] == MAX_RECLAIMS
+                and (
+                    requeued == MAX_RECLAIMS
+                    and row["count"] == MAX_RECLAIMS
+                    or row["reason"] == ENGINE_FAILED
+                    and row["count"] == requeued
+                )
             )
         )
         if not valid:
@@ -113,6 +121,23 @@ def history(job):
     if requeued != count:
         raise Conflict("capacity_reclaim_history_invalid")
     return count, copy.deepcopy(records)
+
+
+def engine_failure(job, attempt, now):
+    """The closed failure class the engine published for this attempt, or None."""
+    from .inference.protocol import safe_failure_code
+
+    note = (job.get("result") or {}).get("engine_failure")
+    started = attempt.get("submission_started_at")
+    if (
+        not isinstance(note, dict)
+        or note.get("attempt_id") != attempt["id"]
+        or not finite(note.get("at"))
+        or not finite(started)
+        or not started <= note["at"] <= now
+    ):
+        return None
+    return safe_failure_code(note.get("code"))
 
 
 def authorized_lost_attempt(job, attempt):
@@ -358,7 +383,13 @@ def reclaim(
                 raise Conflict("capacity_reclaim_not_due")
         elif last_progress_at is not None:
             raise ValueError("capacity_reclaim_progress_invalid")
-        exhausted = count >= MAX_RECLAIMS
+        engine_code = None
+        if reason == ENGINE_FAILED:
+            # Read under the row lock: only the note of this exact attempt counts.
+            engine_code = engine_failure(job, attempt, now)
+            if engine_code is None:
+                raise Conflict("capacity_reclaim_not_due")
+        exhausted = count >= MAX_RECLAIMS or engine_code is not None
         record = dict(
             version=1,
             job_id=job_id,
@@ -382,7 +413,9 @@ def reclaim(
             "capacity_reclaims": [*records, record],
         }
         result.pop("capacity_progress", None)
-        error = "capacity_lost_retries_exhausted" if exhausted else reason
+        error = engine_code or (
+            "capacity_lost_retries_exhausted" if exhausted else reason
+        )
         conn.execute(
             update(attempts)
             .where(attempts.c.id == attempt["id"])
