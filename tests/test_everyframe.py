@@ -129,9 +129,25 @@ class VendorRequestTests(unittest.TestCase):
                         compiled(inputs={**inputs, **changes}, **track), FAST
                     )
                 )
-        reference = compiled(mode="ref", inputs=inputs, **track)
+        # Storyboard dialogue shots: reference pictures and the track.
+        pictures = {**inputs, "first_frame": None, "images": ["i1", "i2"]}
+        reference = compiled(mode="ref", inputs=pictures, **track)
         reference["recipe_id"] = "h3-base-ref2va-v1"
-        self.assertIsNone(plan.vendor_request(reference, FAST))
+        body, refs = plan.vendor_request(reference, FAST)
+        self.assertEqual((body["referenceMode"], refs), ("omni", ["i1", "i2", "s1"]))
+        # Pika takes the mode but speaks the lines in a voice of its own.
+        self.assertIsNone(plan.vendor_request(reference, "pika-h3-flex"))
+        self.assertEqual(plan.chain(reference), [FAST])
+        for changes in (
+            {"images": []},  # No picture.
+            {"videos": ["v"]},  # Untried beside a track.
+            {"first_frame": "a"},
+            {"audios": ["s1", "s2"]},
+        ):
+            with self.subTest(reference=changes):
+                value = compiled(mode="ref", inputs={**pictures, **changes}, **track)
+                value["recipe_id"] = "h3-base-ref2va-v1"
+                self.assertIsNone(plan.vendor_request(value, FAST))
 
     def test_anything_not_exactly_representable_stays_on_our_machines(self):
         inputs = {
@@ -548,8 +564,10 @@ class BackendTests(unittest.TestCase):
             data = track.read_bytes()
 
             class TrackStore(Store):
+                read = len(data)
+
                 def open(self, key):
-                    return io.BytesIO(data)
+                    return io.BytesIO(data[: self.read])
 
             value = compiled(
                 audio_conditioning="soundtrack",
@@ -578,12 +596,37 @@ class BackendTests(unittest.TestCase):
                 sorted(p.name for p in target.iterdir()),
                 ["everyframe-audio.flac", "everyframe-video.mp4"],
             )
-            # A track that changed since the take was compiled is not put back.
+            # The render is paid for. A track that changed, or cannot be read
+            # whole, is not put back: the vendor's copy of it is the sound, and
+            # nothing of the attempt is left behind.
+            changed, short = TrackStore(len(data) + 1), TrackStore(len(data))
+            short.read = 10
+            silent = copy.deepcopy(value)
+            silent["request"]["generate_audio"] = False
+            for store, take in ((changed, value), (short, value)):
+                for path in target.iterdir():
+                    path.unlink()
+                backend = self.backend(
+                    [(200, {"render": done}), (200, vendor.read_bytes())], store=store
+                )
+                paths = backend.fetch(job(take), "t", "rnd_1", target, lambda: None)
+                self.assertGreater(
+                    loudness(paths["video"], 440), loudness(paths["video"], 1500) + 20
+                )
+                self.assertEqual(
+                    sorted(p.name for p in target.iterdir()),
+                    ["everyframe-audio.flac", "everyframe-video.mp4"],
+                )
+            # A take delivered without sound never opens the track.
+            for path in target.iterdir():
+                path.unlink()
+            unread = mock.Mock(spec=Store)
             backend = self.backend(
-                [(200, {"render": done})], store=TrackStore(len(data) + 1)
+                [(200, {"render": done}), (200, vendor.read_bytes())], store=unread
             )
-            with self.assertRaises(BackendError):
-                backend.fetch(job(value), "t", "rnd_1", target, lambda: None)
+            paths = backend.fetch(job(silent), "t", "rnd_1", target, lambda: None)
+            self.assertEqual(list(paths), ["video"])
+            unread.open.assert_not_called()
 
 
 if __name__ == "__main__":

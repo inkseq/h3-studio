@@ -12,8 +12,8 @@ after the vendor's 2026-11-05 rise. Pika's omni prices are its
 price for every mode. Free quotes on 2026-11-06 matched all of them. The
 real charge comes from the free POST /render/quote and the render itself, but
 quote does not validate the mode, so modes are gated here. A kept voice
-track (lip-sync) goes to H3 Max fast with the take's first, or first and
-last, frame (measured 2026-11-11). The vendor has no
+track (lip-sync) goes to H3 Max fast only, with the take's frames or its
+reference pictures (measured 2026-11-11). The vendor has no
 cancel: a submitted render runs to completion and settles. This module never
 contacts a vendor.
 """
@@ -53,6 +53,10 @@ class HostedModel:
     # Vivix ignores the requested size and always renders 1264x720.
     vendor_resolution: str | None = None
     concurrency: int | None = None  # None: no limit known
+    # Returns a kept voice track as the sound, in step, and moves mouths to it.
+    # Measured 2026-11-11: H3 Max fast does; Pika speaks the lines in a voice
+    # of its own (envelope correlation 0.12 against 0.99).
+    keeps_track: bool = False
 
 
 H3 = frozenset({"480P", "768P", "1080P"})
@@ -105,9 +109,7 @@ MODELS = {
             "h3-max-fast",
             "everyframe-h3-max-fast-v1",
             # omni-first and omni-pair: a kept voice track with the take's
-            # first (and last) frame. Measured 2026-11-11: both frames kept,
-            # mouths follow the track, and the track comes back as the sound
-            # in step to the frame (docs/EXPERIMENTS.md).
+            # first (and last) frame (docs/EXPERIMENTS.md, 2026-11-11).
             PLAIN | {"omni", "omni-first", "omni-pair"},
             H3,
             WIDE,
@@ -124,6 +126,7 @@ MODELS = {
                 ("1080P", "references"): 0.8,
             },
             300,
+            keeps_track=True,
         ),
         HostedModel(
             # Economy only: one render at a time across all vendor customers,
@@ -205,20 +208,21 @@ def vendor_request(compiled, model_id):
         "aspect": request["aspect_ratio"],
     }
     if request.get("audio_conditioning") == "soundtrack":
-        # Lip-sync to a kept track: the track and the frames it plays over,
-        # nothing else. The vendor refuses a track without a picture.
-        if (
-            request.get("mode") != "fl"
-            or not first
-            or refs["images"]
-            or refs["videos"]
-            or len(refs["audios"]) != 1
-        ):
+        # Lip-sync to a kept track: the one track with the frames it plays
+        # over, or with reference pictures. The vendor refuses a track without
+        # a picture; reference videos beside a track are untried.
+        if not model.keeps_track or len(refs["audios"]) != 1 or refs["videos"]:
             return None
-        mode = "omni-pair" if last else "omni-first"
-        attachments = (
-            [first, last, *refs["audios"]] if last else [first, *refs["audios"]]
-        )
+        if request.get("mode") == "fl" and first and not refs["images"]:
+            mode = "omni-pair" if last else "omni-first"
+            attachments = (
+                [first, last, *refs["audios"]] if last else [first, *refs["audios"]]
+            )
+        elif request.get("mode") == "ref" and not first and refs["images"]:
+            mode = "omni"
+            attachments = refs["images"] + refs["audios"]
+        else:
+            return None
     elif request.get("mode") == "fl" and not any(refs.values()):
         mode = "first-last" if last else "first-frame" if first else "text"
         attachments = [first, last] if last else [first] if first else []

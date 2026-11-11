@@ -49,7 +49,7 @@ CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp", "video/mp4", "audio/wa
 CONTENT_TYPES |= {"video/quicktime", "video/webm", "audio/mpeg", "audio/mp4"}
 CONTENT_TYPES |= {"audio/aac", "audio/ogg", "image/avif"}
 # What a kept voice track is stored as, and the suffix media.ffmpeg reads it by.
-TRACK_SUFFIXES = {"audio/wav": ".wav", "audio/mpeg": ".mp3", "audio/flac": ".flac"}
+TRACK_SUFFIXES = {"audio/wav": ".wav", "audio/mpeg": ".mp3"}
 
 
 class ConfigError(ValueError):
@@ -299,35 +299,41 @@ class EveryFrameBackend:
                     path.unlink()
 
     def _kept_track(self, job, target):
-        """The take's own voice track, to go back as its sound exactly, or None.
+        """A copy of the take's own voice track to use as its sound, or None.
 
-        The vendor returns the track it was given, re-encoded. The promise of a
-        kept track is the creator's file itself, as on our own machines.
+        The vendor returns the track it was given, in step. Ours is one
+        encoding closer to the creator's file, as on our own machines. The
+        render is already paid for: if the track cannot be read now, the
+        vendor's copy of it is the sound.
         """
         compiled = job["request"]
         request = compiled["request"]
-        if request.get("audio_conditioning") != "soundtrack":
-            return None
-        audios = (request.get("inputs") or {}).get("audios") or []
-        item = compiled.get("assets", {}).get(audios[0]) if len(audios) == 1 else None
-        if type(item) is not dict or type(item.get("model")) is not dict:
-            raise BackendError("everyframe_input_missing")
-        obj = item["model"]
-        suffix = TRACK_SUFFIXES.get(obj.get("content_type"))
-        if suffix is None:
-            raise BackendError("everyframe_input_type_unsupported")
-        info = self.store.stat(obj["key"])
-        if info.size_bytes != obj["size_bytes"] or not 0 < info.size_bytes <= (
-            MAX_INPUT_BYTES
+        if request.get("audio_conditioning") != "soundtrack" or not request.get(
+            "generate_audio"
         ):
-            raise BackendError("everyframe_input_changed")
-        path = target / ("everyframe-track-" + os.urandom(8).hex() + suffix)
-        with self.store.open(obj["key"]) as source, path.open("xb") as handle:
-            data = source.read(MAX_INPUT_BYTES + 1)
-            if len(data) != info.size_bytes:
-                raise BackendError("everyframe_input_changed")
-            handle.write(data)
-        return path
+            return None
+        path = None
+        try:
+            audios = (request.get("inputs") or {}).get("audios") or []
+            obj = compiled["assets"][audios[0]]["model"]
+            suffix = TRACK_SUFFIXES[obj["content_type"]]
+            info = self.store.stat(obj["key"])
+            if len(audios) != 1 or not 0 < info.size_bytes <= MAX_INPUT_BYTES:
+                raise ValueError
+            if info.size_bytes != obj["size_bytes"]:
+                raise ValueError
+            path = target / ("everyframe-track-" + os.urandom(8).hex() + suffix)
+            with self.store.open(obj["key"]) as source, path.open("xb") as handle:
+                data = source.read(MAX_INPUT_BYTES + 1)
+                if len(data) != info.size_bytes:
+                    raise ValueError
+                handle.write(data)
+            return path
+        except Exception:
+            if path is not None and path.exists():
+                path.unlink()
+            print("everyframe_track_unavailable", flush=True)
+            return None
 
     def _normalize(self, job, raw, target, track=None):
         """Exact output size and at least the planned duration.
