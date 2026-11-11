@@ -211,6 +211,32 @@ class InkyStore:
             and (source["context"]["shot_action"].strip() or source.get("upload"))
         ) + sum(1 for review in compared.values() if review["digest"] not in claimed)
 
+    def unclaimed(self, principal, project_id):
+        """Shots claim() could still say yes to, in project order. One plain read.
+
+        claim() stays the only authority. This only spares a long story one
+        locked transaction, each rereading the whole project, for every shot
+        that was evaluated long ago, on every save (#1192).
+        """
+        with self.repo.engine.connect() as conn:
+            current = sources(self.project(conn, principal, project_id))
+            settings = self.row(conn, principal, project_id, SETTINGS, "settings")
+            if settings and settings["payload"].get("muted"):
+                return []
+            claimed = set(
+                conn.execute(
+                    select(documents.c.document_id).where(
+                        *self.where(principal, project_id, CLAIM)
+                    )
+                ).scalars()
+            )
+        return [
+            shot_id
+            for shot_id, source in current.items()
+            if source["source_id"] not in claimed
+            and (source["context"]["shot_action"].strip() or source.get("upload"))
+        ]
+
     def claim(self, principal, project_id, shot_id):
         """Reserve exactly one evaluation per current source; never retry unknown."""
         with self.repo.transaction() as conn:
@@ -270,7 +296,8 @@ class InkyStore:
         source = review["source"]
         with self.repo.transaction() as conn:
             current = reviews(
-                self.project(conn, principal, project_id, write=True)
+                self.project(conn, principal, project_id, write=True),
+                only=source["shot_id"],
             ).get(source["shot_id"])
             if not current or current["digest"] != review["digest"]:
                 return False
