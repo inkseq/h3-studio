@@ -201,19 +201,19 @@ def unserved_stop(node, related, now):
 
 
 def start_loop(cycles):
-    """Cross-lane start loops pause demand; one failing lane only backs off.
+    """A machine that was ready but never served pauses demand; failed starts do not.
 
     `cycles` are (stopped, intent_id, lane) in the loop window; lane is None
-    unless an allocated machine never became ready. A lane that fails on its own is cooled
-    by scheduling.health (#931 step 2), so the global switch is for loops that
-    are not one lane's: a machine that was ready but never served, or four failed
-    starts in the window. One bad machine on each of two lanes must not stop
-    automatic start for everyone (owner, 2026-11-06).
+    unless an allocated machine never became ready. A start that never got
+    ready is the host's or the lane's fault: the host is denied for good
+    (host_policy.deny_failed_rental) and the lane cools on its own
+    (scheduling.health), so its cost is bounded and it must not stop automatic
+    start for everyone (owner, 2026-11-06). Four such starts in an hour used
+    to pause demand; on 2026-11-10 that stopped staging and nothing switched
+    it back on. The global switch is for the loop that is ours: machines boot,
+    are ready, and are never given work.
     """
-    if len(cycles) < 2:
-        return False
-    backends = {backend for _, _, backend in cycles}
-    return len(cycles) >= 4 or None in backends
+    return len(cycles) >= 2 and any(backend is None for _, _, backend in cycles)
 
 
 def evaluate(

@@ -20,7 +20,14 @@ from studio_platform.speech_requests import SpeechRequest
 from studio_platform.credit_schema import entries
 from studio_platform.guided import receipts
 from studio_platform.repository import documents
-from test_speech import mp3, set_switches
+from test_speech import (
+    EDIT_SCOPES,
+    assert_paid_work_refused,
+    connection_headers,
+    key_headers,
+    mp3,
+    set_switches,
+)
 import test_story_chat_image_credits as image_fixtures
 
 
@@ -79,8 +86,31 @@ class SpeechBillingTests(unittest.TestCase):
             **changes,
         }
 
-    def speak(self, request_id="speech-paid-0001", **changes):
-        return self.client.post(self.path, json=self.payload(request_id, **changes))
+    def speak(self, request_id="speech-paid-0001", headers=None, **changes):
+        return self.client.post(
+            self.path, json=self.payload(request_id, **changes), headers=headers
+        )
+
+    def test_callers_who_may_not_spend_are_refused_before_any_charge(self):
+        assert_paid_work_refused(
+            self,
+            self.speak(headers=connection_headers(self.app, "organise")),
+            self.speak(headers=key_headers(self.client, EDIT_SCOPES)),
+        )
+        self.assertEqual(self.adapter.calls, [])
+        self.assertEqual(self.ledger(), [])
+        self.assertEqual(self.balance(), (100, 0))
+        # Nothing was fenced either: the owner can still speak the same request.
+        paid = self.speak()
+        self.assertEqual(paid.status_code, 200, paid.text)
+        self.assertEqual(self.balance(), (98, 0))
+        # A connection that may spend is charged like the owner.
+        agent = self.speak(
+            "speech-paid-0002", headers=connection_headers(self.app, "generate")
+        )
+        self.assertEqual(agent.status_code, 200, agent.text)
+        self.assertEqual(self.balance(), (96, 0))
+        self.assertEqual(len(self.adapter.calls), 2)
 
     def switches(self, **changes):
         with self.repo.transaction() as connection:

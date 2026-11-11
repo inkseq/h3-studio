@@ -90,6 +90,7 @@ ERROR_CODES = (
             "capacity_start_blocked",
             "capacity_collect_stuck",
             "capacity_download_upstream_slow",
+            "capacity_start_failures_upstream",
             "worker_preparation_not_ready",
             "worker_preparation_failed",
             "worker_reconciliation_needed",

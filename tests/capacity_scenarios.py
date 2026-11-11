@@ -73,17 +73,22 @@ SCENARIOS = [
         max_machines=1,
         jobs=[JobBatch(0, 4), JobBatch(2 * 3600, 2)],
         hosts=[Host("19901", [UNREACHABLE]), Host("19902", [MachineScript()])],
-        # Tried once, skipped while the failure is fresh, denied on a second.
-        expect_host_rentals={"19901": 2},
+        # Owner, 2026-11-10: rented once, denied, never rented again.
+        expect_host_rentals={"19901": 1},
+        expect_denies={"automatic_start_failure": 1},
     ),
     Scenario(
-        "unreachable_host_retry_works",
-        "The only host is unreachable on its first rental and fine on the next.",
-        hours=4,
+        "start_failures_upstream",
+        "Four hosts are unreachable on their first rental and fine afterwards.",
+        # Several fresh hosts failing the same way is our image or registry,
+        # not the hosts. The first two are denied; from the third on the brake
+        # holds, one alert is raised, and those hosts serve the queue later.
+        hours=6,
         max_machines=1,
         jobs=[JobBatch(0, 4)],
-        hosts=[Host("19901", [UNREACHABLE, MachineScript()])],
-        expect_starts=2,
+        hosts=[Host(str(19901 + i), [UNREACHABLE, MachineScript()]) for i in range(4)],
+        expect_denies={"automatic_start_failure": 2},
+        expect_alerts=("capacity_start_failures_upstream",),
     ),
     Scenario(
         "lost_create_reply",

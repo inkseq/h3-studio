@@ -42,6 +42,8 @@ const HOST_REASONS = [
   'operator_host_denied',
   'operator_host_bad_output',
   'automatic_slow_download',
+  'automatic_start_failure',
+  'automatic_repeated_failure',
 ];
 export const hostReasonText = (value, locale = 'zh') =>
   HOST_REASONS.includes(value)

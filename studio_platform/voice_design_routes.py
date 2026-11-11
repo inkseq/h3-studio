@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 
 from .repository import Conflict, NotFound
 from .speech_provider import level
+from .speech_routes import require_paid_work
 from .voice_design import (
     MAX_DESCRIPTION,
     MAX_SAMPLE,
@@ -112,6 +113,7 @@ def register_routes(app):
 
         principal = request.state.principal
         row = app.state.authorized_project(principal, project_id, "projects:write")
+        require_paid_work(app, principal, project_id)
         reject_managed(row["payload"])
         card = _character(row["payload"], body.character_id)
         voice_on()

@@ -82,6 +82,10 @@ export const operatorPanelCatalogs = {
     'operatorPanel.reason.operator_host_denied': 'denied by an admin',
     'operatorPanel.reason.operator_host_bad_output': 'denied by an admin: bad output',
     'operatorPanel.reason.automatic_slow_download': 'denied automatically: model download too slow',
+    'operatorPanel.reason.automatic_start_failure':
+      'denied automatically: never started after it was rented',
+    'operatorPanel.reason.automatic_repeated_failure':
+      'denied automatically: started, then failed twice within a day',
     'operatorPanel.ageSeconds': 'Since last job update: {value} s',
     'operatorPanel.ageMinutes': 'Since last job update: {value} min',
     'operatorPanel.attempt': 'Attempt #{number} · {id}',
@@ -197,6 +201,8 @@ export const operatorPanelCatalogs = {
     'operatorPanel.reason.operator_host_denied': '管理员禁止',
     'operatorPanel.reason.operator_host_bad_output': '管理员禁止：出片有问题',
     'operatorPanel.reason.automatic_slow_download': '自动禁止：模型下载太慢',
+    'operatorPanel.reason.automatic_start_failure': '自动禁止：租到后一直没启动起来',
+    'operatorPanel.reason.automatic_repeated_failure': '自动禁止：启动后一天内两次出问题',
     'operatorPanel.ageSeconds': '距最近任务更新 {value} 秒',
     'operatorPanel.ageMinutes': '距最近任务更新 {value} 分钟',
     'operatorPanel.attempt': '执行 #{number} · {id}',

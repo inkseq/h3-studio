@@ -353,9 +353,22 @@ def _stop(
             elif reason == "capacity_dispatch_unavailable":
                 marker["health_event_id"] = health_event_id
             payload["capacity_watchdog"] = marker
+            marked = True
+        else:
+            marked = False
         candidate = dict(current, payload=payload)
         if not fenced_node_stop(connection, candidate, intent, now=now):
             return False
+        if marked:
+            from .host_policy import deny_failed_rental
+
+            deny_failed_rental(
+                repo,
+                payload["tenant_id"],
+                connection,
+                dict(candidate, desired_state="stopped"),
+                now=now,
+            )
         if current["desired_state"] != "stopped":
             payload["stop_reason_code"] = reason
             payload = advance_command_revision(payload)

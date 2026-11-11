@@ -143,6 +143,7 @@ WANGP_VALIDATION_CODES |= frozenset(
         'wangp_ref_total_video_duration_exceeded',
         'wangp_selected_video_has_no_audio',
         'wangp_single_soundtrack_required',
+        'wangp_soundtrack_longer_than_output',
         'wangp_staged_input_mismatch',
         'wangp_unbound_input_handle',
         'wangp_unsupported_controls',

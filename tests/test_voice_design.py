@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -14,7 +15,15 @@ from studio_platform.voice_design import (
     brief,
     validate,
 )
-from test_speech import mp3, set_switches
+from test_speech import (
+    EDIT_SCOPES,
+    SPEND_SCOPES,
+    assert_paid_work_refused,
+    connection_headers,
+    key_headers,
+    mp3,
+    set_switches,
+)
 import test_platform_api as fixtures
 
 KEY = "k" * 32
@@ -161,7 +170,7 @@ class RouteTests(unittest.TestCase):
         if voice:
             set_switches(self.app, voice_enabled=True)
 
-    def design(self, request_id="vd-000001", **body):
+    def design(self, request_id="vd-000001", headers=None, **body):
         return self.client.post(
             "/v1/projects/story-one/voice-designs",
             json={
@@ -172,7 +181,43 @@ class RouteTests(unittest.TestCase):
                 "sample": "早点回来。",
                 **body,
             },
+            headers=headers,
         )
+
+    def test_a_design_needs_the_permission_a_generation_job_needs(self):
+        self.prepare()
+        organise = connection_headers(self.app, "organise")
+        editor = key_headers(self.client, EDIT_SCOPES)
+        from studio_platform import voice_design_routes
+
+        with (
+            patch.object(voice_design_routes, "DAILY_LIMIT", 3),
+            patch.object(voice_design_routes, "brief") as drafted,
+        ):
+            # No words given: a refusal must come before the brief is drafted too.
+            assert_paid_work_refused(
+                self,
+                self.design(headers=organise, description="", sample=""),
+                self.design(headers=editor, description="", sample=""),
+            )
+            drafted.assert_not_called()
+            self.assertEqual(self.designer.calls, [])
+            assets = self.client.get(
+                "/v1/assets", params={"client_project_id": "story-one"}
+            )
+            self.assertEqual(assets.json()["assets"], [])
+            # Refusals took none of the day's three designs.
+            for number, headers in enumerate(
+                (
+                    None,
+                    connection_headers(self.app, "generate"),
+                    key_headers(self.client, SPEND_SCOPES),
+                )
+            ):
+                reply = self.design(f"vd-00010{number}", headers=headers)
+                self.assertEqual(reply.status_code, 200, reply.text)
+                self.assertEqual(len(reply.json()["previews"]), 3)
+        self.assertEqual(len(self.designer.calls), 9)
 
     def test_voice_switch_off_designs_nothing(self):
         self.prepare(voice=False)

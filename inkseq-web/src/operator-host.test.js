@@ -862,6 +862,11 @@ test('Lium executors are hosts too: provider-keyed pages, lookups and a bad-outp
 
 test('host policy reasons read as words in both languages; unknown codes stay visible', () => {
   assert.equal(hostReasonText('automatic_slow_download', 'zh'), '自动禁止：模型下载太慢');
+  assert.equal(hostReasonText('automatic_start_failure', 'zh'), '自动禁止：租到后一直没启动起来');
+  assert.equal(
+    hostReasonText('automatic_repeated_failure', 'en'),
+    'denied automatically: started, then failed twice within a day',
+  );
   assert.equal(
     hostReasonText('automatic_slow_download', 'en'),
     'denied automatically: model download too slow',

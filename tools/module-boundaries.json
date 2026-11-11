@@ -30,7 +30,7 @@
   "platform -> billing": 27,
   "platform -> capacity": 27,
   "platform -> creation": 39,
-  "platform -> identity": 34,
+  "platform -> identity": 36,
   "platform -> jobs": 30,
   "platform -> media": 33
  },
@@ -579,6 +579,7 @@
   "speech_provider -> media",
   "speech_requests -> guided",
   "speech_requests -> identity_schema",
+  "speech_routes -> agent_management",
   "speech_routes -> credits",
   "speech_routes -> generation_admission",
   "speech_routes -> identity",
