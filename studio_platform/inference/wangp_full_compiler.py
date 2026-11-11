@@ -759,6 +759,14 @@ def _normalize(
                 or meta.get('channels') != 2
             ):
                 raise ValueError('wangp_ref_selected_audio_required')
+        # A kept track that outlasts the picture fails inside the engine, which
+        # then never reports that it stopped: the machine sat for ten minutes
+        # and the job was retried on two more (#1214, staging 2026-11-10: a
+        # 5.2 s track on 124 frames, 11 of 11 attempts lost). Refuse it here.
+        if audio_mode == 'soundtrack' and any(
+            metadata[i]['duration'] > output_spec['frames'] / 24 + 1e-6 for i in audios
+        ):
+            raise ValueError('wangp_soundtrack_longer_than_output')
         if (
             conditioning == 'reference'
             and not video_excerpts

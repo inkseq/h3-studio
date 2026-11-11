@@ -560,6 +560,25 @@ class FullCompilerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'conditioning_required'):
             settings(r, m)
 
+    def test_a_kept_track_longer_than_the_picture_is_refused(self):
+        # #1214: the engine fails on it and never reports that it stopped.
+        for mode, extra in (('fl', {}), ('ref', {'images': ['i']})):
+            r, m = case(mode, audios=['kept'], audio_conditioning='soundtrack', **extra)
+            if mode == 'fl':
+                r['inputs']['first_frame'] = 'first'
+                m['first'] = meta('image')
+            frames = native_output_spec(r)['frames']
+            for seconds in (5, frames / 24):
+                m['kept']['duration'] = seconds
+                settings(r, m)
+            m['kept']['duration'] = 5.2
+            with self.assertRaisesRegex(ValueError, 'soundtrack_longer_than_output'):
+                settings(r, m)
+        # A reference voice is only sampled, so its length is not the picture's.
+        r, m = case(images=['i'], audios=['voice'])
+        m['voice']['duration'] = 12
+        settings(r, m)
+
     def test_time_zero_media_guides_and_from_video_audio_are_not_timed_fake_refs(self):
         r, m = case(
             'fl',
