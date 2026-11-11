@@ -207,6 +207,8 @@ class WanGPBackend:
                 return Outcome("unknown")
             receipt = self._receipt(value, tag, task_id)
             state = receipt.state
+            # The host may already know why an unproven stop happened (#1214).
+            diagnosed = state == "unknown" and not receipt.hold_reason
             if (
                 receipt.hold_reason
                 or state not in {"running", "succeeded", "failed", "cancelled"}
@@ -218,7 +220,9 @@ class WanGPBackend:
                 state,
                 receipt.operation_id,
                 None,
-                safe_failure_code(receipt.reason) if state == "failed" else None,
+                safe_failure_code(receipt.reason)
+                if state == "failed" or diagnosed
+                else None,
             )
         except Exception:
             return Outcome("unknown", task_id, None)

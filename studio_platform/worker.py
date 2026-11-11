@@ -718,6 +718,15 @@ class WorkerRunner:
                 )
             if outcome.state == "unknown":
                 self._generation_note("upstream_status_unknown")
+                code = (
+                    safe_failure_code(getattr(outcome, "error_code", None))
+                    if self.backend.kind == WANGP_WORKER.id
+                    else None
+                )
+                if code:
+                    from .capacity_watchdog import record_engine_failure
+
+                    record_engine_failure(self.repo, self.queue, lease, code)
             if outcome.state == "running":
                 moved = self._past_deadline(job, lease, outcome)
                 if moved:

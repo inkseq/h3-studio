@@ -53,6 +53,28 @@ def record_engine_progress(repo, queue, lease):
         )
 
 
+def record_engine_failure(repo, queue, lease, code):
+    """The engine published a failure while its stop is unproven (#1214).
+
+    Diagnosis only: it ends nothing and proves no stop. The first note of an
+    attempt is kept, so its time is when the failure was first seen.
+    """
+    with repo.transaction() as connection:
+        job = queue._leased(connection, lease)
+        value = copy.deepcopy(job.get("result") or {})
+        seen = value.get("engine_failure")
+        if isinstance(seen, dict) and seen.get("attempt_id") == lease.attempt_id:
+            return
+        value["engine_failure"] = {
+            "attempt_id": lease.attempt_id,
+            "at": repo.clock(),
+            "code": code,
+        }
+        connection.execute(
+            update(jobs).where(jobs.c.id == job["id"]).values(result=value)
+        )
+
+
 def timeout_reason(
     job,
     attempt,

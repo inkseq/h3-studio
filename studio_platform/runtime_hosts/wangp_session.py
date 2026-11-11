@@ -870,6 +870,15 @@ class _SessionHandle:
         self.job.cancel()
         return True
 
+    def _published_failure(self):
+        try:
+            result = self.job.result(timeout=0)
+            if result.cancelled or result.success is True:
+                return None
+            return _failure_code(getattr(result, "errors", None))
+        except Exception:
+            return None  # No readable result is no diagnosis, never a stop.
+
     def observe(self):
         with self._lock:
             if self._observation is not None:
@@ -879,7 +888,13 @@ class _SessionHandle:
             # Upstream's outer exception handler can publish a result while its
             # daemon generation thread remains alive. Done alone is insufficient.
             if self.worker_alive() is not False:
-                return RuntimeObservation("unknown", stopped=False)
+                # The result is already published. Pass its failure class on:
+                # without it the platform read "unknown" for ten minutes and
+                # retried the same request on two more machines (#1214). The
+                # stop itself stays unproven.
+                return RuntimeObservation(
+                    "unknown", stopped=False, error_code=self._published_failure()
+                )
             if not self._stop_verified:
                 self.quiesce()  # Actual factory supplies CUDA synchronize.
                 self._stop_verified = True

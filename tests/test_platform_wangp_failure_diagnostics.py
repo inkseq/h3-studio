@@ -417,6 +417,44 @@ class FailureRetentionTests(LedgerCase):
         self.assertEqual(current["error_code"], "upstream_status_unknown")
         self.assertEqual(self.quiesced, [])
         self.assertEqual(len(self.upstream.calls), 1)
+        # #1214: the published failure class travels with the unknown answer
+        # and is written on the job once; the stop stays unproven.
+        code = "wangp_generation_cuda_out_of_memory"
+        receipt = self.backend.transport.inspect(
+            operation_id(current["current_attempt_id"])
+        )
+        self.assertEqual(
+            (receipt.state, receipt.stop_proven, receipt.reason),
+            ("unknown", False, code),
+        )
+        note = current["result"]["engine_failure"]
+        self.assertEqual(
+            (note["attempt_id"], note["code"]), (current["current_attempt_id"], code)
+        )
+        self.now += 30
+        runner.run_once("worker", "finite-pool")
+        again = self.repo.get_job(self.scope, original["id"])
+        self.assertEqual(again["result"]["engine_failure"], note)
+        self.assertEqual(again["status"], "running")
+        # When the thread ends, the same failure is final and stop is proven.
+        self.alive = False
+        self.assertEqual(runner.run_once("worker", "finite-pool")["state"], "failed")
+        final = self.repo.get_job(self.scope, original["id"])
+        self.assertEqual(final["error_code"], code)
+        self.assertEqual(len(self.upstream.calls), 1)
+
+    def test_a_live_worker_without_a_readable_failure_stays_plain_unknown(self):
+        original, runner = self.begin()
+        self.alive = True
+        self.result.success = True  # done, thread alive, nothing failed
+        self.finish(runner)
+        current = self.repo.get_job(self.scope, original["id"])
+        self.assertEqual(current["error_code"], "upstream_status_unknown")
+        self.assertNotIn("engine_failure", current.get("result") or {})
+        receipt = self.backend.transport.inspect(
+            operation_id(current["current_attempt_id"])
+        )
+        self.assertEqual(receipt.reason, "wangp_stop_unproven")
 
     def test_cancelled_result_ignores_failure_code_and_remains_cancelled(self):
         original, runner = self.begin()
