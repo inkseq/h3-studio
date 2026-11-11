@@ -38,13 +38,3 @@
     max-width: 100%;
   }
 }
-
-.qc-availability-mode,
-.qc-availability-actions {
-  flex-wrap: wrap;
-}
-.qc-availability-mode,
-.qc-deployment-field {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}

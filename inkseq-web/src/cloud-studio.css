@@ -89,43 +89,12 @@
   color: var(--muted);
 }
 
-.cloud-production .cloud-actions {
-  flex-wrap: wrap;
-}
 @media (max-width: 700px) {
   .cloud-actions {
     flex-wrap: wrap;
   }
 }
 
-.shot-prompt-draft p {
-  font-size: 12px;
-  line-height: 1.7;
-}
-.shot-prompt-options {
-  display: grid;
-  gap: 8px;
-  margin: 12px 0;
-}
-.shot-prompt-options label {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-  font-size: 12px;
-}
-.shot-prompt-preview {
-  padding: 12px;
-  margin-top: 12px;
-  border: 1px solid var(--line-2);
-  border-radius: 8px;
-}
-.shot-prompt-draft pre {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  font-size: 12px;
-  max-height: 240px;
-  overflow: auto;
-}
 .cloud-warning > button {
   display: block;
   margin: 8px 0 0;

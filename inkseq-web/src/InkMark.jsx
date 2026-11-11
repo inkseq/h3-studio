@@ -348,8 +348,6 @@ const ANIMALS = {
 };
 
 const ART = { ...FACES, ...ANIMALS };
-export const INK_MARK_FACES = Object.keys(FACES);
-export const INK_MARK_ANIMALS = Object.keys(ANIMALS);
 
 // lean: 'left' (default, owner preference) or 'right'. The artwork is drawn leaning right; the left
 // version turns it 16 degrees back, which keeps the play-button eye on the inner side. The ripple

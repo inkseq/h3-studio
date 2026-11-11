@@ -14,6 +14,7 @@ import {
   reportProblemKey,
   reportShortId,
 } from './report-problem.js';
+import { sendFeedback } from './api/feedback.js';
 import './report-problem.css';
 
 function ReportDialog({ account, onClose }) {
@@ -39,10 +40,9 @@ function ReportDialog({ account, onClose }) {
     setBusy(true);
     setProblem('');
     try {
-      const receipt = await api.request('/v1/feedback', {
-        method: 'POST',
-        key: key.current,
-        body: reportBody({
+      const receipt = await sendFeedback(
+        api,
+        reportBody({
           category,
           text,
           page,
@@ -50,7 +50,8 @@ function ReportDialog({ account, onClose }) {
           projectId: inStory ? state.project?.id : '',
           shotId: selected?.type === 'shot' ? selected.id : '',
         }),
-      });
+        key.current,
+      );
       setSent(receipt.report_id);
     } catch (error) {
       setProblem(reportProblemKey(error));

@@ -171,15 +171,6 @@
   text-align: right;
 }
 
-.checkout-sum {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  background: var(--surface-2);
-  border-radius: var(--r);
-  font-size: 15px;
-}
 .credits-chip {
   display: inline-flex;
   align-items: center;

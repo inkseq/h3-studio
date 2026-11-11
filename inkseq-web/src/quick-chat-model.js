@@ -41,37 +41,6 @@ export const CONTROL_LABELS = Object.fromEntries(
     'audio_excerpts',
   ].map((name) => [name, true]),
 );
-export const CONTROL_GROUPS = [
-  ['常用设置', ['duration', 'resolution', 'aspect_ratio', 'generate_audio']],
-  [
-    '参考与时间',
-    [
-      'video_conditioning',
-      'audio_conditioning',
-      'image_refs_relative_size',
-      'ref_image_size',
-      'video_excerpts',
-      'audio_excerpts',
-    ],
-  ],
-  ['随机性与采样', ['seed', 'steps', 'sampler_name', 'scheduler', 'denoise', 'mask_mode']],
-  ['音画日程 · 实验项', ['shift_video', 'shift_audio', 'audio_refinement']],
-  [
-    '运行与导出',
-    [
-      'video_decode',
-      'audio_decode',
-      'encoder_device',
-      'video_tile_size',
-      'video_overlap',
-      'video_temporal_size',
-      'video_temporal_overlap',
-      'export_crf',
-      'audio_tile_size',
-      'audio_overlap',
-    ],
-  ],
-];
 export const clone = (value) => structuredClone(value);
 const minimum = (...values) => {
   const known = values.filter(Number.isFinite);
