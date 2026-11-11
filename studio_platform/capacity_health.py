@@ -43,6 +43,9 @@ JOB_ALERTS = {
     "capacity_queue_age": QUEUED,
     "capacity_collect_stuck": {"collecting"},
 }
+# Alerts whose resource is a job, for the report label; the reclaim writes
+# capacity_request_silent itself when it ends a job (capacity_reclaim).
+JOB_RESOURCE_ALERTS = frozenset(JOB_ALERTS) | {"capacity_request_silent"}
 
 
 def download_overdue(binding, now):
@@ -788,9 +791,9 @@ def pending_reports(service, telemetry, reporter=None):
         try:
             if telemetry.enabled:
                 context = {
-                    "job_id" if value["code"] in JOB_ALERTS else "node_id": value[
-                        "resource_id"
-                    ]
+                    "job_id"
+                    if value["code"] in JOB_RESOURCE_ALERTS
+                    else "node_id": value["resource_id"]
                 }
                 grafana_ok = (
                     telemetry.start("queue_wait", context).finish(

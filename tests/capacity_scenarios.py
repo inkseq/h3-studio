@@ -103,6 +103,34 @@ SCENARIOS = [
         expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
     ),
     Scenario(
+        "silent_request_two_machines",
+        "One request goes silent on every machine; four are fine.",
+        # #1214: silence on a second, different machine ends the job there
+        # with one alert, instead of a third machine. Neither machine failed
+        # twice, so no host is denied.
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 1, silent=True), JobBatch(60, 4)],
+        expect_failed={"capacity_lost_retries_exhausted": 1},
+        expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
+        expect_alerts=("capacity_request_silent",),
+    ),
+    Scenario(
+        "silent_requests_many_hosts",
+        "Three requests go silent at once on a market of three hosts.",
+        # Hosts are rented again and again and go silent each time. The
+        # losses belong to the requests, so no host is denied, each request
+        # ends on its second machine with an alert, and the same hosts serve
+        # the good jobs that follow.
+        hours=5,
+        max_machines=3,
+        jobs=[JobBatch(0, 3, silent=True), JobBatch(100 * 60, 3)],
+        hosts=[Host(str(19951 + i), [MachineScript()] * 4) for i in range(3)],
+        expect_failed={"capacity_lost_retries_exhausted": 3},
+        expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
+        expect_alerts=("capacity_request_silent",),
+    ),
+    Scenario(
         "lost_create_reply",
         "The create call times out but the provider did allocate the machine.",
         hours=4,

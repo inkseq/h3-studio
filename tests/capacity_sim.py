@@ -143,6 +143,9 @@ class JobBatch:
     # The engine publishes a failure a minute after it accepts the request
     # and keeps its generation thread alive, on every machine (#1214).
     engine_fails: bool = False
+    # The request is accepted and then nothing is ever heard from the engine,
+    # on every machine: no progress, no failure, no result (#1214).
+    silent: bool = False
 
 
 @dataclass
@@ -995,6 +998,7 @@ class World(LedgerCase):
         self.jobs_created = []
         self.job_actual = {}
         self.engine_failing = set()
+        self.silent_jobs = set()
         if scenario.history_removed:
             self._seed_history(
                 scenario.history_removed,
@@ -1371,6 +1375,8 @@ class World(LedgerCase):
         self.job_actual[created["id"]] = batch.actual_runtime_s
         if batch.engine_fails:
             self.engine_failing.add(created["id"])
+        if batch.silent:
+            self.silent_jobs.add(created["id"])
         return created
 
     # One tick -----------------------------------------------------------------
@@ -1588,6 +1594,8 @@ class World(LedgerCase):
 
                     record_engine_failure(self.repo, queue, lease, ENGINE_FAILURE)
                 return
+            if job_id in self.silent_jobs:
+                return  # Leases renew; the engine never says anything.
             if self.now < machine.job_done_at:
                 record_engine_progress(self.repo, queue, lease)
                 return

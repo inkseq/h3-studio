@@ -252,7 +252,14 @@ A host an admin marked preferred is stopped but never denied automatically.
 When three or more distinct hosts fail the same way within an hour the cause
 is taken to be ours (image, registry, download source): no further host is
 denied and one alert is raised (`capacity_download_upstream_slow`,
-`capacity_start_failures_upstream`).
+`capacity_start_failures_upstream`, `capacity_generate_failures_upstream`).
+
+A failure after ready counts against the host only when it is evidence about
+the host (#1214). It does not count when the job lost there turned out to be
+the cause (the engine rejected it, or it went silent on a second machine as
+well), and an earlier loss does not count while its job is still open and has
+no verdict yet. A host is therefore denied when it loses work that then
+succeeds, or simply ends, elsewhere.
 
 Failed starts do not pause automatic start: each one denies its host and cools
 its lane. Automatic start pauses only for the loop that is ours, a machine

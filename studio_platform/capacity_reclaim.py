@@ -39,6 +39,10 @@ ENGINE_FAILED = "capacity_engine_failed"
 # worker turn then reads it as failed with the stop proven and the machine is
 # kept. Only a thread still alive this long after the note is the stuck case.
 ENGINE_FAILURE_GRACE_SECONDS = 60
+# A job that goes silent on a second, different machine is the suspect, not
+# the machines: it ends there instead of taking a third (#1214).
+SILENT = "capacity_no_progress"
+SILENT_ALERT = "capacity_request_silent"
 FIELDS = {
     "version",
     "job_id",
@@ -115,6 +119,8 @@ def history(job):
                     and row["count"] == MAX_RECLAIMS
                     or row["reason"] == ENGINE_FAILED
                     and row["count"] == requeued
+                    or silent_again(records[:index], row)
+                    and row["count"] == requeued
                 )
             )
         )
@@ -125,6 +131,55 @@ def history(job):
     if requeued != count:
         raise Conflict("capacity_reclaim_history_invalid")
     return count, copy.deepcopy(records)
+
+
+def silent_again(earlier, attempt):
+    """The job's last loss was silence too, on another machine; `attempt` is
+    the attempt row or the record of the loss being judged."""
+    if attempt.get("reason", SILENT) != SILENT or not earlier:
+        return False
+    previous = earlier[-1]
+    return (
+        previous["state"] == "requeued"
+        and previous["reason"] == SILENT
+        and previous["worker_id"] != attempt["worker_id"]
+    )
+
+
+def request_suspect(connection, intent_id, *, pending=False):
+    """A machine's lost attempt belonged to a job that proved to be the cause.
+
+    Such a loss says nothing about the host. True when a job lost on this
+    machine later ended because the engine rejected it or because it went
+    silent on a second machine as well. With ``pending``, a job that is still
+    open counts too: its verdict is not in yet, so its loss is no evidence.
+    """
+    worker = "dstack-" + intent_id.replace("-", "")
+    lost = connection.execute(
+        select(attempts.c.job_id, attempts.c.id).where(
+            attempts.c.worker_id == worker, attempts.c.status == "attempt_lost"
+        )
+    ).all()
+    for job_id, attempt_id in lost:
+        job = (
+            connection.execute(select(jobs).where(jobs.c.id == job_id))
+            .mappings()
+            .first()
+        )
+        try:
+            _, records = history(dict(job))
+        except (Conflict, TypeError):
+            continue
+        if not any(row["attempt_id"] == attempt_id for row in records):
+            continue
+        if pending and job["status"] not in {"succeeded", "failed", "cancelled"}:
+            return True
+        last = records[-1]
+        if last["state"] == "exhausted" and (
+            last["reason"] == ENGINE_FAILED or silent_again(records[:-1], last)
+        ):
+            return True
+    return False
 
 
 def engine_failure(job, attempt, now):
@@ -394,7 +449,8 @@ def reclaim(
             engine_code = engine_failure(job, attempt, now)
             if engine_code is None:
                 raise Conflict("capacity_reclaim_not_due")
-        exhausted = count >= MAX_RECLAIMS or engine_code is not None
+        repeated = reason == SILENT and silent_again(records, attempt)
+        exhausted = count >= MAX_RECLAIMS or engine_code is not None or repeated
         record = dict(
             version=1,
             job_id=job_id,
@@ -455,6 +511,26 @@ def reclaim(
                 created_at=now,
             )
         )
+        if repeated:
+            # One alert: a request that silences machines is ours to look at.
+            identity = str(uuid.uuid4())
+            conn.execute(
+                insert(outbox).values(
+                    id=identity,
+                    event_type="capacity.health_alert",
+                    aggregate_id=job_id,
+                    payload={
+                        "version": 1,
+                        "code": SILENT_ALERT,
+                        "diagnosis": "silent_on_two_machines",
+                        "resource_id": job_id,
+                        "since": now,
+                        "event_id": identity,
+                        "tenant_id": job["tenant_id"],
+                    },
+                    created_at=now,
+                )
+            )
         if exhausted:
             from .credits import release
             from .settlement_recovery import release_terminal_job

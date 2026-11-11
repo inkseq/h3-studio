@@ -158,6 +158,17 @@ waited ten silent minutes on each of three machines (staging, 2026-11-10).
 
 Scenario: `engine_rejects_one_request`.
 
+**A request that goes silent (#1214).** With no word from the engine at all,
+the attempt is reclaimed as `capacity_no_progress` after the silence window
+and requeued once. Silence again on a second, different machine ends the job
+there (`capacity_lost_retries_exhausted`, hold released) and raises one alert,
+`capacity_request_silent`: the request is the suspect, so it does not take a
+third machine. Silence twice on the same machine, or after a different kind
+of loss, keeps the ordinary count of two requeues. Neither loss counts
+against its host.
+
+Scenarios: `silent_request_two_machines`, `silent_requests_many_hosts`.
+
 ## Recorded capacity timeline (staging and production)
 
 The controller records after each tick, never deciding anything
@@ -269,6 +280,7 @@ Scenario(
 - `JobBatch(engine_fails=True)` makes every job of the batch fail inside the
   engine a minute after submission, thread alive, on any machine;
   `expect_failed={code: jobs}` names the jobs that must end failed with that code.
+  `JobBatch(silent=True)`: accepted, then never heard from, on any machine.
 - `hosts` instead of `machines` gives the provider a market of named physical
   hosts (`Host("19901", [MachineScript(...), ...])`): every plan offers all of
   them, cheapest first, a create lands on the first one the frozen selector

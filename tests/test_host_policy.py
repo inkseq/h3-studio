@@ -419,6 +419,43 @@ class HostPolicyTests(ledger.LedgerCase):
         self.assertTrue(self.denied(second, 5000, history=[first]))
         self.assertEqual(self.stored(), ("deny", "automatic_repeated_failure", None))
 
+    def test_many_hosts_failing_after_ready_at_once_are_not_denied(self):
+        # #1214: three hosts going silent within the hour is a request or a
+        # release of ours. From the third on nothing is denied, one alert.
+        def stalled(machine, name, at):
+            node = rental(name, at, ready=at - 100, stalled=True)
+            node["payload"]["host_observation"] = physical(machine=machine, at=at)
+            return node
+
+        history = []
+        for i in range(3):
+            node = stalled(str(19600 + i), "first-%d" % i, 1000 + i)
+            self.assertFalse(self.denied(node, 1000 + i))
+            history.append(node)
+        # Each of them fails a second time inside the hour: a pair, but braked.
+        for i in range(3):
+            again = stalled(str(19600 + i), "again-%d" % i, 2000 + i)
+            self.assertFalse(self.denied(again, 2000 + i, history=history))
+            history.append(again)
+        for i in range(3):
+            self.assertEqual(self.stored(str(19600 + i))[0], "default")
+        with self.repo.engine.connect() as connection:
+            alerts = list(
+                connection.execute(
+                    select(outbox.c.payload).where(
+                        outbox.c.event_type == "capacity.health_alert"
+                    )
+                ).scalars()
+            )
+        self.assertEqual(
+            [(row["code"], row["diagnosis"], row["failed_hosts"]) for row in alerts],
+            [("capacity_generate_failures_upstream", "generate_failures_upstream", 3)],
+        )
+        # Once the hour is clear, a host that fails twice in a day is denied again.
+        late = [stalled("19600", "late-%d" % i, 9000 + 100 * i) for i in range(2)]
+        self.assertFalse(self.denied(late[0], 9000, history=[]))
+        self.assertTrue(self.denied(late[1], 9100, history=[late[0]]))
+
     def test_a_failed_start_never_overrides_an_admin_prefer(self):
         self.service.policy(self.owner, self.body("prefer"), "prefer")
         self.assertFalse(self.denied(rental("a", 1000, failed=True), 1000))

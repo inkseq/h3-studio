@@ -109,6 +109,8 @@ SLOW_STOP_EVENT = "dstack.download_slow_stop"
 UPSTREAM_ALERT = "capacity_download_upstream_slow"
 START_FAILURE_EVENT = "dstack.start_failure_stop"
 START_FAILURES_ALERT = "capacity_start_failures_upstream"
+GENERATE_FAILURE_EVENT = "dstack.generate_failure_stop"
+GENERATE_FAILURES_ALERT = "capacity_generate_failures_upstream"
 
 
 def finite(value, *, minimum=0, maximum=9_000_000_000_000):
@@ -365,6 +367,25 @@ def start_failure_braked(connection, tenant, node_id, physical, now):
     )
 
 
+def generate_failure_braked(connection, tenant, node_id, physical, now):
+    """Journal one failure after ready; True when many hosts fail that way at once.
+
+    Three hosts going silent or over time within the hour is a request or a
+    release of ours, not three bad hosts (#1214): stop denying, raise one alert.
+    """
+    return _upstream_braked(
+        connection,
+        tenant,
+        node_id,
+        physical,
+        now,
+        event=GENERATE_FAILURE_EVENT,
+        alert=GENERATE_FAILURES_ALERT,
+        diagnosis="generate_failures_upstream",
+        count="failed_hosts",
+    )
+
+
 def _upstream_braked(
     connection, tenant, node_id, physical, now, *, event, alert, diagnosis, count
 ):
@@ -570,7 +591,8 @@ def deny_failed_rental(repo, tenant, connection, node, *, now):
     stored. A rental that never started denies its host at once, unless many
     hosts fail to start within the hour (start_failure_braked). A rental that
     started and failed later denies its host on the second such failure
-    within a day. Either deny stays until an admin clears it.
+    within a day, unless many hosts fail that way within the hour
+    (generate_failure_braked). Either deny stays until an admin clears it.
     """
     outcome = _rental_outcome(node, now=now)
     if outcome is None or outcome[2] is None:
@@ -582,10 +604,23 @@ def deny_failed_rental(repo, tenant, connection, node, *, now):
             return False
         reason = AUTOMATIC_START_FAILURE
     else:
+        physical = bound_observation(node, now=now)
+        if generate_failure_braked(
+            connection, tenant, node["intent_id"], physical, now
+        ):
+            return False
+        from .capacity_reclaim import request_suspect
+
+        # A loss caused by the request itself is not evidence about the host
+        # (#1214): not this one, and not an earlier one of the same host. An
+        # earlier loss whose job is still open has no verdict yet and waits.
+        if request_suspect(connection, node["intent_id"]):
+            return False
         nodes = [
             row
             for row in original_nodes(connection, tenant)
             if row["intent_id"] != node["intent_id"]
+            and not request_suspect(connection, row["intent_id"], pending=True)
         ]
         if (
             automatic_deny([*nodes, node], machine_id, now=now, provider=provider)

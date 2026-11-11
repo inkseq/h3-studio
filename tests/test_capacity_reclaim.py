@@ -389,6 +389,103 @@ class CapacityReclaimTests(LedgerCase):
         forged["result"]["capacity_reclaims"][0]["reason"] = "capacity_engine_failed"
         self.assertEqual(history(forged)[0], 0)
 
+    def silent(self, claim):
+        self.now += 601
+        return self.reclaim(
+            claim,
+            reason="capacity_no_progress",
+            last_progress_at=self.attempt(claim.lease.attempt_id)[
+                "submission_started_at"
+            ],
+        )
+
+    def alerts(self):
+        with self.repo.engine.connect() as conn:
+            return [
+                row["payload"]
+                for row in conn.execute(
+                    select(outbox).where(outbox.c.event_type == "capacity.health_alert")
+                ).mappings()
+            ]
+
+    def test_silence_on_a_second_machine_ends_the_job_with_one_alert(self):
+        # #1214: the job is the suspect, not the machines; no third machine.
+        claim = self.running()
+        held = self.holds()
+        self.assertEqual(self.silent(claim)["state"], "requeued")
+        self.assertEqual(self.alerts(), [])
+        claim = self.running(claim.job, worker="worker-1")
+        receipt = self.silent(claim)
+        self.assertEqual((receipt["state"], receipt["count"]), ("exhausted", 1))
+        job = self.repo.get_job(self.scope, claim.job["id"])
+        self.assertEqual(
+            (job["status"], job["error_code"]),
+            ("failed", "capacity_lost_retries_exhausted"),
+        )
+        self.assertEqual((history(job)[0], len(history(job)[1])), (1, 2))
+        [alert] = self.alerts()
+        self.assertEqual(
+            (alert["code"], alert["diagnosis"], alert["resource_id"]),
+            ("capacity_request_silent", "silent_on_two_machines", job["id"]),
+        )
+        self.assertEqual(self.holds(), held)
+        self.assertIsNone(self.queue.claim("third", "test-pool"))
+        # Replaying the receipt neither changes the job nor alerts again.
+        self.assertTrue(
+            self.reclaim(
+                claim,
+                reason="capacity_no_progress",
+                last_progress_at=receipt["last_progress_at"],
+            )["replayed"]
+        )
+        self.assertEqual(len(self.alerts()), 1)
+
+    def test_silence_twice_on_the_same_machine_or_after_another_loss_keeps_the_count(
+        self,
+    ):
+        # The same machine twice says nothing about the job.
+        claim = self.running()
+        self.assertEqual(self.silent(claim)["state"], "requeued")
+        claim = self.running(claim.job)
+        self.assertEqual(self.silent(claim)["state"], "requeued")
+        self.assertEqual(self.alerts(), [])
+        # A different kind of loss in between is not the same symptom.
+        other = self.running(self.job())
+        self.assertEqual(self.reclaim(other)["state"], "requeued")
+        other = self.running(other.job, worker="worker-1")
+        self.assertEqual(self.silent(other)["state"], "requeued")
+        self.assertEqual(self.alerts(), [])
+
+    def test_a_loss_caused_by_the_request_is_no_evidence_about_the_host(self):
+        from studio_platform.capacity_reclaim import request_suspect
+
+        nodes = ["00000000-0000-4000-8000-00000000000%d" % index for index in range(4)]
+        workers = ["dstack-" + node.replace("-", "") for node in nodes]
+
+        def suspect(node, **options):
+            with self.repo.engine.connect() as conn:
+                return request_suspect(conn, node, **options)
+
+        claim = self.running(worker=workers[0])
+        self.silent(claim)
+        # The job is open: no verdict yet, so an earlier loss waits.
+        self.assertFalse(suspect(nodes[0]))
+        self.assertTrue(suspect(nodes[0], pending=True))
+        claim = self.running(claim.job, worker=workers[1])
+        self.silent(claim)
+        # Silent on a second machine: both losses belong to the request.
+        self.assertTrue(suspect(nodes[0]))
+        self.assertTrue(suspect(nodes[1]))
+        # A job that was lost once and then delivered elsewhere was fine:
+        # that loss does count against its host.
+        other = self.running(self.job(), worker=workers[2])
+        self.silent(other)
+        done = self.running(other.job, worker=workers[3])
+        self.queue.begin_collection(done.lease)
+        self.queue.complete(done.lease, [VALID_ARTIFACT], actual_cost_microusd=0)
+        self.assertFalse(suspect(nodes[2], pending=True))
+        self.assertFalse(suspect(nodes[3], pending=True))
+
     def test_timeout_uses_positive_progress_and_runtime_floor(self):
         claim = self.running()
         self.now = 1599

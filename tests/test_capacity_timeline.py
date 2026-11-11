@@ -382,6 +382,37 @@ class TimelineCliTests(unittest.TestCase):
                 main(["--recent", "5"], out=recent)
                 self.assertIn(intent, recent.getvalue())
 
+    def test_a_machine_the_provider_never_had_reads_as_closed(self):
+        # #1214: such a machine has nothing to remove; it is not "still waiting".
+        from studio_platform.capacity_timeline_cli import TIMELINE, diagnose
+
+        def entry(code, at, detail=None):
+            return {"_type": TIMELINE, "code": code, "at": at, "detail": detail or {}}
+
+        entries = [
+            entry("start_requested", 0),
+            entry(
+                "stop_requested",
+                300,
+                {"reason": "dstack_never_allocated", "claims": 0},
+            ),
+            entry("no_allocation_confirmed", 300),
+            entry("intent_destroyed", 300),
+            entry("timeline_closed", 300),
+        ]
+        lines = diagnose(entries, 14_000)
+        self.assertTrue(lines[0].startswith("stopped: dstack_never_allocated"))
+        self.assertIn("closed: the provider had no machine; nothing was charged", lines)
+        self.assertFalse(any("still waiting" in line for line in lines))
+        # A machine that was allocated still waits for its removal.
+        del entries[2]
+        self.assertTrue(
+            any(
+                line.startswith("still waiting for: provider removal")
+                for line in diagnose(entries, 14_000)
+            )
+        )
+
 
 class ExportTests(unittest.TestCase):
     def test_run_read_errors_become_windows(self):
