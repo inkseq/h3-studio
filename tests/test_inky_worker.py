@@ -325,7 +325,13 @@ class InkyWorkerTests(InkyStoreTests):
                 "settings",
                 {"muted": True},
             )
-        self.refresh(worker)
+        self.assertEqual(
+            self.store.unclaimed(self.principal, self.scope.project_id), []
+        )
+        with patch.object(self.store, "claim", wraps=self.store.claim) as claim:
+            self.refresh(worker)
+        claim.assert_not_called()
+        worker.judge.assert_not_called()
         worker.judge.continuity.assert_not_called()
 
     def test_one_refresh_stays_within_its_bounds(self):
@@ -346,6 +352,37 @@ class InkyWorkerTests(InkyStoreTests):
         worker = self.continuity_worker(score=0.1)
         self.refresh(worker)
         self.assertEqual(worker.judge.continuity.call_count, 8)
+
+    def test_a_save_asks_again_only_about_shots_not_yet_evaluated(self):
+        shot = self.project["entities"][3]
+        for index in range(7):
+            self.project["entities"].append(
+                {
+                    **shot,
+                    "id": f"more{index}",
+                    "order": index + 1,
+                    "data": {**shot["data"], "prompt": f"Lin takes step {index}."},
+                }
+            )
+        self.save()
+        worker = self.worker()
+        principal, project_id = self.principal, self.scope.project_id
+        waiting = len(worker.store.unclaimed(principal, project_id))
+        self.assertGreater(waiting, 3)
+        with patch.object(worker.store, "claim", wraps=worker.store.claim) as claim:
+            self.refresh(worker)
+        # Three a save, as before, and the rest still wait their turn.
+        self.assertEqual(claim.call_count, 3)
+        self.assertEqual(
+            len(worker.store.unclaimed(principal, project_id)), waiting - 3
+        )
+        for _ in range(waiting):
+            self.refresh(worker)
+        self.assertEqual(worker.store.unclaimed(principal, project_id), [])
+        with patch.object(worker.store, "claim", wraps=worker.store.claim) as claim:
+            self.refresh(worker)
+        # Every shot evaluated: the save opens no locked transaction per shot.
+        claim.assert_not_called()
 
     def test_budget_exhaustion_keeps_templates_and_logs_without_context(self):
         InkyBudget(self.repo).reserve(

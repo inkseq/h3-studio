@@ -1,5 +1,7 @@
 import json
+import random
 import unittest
+from unittest import mock
 
 from studio_platform import inky_continuity as continuity
 from studio_platform import inky_models as core
@@ -80,6 +82,67 @@ class ReviewTests(unittest.TestCase):
         self.assertIn("第58镜", state["story_so_far"])
         self.assertNotIn("第0镜", state["story_so_far"])
         self.assertGreater(state["earlier_shots_not_shown"], 0)
+
+    def test_the_cut_is_the_one_dropping_the_oldest_shot_at_a_time_would_make(self):
+        # The digest of a review is its claim: a different cut would have every
+        # long story judged, and paid for, again.
+        def one_at_a_time(target, lines, cards):
+            shown = list(lines)
+            while True:
+                state = {
+                    "target_shot": target,
+                    "story_so_far": "\n".join(shown),
+                    "cards": cards,
+                    "earlier_shots_not_shown": len(lines) - len(shown),
+                }
+                size = len(json.dumps(state, ensure_ascii=False))
+                if not shown or size <= continuity.MAX_STATE_CHARS:
+                    return state
+                shown.pop(0)
+
+        chance = random.Random(1192)
+        alphabet = ['雨', 'a', '"', "\\", "\n", "\t", "é", " ", " ", "😀"]
+        for _ in range(60):
+            lines = [
+                "".join(
+                    chance.choice(alphabet)
+                    for _ in range(chance.choice((0, 3, 40, 700, 5000, 27000)))
+                )
+                for _ in range(chance.randrange(0, 40))
+            ]
+            cards = {"Lin": "x" * chance.choice((0, 400, 26000))}
+            target = "t" * chance.choice((1, 300, 26000))
+            expected = one_at_a_time(target, lines, cards)
+            self.assertEqual(continuity._state(target, lines, cards), expected)
+            # As reviews() calls it, with the running totals it keeps.
+            ends = [0]
+            for line in lines:
+                ends.append(ends[-1] + continuity._encoded(line))
+            self.assertEqual(continuity._state(target, lines, cards, ends), expected)
+
+    def test_a_long_story_costs_a_few_encodings_a_shot_not_one_per_shot_left_out(
+        self,
+    ):
+        value = project(*(f"第{index}镜" + "雨" * 900 for index in range(240)))
+        with mock.patch.object(
+            continuity.json, "dumps", wraps=continuity.json.dumps
+        ) as encoded:
+            result = continuity.reviews(value)
+        self.assertEqual(len(result), 239)
+        self.assertGreater(result["s240"]["state"]["earlier_shots_not_shown"], 200)
+        # About 210 shots are left out near the end: one at a time was some 25,000 encodings.
+        self.assertLess(encoded.call_count, 239 * 12)
+
+    def test_one_shot_s_review_alone_is_the_same_review(self):
+        for value, shot in (
+            (project("a", "b", "c", "d"), "s3"),
+            # Long enough that earlier shots are left out.
+            (project(*(f"第{index}镜" + "雨" * 1900 for index in range(40))), "s38"),
+        ):
+            alone = continuity.reviews(value, only=shot)
+            self.assertEqual(list(alone), [shot])
+            self.assertEqual(alone[shot], continuity.reviews(value)[shot])
+        self.assertEqual(continuity.reviews(project("a", "b"), only="gone"), {})
 
     def test_an_earlier_edit_changes_the_review_of_what_follows(self):
         before = continuity.reviews(project("a", "b", "c"))

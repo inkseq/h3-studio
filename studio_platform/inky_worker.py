@@ -16,7 +16,6 @@ from .inky_models import (
     rewrite_text,
     text_findings,
 )
-from .inky_source import sources
 from .repository import Conflict, NotFound
 
 
@@ -47,10 +46,8 @@ class InkyWorker:
         Failure of optional advice must not fail an already committed save.
         """
         try:
-            with self.store.repo.engine.connect() as conn:
-                ids = list(sources(self.store.project(conn, principal, project_id)))
             processed, allowance = 0, 3
-            for shot_id in ids:
+            for shot_id in self.store.unclaimed(principal, project_id):
                 source = self.store.claim(principal, project_id, shot_id)
                 if source is None:
                     continue
