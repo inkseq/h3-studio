@@ -324,11 +324,14 @@ inventory.json
 !inkseq-web/eslint.config.js
 !inkseq-web/tools/
 !inkseq-web/tools/check-changed.mjs
+!inkseq-web/tools/css-class-use.mjs
 !inkseq-web/src/
 !inkseq-web/src/*.js
 !inkseq-web/src/*.jsx
 !inkseq-web/src/*.css
 !inkseq-web/src/*.json
+!inkseq-web/src/api/
+!inkseq-web/src/api/*.js
 !inkseq-web/src/NOVICE-STORIES-AC.md
 
 # Reviewed Agent authoring API and distributable skill; never credential files.

@@ -701,7 +701,7 @@
 
 /* #277: active real-service page controls use the same three sizes as the demo.
    Machine rows are navigable content surfaces, not toolbar-sized buttons. */
-.ops-adapter :is(.p4-page-launch, .assistant-connect) {
+.ops-adapter .p4-page-launch {
   height: 36px;
   min-height: 36px;
 }
@@ -738,10 +738,6 @@
 .assistant-badge {
   align-items: center;
   gap: 4px;
-}
-.assistant-usage {
-  color: var(--ink-2);
-  font-size: 12px;
 }
 .budget-cost-details > summary {
   cursor: pointer;

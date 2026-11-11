@@ -14,7 +14,9 @@ import os
 from pathlib import Path
 
 ROOT_FILES = ("index.html", "package.json", "package-lock.json", "vite.config.js",
-              ".prettierignore", ".prettierrc.json", "eslint.config.js", "tools/check-changed.mjs")
+              ".prettierignore", ".prettierrc.json", "eslint.config.js", "tools/check-changed.mjs",
+              # src/css-class-use.test.js imports it; `npm test` runs on the snapshot.
+              "tools/css-class-use.mjs")
 SOURCE_SUFFIXES = {".js", ".jsx", ".css", ".json"}
 SOURCE_DOCUMENTS = {"src/NOVICE-STORIES-AC.md", "src/v2/fonts/README.md", "src/v2/fonts/OFL-Inter.txt"}
 # Only the reviewed, self-hosted prototype font is a binary source asset. Do

@@ -74,15 +74,6 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.library-name-edit {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.library-name-edit input {
-  margin-bottom: 0;
-  min-width: 0;
-}
 
 @media (max-width: 760px) {
   .libp-side > .library-source-tools {

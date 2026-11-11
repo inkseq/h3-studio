@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useI18n } from './i18n/I18nProvider.jsx';
 import { accountKey } from './data/query.js';
 import { SettingRow, SettingsSection } from './ui/Settings.jsx';
+import { readFeedbackSettings, saveFeedbackSettings } from './api/feedback.js';
 
-const PATH = '/v1/feedback/settings';
 export const checkedFeedbackSettings = (value) =>
   value && Number.isInteger(value.revision) && typeof value.enabled === 'boolean'
     ? { revision: value.revision, enabled: value.enabled }
@@ -23,16 +23,12 @@ export default function FeedbackSettings({ api, account, active }) {
     saved = useRef(null);
   const read = useQuery({
     queryKey: key,
-    queryFn: async () => checkedFeedbackSettings(await api.request(PATH)),
+    queryFn: async () => checkedFeedbackSettings(await readFeedbackSettings(api)),
     enabled: !!(active && api && account),
   });
   const save = useMutation({
     mutationFn: ({ enabled, revision }) =>
-      api.request(PATH, {
-        method: 'PATCH',
-        body: { expected_revision: revision, enabled },
-        key: 'feedback-settings-' + crypto.randomUUID(),
-      }),
+      saveFeedbackSettings(api, { enabled, revision }, 'feedback-settings-' + crypto.randomUUID()),
     onSuccess: (result) => {
       const value = checkedFeedbackSettings(result);
       if (!value) return;

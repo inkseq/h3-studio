@@ -58,7 +58,3 @@ export function trackAtTime(track, timeline, time) {
   if (!placement || track.muted || time < placement.start || time >= placement.end) return null;
   return Number(track.start) + time - placement.start;
 }
-export const secondsLabel = (value) =>
-  `${Math.floor(Math.max(0, value) / 60)
-    .toString()
-    .padStart(2, '0')}:${(Math.max(0, value) % 60).toFixed(1).padStart(4, '0')}`;

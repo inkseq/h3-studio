@@ -162,9 +162,6 @@ select {
 :root dialog.qc-dialog .hosted-sign-in > button.hosted-sign-in-main {
   width: 100%;
 }
-:root dialog.qc-dialog .hosted-sign-in > button.hosted-sign-in-legacy {
-  margin-inline: auto;
-}
 
 /* Telegram linking (h3-studio#382): QR beside the steps on desktop; phones get the button only. */
 .assistant-target {
