@@ -77,6 +77,24 @@ class MediaToolTests(unittest.TestCase):
             )
             connection.return_value.close.assert_called_once()
 
+    def test_a_failed_probe_is_tried_once_more_and_says_why(self):
+        with (
+            patch.object(media.http.client, "HTTPSConnection") as connection,
+            patch.object(media.sys, "stderr") as stderr,
+        ):
+            connection.return_value.request.side_effect = TimeoutError
+            self.assertFalse(media.mirror_available("archive.ubuntu.com"))
+            self.assertEqual(
+                [call.kwargs["timeout"] for call in connection.call_args_list], [5, 20]
+            )
+            self.assertEqual(connection.return_value.close.call_count, 2)
+            said = "".join(call.args[0] for call in stderr.write.call_args_list)
+            self.assertIn("mirror archive.ubuntu.com: TimeoutError", said)
+            # The second try may succeed.
+            connection.return_value.request.side_effect = [TimeoutError, None]
+            connection.return_value.getresponse.return_value.status = 200
+            self.assertTrue(media.mirror_available("archive.ubuntu.com"))
+
     def test_missing_font_preserves_usable_ffmpeg(self):
         with (
             patch.object(media, "usable", return_value=True),
