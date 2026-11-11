@@ -34,6 +34,86 @@ UNREACHABLE = MachineScript(
     },
 )
 
+# everyframe-routing.json with the hosted API first (#1222, owner 2026-11-11).
+HOSTED_FIRST = {
+    "tiers": ["standard", "economy"],
+    "per_window": 20,
+    "hosted_first": True,
+}
+
+HOSTED = [
+    Scenario(
+        "hosted_waits_then_routes",
+        "Hosted beside our machines: a click waits its tier limit, then goes hosted.",
+        hours=1,
+        jobs=[JobBatch(0, 2)],
+        hosted={"tiers": ["standard"], "per_window": 20},
+        expect_starts=0,
+        expect_hosted=2,
+        expect_hosted_within=125,
+    ),
+    Scenario(
+        "hosted_first_no_wait",
+        "Hosted first: a click is routed on the tick that sees it, no machine starts.",
+        hours=1,
+        jobs=[JobBatch(0, 3), JobBatch(600, 1)],
+        hosted=HOSTED_FIRST,
+        expect_starts=0,
+        expect_hosted=4,
+        expect_hosted_within=5,
+    ),
+    Scenario(
+        "hosted_first_demand_off",
+        "Hosted first with automatic machine starts off: jobs still go hosted.",
+        hours=1,
+        jobs=[JobBatch(0, 3)],
+        hosted=HOSTED_FIRST,
+        demand_enabled=False,
+        expect_starts=0,
+        expect_hosted=3,
+        expect_hosted_within=5,
+    ),
+    Scenario(
+        "hosted_first_window_full",
+        "Hosted first, window of two: the rest wait for the window, not a machine.",
+        hours=2,
+        jobs=[JobBatch(0, 5)],
+        hosted=dict(HOSTED_FIRST, per_window=2),
+        expect_starts=0,
+        expect_hosted=5,
+    ),
+    Scenario(
+        "hosted_first_steady_use",
+        "Hosted first: eight clicks a minute apart never warm a machine.",
+        hours=1,
+        jobs=[JobBatch(0, 8, spacing=60)],
+        hosted=HOSTED_FIRST,
+        expect_starts=0,
+        expect_hosted=8,
+        expect_hosted_within=5,
+    ),
+    Scenario(
+        "hosted_first_unhostable",
+        "Hosted first: a request no hosted model renders still gets a machine.",
+        hours=2,
+        jobs=[JobBatch(0, 2), JobBatch(0, 1, hostable=False)],
+        hosted=HOSTED_FIRST,
+        expect_starts=1,
+        expect_hosted=2,
+        expect_hosted_within=5,
+    ),
+    Scenario(
+        "hosted_first_economy_backlog",
+        "Hosted first: 45 economy shots go out one at a time; no machine for them.",
+        hours=4,
+        jobs=[JobBatch(0, 45, tier="economy")],
+        hosted=dict(HOSTED_FIRST, per_window=40),
+        hosted_seconds=30,
+        expect_starts=0,
+        expect_hosted=45,
+    ),
+]
+
 SCENARIOS = [
     Scenario(
         "steady_40_fl",
@@ -521,4 +601,5 @@ SCENARIOS = [
 ]
 # Exported incidents (tests/fixtures/capacity_sim/incident_*.json) replay as
 # scenarios too: python tools/export_capacity_incident.py <intent_id>.
+SCENARIOS += HOSTED
 SCENARIOS += incident_scenarios()
