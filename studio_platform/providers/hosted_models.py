@@ -11,7 +11,9 @@ after the vendor's 2026-11-05 rise. Pika's omni prices are its
 `referencePrices` credits at USD 0.002 each; H3 Max fast and Vivix charge one
 price for every mode. Free quotes on 2026-11-06 matched all of them. The
 real charge comes from the free POST /render/quote and the render itself, but
-quote does not validate the mode, so modes are gated here. The vendor has no
+quote does not validate the mode, so modes are gated here. A kept voice
+track (lip-sync) goes to H3 Max fast with the take's first, or first and
+last, frame (measured 2026-11-11). The vendor has no
 cancel: a submitted render runs to completion and settles. This module never
 contacts a vendor.
 """
@@ -102,7 +104,11 @@ MODELS = {
         HostedModel(
             "h3-max-fast",
             "everyframe-h3-max-fast-v1",
-            PLAIN | {"omni"},
+            # omni-first and omni-pair: a kept voice track with the take's
+            # first (and last) frame. Measured 2026-11-11: both frames kept,
+            # mouths follow the track, and the track comes back as the sound
+            # in step to the frame (docs/EXPERIMENTS.md).
+            PLAIN | {"omni", "omni-first", "omni-pair"},
             H3,
             WIDE,
             9,
@@ -182,7 +188,6 @@ def vendor_request(compiled, model_id):
         or request.get("guides")
         or request.get("video_excerpts")
         or request.get("audio_excerpts")
-        or request.get("audio_conditioning") == "soundtrack"  # lip-sync to a kept track
         or request.get("video_audio")
         or len(refs["images"]) > model.max_images
         or len(refs["videos"]) > model.max_videos
@@ -199,7 +204,22 @@ def vendor_request(compiled, model_id):
         "resolution": model.vendor_resolution or RESOLUTIONS[request["resolution"]],
         "aspect": request["aspect_ratio"],
     }
-    if request.get("mode") == "fl" and not any(refs.values()):
+    if request.get("audio_conditioning") == "soundtrack":
+        # Lip-sync to a kept track: the track and the frames it plays over,
+        # nothing else. The vendor refuses a track without a picture.
+        if (
+            request.get("mode") != "fl"
+            or not first
+            or refs["images"]
+            or refs["videos"]
+            or len(refs["audios"]) != 1
+        ):
+            return None
+        mode = "omni-pair" if last else "omni-first"
+        attachments = (
+            [first, last, *refs["audios"]] if last else [first, *refs["audios"]]
+        )
+    elif request.get("mode") == "fl" and not any(refs.values()):
         mode = "first-last" if last else "first-frame" if first else "text"
         attachments = [first, last] if last else [first] if first else []
     elif request.get("mode") == "ref" and not first and any(refs.values()):
