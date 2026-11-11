@@ -53,6 +53,28 @@ def record_engine_progress(repo, queue, lease):
         )
 
 
+def record_engine_failure(repo, queue, lease, code):
+    """The engine published a failure while its stop is unproven (#1214).
+
+    Diagnosis only: it ends nothing and proves no stop. The first note of an
+    attempt is kept, so its time is when the failure was first seen.
+    """
+    with repo.transaction() as connection:
+        job = queue._leased(connection, lease)
+        value = copy.deepcopy(job.get("result") or {})
+        seen = value.get("engine_failure")
+        if isinstance(seen, dict) and seen.get("attempt_id") == lease.attempt_id:
+            return
+        value["engine_failure"] = {
+            "attempt_id": lease.attempt_id,
+            "at": repo.clock(),
+            "code": code,
+        }
+        connection.execute(
+            update(jobs).where(jobs.c.id == job["id"]).values(result=value)
+        )
+
+
 def timeout_reason(
     job,
     attempt,
@@ -65,6 +87,11 @@ def timeout_reason(
     started = attempt.get("submission_started_at")
     if not _number(started) or started > now:
         return None
+    from .capacity_reclaim import ENGINE_FAILED, engine_failure
+
+    if engine_failure(job, attempt, now):
+        # The engine published the failure itself; waiting changes nothing.
+        return ENGINE_FAILED, None
     expected = job.get("expected_runtime_s")
     expected = expected if _number(expected) else 0
     progress = (job.get("result") or {}).get("capacity_progress", {})
@@ -129,6 +156,7 @@ def fenced_node_stop(connection, node, intent, *, now=None):
         "capacity_no_progress",
         "capacity_runtime_exceeded",
         "capacity_collection_failed",
+        "capacity_engine_failed",
         "capacity_owner_recovery",
         "capacity_startup_timeout",
         "capacity_startup_failed",

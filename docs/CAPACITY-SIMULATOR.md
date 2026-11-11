@@ -141,6 +141,23 @@ timeline records `collect_failed`, `collect_output_stored` and
 
 Scenarios: `collect_fails_then_machine_removed` and `collect_keeps_failing`.
 
+**A request the engine rejects (#1214).** When the engine publishes a failure
+and its generation thread stays alive, the host cannot prove a stop and answers
+`unknown`; it now attaches the closed failure class. The worker turn writes it
+once on the job (`engine_failure`, internal: not in the public job view). An
+ordinary failure exits its thread within moments and is then read as failed
+with the stop proven, machine kept. When the note is a minute old and the
+thread is still alive, the controller reclaims the attempt as
+`capacity_engine_failed`: the job ends at once with the engine's
+failure class instead of being requeued (another machine would fail the same
+way), its credit hold is released, and the machine is stopped because its GPU
+state is unproven. The stop is not a host failure and counts toward no deny.
+Only this reason may end a job before two requeues; the reclaim checks the
+note of the exact attempt under the row lock. Before this, the same request
+waited ten silent minutes on each of three machines (staging, 2026-11-10).
+
+Scenario: `engine_rejects_one_request`.
+
 ## Recorded capacity timeline (staging and production)
 
 The controller records after each tick, never deciding anything
@@ -249,6 +266,9 @@ Scenario(
   run turning terminal, stop delay, price and `read_errors` (windows in which
   a run read raises a recorded error code). dstack `max_duration` from the run
   spec is honoured.
+- `JobBatch(engine_fails=True)` makes every job of the batch fail inside the
+  engine a minute after submission, thread alive, on any machine;
+  `expect_failed={code: jobs}` names the jobs that must end failed with that code.
 - `hosts` instead of `machines` gives the provider a market of named physical
   hosts (`Host("19901", [MachineScript(...), ...])`): every plan offers all of
   them, cheapest first, a create lands on the first one the frozen selector

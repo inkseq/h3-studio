@@ -230,7 +230,10 @@ class WanGPHost:
                         operation_id,
                         expected={"running", "unknown", "sealing"},
                         state="unknown",
-                        reason="wangp_stop_unproven",
+                        # A published failure whose thread is still alive keeps
+                        # its class; the stop is unproven either way (#1214).
+                        reason=safe_failure_code(observation.error_code)
+                        or "wangp_stop_unproven",
                     )
                 if observation.state in {"failed", "cancelled"}:
                     reason = (

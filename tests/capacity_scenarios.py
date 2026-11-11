@@ -91,6 +91,18 @@ SCENARIOS = [
         expect_alerts=("capacity_start_failures_upstream",),
     ),
     Scenario(
+        "engine_rejects_one_request",
+        "One request makes the engine fail with its thread alive; four are fine.",
+        # #1214, staging 2026-11-10: the same request was retried on three
+        # machines, ten silent minutes each. It now ends on the first, with the
+        # engine's reason, and the machine is not blamed.
+        hours=3,
+        max_machines=1,
+        jobs=[JobBatch(0, 1, engine_fails=True), JobBatch(60, 4)],
+        expect_failed={"wangp_generation_tensor_shape_mismatch": 1},
+        expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
+    ),
+    Scenario(
         "lost_create_reply",
         "The create call times out but the provider did allocate the machine.",
         hours=4,

@@ -73,6 +73,9 @@ ARTIFACT = {
 # --------------------------------------------------------------------------
 
 
+ENGINE_FAILURE = "wangp_generation_tensor_shape_mismatch"
+
+
 @dataclass
 class MachineScript:
     """One rented machine, relative to its create call."""
@@ -137,6 +140,9 @@ class JobBatch:
     expected_runtime_s: int = 1800
     actual_runtime_s: float = 240
     spacing: float = 0
+    # The engine publishes a failure a minute after it accepts the request
+    # and keeps its generation thread alive, on every machine (#1214).
+    engine_fails: bool = False
 
 
 @dataclass
@@ -175,6 +181,7 @@ class Scenario:
     check_owner_funding: bool = True  # a start on another owner's profile is recorded
     demand_enabled: bool = True
     expect_all_done: bool = True
+    expect_failed: dict | None = None  # job error code -> jobs that end failed
     expect_capacity: bool = True  # capacity and budget allow work to start
     # Hosts the speed gate denies, and health alert codes raised (#903).
     expect_slow_denies: int | None = None
@@ -258,6 +265,7 @@ class Machine:
         self.idle_with_work = 0.0
         self.idle_without_work = 0.0
         self.job_done_at = 0.0
+        self.job_started_at = 0.0
         self.last_completed_at = None
 
     def incarnation(self):
@@ -986,6 +994,7 @@ class World(LedgerCase):
         self.inflight = {}  # worker_id -> (lease, job_id, done_at)
         self.jobs_created = []
         self.job_actual = {}
+        self.engine_failing = set()
         if scenario.history_removed:
             self._seed_history(
                 scenario.history_removed,
@@ -1360,6 +1369,8 @@ class World(LedgerCase):
             return None
         self.jobs_created.append(created["id"])
         self.job_actual[created["id"]] = batch.actual_runtime_s
+        if batch.engine_fails:
+            self.engine_failing.add(created["id"])
         return created
 
     # One tick -----------------------------------------------------------------
@@ -1553,6 +1564,7 @@ class World(LedgerCase):
             if machine.busy_job not in (None, job["id"]):
                 self.violate("machine_double_booked", job["id"][:8])
             machine.busy_job = job["id"]
+            machine.job_started_at = self.now
             machine.job_done_at = self.now + self.job_actual.get(job["id"], 240)
             queue.record_submitted(lease, "task-" + lease.attempt_id[:12])
             current = (lease, job["id"], slot_fence)
@@ -1568,6 +1580,14 @@ class World(LedgerCase):
             control.heartbeat(worker_id, slot_fence, lease_seconds=900)
             if machine.busy_job != job_id:
                 return  # Held for reconciliation; nothing runs on this host.
+            if job_id in self.engine_failing:
+                # The worker's own path (WorkerRunner): the host answers unknown
+                # with the failure class, which is written on the job once.
+                if self.now >= machine.job_started_at + 60:
+                    from studio_platform.capacity_watchdog import record_engine_failure
+
+                    record_engine_failure(self.repo, queue, lease, ENGINE_FAILURE)
+                return
             if self.now < machine.job_done_at:
                 record_engine_progress(self.repo, queue, lease)
                 return
@@ -2106,12 +2126,25 @@ class World(LedgerCase):
                 )
             )
         statuses = Counter(row["status"] for row in rows)
+        expected_failed = self.scenario.expect_failed or {}
+        failed = Counter(row["error_code"] for row in rows if row["status"] == "failed")
         for row in rows:
             if tries[row["id"]] > 1 + lost[row["id"]]:
                 self.violate("job_run_twice", row["id"][:8])
-            if row["status"] in ("failed", "recovery_hold", "submission_unknown"):
+            if row["status"] in ("recovery_hold", "submission_unknown") or (
+                row["status"] == "failed" and row["error_code"] not in expected_failed
+            ):
                 self.violate("job_lost", "%s %s" % (row["id"][:8], row["status"]))
-        if self.scenario.expect_all_done and statuses.get("succeeded", 0) != len(rows):
+        for code, count in expected_failed.items():
+            if failed[code] != count:
+                self.violate(
+                    "jobs_failed",
+                    "%s: %d failed, expected %d" % (code, failed[code], count),
+                )
+            self.reasons["job_failed:" + code] = failed[code]
+        if self.scenario.expect_all_done and statuses.get("succeeded", 0) != len(
+            rows
+        ) - sum(expected_failed.values()):
             self.violate(
                 "jobs_not_done",
                 ", ".join("%s=%d" % item for item in sorted(statuses.items())),
