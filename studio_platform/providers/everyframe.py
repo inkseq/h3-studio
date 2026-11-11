@@ -48,6 +48,8 @@ ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 CONTENT_TYPES = {"image/png", "image/jpeg", "image/webp", "video/mp4", "audio/wav"}
 CONTENT_TYPES |= {"video/quicktime", "video/webm", "audio/mpeg", "audio/mp4"}
 CONTENT_TYPES |= {"audio/aac", "audio/ogg", "image/avif"}
+# What a kept voice track is stored as, and the suffix media.ffmpeg reads it by.
+TRACK_SUFFIXES = {"audio/wav": ".wav", "audio/mpeg": ".mp3"}
 
 
 class ConfigError(ValueError):
@@ -286,35 +288,79 @@ class EveryFrameBackend:
         if render.get("status") != "succeeded" or not url.startswith("/render/"):
             raise BackendError("everyframe_output_unavailable")
         raw = target / ("everyframe-" + os.urandom(8).hex() + ".mp4")
+        track = self._kept_track(job, target)
         heartbeat()
         try:
             self._download(url, raw, heartbeat)
-            return self._normalize(job, raw, target)
+            return self._normalize(job, raw, target, track)
         finally:
-            if raw.exists():
-                raw.unlink()
+            for path in (raw, track):
+                if path is not None and path.exists():
+                    path.unlink()
 
-    def _normalize(self, job, raw, target):
+    def _kept_track(self, job, target):
+        """A copy of the take's own voice track to use as its sound, or None.
+
+        The vendor returns the track it was given, in step. Ours is one
+        encoding closer to the creator's file, as on our own machines. The
+        render is already paid for: if the track cannot be read now, the
+        vendor's copy of it is the sound.
+        """
+        compiled = job["request"]
+        request = compiled["request"]
+        if request.get("audio_conditioning") != "soundtrack" or not request.get(
+            "generate_audio"
+        ):
+            return None
+        path = None
+        try:
+            audios = (request.get("inputs") or {}).get("audios") or []
+            obj = compiled["assets"][audios[0]]["model"]
+            suffix = TRACK_SUFFIXES[obj["content_type"]]
+            info = self.store.stat(obj["key"])
+            if len(audios) != 1 or not 0 < info.size_bytes <= MAX_INPUT_BYTES:
+                raise ValueError
+            if info.size_bytes != obj["size_bytes"]:
+                raise ValueError
+            path = target / ("everyframe-track-" + os.urandom(8).hex() + suffix)
+            with self.store.open(obj["key"]) as source, path.open("xb") as handle:
+                data = source.read(MAX_INPUT_BYTES + 1)
+                if len(data) != info.size_bytes:
+                    raise ValueError
+                handle.write(data)
+            return path
+        except Exception:
+            if path is not None and path.exists():
+                path.unlink()
+            print("everyframe_track_unavailable", flush=True)
+            return None
+
+    def _normalize(self, job, raw, target, track=None):
         """Exact output size and at least the planned duration.
 
         The vendor picks its own canvas per aspect; scale and centre-crop to
         the compiled size, and hold the last frame if its clip is a frame short.
+        With `track`, that file is the sound instead of the vendor's copy of it.
         """
         output = job["request"]["output_spec"]
         width, height = output["width"], output["height"]
         duration = output["actual_duration"]
         audio = bool(job["request"]["request"].get("generate_audio"))
         info = probe(raw)
-        if audio and not any(
-            s.get("codec_type") == "audio" for s in info.get("streams", [])
+        if (
+            audio
+            and track is None
+            and not any(s.get("codec_type") == "audio" for s in info.get("streams", []))
         ):
             raise BackendError("everyframe_output_audio_missing")
+        sound = audio and track is not None
         video = target / "everyframe-video.mp4"
         ffmpeg(
             [
                 "-y",
                 "-i",
                 raw,
+                *(["-i", track, "-map", "0:v:0", "-map", "1:a:0"] if sound else []),
                 "-vf",
                 f"scale={width}:{height}:force_original_aspect_ratio=increase,"
                 f"crop={width}:{height},fps=24,tpad=stop_mode=clone:stop_duration=1",

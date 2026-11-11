@@ -9,6 +9,7 @@ import platform
 import re
 import subprocess
 import sys
+import time
 
 
 SOURCES = ("/etc/apt/sources.list.d/ubuntu.sources", "/etc/apt/apt-mirrors.txt",
@@ -27,14 +28,23 @@ def https_sources(text):
 def mirror_available(host):
     # This probe selects no package or new trust root. APT still authenticates
     # every index/package. Never follow a redirect or send caller credentials.
-    connection = http.client.HTTPSConnection(host, timeout=5)
-    try:
-        connection.request("HEAD", "/ubuntu/dists/noble/InRelease")
-        return connection.getresponse().status == 200
-    except (OSError, http.client.HTTPException):
-        return False
-    finally:
-        connection.close()
+    # A slow answer gets one longer try; the reason of a failure is printed,
+    # because "unreachable" alone hid what the runner saw (2026-11-11).
+    for timeout in (5, 20):
+        connection = http.client.HTTPSConnection(host, timeout=timeout)
+        started = time.monotonic()
+        try:
+            connection.request("HEAD", "/ubuntu/dists/noble/InRelease")
+            status = connection.getresponse().status
+            if status != 200:
+                print(f"mirror {host}: HTTP {status}", file=sys.stderr)
+            return status == 200
+        except (OSError, http.client.HTTPException) as error:
+            print(f"mirror {host}: {type(error).__name__} after "
+                  f"{time.monotonic() - started:.1f} s", file=sys.stderr)
+        finally:
+            connection.close()
+    return False
 
 
 def reachable_sources(sources, probe=mirror_available):

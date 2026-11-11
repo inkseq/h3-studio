@@ -95,6 +95,60 @@ class VendorRequestTests(unittest.TestCase):
         # Pika omni (USD 0.15 per 5 s at 480p) is below fast's one price (0.25).
         self.assertEqual(plan.chain(value), ["pika-h3-flex", "h3-max-fast"])
 
+    def test_a_kept_voice_track_goes_with_the_frames_it_plays_over(self):
+        # Measured 2026-11-11: both frames kept, mouths on the track, and the
+        # track back as the sound in step. Only H3 Max takes these modes.
+        inputs = {
+            "first_frame": "a",
+            "last_frame": None,
+            "images": [],
+            "videos": [],
+            "audios": ["s1"],
+        }
+        track = {"audio_conditioning": "soundtrack"}
+        value = compiled(inputs=inputs, **track)
+        body, refs = plan.vendor_request(value, FAST)
+        self.assertEqual((body["referenceMode"], refs), ("omni-first", ["a", "s1"]))
+        body, refs = plan.vendor_request(
+            compiled(inputs={**inputs, "last_frame": "b"}, **track), FAST
+        )
+        self.assertEqual((body["referenceMode"], refs), ("omni-pair", ["a", "b", "s1"]))
+        self.assertEqual(plan.chain(value), [FAST])
+        for model in ("pika-h3-flex", "h3-max-turbo", "vivix-w1"):
+            self.assertIsNone(plan.vendor_request(value, model))
+        for changes in (
+            {"first_frame": None},  # The vendor refuses a track without a picture.
+            {"images": ["i"]},
+            {"videos": ["v"]},
+            {"audios": ["s1", "s2"]},
+            {"audios": []},
+        ):
+            with self.subTest(changes=changes):
+                self.assertIsNone(
+                    plan.vendor_request(
+                        compiled(inputs={**inputs, **changes}, **track), FAST
+                    )
+                )
+        # Storyboard dialogue shots: reference pictures and the track.
+        pictures = {**inputs, "first_frame": None, "images": ["i1", "i2"]}
+        reference = compiled(mode="ref", inputs=pictures, **track)
+        reference["recipe_id"] = "h3-base-ref2va-v1"
+        body, refs = plan.vendor_request(reference, FAST)
+        self.assertEqual((body["referenceMode"], refs), ("omni", ["i1", "i2", "s1"]))
+        # Pika takes the mode but speaks the lines in a voice of its own.
+        self.assertIsNone(plan.vendor_request(reference, "pika-h3-flex"))
+        self.assertEqual(plan.chain(reference), [FAST])
+        for changes in (
+            {"images": []},  # No picture.
+            {"videos": ["v"]},  # Untried beside a track.
+            {"first_frame": "a"},
+            {"audios": ["s1", "s2"]},
+        ):
+            with self.subTest(reference=changes):
+                value = compiled(mode="ref", inputs={**pictures, **changes}, **track)
+                value["recipe_id"] = "h3-base-ref2va-v1"
+                self.assertIsNone(plan.vendor_request(value, FAST))
+
     def test_anything_not_exactly_representable_stays_on_our_machines(self):
         inputs = {
             "first_frame": None,
@@ -464,6 +518,115 @@ class BackendTests(unittest.TestCase):
                 sorted(p.name for p in target.iterdir()),
                 ["everyframe-audio.flac", "everyframe-video.mp4"],
             )
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
+    def test_a_kept_track_comes_back_as_the_creator_s_own_file(self):
+        def tone(path, hertz, *, video=False):
+            picture = ["-f", "lavfi", "-i", "testsrc=size=848x480:rate=24:duration=5"]
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-loglevel",
+                    "error",
+                    *(picture if video else []),
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"sine=frequency={hertz}:duration=5",
+                    *(["-shortest", "-pix_fmt", "yuv420p"] if video else []),
+                    path,
+                ],
+                check=True,
+            )
+
+        def loudness(path, hertz):
+            heard = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-i",
+                    path,
+                    "-af",
+                    f"bandpass=f={hertz}:width_type=h:w=40,volumedetect",
+                    "-f",
+                    "null",
+                    "-",
+                ],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stderr
+            return float(heard.split("mean_volume:")[1].split("dB")[0])
+
+        with tempfile.TemporaryDirectory() as directory:
+            vendor, track = Path(directory) / "vendor.mp4", Path(directory) / "t.wav"
+            tone(vendor, 440, video=True)  # The vendor's own copy of the sound.
+            tone(track, 1500)
+            data = track.read_bytes()
+
+            class TrackStore(Store):
+                read = len(data)
+
+                def open(self, key):
+                    return io.BytesIO(data[: self.read])
+
+            value = compiled(
+                audio_conditioning="soundtrack",
+                inputs={
+                    "first_frame": "a",
+                    "last_frame": None,
+                    "images": [],
+                    "videos": [],
+                    "audios": ["s1"],
+                },
+            )
+            value["assets"] = {"s1": asset("audio/wav", len(data))}
+            url = "/render/rnd_1/video?t=x&full=1"
+            done = {"id": "rnd_1", "status": "succeeded", "videoFullUrl": url}
+            backend = self.backend(
+                [(200, {"render": done}), (200, vendor.read_bytes())],
+                store=TrackStore(len(data)),
+            )
+            target = Path(directory) / "out"
+            target.mkdir()
+            paths = backend.fetch(job(value), "t", "rnd_1", target, lambda: None)
+            for path in (paths["video"], paths["audio"]):
+                self.assertGreater(loudness(path, 1500), loudness(path, 440) + 20)
+            # The staged copy of the track is gone with the vendor's file.
+            self.assertEqual(
+                sorted(p.name for p in target.iterdir()),
+                ["everyframe-audio.flac", "everyframe-video.mp4"],
+            )
+            # The render is paid for. A track that changed, or cannot be read
+            # whole, is not put back: the vendor's copy of it is the sound, and
+            # nothing of the attempt is left behind.
+            changed, short = TrackStore(len(data) + 1), TrackStore(len(data))
+            short.read = 10
+            silent = copy.deepcopy(value)
+            silent["request"]["generate_audio"] = False
+            for store, take in ((changed, value), (short, value)):
+                for path in target.iterdir():
+                    path.unlink()
+                backend = self.backend(
+                    [(200, {"render": done}), (200, vendor.read_bytes())], store=store
+                )
+                paths = backend.fetch(job(take), "t", "rnd_1", target, lambda: None)
+                self.assertGreater(
+                    loudness(paths["video"], 440), loudness(paths["video"], 1500) + 20
+                )
+                self.assertEqual(
+                    sorted(p.name for p in target.iterdir()),
+                    ["everyframe-audio.flac", "everyframe-video.mp4"],
+                )
+            # A take delivered without sound never opens the track.
+            for path in target.iterdir():
+                path.unlink()
+            unread = mock.Mock(spec=Store)
+            backend = self.backend(
+                [(200, {"render": done}), (200, vendor.read_bytes())], store=unread
+            )
+            paths = backend.fetch(job(silent), "t", "rnd_1", target, lambda: None)
+            self.assertEqual(list(paths), ["video"])
+            unread.open.assert_not_called()
 
 
 if __name__ == "__main__":

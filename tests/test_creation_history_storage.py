@@ -785,6 +785,9 @@ class CreationHistoryStorageTests(LedgerCase):
         marker_reads = [s for s in statements if artifact_accounting.name in s]
         # One read of the markers per scope, and no write.
         self.assertEqual(len(marker_reads), 2)
+        # Nothing changed since the last complete walk: no artifact's metadata
+        # is read again, only what tells a change apart.
+        self.assertFalse([s for s in statements if "platform_artifacts.metadata," in s])
         self.assertFalse(
             [
                 s
@@ -801,6 +804,57 @@ class CreationHistoryStorageTests(LedgerCase):
             )
         with self.assertRaises(Conflict):
             self.assets.usage(owner)
+        # A walk that raised is not remembered as complete.
+        with self.assertRaises(Conflict):
+            self.assets.usage(owner)
+
+    def test_a_changed_artifact_or_marker_is_walked_again_and_nothing_else(self):
+        from sqlalchemy import delete, event, select
+        from studio_platform.repository import artifacts
+
+        self.prepared(settled=True)
+        owner = self.scope.owner_id
+        engine = self.assets.journal.engine
+
+        def read():
+            """(accounted bytes, whether any artifact's metadata was read)."""
+            statements = []
+
+            def seen(conn, cursor, statement, parameters, context, executemany):
+                statements.append(statement)
+
+            event.listen(engine, "before_cursor_execute", seen)
+            try:
+                counted = self.assets.usage(owner)["accounted_bytes"]
+            finally:
+                event.remove(engine, "before_cursor_execute", seen)
+            return counted, any("platform_artifacts.metadata," in s for s in statements)
+
+        counted, _ = read()
+        self.assertEqual(read(), (counted, False))
+        with self.repo.transaction() as conn:
+            marker = conn.execute(select(artifact_accounting)).first()
+            conn.execute(
+                delete(artifact_accounting).where(
+                    artifact_accounting.c.object_id == marker.object_id
+                )
+            )
+        # A missing marker: walked, added back and the object counted again.
+        again = counted + marker.size_bytes
+        self.assertEqual(read(), (again, True))
+        # The walk itself changed the markers, so one more look, then quiet.
+        self.assertEqual(read(), (again, True))
+        self.assertEqual(read(), (again, False))
+        with self.repo.transaction() as conn:
+            row = conn.execute(select(artifacts.c.id, artifacts.c.metadata)).first()
+            conn.execute(
+                artifacts.update()
+                .where(artifacts.c.id == row.id)
+                .values(metadata={**row.metadata, "noted": True})
+            )
+        # Changed metadata is read and walked once; it adds nothing here.
+        self.assertEqual(read(), (again, True))
+        self.assertEqual(read(), (again, False))
 
     def test_finalizer_rejects_unbound_or_wrong_hash_before_any_accounting_changes(
         self,
