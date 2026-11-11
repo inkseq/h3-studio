@@ -74,6 +74,8 @@ ARTIFACT = {
 
 
 ENGINE_FAILURE = "wangp_generation_tensor_shape_mismatch"
+# The hosted slot simulated requests are routed to.
+HOSTED_MODEL = "h3-max-turbo"
 
 
 @dataclass
@@ -148,6 +150,10 @@ class JobBatch:
     # The request is accepted and then nothing is ever heard from the engine,
     # on every machine: no progress, no failure, no result (#1214).
     silent: bool = False
+    # Hosted routing (Scenario.hosted): the billing tier, and whether the
+    # hosted catalog has a model for this request.
+    tier: str = "standard"
+    hostable: bool = True
 
 
 @dataclass
@@ -211,6 +217,13 @@ class Scenario:
     # takes. Above zero, workers run concurrently with the controller tick:
     # they act during provider waits unless the capacity lock is held (#1148).
     provider_latency: float = 0
+    # The host's everyframe-routing.json; None: the credential is not installed.
+    hosted: dict | None = None
+    hosted_slots: int = 4
+    hosted_seconds: float = 90
+    expect_hosted: int | None = None  # jobs that finish on the hosted route
+    # Every routed job was routed at most this long after it was submitted.
+    expect_hosted_within: float | None = None
 
 
 HISTORY = MachineScript(allocate_after=0, running_after=0)
@@ -1003,6 +1016,8 @@ class World(LedgerCase):
         self.job_actual = {}
         self.engine_failing = set()
         self.silent_jobs = set()
+        if scenario.hosted is not None:
+            self._build_hosted()
         if scenario.history_removed:
             self._seed_history(
                 scenario.history_removed,
@@ -1244,6 +1259,159 @@ class World(LedgerCase):
             finally:
                 self._in_workers = False
 
+    def _build_hosted(self):
+        """The hosted route: its switch file, live slots and an unknown balance.
+
+        The catalog and tier of a simulated request are scripted per batch;
+        the routing rules under test are the real ones.
+        """
+        from studio_platform.control import WorkerSpec
+        from studio_platform.providers import hosted_models
+        from studio_platform.scheduling import rebind
+
+        self.settings.data_dir = str(Path(self.temp.name) / "data")
+        folder = Path(self.settings.data_dir) / "runtime-secrets"
+        folder.mkdir(parents=True)
+        (folder / "everyframe-routing.json").write_text(
+            json.dumps(self.scenario.hosted), encoding="utf-8"
+        )
+        self.settings.everyframe_enabled = True
+        # No vendor read: the balance stays unknown, which leaves hosted open.
+        before = dict(rebind._balance)
+        rebind._balance.update(usd=None, read_at=float("inf"))
+        self.addCleanup(rebind._balance.update, before)
+        model = hosted_models.MODELS[HOSTED_MODEL]
+        for target, value in (
+            (
+                "studio_platform.scheduling.rebind.chain",
+                lambda request: (model.id,) if request.get("sim_hostable") else (),
+            ),
+            (
+                "studio_platform.scheduling.rebind.tier_of",
+                lambda job: job["request"].get("sim_tier"),
+            ),
+        ):
+            patcher = patch(target, side_effect=value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.hosted_workers, self.hosted_inflight = [], {}
+
+    def hosted_alive(self):
+        """Real hosted slots heartbeat every few seconds: live at every tick."""
+        if self.scenario.hosted is None:
+            return
+        from studio_platform.control import WorkerSpec
+        from studio_platform.providers import hosted_models
+
+        control = self.controller.control
+        if self.hosted_workers:
+            for worker in self.hosted_workers:
+                if worker not in self.hosted_inflight:
+                    try:
+                        control.heartbeat(
+                            worker, control.get(worker)["fence"], lease_seconds=900
+                        )
+                    except Conflict:
+                        self.reasons["hosted_slot_conflict"] += 1
+            return
+        model = hosted_models.MODELS[HOSTED_MODEL]
+        recipes = tuple(
+            dict.fromkeys(
+                (
+                    *hosted_models.RECIPES,
+                    self.manifest.document["generation_recipe_id"],
+                )
+            )
+        )
+        for index in range(self.scenario.hosted_slots):
+            worker = "dbos-everyframe-sim-%d" % index
+            self.controller.control.register(
+                WorkerSpec(
+                    worker,
+                    hosted_models.POOL,
+                    hosted_models.PROVIDER,
+                    worker,
+                    (),
+                    recipes,
+                    model.id,
+                    model.configuration_id,
+                    hosted_models.BACKEND,
+                )
+            )
+            self.controller.control.mark_ready(worker, upstream_idle_confirmed=True)
+            self.hosted_workers.append(worker)
+
+    def hosted_work(self):
+        """The hosted slots: claim a routed job, render, deliver."""
+        if self.scenario.hosted is None:
+            return
+        from studio_platform.providers.hosted_models import POOL
+
+        control, queue = self.controller.control, self.queue
+        for worker in self.hosted_workers:
+            try:
+                current = self.hosted_inflight.get(worker)
+                fence = control.get(worker)["fence"]
+                if current is None:
+                    claim = control.claim(worker, POOL, lease_seconds=900)
+                    if claim is None:
+                        continue
+                    queue.begin_submission(claim.lease)
+                    queue.record_submitted(
+                        claim.lease, "render-" + claim.lease.attempt_id[:12]
+                    )
+                    # A queue the hosted route is draining is not blocked.
+                    self._blocked_since = None
+                    self.hosted_inflight[worker] = (
+                        claim.lease,
+                        claim.job["id"],
+                        self.now + self.scenario.hosted_seconds,
+                    )
+                    continue
+                lease, job_id, done_at = current
+                queue.heartbeat(lease, lease_seconds=900)
+                control.heartbeat(worker, fence, lease_seconds=900)
+                if self.now < done_at:
+                    continue
+                queue.begin_collection(lease)
+                queue.complete(lease, [ARTIFACT], actual_cost_microusd=0)
+                self.hosted_inflight.pop(worker)
+                control.observe(worker, job_id)
+            except (LeaseLost, Conflict, InvalidTransition) as error:
+                self.reasons["hosted_lease_lost:" + type(error).__name__] += 1
+                self.hosted_inflight.pop(worker, None)
+
+    def _check_hosted(self):
+        from studio_platform.providers.hosted_models import POOL
+
+        scenario = self.scenario
+        if scenario.hosted is None:
+            return
+        with self.repo.engine.connect() as connection:
+            rows = [
+                dict(row)
+                for row in connection.execute(
+                    select(jobs).where(jobs.c.pool == POOL)
+                ).mappings()
+            ]
+        done = sum(row["status"] == "succeeded" for row in rows)
+        self.metrics["hosted_jobs"] = done
+        waits = [row["execution_plan"]["routed_at"] - row["created_at"] for row in rows]
+        if waits:
+            self.metrics["hosted_wait_max_s"] = int(max(waits))
+        if scenario.expect_hosted is not None and done != scenario.expect_hosted:
+            self.violate(
+                "hosted_count_mismatch",
+                "%d jobs finished hosted, expected %d" % (done, scenario.expect_hosted),
+            )
+        limit = scenario.expect_hosted_within
+        if limit is not None and waits and max(waits) > limit:
+            self.violate(
+                "hosted_route_late",
+                "a job waited %d s for the hosted route, at most %d expected"
+                % (max(waits), limit),
+            )
+
     def _load_service(self):
         self.config_file.write_text(json.dumps(self.config), encoding="utf-8")
         # Like the production file: not readable by others (_protected_read).
@@ -1343,6 +1511,8 @@ class World(LedgerCase):
             deployment_profile_id=operator_fixture.PROFILE,
             request=dict(model=profile["model_id"], mode=batch.mode),
         )
+        if self.scenario.hosted is not None:
+            compiled.update(sim_tier=batch.tier, sim_hostable=batch.hostable)
         execution = dict(
             self.policy,
             policy_hash=request_hash(self.policy),
@@ -1646,6 +1816,7 @@ class World(LedgerCase):
             step = self.random.uniform(*scenario.tick_jitter)
         self.apply_events()
         self.arrive()
+        self.hosted_alive()
         if scenario.provider_latency:
             # Workers poll every second; one claims 2 s into the tick and
             # submits after preparing, concurrently with the controller.
@@ -1657,6 +1828,7 @@ class World(LedgerCase):
                 self._in_tick = False
             self.observe_result(result)
             self._run_workers(float("inf"))
+            self.hosted_work()
             self.now = max(self.now, began + max(step, 2 + scenario.prepare_seconds))
             self.check_tick(self.now - began)
             self.account(self.now - began)
@@ -1665,6 +1837,7 @@ class World(LedgerCase):
         self.observe_result(result)
         self.now += 2  # Workers poll every second; one claims soon after.
         self.work()
+        self.hosted_work()
         self.now += scenario.prepare_seconds
         self.submit()
         self.now = began + max(step, 2 + scenario.prepare_seconds)
@@ -2187,6 +2360,7 @@ class World(LedgerCase):
         self._check_host_policy()
         machines = [m for m in self.client.machines.values() if m.script is not HISTORY]
         self._check_expected_counts(machines)
+        self._check_hosted()
         return {
             "scenario": self.scenario.name,
             "simulated_hours": round((self.now - self.start) / 3600, 2),

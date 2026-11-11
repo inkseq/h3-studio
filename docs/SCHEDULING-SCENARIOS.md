@@ -1,6 +1,6 @@
 # Scheduling scenarios: where a job runs and when a machine starts
 
-The scenario list maps one to one to `SCENARIOS` in `studio_platform/scheduling/decide.py`. If a rule changes, change its table row and behavioral test. The six hosted decisions use that table's pure predicates at the existing call sites. The other five rows name the existing claim, backoff, fallback and idle owners; they do not introduce a second scheduler. Design background is in [PROVIDER-ARCHITECTURE.md](PROVIDER-ARCHITECTURE.md) and [STORY-AUTO-QUEUE.md](STORY-AUTO-QUEUE.md).
+The scenario list maps one to one to `SCENARIOS` in `studio_platform/scheduling/decide.py`. If a rule changes, change its table row and behavioral test. The seven hosted decisions use that table's pure predicates at the existing call sites. The other five rows name the existing claim, backoff, fallback and idle owners; they do not introduce a second scheduler. Design background is in [PROVIDER-ARCHITECTURE.md](PROVIDER-ARCHITECTURE.md) and [STORY-AUTO-QUEUE.md](STORY-AUTO-QUEUE.md).
 
 Several rows can apply at once. Existing transaction and call order decides what happens: removing a hosted hold only makes work eligible for the original machine admission checks. It does not authorize or guarantee a rental. Capacity, funding, original unknown operations, claims and idle-stop ownership remain authoritative. The baseline clarifications below are recorded in [#899](https://github.com/inkseq/h3-studio/issues/899#issuecomment-6578212797); this refactor preserves behavior.
 
@@ -30,10 +30,11 @@ Six signals:
 | 9 | `hosted_fallback` | Confirmed refusal/failure or known-cost deadline moves to the next model, then original machine route. Unknown submission is not repeated | `WorkerRunner._reroute` / `_past_deadline`, `rebind.next_plan` | Built |
 | 10 | `window_full` | A full environment or owner share prevents further hosted offload. Machine hold still follows rows 1, 2 and 5 | `decide.hosted_offload`, original `hold_for_hosted` order | Not yet seen live |
 | 11 | `backlog_finished` | Idle stop only with fresh safe-to-stop proof; active work, unknown obligations, holds, funding and original ownership still apply | `DstackController._reconcile_observed_node` / `dstack_capacity.idle_action` | Built |
+| 12 | `hosted_first` | Routing file says `"hosted_first": true`: a job a live hosted model can take is routed on the tick that sees it, with no tier wait, and holds its machine for as long as hosted can still take it (a full window included), unless the job is 30 min old and hosted has submitted nothing for 30 min. Rows 1, 2, 4 and 5 then do not start or warm machines; rows 8 and 9 still do. Requests no hosted model renders use machines as before | `rebind.hosted_first` / `offload` / `hold_for_hosted` | Simulator only |
 
 ### One primary behavioral check per row
 
-These are isolated fake-provider/temporary-database checks, not new live acceptance claims. `test_scheduling_decide` also verifies that the eleven document keys stay aligned with the runtime table. The older Modal-first/lookahead decision cases remain in that module.
+These are isolated fake-provider/temporary-database checks, not new live acceptance claims. `test_scheduling_decide` also verifies that the twelve document keys stay aligned with the runtime table. The older Modal-first/lookahead decision cases remain in that module.
 
 | Row | Primary behavioral test | Additional failure/boundary coverage |
 |---|---|---|
@@ -48,6 +49,7 @@ These are isolated fake-provider/temporary-database checks, not new live accepta
 | 9 | `test_hosted_rebind.RebindLedgerTests.test_scenario_09_exact_deadline_moves_on_and_keeps_its_charge` | Real worker refusal/refunded failure, chain exhaustion, recorded uncertain-submit cassettes |
 | 10 | `test_hosted_rebind.OffloadDecisionTests.test_scenario_10_full_window_preserves_oldest_first_owner_share` | Environment cap and owner 9/10/11; zero window; existing grace/economy distinction |
 | 11 | `test_dstack_controller.DstackControllerTests.test_hold_preserves_original_deadline_and_expired_idle_stops` | Compatible queue keeps host; unknown stop acknowledgment retains cost and is not replayed |
+| 12 | `test_hosted_rebind.RebindLedgerTests.test_scenario_12_hosted_first_routes_at_once_and_keeps_machines_off` | No live slot, a chain that gave the job back and a low balance release the hold; simulator scenarios `hosted_first_*` (no wait, switch off, full window, steady use, unhostable request, economy backlog) |
 
 ### Preserved baseline details
 

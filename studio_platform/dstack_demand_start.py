@@ -319,6 +319,13 @@ def _claim(service, preread=None):
     actor = 'dstack-demand:' + request_hash({'tenant': tenant})[:40]
     with service.repo.transaction() as connection:
         service.repo._lock_capacity(connection)
+        from .scheduling.rebind import hold_for_hosted, offload
+
+        # The hosted route has its own switch (everyframe-routing.json): it
+        # keeps taking work while automatic machine starts are off (#1222).
+        remaining = offload(
+            service, connection, eligible_jobs(service, connection, now), now
+        )
         if not read_runtime(connection, tenant)['enabled']:
             return _result('disabled'), None
         if demand_configuration(service.config, now=now) is None:
@@ -326,13 +333,9 @@ def _claim(service, preread=None):
         from .scheduling.decide import Rules, dstack_work
 
         rules = Rules.from_modal_first(getattr(service, 'modal_first', None))
-        from .scheduling.rebind import hold_for_hosted, offload
-
         queued = [
             item
-            for item in offload(
-                service, connection, eligible_jobs(service, connection, now), now
-            )
+            for item in remaining
             if not hold_for_hosted(service.settings, connection, item[0], now)
         ]
         work = dstack_work(

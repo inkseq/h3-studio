@@ -80,7 +80,7 @@ class DecideTableTests(unittest.TestCase):
             rows, [(str(rule.number), key) for key, rule in SCENARIOS.items()]
         )
         self.assertEqual(
-            [rule.number for rule in SCENARIOS.values()], list(range(1, 12))
+            [rule.number for rule in SCENARIOS.values()], list(range(1, 13))
         )
 
     def test_table(self):

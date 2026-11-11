@@ -13,7 +13,7 @@ Today's rules, unchanged and table-tested:
   left once a new machine would be ready, or for a job that has waited
   `vast_after_seconds` (Modal refused or failed it).
 
-SCENARIOS maps the eleven documented cases to their decision owners. Hosted
+SCENARIOS maps the twelve documented cases to their decision owners. Hosted
 predicates are applied at the original call sites, not as a global route
 selector: several cases may apply at once. Claims, money, provider operations
 and idle stopping remain with their transactional owners.
@@ -73,21 +73,24 @@ HOSTED_WINDOW_SECONDS = 900
 HOSTED_PER_OWNER = 10
 
 
-def _wait_elapsed(job, tier, enabled_tiers, now):
+def _wait_elapsed(job, tier, enabled_tiers, now, first=False):
     limit = WAIT_LIMITS.get(tier)
     return (
         tier in enabled_tiers
         and limit is not None
-        and not now - job["created_at"] < limit
+        and (first or not now - job["created_at"] < limit)
     )
 
 
-def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
+def hosted_offload(
+    queued, tier_of, enabled_tiers, used, now, *, per_window, first=False
+):
     """Jobs to hand to the hosted API now, oldest first.
 
     A job goes hosted once it has waited past its tier's limit: a free machine
-    of ours would have claimed it by then. `used` is {owner_id: renders in the
-    current window}; the window and per-owner shares bound what is returned.
+    of ours would have claimed it by then. With the hosted API `first` nothing
+    waits. `used` is {owner_id: renders in the current window}; the window and
+    per-owner shares bound what is returned.
     """
     total = sum(used.values())
     owners = dict(used)
@@ -95,7 +98,7 @@ def hosted_offload(queued, tier_of, enabled_tiers, used, now, *, per_window):
     for job, profile in sorted(queued, key=lambda item: item[0]["created_at"]):
         tier = tier_of(job)
         if not SCENARIOS["occasional_click"].offload(
-            job, tier, enabled_tiers, now
+            job, tier, enabled_tiers, now, first
         ) or not SCENARIOS["window_full"].offload(total, owners, job, per_window):
             continue
         chosen.append((job, profile))
@@ -113,6 +116,9 @@ HOSTED_WARMS_MACHINE_AT = 5
 # Economy shots waiting at which a machine of ours is cheaper than Vivix: at
 # USD 0.016 each 768P clip saves about USD 0.007, so about 36 pay for a boot.
 ECONOMY_WARMS_MACHINE_AT = 40
+# With the hosted API first, a job this old may start a machine once hosted
+# has submitted nothing for as long: the route is live but not taking work.
+HOSTED_STALL_SECONDS = 1800
 # Below this vendor balance hosted stops; jobs stay on our machines.
 HOSTED_BALANCE_RESERVE_USD = 1.0
 HOSTED_BALANCE_WARN_USD = 10.0
@@ -184,6 +190,20 @@ SCENARIOS = {
     "backlog_finished": Scenario(
         11,
         "dstack_controller.DstackController._reconcile_observed_node / dstack_capacity.idle_action",
+    ),
+    # The hosted API first (#1222): what a live hosted model can still take is
+    # routed at once and never starts or warms a machine of ours, unless the
+    # hosted route has stopped taking work.
+    "hosted_first": Scenario(
+        12,
+        "scheduling.rebind.offload / hold_for_hosted",
+        hold=lambda job, tier, enabled_tiers, takeable, draining, now: (
+            takeable
+            and tier in enabled_tiers
+            and WAIT_LIMITS.get(tier) is not None
+            and "hosted_tried" not in job["execution_plan"]
+            and (draining or now - job["created_at"] < HOSTED_STALL_SECONDS)
+        ),
     ),
 }
 
