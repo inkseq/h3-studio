@@ -420,8 +420,8 @@ class HostPolicyTests(ledger.LedgerCase):
         self.assertEqual(self.stored(), ("deny", "automatic_repeated_failure", None))
 
     def test_many_hosts_failing_after_ready_at_once_are_not_denied(self):
-        # #1214: three hosts going silent within the hour is a request or a
-        # release of ours. From the third on nothing is denied, one alert.
+        # #1214: three hosts going silent within the hour is taken to be ours.
+        # From the third on nothing is denied, and one alert is raised.
         def stalled(machine, name, at):
             node = rental(name, at, ready=at - 100, stalled=True)
             node["payload"]["host_observation"] = physical(machine=machine, at=at)
@@ -455,75 +455,6 @@ class HostPolicyTests(ledger.LedgerCase):
         late = [stalled("19600", "late-%d" % i, 9000 + 100 * i) for i in range(2)]
         self.assertFalse(self.denied(late[0], 9000, history=[]))
         self.assertTrue(self.denied(late[1], 9100, history=[late[0]]))
-
-    def test_only_losses_that_say_something_about_the_host_count(self):
-        # #1214 and its review: what the jobs lost on the two rentals say.
-        first = rental("a", 1000, ready=900, stalled=True)
-        second = rental("b", 5000, ready=4900, stalled=True)
-
-        def denied_with(verdicts):
-            with patch(
-                "studio_platform.capacity_reclaim.lost_jobs",
-                side_effect=lambda connection, nodes: {
-                    node: verdicts.get(node, []) for node in nodes
-                },
-            ):
-                return self.denied(second, 5000, history=[first])
-
-        for verdicts in (
-            # The request was the cause of the new loss, or of the old one.
-            {"a": [("job-1", "ended")], "b": [("job-2", "suspect")]},
-            {"a": [("job-1", "suspect")], "b": [("job-2", "open")]},
-            # Two different jobs, neither with a verdict yet.
-            {"a": [("job-1", "open")], "b": [("job-2", "open")]},
-        ):
-            self.assertFalse(denied_with(verdicts), verdicts)
-            self.assertEqual(self.stored()[0], "default")
-        # The host already lost a job that ended elsewhere, and loses another.
-        self.assertTrue(
-            denied_with({"a": [("job-1", "ended")], "b": [("job-2", "open")]})
-        )
-        self.assertEqual(self.stored(), ("deny", "automatic_repeated_failure", None))
-        self.service.policy(self.owner, self.body("default"), "release")
-        # The same open job lost twice on this host is the host.
-        self.assertTrue(
-            denied_with({"a": [("job-1", "open")], "b": [("job-1", "open")]})
-        )
-
-    def test_the_derived_deny_follows_the_same_evidence(self):
-        from studio_platform.host_policy import HostPolicyStore
-
-        nodes = [
-            rental("a", 1000, ready=900, stalled=True),
-            rental("b", 5000, ready=4900, stalled=True),
-        ]
-
-        def effective(verdicts):
-            with (
-                patch(
-                    "studio_platform.capacity_reclaim.lost_jobs",
-                    side_effect=lambda connection, wanted: {
-                        node: verdicts.get(node, []) for node in wanted
-                    },
-                ),
-                self.repo.engine.connect() as connection,
-            ):
-                return HostPolicyStore(self.repo, self.scope.tenant_id).read(
-                    connection, "19492", nodes=nodes, now=6000
-                )[0]["effective"]
-
-        self.assertEqual(effective({}), "deny")
-        self.assertEqual(
-            effective({"a": [("job-1", "ended")], "b": [("job-2", "ended")]}), "deny"
-        )
-        # Request-caused or unjudged losses deny nothing, stored or derived.
-        self.assertEqual(
-            effective({"a": [("job-1", "suspect")], "b": [("job-1", "suspect")]}),
-            "default",
-        )
-        self.assertEqual(
-            effective({"a": [("job-1", "ended")], "b": [("job-2", "open")]}), "default"
-        )
 
     def test_a_failed_start_never_overrides_an_admin_prefer(self):
         self.service.policy(self.owner, self.body("prefer"), "prefer")

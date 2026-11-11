@@ -152,33 +152,25 @@ thread is still alive, the controller reclaims the attempt as
 failure class instead of being requeued (another machine would fail the same
 way), its credit hold is released, and the machine is stopped because its GPU
 state is unproven. The stop is not a host failure and counts toward no deny.
-This reason, and silence on a second host (below), are the only ways a job
-ends before two requeues; the reclaim checks the note of the exact attempt
-under the row lock. Before this, the same request
+Only this reason may end a job before two requeues; the reclaim checks the
+note of the exact attempt under the row lock. Before this, the same request
 waited ten silent minutes on each of three machines (staging, 2026-11-10).
 
 Scenario: `engine_rejects_one_request`.
 
-**A request that goes silent (#1214).** With no word from the engine at all,
-the attempt is reclaimed as `capacity_no_progress` after the silence window
-and requeued once. The retry is offered other hosts first: a host whose last
-rental failed after ready is ordered last for an hour. Silence again on a
-second, different physical host ends the job there
-(`capacity_lost_retries_exhausted`, hold released) and raises one alert,
-`capacity_request_silent`: the request is the suspect, so it does not take a
-third machine. Two rentals of one host are one machine: silence there twice,
-or silence after a different kind of loss, keeps the ordinary count of two
-requeues.
+**Plain silence stays ambiguous (#1214).** With no word from the engine at
+all, a bad request and a bad host look the same. The attempt is reclaimed as
+`capacity_no_progress` after the silence window, the job keeps its three
+attempts, and a host is denied on its second such failure within a day. Two
+things narrow the damage: the retry is offered other hosts first (a host
+whose last rental failed after ready is ordered last for an hour), and three
+distinct hosts failing after ready within the hour deny no further host and
+raise `capacity_generate_failures_upstream`. Ending the job on its second
+silent host, and excusing hosts by the job's later verdict, were built and
+dropped: two independent reviews showed that two bad hosts then excuse each
+other and a good job dies on them.
 
-What such a loss says about the host follows the job's verdict. It counts
-against the host when the job then ended elsewhere, and when the same job was
-lost on that host twice. It does not count when the request proved to be the
-cause, and not while the job is still open, except that a host which already
-has one proven loss is denied on its next loss without waiting. The stored
-deny and the deny derived from history use the same rule.
-
-Scenarios: `silent_request_two_machines`, `silent_requests_many_hosts`,
-`silent_host_cheapest`.
+Scenarios: `silent_host_cheapest`, `silent_request_three_machines`.
 
 ## Recorded capacity timeline (staging and production)
 

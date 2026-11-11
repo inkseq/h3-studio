@@ -370,8 +370,9 @@ def start_failure_braked(connection, tenant, node_id, physical, now):
 def generate_failure_braked(connection, tenant, node_id, physical, now):
     """Journal one failure after ready; True when many hosts fail that way at once.
 
-    Three hosts going silent or over time within the hour is a request or a
-    release of ours, not three bad hosts (#1214): stop denying, raise one alert.
+    Three distinct hosts going silent or over time within the hour is taken
+    to be ours (a release, a request), not three bad hosts (#1214): stop
+    denying and raise one alert.
     """
     return _upstream_braked(
         connection,
@@ -532,56 +533,7 @@ def _rental_outcome(node, *, now):
     )
 
 
-def excused_losses(
-    connection, nodes, machine_id, *, now, provider=VASTAI.id, current=None
-):
-    """Rentals of this host whose failure after ready is no evidence about it.
-
-    The job lost there proved to be the cause, or it is still open and was
-    lost on this host only once: no verdict yet (#1214). Two exceptions make
-    an open loss count. The same job lost here twice is the host. And the
-    loss being judged right now (``current``) counts when this host already
-    lost a job that then ended elsewhere: one proven loss plus a new one is
-    enough, and waiting for the second verdict would never deny it. Used by
-    the stored deny and by the derived one, so the two do not disagree.
-    """
-    failed = []
-    for node in nodes:
-        outcome = _rental_outcome(node, now=now)
-        if (
-            outcome is not None
-            and outcome[:2] == (machine_id, provider)
-            and outcome[2] is not None
-            and not outcome[2][1]
-            and outcome[2][0] >= now - 8 * 86400
-        ):
-            failed.append(node["intent_id"])
-    if not failed:
-        return frozenset()
-    from collections import Counter
-
-    from .capacity_reclaim import lost_jobs
-
-    verdicts = lost_jobs(connection, failed)
-    here = Counter(job for items in verdicts.values() for job, _ in items)
-    proven = any(
-        ident != current and any(verdict == "ended" for _, verdict in items)
-        for ident, items in verdicts.items()
-    )
-    return frozenset(
-        ident
-        for ident, items in verdicts.items()
-        if any(
-            verdict == "suspect"
-            or verdict == "open"
-            and here[job] == 1
-            and not (ident == current and proven)
-            for job, verdict in items
-        )
-    )
-
-
-def automatic_deny(nodes, machine_id, *, now, provider=VASTAI.id, excused=frozenset()):
+def automatic_deny(nodes, machine_id, *, now, provider=VASTAI.id):
     """Derive fixed seven-day intervals from distinct original failed rentals.
 
     A stopped-by-owner row, a model-load problem, missing identity, or repeated
@@ -594,11 +546,7 @@ def automatic_deny(nodes, machine_id, *, now, provider=VASTAI.id, excused=frozen
         outcome = _rental_outcome(node, now=now)
         if outcome is None or outcome[:2] != (machine_id, provider):
             continue
-        if (
-            outcome[2] is not None
-            and outcome[2][0] >= now - 8 * 86400
-            and node["intent_id"] not in excused
-        ):
+        if outcome[2] is not None and outcome[2][0] >= now - 8 * 86400:
             events[node["intent_id"]] = outcome[2]
         if outcome[3] is not None:
             readies.append(outcome[3])
@@ -640,9 +588,9 @@ def recent_start_failures(nodes, *, now, provider=VASTAI.id):
 def recent_silent_failures(nodes, *, now, provider=VASTAI.id):
     """Hosts whose last rental failed after ready within the last hour (#1214).
 
-    The retry of that work tries another host first. If it runs there, the
-    host was the problem; if it fails there too, the request was. With the
-    retry on the same host the two cannot be told apart. An order, not a deny.
+    The retry of that work tries another host first: on the same host again,
+    a bad host and a bad request look the same. An order, not a deny; the
+    only host on offer is still rented again.
     """
     failed, ready = {}, {}
     for node in nodes:
@@ -680,35 +628,18 @@ def deny_failed_rental(repo, tenant, connection, node, *, now):
             return False
         reason = AUTOMATIC_START_FAILURE
     else:
-        nodes = [
-            *(
-                row
-                for row in original_nodes(connection, tenant)
-                if row["intent_id"] != node["intent_id"]
-            ),
-            node,
-        ]
-        # A loss that says nothing about the host is neither counted nor
-        # journalled for the brake (#1214).
-        excused = excused_losses(
-            connection,
-            nodes,
-            machine_id,
-            now=now,
-            provider=provider,
-            current=node["intent_id"],
-        )
-        if node["intent_id"] in excused:
-            return False
         physical = bound_observation(node, now=now)
         if generate_failure_braked(
             connection, tenant, node["intent_id"], physical, now
         ):
             return False
+        nodes = [
+            row
+            for row in original_nodes(connection, tenant)
+            if row["intent_id"] != node["intent_id"]
+        ]
         if (
-            automatic_deny(
-                nodes, machine_id, now=now, provider=provider, excused=excused
-            )
+            automatic_deny([*nodes, node], machine_id, now=now, provider=provider)
             is None
         ):
             return False
@@ -804,15 +735,7 @@ class HostPolicyStore:
             )
             value, revision = copy.deepcopy(stored), row["version"]
         nodes = original_nodes(connection, self.tenant) if nodes is None else nodes
-        until = automatic_deny(
-            nodes,
-            machine_id,
-            now=now,
-            provider=provider,
-            excused=excused_losses(
-                connection, nodes, machine_id, now=now, provider=provider
-            ),
-        )
+        until = automatic_deny(nodes, machine_id, now=now, provider=provider)
         effective = (
             "deny"
             if value["manual"] == "deny" or until is not None
