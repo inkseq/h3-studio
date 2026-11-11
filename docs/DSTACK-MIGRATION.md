@@ -252,7 +252,12 @@ A host an admin marked preferred is stopped but never denied automatically.
 When three or more distinct hosts fail the same way within an hour the cause
 is taken to be ours (image, registry, download source): no further host is
 denied and one alert is raised (`capacity_download_upstream_slow`,
-`capacity_start_failures_upstream`).
+`capacity_start_failures_upstream`, `capacity_generate_failures_upstream`).
+
+A host whose last rental failed after ready is ordered last for an hour
+(Vast) or left out of the selector while another executor is offered (Lium),
+so the retry of that work is tried elsewhere first (#1214). This is an order,
+not a deny.
 
 Failed starts do not pause automatic start: each one denies its host and cools
 its lane. Automatic start pauses only for the loop that is ours, a machine

@@ -103,6 +103,38 @@ SCENARIOS = [
         expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
     ),
     Scenario(
+        "silent_host_cheapest",
+        "The cheapest host goes silent on every job; another host is fine.",
+        # #1214: after the first silence the retry is offered the other host
+        # first and finishes there. An hour later the host is tried again,
+        # goes silent again and is denied; that job finishes on the other
+        # host too. Without the order, the retry met the same host twice.
+        hours=5,
+        max_machines=1,
+        jobs=[JobBatch(0, 2), JobBatch(90 * 60, 1)],
+        hosts=[
+            Host("19961", [MachineScript(silent=True, price=0.5)]),
+            Host("19962", [MachineScript()]),
+        ],
+        expect_host_rentals={"19961": 2},
+        expect_denies={"automatic_repeated_failure": 1},
+        expect_effective_denies=1,
+    ),
+    Scenario(
+        "silent_request_three_machines",
+        "One request goes silent on every machine; four are fine.",
+        # The known cost of plain silence (#1214): with no word from the
+        # engine a bad request and a bad host look the same, so the job takes
+        # its three attempts and then fails. Each attempt is on another host,
+        # so no host is denied, and the good jobs finish.
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 1, silent=True), JobBatch(60, 4)],
+        expect_failed={"capacity_lost_retries_exhausted": 1},
+        expect_denies={"automatic_start_failure": 0, "automatic_repeated_failure": 0},
+        expect_effective_denies=0,
+    ),
+    Scenario(
         "lost_create_reply",
         "The create call times out but the provider did allocate the machine.",
         hours=4,

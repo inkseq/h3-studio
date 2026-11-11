@@ -12,7 +12,9 @@ import { useI18n } from './i18n/I18nProvider.jsx';
 const quietly = (promise) => promise.catch(() => {});
 
 // Password / hosted sign-in dialog shared by the landing page and the Telegram connect page.
-export function Login({ onClose, onDone, title, lead }) {
+// `usernameOnly`: the caller already sends people to the hosted page itself, so the dialog
+// is just the username form, open.
+export function Login({ onClose, onDone, title, lead, usernameOnly = false }) {
   const { t } = useI18n();
   const c = useCloud(),
     who = useAccountLabel(c.account),
@@ -50,8 +52,8 @@ export function Login({ onClose, onDone, title, lead }) {
           }}
         >
           <p>{lead ?? t('workspace.copy119')}</p>
-          <HostedSignIn auth={c.auth} />
-          <UsernameSignIn auth={c.auth}>
+          {!usernameOnly && <HostedSignIn auth={c.auth} />}
+          <UsernameSignIn auth={usernameOnly ? null : c.auth}>
             <Field label={t('workspace.copy3')}>
               <input
                 autoComplete="username"

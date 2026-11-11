@@ -158,6 +158,20 @@ waited ten silent minutes on each of three machines (staging, 2026-11-10).
 
 Scenario: `engine_rejects_one_request`.
 
+**Plain silence stays ambiguous (#1214).** With no word from the engine at
+all, a bad request and a bad host look the same. The attempt is reclaimed as
+`capacity_no_progress` after the silence window, the job keeps its three
+attempts, and a host is denied on its second such failure within a day. Two
+things narrow the damage: the retry is offered other hosts first (a host
+whose last rental failed after ready is ordered last for an hour), and three
+distinct hosts failing after ready within the hour deny no further host and
+raise `capacity_generate_failures_upstream`. Ending the job on its second
+silent host, and excusing hosts by the job's later verdict, were built and
+dropped: two independent reviews showed that two bad hosts then excuse each
+other and a good job dies on them.
+
+Scenarios: `silent_host_cheapest`, `silent_request_three_machines`.
+
 ## Recorded capacity timeline (staging and production)
 
 The controller records after each tick, never deciding anything
@@ -269,6 +283,10 @@ Scenario(
 - `JobBatch(engine_fails=True)` makes every job of the batch fail inside the
   engine a minute after submission, thread alive, on any machine;
   `expect_failed={code: jobs}` names the jobs that must end failed with that code.
+  `JobBatch(silent=True)`: accepted, then never heard from, on any machine;
+  `MachineScript(silent=True)`: the same for every job on that machine.
+  `expect_effective_denies=n`: hosts that end the run denied in effect,
+  stored or derived.
 - `hosts` instead of `machines` gives the provider a market of named physical
   hosts (`Host("19901", [MachineScript(...), ...])`): every plan offers all of
   them, cheapest first, a create lands on the first one the frozen selector

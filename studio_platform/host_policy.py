@@ -109,6 +109,8 @@ SLOW_STOP_EVENT = "dstack.download_slow_stop"
 UPSTREAM_ALERT = "capacity_download_upstream_slow"
 START_FAILURE_EVENT = "dstack.start_failure_stop"
 START_FAILURES_ALERT = "capacity_start_failures_upstream"
+GENERATE_FAILURE_EVENT = "dstack.generate_failure_stop"
+GENERATE_FAILURES_ALERT = "capacity_generate_failures_upstream"
 
 
 def finite(value, *, minimum=0, maximum=9_000_000_000_000):
@@ -365,6 +367,26 @@ def start_failure_braked(connection, tenant, node_id, physical, now):
     )
 
 
+def generate_failure_braked(connection, tenant, node_id, physical, now):
+    """Journal one failure after ready; True when many hosts fail that way at once.
+
+    Three distinct hosts going silent or over time within the hour is taken
+    to be ours (a release, a request), not three bad hosts (#1214): stop
+    denying and raise one alert.
+    """
+    return _upstream_braked(
+        connection,
+        tenant,
+        node_id,
+        physical,
+        now,
+        event=GENERATE_FAILURE_EVENT,
+        alert=GENERATE_FAILURES_ALERT,
+        diagnosis="generate_failures_upstream",
+        count="failed_hosts",
+    )
+
+
 def _upstream_braked(
     connection, tenant, node_id, physical, now, *, event, alert, diagnosis, count
 ):
@@ -563,6 +585,29 @@ def recent_start_failures(nodes, *, now, provider=VASTAI.id):
     }
 
 
+def recent_silent_failures(nodes, *, now, provider=VASTAI.id):
+    """Hosts whose last rental failed after ready within the last hour (#1214).
+
+    The retry of that work tries another host first: on the same host again,
+    a bad host and a bad request look the same. An order, not a deny; the
+    only host on offer is still rented again.
+    """
+    failed, ready = {}, {}
+    for node in nodes:
+        outcome = _rental_outcome(node, now=now)
+        if outcome is None or outcome[1] != provider:
+            continue
+        if outcome[2] is not None and not outcome[2][1]:
+            failed[outcome[0]] = max(failed.get(outcome[0], 0), outcome[2][0])
+        if outcome[3] is not None:
+            ready[outcome[0]] = max(ready.get(outcome[0], 0), outcome[3])
+    return {
+        host
+        for host, at in failed.items()
+        if at >= now - START_FAILURE_RETRY_LAST_SECONDS and at > ready.get(host, 0)
+    }
+
+
 def deny_failed_rental(repo, tenant, connection, node, *, now):
     """Deny the bound host of a rental that just failed; True when denied.
 
@@ -570,7 +615,8 @@ def deny_failed_rental(repo, tenant, connection, node, *, now):
     stored. A rental that never started denies its host at once, unless many
     hosts fail to start within the hour (start_failure_braked). A rental that
     started and failed later denies its host on the second such failure
-    within a day. Either deny stays until an admin clears it.
+    within a day, unless many hosts fail that way within the hour
+    (generate_failure_braked). Either deny stays until an admin clears it.
     """
     outcome = _rental_outcome(node, now=now)
     if outcome is None or outcome[2] is None:
@@ -582,6 +628,11 @@ def deny_failed_rental(repo, tenant, connection, node, *, now):
             return False
         reason = AUTOMATIC_START_FAILURE
     else:
+        physical = bound_observation(node, now=now)
+        if generate_failure_braked(
+            connection, tenant, node["intent_id"], physical, now
+        ):
+            return False
         nodes = [
             row
             for row in original_nodes(connection, tenant)

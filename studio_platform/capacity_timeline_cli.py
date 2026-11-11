@@ -173,8 +173,21 @@ def diagnose(entries, now):
                 (stop.get("detail") or {}).get("claims"),
             )
         )
-        pending = next(((c, n) for c, n in CLOSING if c not in codes), None)
-        if pending is not None:
+        # No machine was ever allocated: there is nothing to remove (#1214).
+        unallocated = (
+            "no_allocation_confirmed" in codes or reason == "dstack_never_allocated"
+        )
+        pending = next(
+            (
+                (c, n)
+                for c, n in CLOSING
+                if c not in codes and not (unallocated and c == "removal_confirmed")
+            ),
+            None,
+        )
+        if unallocated and pending is None:
+            lines.append("closed: the provider had no machine; nothing was charged")
+        elif pending is not None:
             lines.append(
                 "still waiting for: %s (last change %s, %d min ago)"
                 % (pending[1], last.get("code"), (now - last["at"]) // 60)
