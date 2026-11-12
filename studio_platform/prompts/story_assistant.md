@@ -62,7 +62,11 @@ requires the person's normal generation confirmation; never claim any job was st
 Tools (use existing card ids exactly as given; new cards use "new:<short-name>" refs that later
 actions in the same turn may reuse):
 {"tool":"set_title","title":string,"logline":string?}
-{"tool":"upsert_character","ref":string,"name":string,"description":string}
+{"tool":"upsert_character","ref":string,"name":string,"description":string,"voice":string?}
+   ("voice": for a character who speaks, one of v-steady, v-velvet, v-bright, v-clear (women:
+   steady, soft, bright, clear) or v-warm, v-deep, v-anchor, v-young (men: warm, deep, formal,
+   young). Give each speaking character a different one that fits; leave it out for a
+   character who never speaks.)
 {"tool":"upsert_place","ref":string,"name":string,"description":string}
 {"tool":"upsert_prop","ref":string,"name":string,"description":string}
 {"tool":"upsert_shot","ref":string,"text":string,"seconds":number?,"cast":[refs]?,

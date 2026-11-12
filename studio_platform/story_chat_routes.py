@@ -728,6 +728,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     nothing_written=True,
                     reason=str(error)[:300],
                 )
+            from .catalog_voice import after_story_chat
+
+            after_story_chat(app, principal, project_id, chat["language"], changes)
             row = read(principal, project_id)
             return answer(row, stored_turn(chat_of(row["payload"]), turn_id))
         _fail("document_version_conflict", 409, nothing_written=True)

@@ -137,6 +137,92 @@ class StoryChatTests(unittest.TestCase):
         with self.app.state.repository.engine.connect() as conn:
             return conn.execute(select(func.count()).select_from(jobs)).scalar()
 
+    def test_a_character_the_assistant_gives_a_voice_gets_its_sample(self):
+        from test_speech import set_switches
+
+        set_switches(self.app, voice_enabled=True)
+        chat = self.start()
+        plan = {
+            "reply": "Done.",
+            "actions": [
+                {
+                    "tool": "upsert_character",
+                    "ref": "new:mia",
+                    "name": "Mia",
+                    "description": "Girl, red raincoat",
+                    "voice": "v-bright",
+                },
+                {
+                    "tool": "upsert_character",
+                    "ref": "new:zib",
+                    "name": "Zib",
+                    "description": "Small alien",
+                    "voice": "robot",
+                },
+            ],
+        }
+        reply = self.turn(chat, "two people", plan=plan)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
+            "project"
+        ]
+        cards = {e["title"]: e for e in project["entities"] if e["type"] == "character"}
+        mia = cards["Mia"]["data"]
+        self.assertEqual(mia["voiceId"], "v-bright")
+        self.assertEqual(len(mia["voices"]), 1)
+        self.assertEqual(mia["mainVoiceId"], mia["voices"][0]["id"])
+        clip = next(
+            e for e in project["entities"] if e["id"] == mia["voices"][0]["assetId"]
+        )
+        self.assertEqual(clip["type"], "audio")
+        # A name that is not one of our voices is dropped, not stored.
+        self.assertNotIn("voiceId", cards["Zib"]["data"])
+        self.assertEqual(cards["Zib"]["data"]["voices"], [])
+        # A later turn never replaces the voice a character already has.
+        again = {
+            "reply": "Done.",
+            "actions": [
+                {
+                    "tool": "upsert_character",
+                    "ref": cards["Mia"]["id"],
+                    "name": "Mia",
+                    "description": "Girl, yellow raincoat",
+                    "voice": "v-clear",
+                }
+            ],
+        }
+        self.assertEqual(
+            self.turn(chat, "yellow", turn_id="turn-0002", plan=again).status_code, 200
+        )
+        project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
+            "project"
+        ]
+        mia = next(e for e in project["entities"] if e["title"] == "Mia")["data"]
+        self.assertEqual(mia["voiceId"], "v-bright")
+        self.assertEqual(len(mia["voices"]), 1)
+
+    def test_with_voice_off_the_choice_is_kept_and_no_sample_is_made(self):
+        chat = self.start()
+        plan = {
+            "reply": "Done.",
+            "actions": [
+                {
+                    "tool": "upsert_character",
+                    "ref": "new:mia",
+                    "name": "Mia",
+                    "description": "Girl",
+                    "voice": "v-bright",
+                }
+            ],
+        }
+        self.assertEqual(self.turn(chat, "one", plan=plan).status_code, 200)
+        project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
+            "project"
+        ]
+        mia = next(e for e in project["entities"] if e["type"] == "character")["data"]
+        self.assertEqual((mia["voiceId"], mia["voices"]), ("v-bright", []))
+        self.assertFalse([e for e in project["entities"] if e["type"] == "audio"])
+
     def test_thinking_level_reaches_the_request(self):
         body = payload(
             "gemini-3.8-flash", [{"role": "user", "text": "x"}], thinking="low"
