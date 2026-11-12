@@ -132,6 +132,7 @@ class VoiceMissingTests(unittest.TestCase):
     def test_nothing_is_reported_where_a_sample_would_not_be_sent_or_heard(self):
         for name, value in (
             ("first and last frame shot", shot(self.LINE, board={"mode": "fl"})),
+            ("shot with no mode yet", shot(self.LINE)),
             (
                 "finished dialogue track",
                 shot(

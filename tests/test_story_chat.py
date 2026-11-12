@@ -163,6 +163,11 @@ class StoryChatTests(unittest.TestCase):
         }
         reply = self.turn(chat, "two people", plan=plan)
         self.assertEqual(reply.status_code, 200, reply.text)
+        # One write for the turn and its voice: undo is still offered.
+        self.assertEqual(reply.json()["undo_turn_id"], "turn-0001")
+        shown = {c["name"]: c for c in reply.json()["cards"]["characters"]}
+        self.assertEqual(shown["Mia"]["voice"], "v-bright")
+        self.assertNotIn("voice", shown["Zib"])
         project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
             "project"
         ]
@@ -200,6 +205,42 @@ class StoryChatTests(unittest.TestCase):
         mia = next(e for e in project["entities"] if e["title"] == "Mia")["data"]
         self.assertEqual(mia["voiceId"], "v-bright")
         self.assertEqual(len(mia["voices"]), 1)
+        # The turn can still be undone, and takes only its own change back.
+        undo = self.client.post(
+            f"/v1/story-chats/{chat['project_id']}/undo", json={"turn_id": "turn-0002"}
+        )
+        self.assertEqual(undo.status_code, 200, undo.text)
+
+    def test_a_sample_that_cannot_be_stored_never_fails_the_turn(self):
+        from unittest import mock
+
+        from studio_platform import catalog_voice
+        from test_speech import set_switches
+
+        set_switches(self.app, voice_enabled=True)
+        chat = self.start()
+        plan = {
+            "reply": "Done.",
+            "actions": [
+                {
+                    "tool": "upsert_character",
+                    "ref": "new:mia",
+                    "name": "Mia",
+                    "description": "Girl",
+                    "voice": "v-bright",
+                }
+            ],
+        }
+        with mock.patch.object(
+            catalog_voice, "clip_action", side_effect=RuntimeError("store down")
+        ):
+            reply = self.turn(chat, "one", plan=plan)
+        self.assertEqual(reply.status_code, 200, reply.text)
+        project = self.client.get(f"/v1/projects/{chat['project_id']}").json()[
+            "project"
+        ]
+        mia = next(e for e in project["entities"] if e["type"] == "character")["data"]
+        self.assertEqual((mia["voiceId"], mia["voices"]), ("v-bright", []))
 
     def test_with_voice_off_the_choice_is_kept_and_no_sample_is_made(self):
         chat = self.start()

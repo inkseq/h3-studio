@@ -88,7 +88,7 @@ def findings(project, shot):
     names = _speakers(action, voiceless) if audio else []
     # Samples go out with reference shots only, and a finished track carries
     # every voice itself (storyboard.compile_draft).
-    if names and board.get("mode") != "fl" and not board.get("dialogueTrack"):
+    if names and board.get("mode") == "ref" and not board.get("dialogueTrack"):
         result.append({"code": "voice_missing", "names": names})
     if (
         audio

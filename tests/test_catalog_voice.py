@@ -2,7 +2,7 @@
 
 import unittest
 
-from studio_platform.catalog_voice import choice, needs_sample
+from studio_platform.catalog_voice import _named, choice
 from studio_platform.speech_catalog import LANGUAGES, VOICES
 from studio_platform.catalog_voice import SAMPLES
 from test_speech import set_switches
@@ -16,12 +16,25 @@ class ChoiceTests(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertIsNone(choice(value))
 
-    def test_a_sample_is_owed_only_to_a_chosen_voice_with_nothing_to_send(self):
-        self.assertTrue(needs_sample({"data": {"voiceId": "v-warm", "voices": []}}))
-        self.assertFalse(needs_sample({"data": {"voices": []}}))
-        self.assertFalse(
-            needs_sample({"data": {"voiceId": "v-warm", "voices": [{"id": "own"}]}})
-        )
+    def test_a_sample_is_owed_only_to_a_named_voice_with_nothing_to_send(self):
+        def create(data):
+            return {"op": "entity.create", "entity": {"data": data}}
+
+        def update(data):
+            return {"op": "entity.update", "patch": {"data": data}}
+
+        self.assertIsNotNone(_named(create({"voiceId": "v-warm", "voices": []})))
+        self.assertIsNotNone(_named(update({"voiceId": "v-warm"})))
+        for action in (
+            create({"voices": []}),
+            create({"voiceId": "robot"}),
+            create({"voiceId": "v-warm", "voices": [{"id": "own"}]}),
+            update(None),
+            {"op": "entity.update", "patch": {"title": "x"}},
+            {"op": "project.update", "patch": {}},
+        ):
+            with self.subTest(action=action):
+                self.assertIsNone(_named(action))
 
     def test_every_voice_has_a_sample_long_enough_to_clip(self):
         # Storyboard validation needs three seconds after clipStart.

@@ -304,9 +304,14 @@ def cards(project, chat):
             "version": entity["version"],
         }
 
+    def person(entity):
+        # So the assistant can keep every speaker's voice different.
+        voice = _voice({"voice": entity.get("data", {}).get("voiceId")})
+        return {**profile(entity), **({"voice": voice} if voice else {})}
+
     roots = [e for e in project["entities"] if e["parentId"] is None]
     result = {
-        "characters": [profile(e) for e in roots if e["type"] == "character"],
+        "characters": [person(e) for e in roots if e["type"] == "character"],
         "places": [profile(e) for e in roots if e["type"] == "location"],
         "props": [profile(e) for e in roots if e["type"] == "prop"],
         "shots": [],

@@ -38,17 +38,51 @@ def choice(value):
     return value if isinstance(value, str) and value in VOICES else None
 
 
-def needs_sample(character):
-    """A character with a catalog voice chosen and no sample to send yet."""
-    data = character.get("data", {})
-    return choice(data.get("voiceId")) is not None and not data.get("voices")
+def clip_id(voice_id, language):
+    return f"catalog-voice-{voice_id}-{language}"
+
+
+def entry(voice_id, language):
+    """The character's `voices[]` item for this sample."""
+    return {
+        "id": f"catalog-{voice_id}-{language}",
+        "assetId": clip_id(voice_id, language),
+        "clipStart": 0,
+    }
+
+
+def enabled(app):
+    """The tenant's voice switch; off means our voices are not offered at all."""
+    from .speech_settings import read
+
+    with app.state.repository.engine.connect() as connection:
+        return read(connection, app.state.settings.tenant_id)["voice_enabled"] is True
+
+
+def clip_action(app, principal, project_id, voice_id, language):
+    """The action that makes the sample a story clip; stores the file if needed."""
+    asset = app.state.assets.upload(
+        principal.owner,
+        project_id,
+        io.BytesIO((SAMPLES / f"{voice_id}-{language}.mp3").read_bytes()),
+        f"{voice_id}-{language}.mp3",
+        client_asset_id=f"catalog-voice:{voice_id}:{language}",
+    )
+    if asset.get("status") != "ready":
+        raise CatalogVoiceError("voice_store_failed", 502)
+    return {
+        "op": "asset.attach",
+        "asset_id": asset["asset_id"],
+        "entity_id": clip_id(voice_id, language),
+        "title": VOICES[voice_id]["name"][language],
+    }
 
 
 def attach(app, principal, project_id, character_id, voice_id, language):
     """Make the voice's sample the character's main voice; the same call twice adds nothing."""
     if voice_id not in VOICES or language not in LANGUAGES:
         raise CatalogVoiceError("voice_unknown", 404)
-    clip = f"catalog-voice-{voice_id}-{language}"
+    clip, sample = clip_id(voice_id, language), entry(voice_id, language)
     for _ in range(3):
         row = app.state.authorized_project(principal, project_id, "projects:write")
         entities = row["payload"]["entities"]
@@ -57,36 +91,14 @@ def attach(app, principal, project_id, character_id, voice_id, language):
             raise CatalogVoiceError("voice_character_missing", 404)
         data = card["data"]
         voices = list(data.get("voices", []))
-        entry = next((v for v in voices if v.get("assetId") == clip), None)
+        if not any(v.get("id") == sample["id"] for v in voices):
+            voices.append(sample)
         actions = []
         if not any(e["id"] == clip for e in entities):
-            asset = app.state.assets.upload(
-                principal.owner,
-                project_id,
-                io.BytesIO((SAMPLES / f"{voice_id}-{language}.mp3").read_bytes()),
-                f"{voice_id}-{language}.mp3",
-                client_asset_id=f"catalog-voice:{voice_id}:{language}",
-            )
-            if asset.get("status") != "ready":
-                raise CatalogVoiceError("voice_store_failed", 502)
-            actions.append(
-                {
-                    "op": "asset.attach",
-                    "asset_id": asset["asset_id"],
-                    "entity_id": clip,
-                    "title": VOICES[voice_id]["name"][language],
-                }
-            )
-        if entry is None:
-            entry = {
-                "id": f"catalog-{voice_id}-{language}",
-                "assetId": clip,
-                "clipStart": 0,
-            }
-            voices.append(entry)
-        patch = {"voices": voices, "voiceId": voice_id, "mainVoiceId": entry["id"]}
+            actions.append(clip_action(app, principal, project_id, voice_id, language))
+        patch = {"voices": voices, "voiceId": voice_id, "mainVoiceId": sample["id"]}
         if not actions and all(data.get(key) == value for key, value in patch.items()):
-            return entry
+            return sample
         actions.append(
             {"op": "entity.update", "entity_id": character_id, "patch": {"data": patch}}
         )
@@ -100,43 +112,56 @@ def attach(app, principal, project_id, character_id, voice_id, language):
             if str(error) == "document_version_conflict":
                 continue
             raise
-        return entry
+        return sample
     raise CatalogVoiceError("document_version_conflict", 409)
 
 
-def enabled(app):
-    """The tenant's voice switch; off means our voices are not offered at all."""
-    from .speech_settings import read
+def _named(action):
+    """The character data of a create or update that names a voice and has no sample."""
+    if action.get("op") == "entity.create":
+        data = action["entity"].get("data")
+    elif action.get("op") == "entity.update":
+        data = action.get("patch", {}).get("data")
+    else:
+        data = None
+    if (
+        isinstance(data, dict)
+        and choice(data.get("voiceId"))
+        and not data.get("voices")
+    ):
+        return data
+    return None
 
-    with app.state.repository.engine.connect() as connection:
-        return read(connection, app.state.settings.tenant_id)["voice_enabled"] is True
 
+def with_samples(app, principal, project_id, project, actions, language):
+    """A story chat turn's actions, with a sample for each voice it names.
 
-def after_story_chat(app, principal, project_id, language, changes):
-    """Samples for the characters a chat turn just gave a voice to.
-
-    The turn is already saved: a failure here leaves a character without a
-    sample, which the readiness check reports, and never fails the turn.
+    Part of the turn's own write, so undo takes the voice back with the turn.
+    Anything that goes wrong leaves the actions as they were: the character
+    keeps its choice without a sample, which the readiness check reports.
     """
-    idents = {c["id"] for c in changes if c.get("kind") == "character" and "id" in c}
-    if not idents:
-        return
+    language = language if language in LANGUAGES else "zh"
     try:
-        if not enabled(app):
-            return
-        row = app.state.authorized_project(principal, project_id, "projects:write")
-        for card in row["payload"]["entities"]:
-            if card["id"] in idents and needs_sample(card):
-                attach(
-                    app,
-                    principal,
-                    project_id,
-                    card["id"],
-                    card["data"]["voiceId"],
-                    language if language in LANGUAGES else "zh",
-                )
+        if not any(_named(action) for action in actions) or not enabled(app):
+            return actions
+        app.state.authorized_project(principal, project_id, "assets:write")
+        import copy
+
+        result = copy.deepcopy(actions)
+        named = [data for data in map(_named, result) if data is not None]
+        held = {entity["id"] for entity in project["entities"]}
+        clips = [
+            clip_action(app, principal, project_id, voice_id, language)
+            for voice_id in dict.fromkeys(data["voiceId"] for data in named)
+            if clip_id(voice_id, language) not in held
+        ]
+        for data in named:
+            sample = entry(data["voiceId"], language)
+            data.update(voices=[sample], mainVoiceId=sample["id"])
+        return clips + result
     except Exception as error:
         LOG.warning("catalog_voice_unavailable error_type=%s", type(error).__name__)
+        return actions
 
 
 def register_routes(app):
@@ -148,13 +173,21 @@ def register_routes(app):
 
         principal = request.state.principal
         row = app.state.authorized_project(principal, project_id, "projects:write")
+        # The sample is stored as a file of the story, like any upload.
+        app.state.authorized_project(principal, project_id, "assets:write")
         reject_managed(row["payload"])
         if not enabled(app):
             raise HTTPException(409, {"code": "voice_disabled"})
         try:
-            entry = attach(
+            sample = attach(
                 app, principal, project_id, character_id, body.voice_id, body.language
             )
         except CatalogVoiceError as error:
             raise HTTPException(error.status, {"code": error.code}) from None
-        return {"voice": entry}
+        except HTTPException:
+            raise
+        except Exception as error:
+            # A trashed or changed sample file, or a clip kept under another name.
+            LOG.warning("catalog_voice_failed error_type=%s", type(error).__name__)
+            raise HTTPException(409, {"code": "voice_store_failed"}) from None
+        return {"voice": sample}
