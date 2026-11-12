@@ -25,9 +25,16 @@ flowchart TD
 | 工作约定和创作规则（思考档设为 low） | [`story_assistant.md`](../studio_platform/prompts/story_assistant.md) |
 | 用户贴的是整段剧本 | [`story_script_note.md`](../studio_platform/prompts/story_script_note.md) |
 | 从小墨打字（只能改卡片） | [`inky_typing_note.md`](../studio_platform/prompts/inky_typing_note.md)、[`inky_typing_focus.md`](../studio_platform/prompts/inky_typing_focus.md) |
+| 用户抱怨已出的镜头（“太慢”“门对不上”“台词来得太晚”），附上最多 3 条对应修法 | [`inky_fix_note.md`](../studio_platform/prompts/inky_fix_note.md)、[`inky_fix_guide.md`](../studio_platform/prompts/inky_fix_guide.md) |
 | 旧版自由对话 | [`quick_chat_default.md`](../studio_platform/prompts/quick_chat_default.md) |
 | 自动起标题 | [`story_title.md`](../studio_platform/prompts/story_title.md) |
 | 长镜头拆成连续片段 | [`script_windows.md`](../studio_platform/prompts/script_windows.md) |
+
+### 看片问题修法（#1227）
+
+故事里已有出好的镜头时，用户打字（小墨或快速对话，贴剧本除外）里出现某条修法的说法，就把匹配的修法（最多 3 条，匹配越长越靠前）附在这一轮的说明里，不多调一次模型。小墨先说原因，再给最便宜的修法：能改卡片文字的（`inky: edit`）先问用户，用户说好才改，可撤销；要用户自己动手的（`inky: point`）说清在哪改（换一条、剪辑里的速度/裁剪、尾帧、场景图）。重新生成要花积分，由用户自己点。
+
+**加一条修法**：拍片技能（`inky-film` 的 `references/fix-guide.md`）学到新的坑后，在 [`inky_fix_guide.md`](../studio_platform/prompts/inky_fix_guide.md) 加一段 `## 名字`，四行 `when`（用户会说的话，中英文都要，用 `|` 分开）、`cause`、`fix`、`inky`（`point` 或 `edit: 小墨能改什么`）。用面向用户的话写：不写模型名、厂商、价格、内部编号或内部工具。再在 [`tests/test_inky_fix_guide.py`](../tests/test_inky_fix_guide.py) 的 `COMPLAINTS` 加一句用户会怎么说，跑这个测试。格式不对时应用启动就会报错。
 
 ## 小墨后台检查
 
