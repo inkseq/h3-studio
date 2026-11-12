@@ -1028,8 +1028,10 @@ def compile_draft(project, shot, *, capabilities=None, recipes=None):
             inputs[slot] = entry
         else:
             inputs[slot].append(entry)
+    # A voice alone is not material: the model refuses sound with nothing to
+    # look at, and a character's voice sample must not open this gate.
     if mode == "ref" and not (
-        any(inputs[key] for key in ("images", "videos", "audios"))
+        any(inputs[key] for key in ("images", "videos"))
         or native_roles
         and (inputs['first_frame'] or inputs['last_frame'] or inputs['guides'])
     ):

@@ -1974,6 +1974,21 @@ export function createCloudController({
       emit({ remoteUpdate: { id: record.id, version: record.version } });
     return kept;
   }
+  // One of our voices for a character (h3-studio#1222): the server makes that voice's own sample
+  // the character's voice sample, so shots send it. The person's unsaved edits go first, so the
+  // server's story then comes in as a plain remote change.
+  async function chooseCatalogVoice(characterId, body) {
+    requireCloud();
+    const ctx = context();
+    if (current().workspace.dirty) await save();
+    const chosen = await api.request(
+      `/v1/projects/${encodeURIComponent(ctx.projectId)}/characters/${encodeURIComponent(characterId)}/catalog-voice`,
+      { method: 'POST', body, timeoutMs: 30000 },
+    );
+    guard(ctx);
+    await pullServerStory(ctx);
+    return chosen;
+  }
   async function readShotReadiness() {
     requireCloud();
     const ctx = context();
@@ -2257,6 +2272,14 @@ export function createCloudController({
     speakLine: (body) => speakLine(body),
     designVoice: (body) => designVoice(body),
     keepVoiceDesign: (body) => keepVoiceDesign(body),
+    // Takes its turn with saves, so autosave never sends a version this call is changing. A
+    // failure shows where the voice was chosen, not as a page error.
+    chooseCatalogVoice: (characterId, body) =>
+      action(() =>
+        chooseCatalogVoice(characterId, body).catch((error) => {
+          throw Object.assign(error, { quiet: true });
+        }),
+      ),
     readShotReadiness: () => readShotReadiness(),
     ignoreInkySuggestion: (id) => ignoreInkySuggestion(id),
     rewriteInkySuggestion: (id) => rewriteInkySuggestion(id),

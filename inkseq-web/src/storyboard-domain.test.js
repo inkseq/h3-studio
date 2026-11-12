@@ -757,11 +757,13 @@ test('readiness hints follow the version on screen and skip what the editor alre
       { code: 'action_missing' },
       { code: 'character_picture_missing', names: ['Mia', 'Tom'] },
       { code: 'speech_unspecified' },
+      { code: 'voice_missing', names: ['Mia', 'Tom'] },
     ],
   };
   assert.deepEqual(readinessHints(item, 3, t), [
     'hint.characterPicture:Mia, Tom',
     'hint.speechUnspecified',
+    'hint.voiceMissing:Mia, Tom',
   ]);
   assert.deepEqual(readinessHints(item, 4, t), []);
   assert.deepEqual(readinessHints(undefined, 3, t), []);
