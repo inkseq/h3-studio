@@ -169,3 +169,27 @@ class VoiceMissingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_a_fourth_voice_in_one_shot_is_reported_as_not_sent(self):
+        def voiced(ident, title, clip):
+            sample = {"id": "v", "assetId": clip, "clipStart": 0}
+            return person(ident, title, voices=[sample], mainVoiceId="v")
+
+        others = (
+            voiced("zib", "Zib", "clip-z"),
+            voiced("tom", "Tom", "clip-t"),
+            voiced("ann", "Ann", "clip-a"),
+            # The same clip as Mia's goes out once, so it takes no place.
+            voiced("twin", "Twin", "clip"),
+        )
+        cast = ("mia", "twin", "zib", "tom", "ann")
+        value = shot(self.LINE, cast=cast, board={"mode": "ref"})
+        self.assertEqual(
+            findings(project(value, extra=others), value),
+            [{"code": "voice_dropped", "names": ["Ann"]}],
+        )
+        three = shot(self.LINE, cast=cast[:4], board={"mode": "ref"})
+        self.assertEqual(codes(project(three, extra=others), three), [])
+        track = {"mode": "ref", "dialogueTrack": {"entityId": "t"}}
+        kept = shot(self.LINE, cast=cast, board=track)
+        self.assertEqual(codes(project(kept, extra=others), kept), [])

@@ -702,6 +702,8 @@ export const legacyCatalogs = {
       'No spoken lines yet. Write what is said in quotes, or say “no dialogue”, so the voice does not invent words.',
     'hint.voiceMissing':
       '{names} has a line here but no voice yet. Pick a voice on the character card, or the voice will differ from shot to shot.',
+    'hint.voiceDropped':
+      'A shot carries three voices. {names} is beyond that here, so that voice may differ in this shot. Fewer speakers in one shot keeps every voice.',
     'hint.focusRefs':
       'Lots of references, or reference videos, may only be partly used. A few focused references usually work better.',
     'hint.audioNeedsPicture':
@@ -2095,6 +2097,8 @@ export const legacyCatalogs = {
       '还没有写台词。用引号写出要说的话，或写明“无对白”，否则声音可能会自己编内容。',
     'hint.voiceMissing':
       '{names}在这一镜有台词，但还没有音色。到角色卡上选一个音色，否则每一镜的声音会不一样。',
+    'hint.voiceDropped':
+      '一个镜头最多带三个音色。{names}排在第三个之后，这一镜的声音可能和别的镜头不一样。一镜里说话的人少一些，每个人的声音都能保持。',
     'hint.focusRefs':
       '参考素材很多或有参考视频时，模型可能只用上一部分。少而精的参考通常效果更好。',
     'hint.audioNeedsPicture': '用声音做参考时，还需要一张图：给角色加张图，或加一个首帧。',

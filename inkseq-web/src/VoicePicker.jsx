@@ -18,6 +18,7 @@ import { VoiceDesign, useSample } from './VoiceDesign.jsx';
 import { useSpeaking } from './ProfileBible.jsx';
 import { ProfileSplit } from './ProfileSplit.jsx';
 import { hasVoiceSample, nextSpeaker, peopleInProfile, voiceGaps } from './story-bible.js';
+import { shownVoices, voiceFilters, voiceSpeaks } from './voice-catalog.js';
 
 const DIRECTIONS = ['calm', 'angry', 'sad', 'happy'],
   MAX_LINE = 500;
@@ -183,6 +184,77 @@ function useCatalogSample(profile, language) {
   return { choose, give, owed: cloud && !giving && !!profile.voiceId && lacking };
 }
 
+// Our voices, narrowed by gender and age. The list keeps its height while a filter changes,
+// so nothing under it moves; the voice in use always shows.
+function VoiceList({ voices, chosenId, language, choose }) {
+  const { t } = useI18n();
+  const { playing, toggle } = useSample();
+  const [filter, setFilter] = useState({ gender: '', age: '' });
+  const { genders, ages } = voiceFilters(voices);
+  const shown = shownVoices(voices, filter, chosenId);
+  const options = (key, values) => [
+    { value: '', label: t('voice.filter.all') },
+    ...values.map((value) => ({ value, label: t(`voice.${key}.${value}`) })),
+  ];
+  const pick = (key) => (value) => setFilter((current) => ({ ...current, [key]: value }));
+  return (
+    <>
+      {(genders.length > 0 || ages.length > 0) && (
+        <div className="voice-filters">
+          {genders.length > 0 && (
+            <Segmented
+              label={t('voice.filter.gender')}
+              options={options('gender', genders)}
+              value={filter.gender}
+              onChange={pick('gender')}
+            />
+          )}
+          {ages.length > 0 && (
+            <Segmented
+              label={t('voice.filter.age')}
+              options={options('age', ages)}
+              value={filter.age}
+              onChange={pick('age')}
+            />
+          )}
+        </div>
+      )}
+      <ul className={voices.length > 8 ? 'voice-list long' : 'voice-list'}>
+        {shown.map((voice) => {
+          const chosen = chosenId === voice.id,
+            name = voice.name?.[language] || voice.id;
+          return (
+            <li key={voice.id} className={chosen ? 'voice-item chosen' : 'voice-item'}>
+              <IconButton
+                size="sm"
+                label={t('voice.listen', { name })}
+                onClick={() => toggle(voice.id, sampleOf(voice, language))}
+              >
+                {playing === voice.id ? <Pause size={14} /> : <Play size={14} />}
+              </IconButton>
+              <span className="voice-name">{name}</span>
+              <small className="muted">
+                {t('voice.gender.' + voice.gender)}
+                {voice.age ? ' · ' + t('voice.age.' + voice.age) : ''}
+              </small>
+              <Button
+                size="sm"
+                variant={chosen ? 'primary' : 'secondary'}
+                aria-pressed={chosen}
+                aria-label={t(chosen ? 'voice.chosenNamed' : 'voice.chooseNamed', { name })}
+                onClick={() => void choose(chosen ? '' : voice.id)}
+              >
+                {chosen ? t('voice.chosen') : t('voice.choose')}
+              </Button>
+            </li>
+          );
+        })}
+        {shown.length === 0 && <li className="muted small">{t('voice.filter.none')}</li>}
+      </ul>
+    </>
+  );
+}
+
 export function VoicePicker({ profile, samples = null }) {
   const { t, locale } = useI18n();
   const { adapter, state } = useStore();
@@ -194,7 +266,6 @@ export function VoicePicker({ profile, samples = null }) {
     staleTime: 600000,
     retry: false,
   });
-  const { playing, toggle } = useSample();
   const speaking = useSpeaking(profile);
   const people = peopleInProfile(profile, state.profiles);
   const gaps = voiceGaps(profile, speaking);
@@ -219,35 +290,13 @@ export function VoicePicker({ profile, samples = null }) {
         <div className="voice-catalog">
           <h4>{t('voice.title')}</h4>
           {adapter?.designVoice && <VoiceDesign profile={profile} language={language} />}
-          <ul className="voice-list">
-            {data.voices.map((voice) => {
-              const chosen = profile.voiceId === voice.id,
-                name = voice.name?.[language] || voice.id;
-              return (
-                <li key={voice.id} className={chosen ? 'voice-item chosen' : 'voice-item'}>
-                  <IconButton
-                    size="sm"
-                    label={t('voice.listen', { name })}
-                    onClick={() => toggle(voice.id, sampleOf(voice, language))}
-                  >
-                    {playing === voice.id ? <Pause size={14} /> : <Play size={14} />}
-                  </IconButton>
-                  <span className="voice-name">{name}</span>
-                  <small className="muted">{t('voice.gender.' + voice.gender)}</small>
-                  <Button
-                    size="sm"
-                    variant={chosen ? 'primary' : 'secondary'}
-                    aria-pressed={chosen}
-                    aria-label={t(chosen ? 'voice.chosenNamed' : 'voice.chooseNamed', { name })}
-                    onClick={() => void choose(chosen ? '' : voice.id)}
-                  >
-                    {chosen ? t('voice.chosen') : t('voice.choose')}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-          {profile.voiceId && adapter?.speakLine && (
+          <VoiceList
+            voices={data.voices}
+            chosenId={profile.voiceId}
+            language={language}
+            choose={choose}
+          />
+          {adapter?.speakLine && voiceSpeaks(data.voices, profile.voiceId) && (
             <VoiceLine profile={profile} language={language} />
           )}
           {owed && (
