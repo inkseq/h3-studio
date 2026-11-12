@@ -742,6 +742,7 @@ export default function StoryboardConnected({
     speakLine: cloud.speakLine,
     designVoice: cloud.designVoice,
     keepVoiceDesign: cloud.keepVoiceDesign,
+    chooseCatalogVoice: cloud.chooseCatalogVoice,
     readShotReadiness: cloud.readShotReadiness && (() => cloud.readShotReadiness()),
     ignoreInkySuggestion: (id) => cloud.ignoreInkySuggestion?.(id),
     rewriteInkySuggestion: (id) => cloud.rewriteInkySuggestion(id),

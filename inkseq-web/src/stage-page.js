@@ -24,7 +24,8 @@ export function coverId(p) {
  */
 export function cardFacts(p, { speaking = 0, used = false } = {}) {
   const photos = list(p?.variants).reduce((n, v) => n + list(v.images).length, 0);
-  const voices = list(p?.voices).length || (p?.voice ? 1 : 0) || (p?.voiceId ? 1 : 0);
+  // Samples only: a voice chosen from our list alone is not one a shot can send.
+  const voices = list(p?.voices).length || (p?.voice ? 1 : 0);
   const items = profileChecklist(p, { used });
   const gaps = [...(photos ? [] : ['picture']), ...voiceGaps(p, speaking)];
   return {

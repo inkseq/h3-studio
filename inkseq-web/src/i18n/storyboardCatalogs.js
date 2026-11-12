@@ -606,6 +606,9 @@ export const storyboardCatalogs = {
     'voiceDesign.failed.keep': 'That version was not added. Please try again.',
     'voice.speaking': 'Making…',
     'voice.failed': 'That line did not work. Nothing was added. Please try again.',
+    'voice.sampleFailed':
+      'This voice is chosen, but its sample was not added to the character yet. Shots need the sample to keep the voice the same.',
+    'voice.sampleRetry': 'Add the sample',
     'voice.listen': 'Listen to {name}',
     'voice.choose': 'Use',
     'voice.chosen': 'In use',
@@ -1618,6 +1621,8 @@ export const storyboardCatalogs = {
     'voiceDesign.failed.keep': '这个版本没加上，请再试一次。',
     'voice.speaking': '生成中…',
     'voice.failed': '这句没有生成成功，没有添加任何内容。请再试一次。',
+    'voice.sampleFailed': '音色已选上，但样本还没加到角色上。镜头需要这个样本，声音才能保持一致。',
+    'voice.sampleRetry': '加上样本',
     'voice.listen': '试听{name}',
     'voice.choose': '使用',
     'voice.chosen': '使用中',
