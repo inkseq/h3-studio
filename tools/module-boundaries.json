@@ -31,7 +31,7 @@
   "platform -> capacity": 27,
   "platform -> creation": 39,
   "platform -> identity": 36,
-  "platform -> jobs": 30,
+  "platform -> jobs": 31,
   "platform -> media": 33
  },
  "edges": [
@@ -210,6 +210,7 @@
   "caption_server -> render_plans",
   "caption_server -> render_timing",
   "caption_server -> shot_segments",
+  "catalog_voice -> generation_admission",
   "content_lifecycle -> account_deletion",
   "content_lifecycle -> assets",
   "content_lifecycle -> universal_trash",
