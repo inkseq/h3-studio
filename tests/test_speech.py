@@ -231,6 +231,11 @@ class SpeechRouteTests(unittest.TestCase):
             ("v-easy", "r1"): "roger",
             ("v-chill", "r1"): "will",
             ("v-casual", "r1"): "chris",
+            ("v-friendly", "r1"): "matilda",
+            ("v-energetic", "r1"): "charlie",
+            ("v-gravel", "r1"): "callum",
+            ("v-composed", "r1"): "eric",
+            ("v-seasoned", "r1"): "bill",
         }
         for (ident, revision), vendor_voice in pinned.items():
             self.assertEqual(
@@ -404,6 +409,9 @@ class AdapterTests(unittest.TestCase):
 
     def test_every_direction_has_a_tag(self):
         self.assertEqual(set(OpenRouterSpeech.STYLE), set(speech_provider.DIRECTIONS))
+        # The default delivery must be a full voice, not a hushed one (#1226).
+        self.assertNotIn("quiet", OpenRouterSpeech.STYLE["calm"])
+        self.assertNotIn("whisper", OpenRouterSpeech.STYLE["calm"])
 
     def test_errors_carry_no_upstream_text(self):
         adapter = OpenRouterSpeech(

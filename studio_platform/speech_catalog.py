@@ -114,6 +114,46 @@ VOICES = {
         "revision": "r1",
         **ELEVEN,
     },
+    "v-friendly": {
+        "name": {"zh": "亲切", "en": "Friendly"},
+        "gender": "female",
+        "age": "adult",
+        "provider_voice": "matilda",
+        "revision": "r1",
+        **ELEVEN,
+    },
+    "v-energetic": {
+        "name": {"zh": "活力", "en": "Energetic"},
+        "gender": "male",
+        "age": "young",
+        "provider_voice": "charlie",
+        "revision": "r1",
+        **ELEVEN,
+    },
+    "v-gravel": {
+        "name": {"zh": "粗粝", "en": "Gravelly"},
+        "gender": "male",
+        "age": "adult",
+        "provider_voice": "callum",
+        "revision": "r1",
+        **ELEVEN,
+    },
+    "v-composed": {
+        "name": {"zh": "稳重", "en": "Composed"},
+        "gender": "male",
+        "age": "adult",
+        "provider_voice": "eric",
+        "revision": "r1",
+        **ELEVEN,
+    },
+    "v-seasoned": {
+        "name": {"zh": "老练", "en": "Seasoned"},
+        "gender": "male",
+        "age": "senior",
+        "provider_voice": "bill",
+        "revision": "r1",
+        **ELEVEN,
+    },
 }
 
 # Designed voices (#1226): id, zh name, en name, gender, age. Samples only, no vendor.
