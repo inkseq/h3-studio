@@ -12,6 +12,8 @@ import re
 # Same signal as the frontend's submitHints: H3 speech tags (what Quick Create
 # writes), quoted lines or "Name: line".
 DIALOGUE = re.compile(r"<d>|[“”\"「」『』]|[：:]\s*\S", re.IGNORECASE)
+# A shot sends this many voice samples (capabilities "max_audios"); cast order decides.
+MAX_VOICES = 3
 # Who speaks: the video model's speaker tag, as story chat writes it.
 SPEAKER = re.compile(r"\(\s*(S\d+)\s*\)", re.IGNORECASE)
 NO_DIALOGUE = re.compile(
@@ -71,7 +73,7 @@ def findings(project, shot):
     if not action.strip():
         result.append({"code": "action_missing"})
     has_frame = bool(board.get("firstFrameId") or board.get("continuePrev"))
-    missing, voiceless = [], []
+    missing, voiceless, voiced = [], [], {}
     for binding in data.get("cast", scene.get("data", {}).get("cast", [])):
         ident = binding if isinstance(binding, str) else binding.get("characterId")
         character = lookup.get(ident)
@@ -80,16 +82,25 @@ def findings(project, shot):
         look = _look(character, binding)
         if not (look or {}).get("imageIds") and character.get("title") not in missing:
             missing.append(character.get("title"))
-        if not _voice(character, look):
+        sample = _voice(character, look)
+        if not sample:
             voiceless.append(character)
+        else:
+            # Two people with the same clip send it once.
+            clip = (sample.get("assetId"), sample.get("clipStart", 0))
+            voiced.setdefault(clip, character.get("title"))
     if missing and not has_frame:
         result.append({"code": "character_picture_missing", "names": missing})
     audio = data.get("h3", {}).get("controls", {}).get("generate_audio") is not False
     names = _speakers(action, voiceless) if audio else []
     # Samples go out with reference shots only, and a finished track carries
     # every voice itself (storyboard.compile_draft).
-    if names and board.get("mode") == "ref" and not board.get("dialogueTrack"):
+    sends = audio and board.get("mode") == "ref" and not board.get("dialogueTrack")
+    if names and sends:
         result.append({"code": "voice_missing", "names": names})
+    if sends and len(voiced) > MAX_VOICES:
+        dropped = list(voiced.values())[MAX_VOICES:]
+        result.append({"code": "voice_dropped", "names": dropped})
     if (
         audio
         and action.strip()

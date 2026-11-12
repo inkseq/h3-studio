@@ -18,7 +18,7 @@ from .credits import CreditError
 from .repository import Conflict
 from .speech_credit_proof import quote as speech_quote
 from .speech_requests import SpeechRequest
-from .speech_catalog import LANGUAGES, VOICES, public
+from .speech_catalog import LANGUAGES, VOICES, public, spoken
 from .speech_provider import DIRECTIONS, SpeechError, configured, level
 
 REQUEST_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -66,8 +66,11 @@ def clean(text):
 
 
 def checked(body, *, voice_required=True):
-    """The catalog voice and the words to speak, or a refusal before anything is spent."""
-    voice = VOICES.get(body.voice_id)
+    """The catalog voice and the words to speak, or a refusal before anything is spent.
+
+    A designed voice is a sample only, so to this route it is not a voice.
+    """
+    voice = spoken(body.voice_id)
     text = clean(body.text)
     if voice is None and voice_required:
         _fail("voice_unknown", 422)
