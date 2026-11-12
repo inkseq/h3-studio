@@ -11,7 +11,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import FileResponse
 
 from .google_chat import ChatError, GoogleChatClient
-from . import llm_tracing, story_chat_advice, story_chat_undo
+from . import inky_fix_guide, llm_tracing, story_chat_advice, story_chat_undo
 from .repository import Conflict
 from .story_chat_photos import shown, with_photos
 from .story_chat import (
@@ -580,6 +580,13 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             note = INKY_NOTE
             if inky["shot_id"] in shots:
                 note += INKY_FOCUS.format(shot=inky["shot_id"])
+        # A complaint about a finished take brings our recorded fixes for it (#1227).
+        fixes = (
+            inky_fix_guide.match(text)
+            if not is_script and inky_fix_guide.has_take(cards(row["payload"], chat))
+            else []
+        )
+        note += inky_fix_guide.note(fixes)
         if principal.machine:
             limit = settings.story_chat_connection_daily_turns
             if connection_turns_today(principal) >= limit:
@@ -598,6 +605,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 "prompt": "story_assistant",
                 "prompt_version": llm_tracing.digest(INSTRUCTION),
                 "photos": len(attached),
+                "fixes": [row["id"] for row in fixes],
             },
         ) as traced:
             try:

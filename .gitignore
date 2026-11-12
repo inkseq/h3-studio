@@ -1010,6 +1010,7 @@ inventory.json
 !tests/test_inky_models.py
 !studio_platform/inky_budget.py
 !studio_platform/inky_continuity.py
+!studio_platform/inky_fix_guide.py
 !tests/test_inky_continuity.py
 !tests/test_prompt_files.py
 !docs/AI-FLOWS.zh-CN.md
