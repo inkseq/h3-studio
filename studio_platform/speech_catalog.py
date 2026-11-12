@@ -82,7 +82,84 @@ VOICES = {
         "revision": "r1",
         **ELEVEN,
     },
+    "v-sassy": {
+        "name": {"zh": "俏皮", "en": "Sassy"},
+        "gender": "female",
+        "age": "young",
+        "provider_voice": "laura",
+        "revision": "r1",
+        **ELEVEN,
+    },
+    "v-easy": {
+        "name": {"zh": "从容", "en": "Easygoing"},
+        "gender": "male",
+        "age": "adult",
+        "provider_voice": "roger",
+        "revision": "r1",
+        **ELEVEN,
+    },
+    "v-chill": {
+        "name": {"zh": "随和", "en": "Chill"},
+        "gender": "male",
+        "age": "young",
+        "provider_voice": "will",
+        "revision": "r1",
+        **ELEVEN,
+    },
+    "v-casual": {
+        "name": {"zh": "自然", "en": "Casual"},
+        "gender": "male",
+        "age": "adult",
+        "provider_voice": "chris",
+        "revision": "r1",
+        **ELEVEN,
+    },
 }
+
+# Designed voices (#1226): id, zh name, en name, gender, age. Samples only, no vendor.
+DESIGNED = (
+    ("vf-girl", "小女孩", "Little girl", "female", "child"),
+    ("vf-shy-girl", "怯生生的女孩", "Shy girl", "female", "child"),
+    ("vf-lively", "活泼少女", "Lively teen", "female", "teen"),
+    ("vf-cool", "清冷少女", "Cool teen", "female", "teen"),
+    ("vf-sweet", "甜美", "Sweet", "female", "young"),
+    ("vf-gentle", "温柔", "Gentle", "female", "young"),
+    ("vf-crisp", "干练", "Crisp", "female", "young"),
+    ("vf-hearty", "爽朗", "Hearty", "female", "young"),
+    ("vf-icy", "冷艳", "Icy", "female", "adult"),
+    ("vf-newsreader", "播音", "Newsreader", "female", "adult"),
+    ("vf-mother", "温和的母亲", "Gentle mother", "female", "adult"),
+    ("vf-fiery", "泼辣", "Fiery", "female", "adult"),
+    ("vf-weary", "疲惫", "Weary", "female", "adult"),
+    ("vf-elegant", "优雅", "Elegant", "female", "adult"),
+    ("vf-stern", "严厉", "Stern", "female", "adult"),
+    ("vf-frail", "苍老", "Frail", "female", "senior"),
+    ("vf-storyteller", "讲述", "Storyteller", "female", "adult"),
+    ("vf-northern", "北方大姐", "Northern big sister", "female", "adult"),
+    ("vm-boy", "小男孩", "Little boy", "male", "child"),
+    ("vm-cheeky-boy", "调皮男孩", "Cheeky boy", "male", "child"),
+    ("vm-teen", "变声期少年", "Teen boy", "male", "teen"),
+    ("vm-sunny", "阳光", "Sunny", "male", "young"),
+    ("vm-refined", "温润", "Refined", "male", "young"),
+    ("vm-aloof", "冷淡", "Aloof", "male", "young"),
+    ("vm-magnetic", "磁性", "Magnetic", "male", "adult"),
+    ("vm-hoarse", "沙哑", "Hoarse", "male", "adult"),
+    ("vm-slick", "油滑", "Slick", "male", "adult"),
+    ("vm-sinister", "阴沉", "Sinister", "male", "adult"),
+    ("vm-scholar", "儒雅", "Scholarly", "male", "adult"),
+    ("vm-soldier", "硬朗", "Tough", "male", "adult"),
+    ("vm-weary", "疲惫", "Weary", "male", "adult"),
+    ("vm-newsreader", "播音", "Newsreader", "male", "adult"),
+    ("vm-stubborn", "倔老头", "Stubborn old man", "male", "senior"),
+    ("vm-elder", "长者", "Elder", "male", "senior"),
+    ("vm-narrator", "讲述", "Narrator", "male", "adult"),
+)
+VOICES.update(
+    {
+        ident: {"name": {"zh": zh, "en": en}, "gender": gender, "age": age}
+        for ident, zh, en, gender, age in DESIGNED
+    }
+)
 
 # (voice id, revision) -> vendor fields of revisions that are no longer current.
 RETIRED = {}

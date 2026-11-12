@@ -14,7 +14,16 @@ from sqlalchemy import insert
 from studio_platform import speech_provider, speech_settings
 from studio_platform.auth import digest
 from studio_platform.repository import documents
-from studio_platform.speech_catalog import LANGUAGES, RETIRED, VOICES, maker, public
+from studio_platform.speech_catalog import (
+    AGES,
+    GENDERS,
+    LANGUAGES,
+    RETIRED,
+    VOICES,
+    maker,
+    public,
+    spoken,
+)
 from studio_platform.speech_provider import (
     OpenRouterSpeech,
     Speech,
@@ -218,6 +227,10 @@ class SpeechRouteTests(unittest.TestCase):
             ("v-deep", "r1"): "brian",
             ("v-anchor", "r1"): "daniel",
             ("v-young", "r1"): "liam",
+            ("v-sassy", "r1"): "laura",
+            ("v-easy", "r1"): "roger",
+            ("v-chill", "r1"): "will",
+            ("v-casual", "r1"): "chris",
         }
         for (ident, revision), vendor_voice in pinned.items():
             self.assertEqual(
@@ -229,11 +242,16 @@ class SpeechRouteTests(unittest.TestCase):
                 },
             )
         for ident, voice in VOICES.items():
-            self.assertTrue(
-                (ident, voice["revision"]) in pinned
-                or (ident, voice["revision"]) not in RETIRED,
-                ident,
-            )
+            if spoken(ident) is None:
+                # A designed voice is a sample only: no vendor, no revision, never a maker.
+                self.assertFalse(
+                    {"provider", "model", "provider_voice", "revision"} & set(voice),
+                    ident,
+                )
+                self.assertIsNone(maker(ident, "r1"))
+                continue
+            self.assertIn((ident, voice["revision"]), pinned, ident)
+            self.assertNotIn((ident, voice["revision"]), RETIRED, ident)
         self.assertIsNone(maker("v-warm", "r0"))
         self.assertIsNone(maker("v-none", "r1"))
 
@@ -245,7 +263,8 @@ class SpeechRouteTests(unittest.TestCase):
         for word in ("eleven", "openrouter", "provider", "model"):
             self.assertNotIn(word, raw)
         for voice in VOICES.values():
-            self.assertNotIn('"' + voice["provider_voice"] + '"', raw)
+            if "provider_voice" in voice:
+                self.assertNotIn('"' + voice["provider_voice"] + '"', raw)
 
     def test_a_line_becomes_an_asset_that_records_what_made_it(self):
         self.prepare(voice_enabled=True)
@@ -300,6 +319,8 @@ class SpeechRouteTests(unittest.TestCase):
     def test_bad_requests(self):
         self.prepare(voice_enabled=True)
         self.assertEqual(self.speak(voice_id="sarah").status_code, 422)
+        # A designed voice is a timbre sample; it cannot say a line.
+        self.assertEqual(self.speak(voice_id="vf-gentle").status_code, 422)
         self.assertEqual(self.speak(direction="shouting").status_code, 422)
         self.assertEqual(self.speak(language="fr").status_code, 422)
         self.assertEqual(self.speak(request_id="bad id !!").status_code, 422)
@@ -418,6 +439,33 @@ class AdapterTests(unittest.TestCase):
         for entry in public():
             self.assertEqual(set(entry["name"]), {"zh", "en"})
             self.assertEqual(set(entry["samples"]), set(LANGUAGES))
+            self.assertIn(entry["gender"], GENDERS)
+            self.assertIn(entry["age"], AGES)
+            self.assertEqual(entry["speaks"], spoken(entry["id"]) is not None)
+        shown = [(e["gender"], e["age"], e["name"]["zh"]) for e in public()]
+        # Within one gender and age a name is the only thing that tells two voices apart.
+        self.assertEqual(len(shown), len(set(shown)))
+
+    def test_the_assistant_is_told_every_voice_under_its_gender_and_age(self):
+        from studio_platform.story_chat import INSTRUCTION
+
+        start = INSTRUCTION.index('("voice":')
+        block = " ".join(
+            INSTRUCTION[
+                start : INSTRUCTION.index(")", INSTRUCTION.index("women ", start))
+            ].split()
+        )
+        told = {}
+        women, men = block[block.index("women ") + 6 :].split(" men ")
+        for gender, part in (("female", women), ("male", men)):
+            for group in part.split(";"):
+                age, ids = group.split(":")
+                for ident in ids.split(","):
+                    told[ident.strip()] = (gender, age.strip())
+        self.assertEqual(
+            told,
+            {ident: (voice["gender"], voice["age"]) for ident, voice in VOICES.items()},
+        )
 
     def test_a_line_cannot_steer_its_own_delivery(self):
         self.assertEqual(clean("[shouting] 你好\n再见"), "shouting 你好 再见")

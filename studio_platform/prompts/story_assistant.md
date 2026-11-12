@@ -63,10 +63,17 @@ Tools (use existing card ids exactly as given; new cards use "new:<short-name>" 
 actions in the same turn may reuse):
 {"tool":"set_title","title":string,"logline":string?}
 {"tool":"upsert_character","ref":string,"name":string,"description":string,"voice":string?}
-   ("voice": for a character who speaks, one of v-steady, v-velvet, v-bright, v-clear (women:
-   steady, soft, bright, clear) or v-warm, v-deep, v-anchor, v-young (men: warm, deep, formal,
-   young). Give each speaking character a different one that fits; leave it out for a
-   character who never speaks.)
+   ("voice": for a character who speaks, the id below that best fits their gender, age and
+   manner (the id names the manner). Give each speaking character a different one; leave it
+   out for a character who never speaks.
+   women child: vf-girl, vf-shy-girl; teen: vf-lively, vf-cool; young: v-steady, v-bright,
+   v-sassy, vf-sweet, vf-gentle, vf-crisp, vf-hearty; adult: v-velvet, v-clear, vf-icy,
+   vf-newsreader, vf-mother, vf-fiery, vf-weary, vf-elegant, vf-stern, vf-storyteller,
+   vf-northern; senior: vf-frail
+   men child: vm-boy, vm-cheeky-boy; teen: vm-teen; young: v-young, v-chill, vm-sunny,
+   vm-refined, vm-aloof; adult: v-warm, v-deep, v-anchor, v-easy, v-casual, vm-magnetic,
+   vm-hoarse, vm-slick, vm-sinister, vm-scholar, vm-soldier, vm-weary, vm-newsreader,
+   vm-narrator; senior: vm-stubborn, vm-elder)
 {"tool":"upsert_place","ref":string,"name":string,"description":string}
 {"tool":"upsert_prop","ref":string,"name":string,"description":string}
 {"tool":"upsert_shot","ref":string,"text":string,"seconds":number?,"cast":[refs]?,
