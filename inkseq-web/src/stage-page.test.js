@@ -39,6 +39,7 @@ test('a card names what it lacks in plain words, voice only once the character s
   assert.deepEqual(speaks.gaps, ['speaker', 'voice']);
   const ready = cardFacts(
     person('c', ['img'], {
+      voice: 'v',
       voices: [{ asset: 'v' }],
       bible: { ...bibleOf(null), speaker: 'S1' },
     }),
@@ -46,6 +47,13 @@ test('a card names what it lacks in plain words, voice only once the character s
   );
   assert.deepEqual(ready.gaps, []);
   assert.equal(ready.voices, 1);
+  // A voice chosen from our list alone sends no sample, so it is not a voice yet.
+  const listed = cardFacts(
+    person('d', ['img'], { voiceId: 'v-steady', bible: { ...bibleOf(null), speaker: 'S2' } }),
+    { speaking: 1 },
+  );
+  assert.deepEqual(listed.gaps, ['voice']);
+  assert.equal(listed.voices, 0);
   assert.equal(ready.total, 6);
   assert.ok(ready.done >= 3);
 });

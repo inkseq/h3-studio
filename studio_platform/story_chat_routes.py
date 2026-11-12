@@ -713,13 +713,20 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             story_chat_undo.remember(
                 app, principal, project_id, turn_id, version, project
             )
+            from .catalog_voice import with_samples
+
+            # After the plan was checked: a voice the assistant named gets its sample
+            # in this same write, so undoing the turn takes it back as well.
+            written = with_samples(
+                app, principal, project_id, project, actions, chat["language"]
+            )
             try:
                 app.state.guided.mutate(
                     principal,
                     project_id,
                     {
                         "expected_version": version,
-                        "actions": actions
+                        "actions": written
                         + [{"op": "journey.update", "patch": {"storyChat": value}}],
                     },
                 )

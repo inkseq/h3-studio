@@ -773,6 +773,7 @@ inventory.json
 !studio_platform/speech_routes.py
 !studio_platform/voice_design.py
 !studio_platform/voice_design_routes.py
+!studio_platform/catalog_voice.py
 !studio_platform/h3_prompt.py
 !studio_platform/speech_settings.py
 !studio_platform/voice_samples/

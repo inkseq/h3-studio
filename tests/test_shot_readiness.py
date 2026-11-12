@@ -5,7 +5,13 @@ import unittest
 from studio_platform.shot_readiness import findings, project_readiness
 
 
-def project(*shots, looks=None):
+VOICE = {
+    "voices": [{"id": "v1", "assetId": "clip", "clipStart": 0}],
+    "mainVoiceId": "v1",
+}
+
+
+def project(*shots, looks=None, voice=VOICE, extra=()):
     return {
         "entities": [
             {
@@ -17,10 +23,22 @@ def project(*shots, looks=None):
                     "looks": looks
                     if looks is not None
                     else [{"id": "l1", "imageIds": ["img"]}],
+                    **(voice or {}),
                 },
             },
+            *extra,
             *shots,
         ]
+    }
+
+
+def person(ident, title, **data):
+    looks = [{"id": "l1", "imageIds": ["img"]}]
+    return {
+        "id": ident,
+        "type": "character",
+        "title": title,
+        "data": {"defaultLookId": "l1", "looks": looks, **data},
     }
 
 
@@ -85,6 +103,67 @@ class ShotReadinessTests(unittest.TestCase):
                     }
                 ]
             },
+        )
+
+
+class VoiceMissingTests(unittest.TestCase):
+    LINE = "Mia looks up (S1) <d>[English] You were here all along.</d>"
+
+    def test_a_line_for_a_character_without_a_sample_is_reported_by_name(self):
+        value = shot(self.LINE, board={"mode": "ref"})
+        self.assertEqual(
+            findings(project(value, voice=None), value),
+            [{"code": "voice_missing", "names": ["Mia"]}],
+        )
+        self.assertEqual(codes(project(value), value), [])
+        # A main voice id that names no sample sends nothing either.
+        dangling = {"voices": [], "mainVoiceId": "gone"}
+        self.assertEqual(
+            codes(project(value, voice=dangling), value), ["voice_missing"]
+        )
+        # The look's own voice is what compile sends first.
+        look = [{"id": "l1", "imageIds": ["img"], "voiceId": "v1"}]
+        own = {
+            "voices": [{"id": "v1", "assetId": "clip", "clipStart": 0}],
+            "mainVoiceId": "",
+        }
+        self.assertEqual(codes(project(value, looks=look, voice=own), value), [])
+
+    def test_nothing_is_reported_where_a_sample_would_not_be_sent_or_heard(self):
+        for name, value in (
+            ("first and last frame shot", shot(self.LINE, board={"mode": "fl"})),
+            ("shot with no mode yet", shot(self.LINE)),
+            (
+                "finished dialogue track",
+                shot(
+                    self.LINE, board={"mode": "ref", "dialogueTrack": {"entityId": "t"}}
+                ),
+            ),
+            ("sound off", shot(self.LINE, board={"mode": "ref"}, audio=False)),
+            ("no line", shot("Mia walks, no dialogue.", board={"mode": "ref"})),
+            ("quoted text only", shot('A sign reads "OPEN".', board={"mode": "ref"})),
+        ):
+            with self.subTest(name):
+                self.assertNotIn(
+                    "voice_missing", codes(project(value, voice=None), value)
+                )
+
+    def test_a_numbered_speaker_counts_only_when_its_number_speaks(self):
+        zib = person("zib", "Zib", speaker="S2")
+        tom = person("tom", "Tom")
+        value = shot(self.LINE, cast=("mia", "zib", "tom"), board={"mode": "ref"})
+        mia = {"speaker": "S1"}
+        # Mia (S1) speaks; Zib (S2) does not; Tom has no number, so he may.
+        self.assertEqual(
+            findings(project(value, voice=mia, extra=(zib, tom)), value),
+            [{"code": "voice_missing", "names": ["Mia", "Tom"]}],
+        )
+        untagged = shot(
+            "Mia says <d>[English] Go.</d>", cast=("mia", "zib"), board={"mode": "ref"}
+        )
+        self.assertEqual(
+            findings(project(untagged, voice=mia, extra=(zib,)), untagged),
+            [{"code": "voice_missing", "names": ["Mia", "Zib"]}],
         )
 
 

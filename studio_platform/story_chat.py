@@ -304,9 +304,14 @@ def cards(project, chat):
             "version": entity["version"],
         }
 
+    def person(entity):
+        # So the assistant can keep every speaker's voice different.
+        voice = _voice({"voice": entity.get("data", {}).get("voiceId")})
+        return {**profile(entity), **({"voice": voice} if voice else {})}
+
     roots = [e for e in project["entities"] if e["parentId"] is None]
     result = {
-        "characters": [profile(e) for e in roots if e["type"] == "character"],
+        "characters": [person(e) for e in roots if e["type"] == "character"],
         "places": [profile(e) for e in roots if e["type"] == "location"],
         "props": [profile(e) for e in roots if e["type"] == "prop"],
         "shots": [],
@@ -389,6 +394,13 @@ def _digest(value):
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode()
     ).hexdigest()
+
+
+def _voice(item):
+    """One of our voices the assistant named for a character; anything else is dropped."""
+    from .catalog_voice import choice
+
+    return choice(item.get("voice"))
 
 
 def profile_data(kind):
@@ -514,18 +526,26 @@ def apply_plan(project, chat, plan, *, model_fresh=True):
                     "description": text,
                     "data": profile_data(kind),
                 }
+                if kind == "character" and _voice(item):
+                    entity["data"]["voiceId"] = _voice(item)
                 actions.append({"op": "entity.create", "entity": entity})
                 lookup[ident] = {**entity, "version": 1}
                 changes.append({"kind": kind, "op": "create", "id": ident})
             else:
                 ident = resolve(ref, {kind})
                 touched.add(ident)
+                patch = {"title": name, "description": text}
+                held = lookup[ident].get("data", {})
+                # Only a character with no voice yet: a person's own choice stays.
+                if (
+                    kind == "character"
+                    and _voice(item)
+                    and not held.get("voices")
+                    and not held.get("voiceId")
+                ):
+                    patch["data"] = {"voiceId": _voice(item)}
                 actions.append(
-                    {
-                        "op": "entity.update",
-                        "entity_id": ident,
-                        "patch": {"title": name, "description": text},
-                    }
+                    {"op": "entity.update", "entity_id": ident, "patch": patch}
                 )
                 changes.append({"kind": kind, "op": "update", "id": ident})
         elif tool == "upsert_shot":

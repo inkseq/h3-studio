@@ -1918,3 +1918,81 @@ test('a server-side result binding rebases the tab: clean adopts, separate edits
   assert.equal(store.rebaseCloud(remote, { account: 'superdan', version: 1 }), false);
   assert.equal(store.rebaseCloud(remote, { account: 'supervan', version: 3 }), false);
 });
+
+test('a catalog voice saves unsaved edits first, takes the server story and never races a save', async () => {
+  let fail = false,
+    hold = null,
+    reached;
+  const h = harness({
+    request: async (path, options) => {
+      h.calls.push(['request', path, options.method, options.body]);
+      if (fail) throw new CloudError('off', { status: 409 });
+      // The server works on its saved copy: one new clip, and the sample on the character.
+      const [, id, card] = path.match(
+          /^\/v1\/projects\/([^/]+)\/characters\/([^/]+)\/catalog-voice$/,
+        ),
+        record = h.remote.get(decodeURIComponent(id)),
+        hero = record.project.entities.find((e) => e.id === decodeURIComponent(card)),
+        voice = { id: 'catalog-v-steady-en', assetId: 'catalog-voice-v-steady-en', clipStart: 0 };
+      assert.equal(hero.data.voiceId, 'v-steady');
+      if (!hero.data.voices?.length) {
+        record.project.entities.push({
+          ...structuredClone(hero),
+          id: voice.assetId,
+          type: 'audio',
+          title: 'Steady',
+          data: { cloudAssetId: 'a1', fileId: 'cloud_asset_a1' },
+        });
+        hero.data = { ...hero.data, voices: [voice], mainVoiceId: voice.id };
+        hero.version++;
+        record.version++;
+      }
+      // The answer is on its way: the server is ahead of the page until the story is read.
+      reached?.();
+      if (hold) await hold;
+      return { voice };
+    },
+  });
+  await h.start();
+  const id = h.store.getState().project.id,
+    hero = h.store.addEntity('character'),
+    body = { voice_id: 'v-steady', language: 'en' },
+    card = () => h.store.exportProject().entities.find((e) => e.id === hero);
+  h.store.updateEntity(hero, { data: { voiceId: 'v-steady' } });
+  assert.equal(h.store.getState().workspace.dirty, true);
+  let release;
+  hold = new Promise((resolve) => (release = resolve));
+  const changed = new Promise((resolve) => (reached = resolve));
+  const giving = h.controller.chooseCatalogVoice(hero, body);
+  await changed;
+  assert.deepEqual(h.calls.slice(-2), [
+    ['save', id, 1],
+    ['request', `/v1/projects/${id}/characters/${hero}/catalog-voice`, 'POST', body],
+  ]);
+  // An edit and a save made meanwhile wait their turn, so the save uses the new version.
+  h.store.updateEntity(h.shot, { description: 'Typed meanwhile' });
+  const saving = h.controller.save();
+  release();
+  hold = null;
+  assert.equal((await giving).voice.id, 'catalog-v-steady-en');
+  await saving;
+  assert.equal(h.controller.getState().conflict, null);
+  assert.equal(card().data.mainVoiceId, 'catalog-v-steady-en');
+  assert.equal(card().data.voices.length, 1);
+  assert.equal(h.store.getState().workspace.serverVersion, 4);
+  assert.equal(h.store.getState().workspace.dirty, false);
+  assert.equal(
+    h.remote.get(id).project.entities.find((e) => e.id === h.shot).description,
+    'Typed meanwhile',
+  );
+  // The same choice again changes nothing, here or on the server.
+  await h.controller.chooseCatalogVoice(hero, body);
+  assert.equal(card().data.voices.length, 1);
+  assert.equal(h.store.getState().workspace.serverVersion, 4);
+  // A failure keeps the choice and is the caller's to show, not a page error.
+  fail = true;
+  await assert.rejects(h.controller.chooseCatalogVoice(hero, body));
+  assert.equal(h.controller.getState().error, '');
+  assert.equal(card().data.voiceId, 'v-steady');
+  h.controller.destroy();
+});

@@ -730,6 +730,8 @@ export function readinessHints(item, version, t) {
     if (finding.code === 'character_picture_missing')
       return [t('hint.characterPicture', { names: (finding.names || []).join(', ') })];
     if (finding.code === 'speech_unspecified') return [t('hint.speechUnspecified')];
+    if (finding.code === 'voice_missing')
+      return [t('hint.voiceMissing', { names: (finding.names || []).join(', ') })];
     return [];
   });
 }

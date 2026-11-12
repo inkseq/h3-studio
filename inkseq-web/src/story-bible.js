@@ -164,7 +164,7 @@ export function profileChecklist(p, { used = false } = {}) {
       { key: 'body', done: !!(b.body.line.trim() || (b.body.heads && b.body.arms && b.body.legs)) },
       { key: 'expressions', done: part === EXPRESSIONS.length, part },
       { key: 'look', done: p.variants.some((v) => v.desc.trim()) },
-      { key: 'voice', done: !!(p.voiceId || p.voice || p.voices?.length) },
+      { key: 'voice', done: hasVoiceSample(p) },
       { key: 'used', done: used },
     ];
   }
@@ -289,13 +289,20 @@ export function speakingPlaces(p, { scenes = [], shots = [], profiles = [] } = {
   return n;
 }
 
+/**
+ * Whether a shot would send a voice sample for this character: a look's own voice or the main
+ * voice, each a sample on the card. A voice chosen from our list alone (`voiceId`) sends
+ * nothing (h3-studio#1222).
+ */
+export function hasVoiceSample(p) {
+  const samples = new Set(list(p?.voices).map((v) => v?.asset));
+  return [p?.voice, ...list(p?.variants).map((v) => v?.voice)].some((id) => id && samples.has(id));
+}
+
 /** What a speaking character still lacks: 'speaker' (an Sx number) and/or 'voice'. */
 export function voiceGaps(p, speaking) {
   if (p?.type !== 'character' || !speaking) return [];
-  return [
-    ...(p.bible?.speaker ? [] : ['speaker']),
-    ...(p.voiceId || p.voice || p.voices?.length ? [] : ['voice']),
-  ];
+  return [...(p.bible?.speaker ? [] : ['speaker']), ...(hasVoiceSample(p) ? [] : ['voice'])];
 }
 
 /** The name without a trailing note in brackets: "儿子（三兄弟）" -> "儿子". */

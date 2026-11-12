@@ -5,6 +5,7 @@ import {
   bibleOf,
   characterGroups,
   exportBible,
+  hasVoiceSample,
   importActions,
   importPlan,
   nextSpeaker,
@@ -102,9 +103,14 @@ test('the checklist follows the flow and counts a partial expression sheet', () 
   const p = view({
     variants: [{ id: 'main', name: '默认', desc: '棕袍', images: ['img-1'] }],
     voiceId: 'v1',
+    voice: 'clip-1',
+    voices: [{ asset: 'clip-1', start: 0 }],
     bible: bibleOf({ data: { body: { line: 'one man' }, expressions: { pain: 'img-1' } } }),
   });
   const items = profileChecklist(p, { used: true });
+  // A voice chosen from our list alone is not a sample a shot can send (h3-studio#1222).
+  const voiceDone = (over) => profileChecklist(view(over)).find((i) => i.key === 'voice').done;
+  assert.equal(voiceDone({ voiceId: 'v1' }), false);
   assert.deepEqual(
     items.map((i) => [i.key, i.done]),
     [
@@ -230,6 +236,22 @@ test('speaking places come from line beats, the speaker number and unclaimed lin
   assert.deepEqual(voiceGaps(sons, at(sons)), ['speaker', 'voice']);
   assert.deepEqual(voiceGaps(mum, at(mum)), ['voice']);
   assert.deepEqual(voiceGaps(view({ voiceId: 'v1' }), 0), []);
+});
+
+test('a character has a voice only when a shot would send a sample for it', () => {
+  const tagged = { bible: bibleOf({ data: { speaker: 'S1' } }) },
+    voices = [{ asset: 'clip-1', start: 0 }];
+  const gaps = (over) => voiceGaps(view({ ...tagged, ...over }), 1);
+  // A voice from our list alone, or a sample that is neither the main voice nor a look's
+  // voice, sends nothing.
+  assert.deepEqual(gaps({ voiceId: 'v-steady' }), ['voice']);
+  assert.deepEqual(gaps({ voices }), ['voice']);
+  assert.deepEqual(gaps({ voice: 'gone', voices }), ['voice']);
+  assert.deepEqual(gaps({ voiceId: 'v-steady', voice: 'clip-1', voices }), []);
+  const look = { id: 'main', name: '默认', desc: '', images: [], voice: 'clip-1' };
+  assert.deepEqual(gaps({ voices, variants: [look] }), []);
+  assert.equal(hasVoiceSample(view({ voice: 'clip-1', voices })), true);
+  assert.equal(hasVoiceSample(null), false);
 });
 
 test('splitting makes one card per person in a group, all at once, and keeps the old card', () => {
