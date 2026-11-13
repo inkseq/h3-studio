@@ -13,12 +13,16 @@ export function voiceFilters(voices) {
   return { genders: genders.length > 1 ? genders : [], ages: ages.length > 1 ? ages : [] };
 }
 
-export function shownVoices(voices, { gender = '', age = '' } = {}, chosenId = '') {
-  return voices.filter(
+// `firstId` leads the list: the voice that was in use when the list opened, so it is seen without
+// scrolling. It is not the live choice, so choosing another voice moves no row.
+export function shownVoices(voices, { gender = '', age = '' } = {}, chosenId = '', firstId = '') {
+  const shown = voices.filter(
     (voice) =>
       voice.id === chosenId ||
       ((!gender || voice.gender === gender) && (!age || voice.age === age)),
   );
+  const first = shown.find((voice) => voice.id === firstId);
+  return first ? [first, ...shown.filter((voice) => voice !== first)] : shown;
 }
 
 // A designed voice is a sample only; an older server that does not say can speak them all.

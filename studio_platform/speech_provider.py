@@ -49,8 +49,9 @@ class OpenRouterSpeech:
     """Eleven v4 through OpenRouter. Delivery is written as bracket tags in the text."""
 
     NAME = "openrouter"
+    # "quietly" came out whispered in English (measured on the first samples, #1226).
     STYLE = {
-        "calm": "quietly",
+        "calm": "calm",
         "angry": "furious, shouting",
         "sad": "crying, voice breaking",
         "happy": "excited, laughing",

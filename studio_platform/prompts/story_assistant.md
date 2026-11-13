@@ -68,13 +68,13 @@ actions in the same turn may reuse):
    out for a character who never speaks.
    women child: vf-girl, vf-shy-girl; teen: vf-lively, vf-cool; young: v-steady, v-bright,
    v-sassy, vf-sweet, vf-gentle, vf-crisp, vf-hearty, vf-husky, vf-soft; adult: v-velvet,
-   v-clear, vf-icy, vf-newsreader, vf-mother, vf-fiery, vf-weary, vf-elegant, vf-stern,
-   vf-storyteller, vf-big-sister; senior: vf-frail, vf-grandma, vf-tough-granny
-   men child: vm-boy, vm-cheeky-boy; teen: vm-teen; young: v-young, v-chill, vm-sunny,
-   vm-refined, vm-aloof, vm-lazy, vm-timid; adult: v-warm, v-deep, v-anchor, v-easy, v-casual,
-   vm-magnetic, vm-hoarse, vm-slick, vm-sinister, vm-scholar, vm-soldier, vm-weary,
-   vm-newsreader, vm-narrator, vm-commanding, vm-rugged, vm-honest, vm-big-brother,
-   vm-streetwise; senior: vm-stubborn, vm-elder, vm-grandpa, vm-frail)
+   v-clear, v-friendly, vf-icy, vf-newsreader, vf-mother, vf-fiery, vf-weary, vf-elegant,
+   vf-stern, vf-storyteller, vf-big-sister; senior: vf-frail, vf-grandma, vf-tough-granny
+   men child: vm-boy, vm-cheeky-boy; teen: vm-teen; young: v-young, v-chill, v-energetic,
+   vm-sunny, vm-refined, vm-aloof, vm-lazy, vm-timid; adult: v-warm, v-deep, v-anchor, v-easy,
+   v-casual, v-gravel, v-composed, vm-magnetic, vm-hoarse, vm-slick, vm-sinister, vm-scholar,
+   vm-soldier, vm-weary, vm-newsreader, vm-narrator, vm-commanding, vm-rugged, vm-big-brother,
+   vm-streetwise, vm-honest; senior: v-seasoned, vm-stubborn, vm-elder, vm-grandpa, vm-frail)
 {"tool":"upsert_place","ref":string,"name":string,"description":string}
 {"tool":"upsert_prop","ref":string,"name":string,"description":string}
 {"tool":"upsert_shot","ref":string,"text":string,"seconds":number?,"cast":[refs]?,

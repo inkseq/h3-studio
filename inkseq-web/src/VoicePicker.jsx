@@ -190,8 +190,10 @@ function VoiceList({ voices, chosenId, language, choose }) {
   const { t } = useI18n();
   const { playing, toggle } = useSample();
   const [filter, setFilter] = useState({ gender: '', age: '' });
+  // The voice in use when the list opened leads it; a new choice does not reorder the rows.
+  const [first] = useState(chosenId);
   const { genders, ages } = voiceFilters(voices);
-  const shown = shownVoices(voices, filter, chosenId);
+  const shown = shownVoices(voices, filter, chosenId, first);
   const options = (key, values) => [
     { value: '', label: t('voice.filter.all') },
     ...values.map((value) => ({ value, label: t(`voice.${key}.${value}`) })),
@@ -291,6 +293,7 @@ export function VoicePicker({ profile, samples = null }) {
           <h4>{t('voice.title')}</h4>
           {adapter?.designVoice && <VoiceDesign profile={profile} language={language} />}
           <VoiceList
+            key={profile.id}
             voices={data.voices}
             chosenId={profile.voiceId}
             language={language}
