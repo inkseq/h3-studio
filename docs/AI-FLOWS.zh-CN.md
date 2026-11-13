@@ -25,7 +25,7 @@ flowchart TD
 | 工作约定和创作规则（思考档设为 low） | [`story_assistant.md`](../studio_platform/prompts/story_assistant.md) |
 | 用户贴的是整段剧本 | [`story_script_note.md`](../studio_platform/prompts/story_script_note.md) |
 | 从小墨打字（只能改卡片） | [`inky_typing_note.md`](../studio_platform/prompts/inky_typing_note.md)、[`inky_typing_focus.md`](../studio_platform/prompts/inky_typing_focus.md) |
-| 用户抱怨已出的镜头（“太慢”“门对不上”“台词来得太晚”），附上最多 3 条对应修法 | [`inky_fix_note.md`](../studio_platform/prompts/inky_fix_note.md)、[`inky_fix_guide.md`](../studio_platform/prompts/inky_fix_guide.md) |
+| 用户抱怨已出的镜头（“太慢”“门对不上”“台词来得太晚”），附上最多 3 条对应修法 | [`inky_fix_note.md`](../studio_platform/prompts/inky_fix_note.md)；修法来自经验表 [`pitfalls.json`](../studio_platform/pitfalls.json) |
 | 旧版自由对话 | [`quick_chat_default.md`](../studio_platform/prompts/quick_chat_default.md) |
 | 自动起标题 | [`story_title.md`](../studio_platform/prompts/story_title.md) |
 | 长镜头拆成连续片段 | [`script_windows.md`](../studio_platform/prompts/script_windows.md) |
@@ -34,7 +34,26 @@ flowchart TD
 
 故事里已有出好的镜头时，用户打字（小墨或快速对话，贴剧本除外）里出现某条修法的说法，就把匹配的修法（最多 3 条，匹配越长越靠前）附在这一轮的说明里，不多调一次模型。小墨先说原因，再给最便宜的修法：能改卡片文字的（`inky: edit`）先问用户，用户说好才改，可撤销；要用户自己动手的（`inky: point`）说清在哪改（换一条、剪辑里的速度/裁剪、尾帧、场景图）。重新生成要花积分，由用户自己点。
 
-**加一条修法**：拍片技能（`inky-film` 的 `references/fix-guide.md`）学到新的坑后，在 [`inky_fix_guide.md`](../studio_platform/prompts/inky_fix_guide.md) 加一段 `## 名字`，四行 `when`（用户会说的话，中英文都要，用 `|` 分开）、`cause`、`fix`、`inky`（`point` 或 `edit: 小墨能改什么`）。用面向用户的话写：不写模型名、厂商、价格、内部编号或内部工具。再在 [`tests/test_inky_fix_guide.py`](../tests/test_inky_fix_guide.py) 的 `COMPLAINTS` 加一句用户会怎么说，跑这个测试。格式不对时应用启动就会报错。
+**加一条修法**：在经验表 [`pitfalls.json`](../studio_platform/pitfalls.json) 加一条，`uses` 里写 `complaint`，填 `user_words`（用户会说的话，中英文都要）、`cause`、`fix`、`assistant`（`point` 或 `edit: 小墨能改什么`）。这三段会经小墨说给用户，用面向用户的话写：不写模型名、厂商、价格、内部编号或内部工具。再在 [`tests/test_inky_fix_guide.py`](../tests/test_inky_fix_guide.py) 的 `COMPLAINTS` 加一句用户会怎么说，跑这个测试。格式不对时应用启动就会报错。
+
+## 经验表（#1237）
+
+关于"生成的镜头会出什么毛病、为什么、怎么治"的经验只写在一处：[`studio_platform/pitfalls.json`](../studio_platform/pitfalls.json)，一条经验一个条目。格式和规则写在 [`studio_platform/pitfalls.py`](../studio_platform/pitfalls.py) 开头，[`tests/test_pitfalls.py`](../tests/test_pitfalls.py) 检查。
+
+| 字段 | 意思 |
+|---|---|
+| `id` | `阶段.名字`，唯一。`take.*` 是用户在成片里看到的毛病，其他阶段（`prompt.*`、`cam.*`、`cont.*`）是原因 |
+| `status` | `proposed` 没测过、`measured` 测过还没启用、`in_use` 在用、`retired` 复测不过已停用（条目留着，免得再加一遍） |
+| `uses` | 这条在哪里起作用：`complaint` 用户抱怨时小墨照它回答；`prevent` 开拍前改镜头文字；`check` 拍完后检查 |
+| `measured` | 以日期开头的一行：测了什么、哪个模型、出现率。`proposed` 以外的状态必须有 |
+| `models` | 在哪些模型和版本上测的 |
+| `match` | 触发条件：`shot_text`（正则）、`film`（整个故事的规则名）、`shot`（单个镜头的规则名） |
+| `prevent` / `check` | 开拍前怎么改；拍完怎么查（`how` 是 `code`、`judge` 或 `human`，带问题和期望答案） |
+| `user_words` / `cause` / `fix` / `assistant` | 用户会怎么说；原因；修法；小墨能做什么 |
+
+规则只有一条：**凭证据进，复测不过就出。** 没测过的条目只能在用户自己说出毛病时拿来回答（`complaint`）；要改用户没抱怨的镜头（`prevent`）或给镜头下判断（`check`），必须是 `in_use` 并带一行有日期的实测。目前只有 `complaint` 有代码在读，另外两处先按同一条规则立好。
+
+**怎么查一条经验**：在表里搜 `id` 或关键词。**怎么数它被用了多少次**：用户的抱怨命中某条时，这一轮对话在 Langfuse 里带标签 `pitfall:<id>`，按标签筛就是次数；之后有没有重拍、留了哪一条，从任务记录和故事的修改记录里按故事和时间对上。
 
 ## 小墨后台检查
 

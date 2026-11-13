@@ -54,11 +54,13 @@ INTERNAL = re.compile(
 
 class FixGuideRowTests(unittest.TestCase):
     def test_every_row_is_found_by_its_complaint(self):
-        self.assertEqual(set(COMPLAINTS), {row["id"] for row in guide.ROWS})
+        self.assertEqual(
+            {"take." + name for name in COMPLAINTS}, {row["id"] for row in guide.ROWS}
+        )
         for row_id, complaint in {**COMPLAINTS, **ENGLISH}.items():
             found = guide.match(complaint)
             self.assertTrue(found, complaint)
-            self.assertEqual(found[0]["id"], row_id, complaint)
+            self.assertEqual(found[0]["id"], "take." + row_id, complaint)
 
     def test_every_row_has_chinese_and_english_phrases(self):
         for row in guide.ROWS:
@@ -67,7 +69,10 @@ class FixGuideRowTests(unittest.TestCase):
             self.assertTrue(any(re.search(r"[a-z]", p) for p in phrases), row["id"])
 
     def test_rows_and_note_name_no_internals(self):
-        text = prompt_text("inky_fix_guide") + prompt_text("inky_fix_note")
+        said = [
+            f"{row['cause']} {row['fix']} {row['edit'] or ''}" for row in guide.ROWS
+        ]
+        text = " ".join(said) + prompt_text("inky_fix_note")
         self.assertIsNone(INTERNAL.search(text), INTERNAL.search(text))
 
     def test_ordinary_requests_bring_no_rows(self):
@@ -82,7 +87,7 @@ class FixGuideRowTests(unittest.TestCase):
     def test_at_most_three_rows_with_the_longest_match_first(self):
         found = guide.match("太慢了，门对不上，多了一个人，还有字幕，声音对不上")
         self.assertEqual(len(found), guide.LIMIT)
-        self.assertEqual(guide.match("声音对不上")[0]["id"], "sound_out_of_sync")
+        self.assertEqual(guide.match("声音对不上")[0]["id"], "take.sound_out_of_sync")
 
     def test_note_marks_what_inky_may_edit(self):
         self.assertEqual(guide.note([]), "")
@@ -93,11 +98,11 @@ class FixGuideRowTests(unittest.TestCase):
         self.assertIn("The person does it", point)
         self.assertIn("film editor", point)
 
-    def test_a_broken_row_stops_the_app(self):
-        with self.assertRaises(ValueError):
-            guide._row("x", "when: 慢 | slow\ncause: a\nfix: b\ninky: maybe")
-        with self.assertRaises(ValueError):
-            guide._row("x", "when: 慢\ncause: a\nfix: b")
+    def test_rows_are_the_table_entries_that_answer_complaints(self):
+        from studio_platform import pitfalls
+
+        answering = [e["id"] for e in pitfalls.ENTRIES if "complaint" in e["uses"]]
+        self.assertEqual([row["id"] for row in guide.ROWS], answering)
 
 
 class FixGuideTurnTests(unittest.TestCase):
@@ -177,6 +182,27 @@ class FixGuideTurnTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["turn"], str(self.model.calls[-1]["messages"])
+
+    def test_a_matched_complaint_is_tagged_with_its_entry(self):
+        from unittest import mock
+
+        from studio_platform import llm_tracing
+
+        seen, observe = [], llm_tracing.observe
+
+        def recording(name, **fields):
+            seen.append((name, fields.get("tags")))
+            return observe(name, **fields)
+
+        self.finish_take()
+        reply = {"reply": "镜头描述里提到了画外的人。", "actions": []}
+        with mock.patch.object(llm_tracing, "observe", recording):
+            self.say("后面多了一个人", reply)
+            self.say("把她的名字改成小红", reply)
+        turns = [tags for name, tags in seen if name == "story-chat-turn"]
+        self.assertEqual(len(turns), 2)
+        self.assertIn("pitfall:take.extra_person", turns[0])
+        self.assertFalse([tag for tag in turns[1] if tag.startswith("pitfall:")])
 
     def test_a_complaint_gets_the_cause_and_an_offer_then_yes_edits_with_undo(self):
         self.finish_take()

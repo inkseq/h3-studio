@@ -1,10 +1,10 @@
 """Recorded fixes for complaints about a finished take (#1227).
 
-The rows live in ``prompts/inky_fix_guide.md``: one ``## name`` part per complaint with
-``when`` (phrases a person types, Chinese and English, split by ``|``), ``cause``, ``fix``
-and ``inky`` (``point`` when the person fixes it elsewhere in the app, or ``edit: ...``
-for a card change Inky can offer). They are curated from the film team's fix guide and
-are user facing: no model names, suppliers, prices or internal ids.
+The rows are the entries of the pitfalls table (``pitfalls.json``, #1237) that answer a
+complaint: ``user_words`` (phrases a person types, Chinese and English), ``cause``, ``fix``
+and ``assistant`` (``point`` when the person fixes it elsewhere in the app, or
+``edit: ...`` for a card change Inky can offer). They are user facing: no model names,
+suppliers, prices or internal ids.
 
 A typed message picks at most three rows by its phrases, longest matches first, and only
 once the story has a finished take. No model call; the rows ride on the turn's note.
@@ -12,12 +12,11 @@ once the story has a finished take. No model call; the rows ride on the turn's n
 
 import re
 
-from .prompt_files import sections
+from . import pitfalls
 from .prompt_files import text as prompt_text
 
 LIMIT = 3
 NOTE = prompt_text("inky_fix_note")
-KEYS = ("when", "cause", "fix", "inky")
 
 
 def _pattern(phrase):
@@ -30,31 +29,21 @@ def _pattern(phrase):
     return re.compile(escaped)
 
 
-def _row(name, body):
-    fields = {}
-    for line in body.splitlines():
-        if not line.strip():
-            continue
-        key, sep, value = line.partition(": ")
-        if not sep or key not in KEYS or key in fields or not value.strip():
-            raise ValueError(f"inky_fix_guide_invalid:{name}")
-        fields[key] = value.strip()
-    when = [p.strip().lower() for p in fields.get("when", "").split("|") if p.strip()]
-    inky = fields.get("inky", "")
-    if set(fields) != set(KEYS) or not when:
-        raise ValueError(f"inky_fix_guide_invalid:{name}")
-    if inky != "point" and not inky.startswith("edit: "):
-        raise ValueError(f"inky_fix_guide_invalid:{name}")
+def _row(entry):
+    assistant = entry["assistant"]
     return {
-        "id": name,
-        "when": tuple((phrase, _pattern(phrase)) for phrase in when),
-        "cause": fields["cause"],
-        "fix": fields["fix"],
-        "edit": inky.removeprefix("edit: ") if inky != "point" else None,
+        "id": entry["id"],
+        "when": tuple(
+            (phrase, _pattern(phrase))
+            for phrase in (word.strip().lower() for word in entry["user_words"])
+        ),
+        "cause": entry["cause"],
+        "fix": entry["fix"],
+        "edit": None if assistant == "point" else assistant.removeprefix("edit: "),
     }
 
 
-ROWS = tuple(_row(name, body) for name, body in sections("inky_fix_guide").items())
+ROWS = tuple(_row(entry) for entry in pitfalls.used_for("complaint"))
 
 
 def match(text, limit=LIMIT):
