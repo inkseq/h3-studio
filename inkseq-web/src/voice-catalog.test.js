@@ -31,6 +31,17 @@ test('a filter narrows the list and the voice in use always shows', () => {
   assert.deepEqual(ids({ gender: 'male', age: 'senior' }, 'a'), ['a', 'c']);
 });
 
+test('the voice in use when the list opened comes first and later choices move nothing', () => {
+  const ids = (filter, chosen, first) =>
+    shownVoices(voices, filter, chosen, first).map((voice) => voice.id);
+  assert.deepEqual(ids({}, 'c', 'c'), ['c', 'a', 'b', 'd']);
+  // Another voice is chosen while the list is open: the order stays.
+  assert.deepEqual(ids({}, 'd', 'c'), ['c', 'a', 'b', 'd']);
+  // A filter hides the opening voice once it is no longer the one in use.
+  assert.deepEqual(ids({ gender: 'female' }, 'd', 'c'), ['a', 'b', 'd']);
+  assert.deepEqual(ids({}, '', 'gone'), ['a', 'b', 'c', 'd']);
+});
+
 test('a designed voice cannot say a line', () => {
   assert.equal(voiceSpeaks(voices, 'a'), true);
   assert.equal(voiceSpeaks(voices, 'b'), false);
