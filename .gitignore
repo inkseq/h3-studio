@@ -83,6 +83,8 @@ inventory.json
 !studio_platform/prompts/
 !studio_platform/prompts/*.md
 !studio_platform/prompt_files.py
+!studio_platform/pitfalls.py
+!studio_platform/pitfalls.json
 !studio_platform/__init__.py
 !studio_platform/modal_credentials.py
 !studio_platform/worker_boot.py

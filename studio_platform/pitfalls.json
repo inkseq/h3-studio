@@ -1,0 +1,508 @@
+{
+ "about": "Lessons about faults in generated shots. Format, uses and lifecycle: studio_platform/pitfalls.py and docs/AI-FLOWS.zh-CN.md.",
+ "entries": [
+  {
+   "id": "take.too_slow",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "太慢",
+    "慢动作",
+    "好慢",
+    "拖沓",
+    "动作慢",
+    "磨蹭",
+    "too slow",
+    "slow motion",
+    "so slow",
+    "sluggish",
+    "drags"
+   ],
+   "cause": "Generated movement usually plays 1.5 to 2.5 times slower than real life, and unevenly. Words like \"slowly\", \"gradually\" or \"缓缓\" in the shot text make it slower still.",
+   "fix": "In the film editor (剪辑), raise this clip's Speed (速度): walking about 1.5x, a quick turn or crouch about 2x, and trim the still moments at its start and end. Keep it a little slower than real life. Asking for an exact number of seconds in the text does not work.",
+   "assistant": "edit: remove the slow words (\"slowly\", \"gradually\", \"缓缓\", \"慢慢\") from the shot text so the next take moves faster. The clip speed itself is set by the person in the film editor."
+  },
+  {
+   "id": "take.reveal_too_fast",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "一闪而过",
+    "一闪就过",
+    "看不清",
+    "没看清",
+    "太快了",
+    "too fast",
+    "can't see it",
+    "cannot see it",
+    "blink and miss",
+    "gone too quickly"
+   ],
+   "cause": "The moment that must be seen was sped up or trimmed together with the movement around it.",
+   "fix": "In the film editor, let the clip land and hold 0.6 to 1 second at normal speed after the reveal (lower its Speed or move the trim end later). Keep a reveal shot at least 2 seconds long.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.speech_flat",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "说话慢",
+    "说话很慢",
+    "像念稿",
+    "念稿",
+    "很机械",
+    "机械",
+    "没感情",
+    "语速",
+    "不自然",
+    "reads like a script",
+    "robotic",
+    "monotone",
+    "talks too slowly",
+    "speaks too slowly",
+    "flat delivery",
+    "unnatural voice"
+   ],
+   "cause": "The voice or the words around the line ask for slow, calm speech. Speeding a voice up afterwards makes it sound stiff.",
+   "fix": "Describe how this person normally talks (everyday pace, rising and falling, accent) instead of \"slow\" or \"calm\"; do not add slow words around the line; do not speed the voice up afterwards. Each speaking character keeps one neutral voice sample of ordinary talking on their character card.",
+   "assistant": "edit: rewrite the delivery words beside the line (remove \"slowly\", \"calmly\", \"softly and slowly\"; say how the person talks and what they feel). Never change the spoken words themselves unless asked."
+  },
+  {
+   "id": "take.set_mismatch",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "门对不上",
+    "各镜对不上",
+    "前后对不上",
+    "陈设",
+    "布景不一样",
+    "场景不一致",
+    "不连贯",
+    "电梯不一样",
+    "doors don't match",
+    "doesn't match between shots",
+    "don't match",
+    "inconsistent",
+    "continuity",
+    "the set changes"
+   ],
+   "cause": "The place has a picture for only one direction. Shots looking another way invent their own set, so doors, furniture and fittings differ.",
+   "fix": "For each camera direction used in a place, make one place picture and state the fixed counts in it (how many doors, how many handles). Attach it to every shot looking that way, remake those shots' first frames, then generate again.",
+   "assistant": "edit: add the fixed counts and layout to the place card's description. Making pictures and generating are done by the person, and generating costs credits."
+  },
+  {
+   "id": "take.background_jump",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "背景变了",
+    "背景突然",
+    "突然变了",
+    "换了背景",
+    "冒出",
+    "凭空出现",
+    "场景跳",
+    "background changed",
+    "background jumps",
+    "appeared out of nowhere",
+    "suddenly a door",
+    "scene jumps"
+   ],
+   "cause": "About one take in four swaps the whole background partway through. Push-ins and backing-away follow shots are the most prone.",
+   "fix": "Pick this shot's other take. If the change comes late, trim the clip's end in the film editor to before it. Making two takes per shot and keeping the clean one is the usual cure.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.extra_person",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "多了一个人",
+    "多出一个人",
+    "多了个人",
+    "多出来的人",
+    "陌生人",
+    "不该有人",
+    "extra person",
+    "someone appeared",
+    "a stranger",
+    "someone else in the shot",
+    "who is that"
+   ],
+   "cause": "The shot text mentions someone who is off screen (whom they look at, footsteps outside the frame), so the video draws that person in.",
+   "fix": "Remove every mention of people who are off screen; write the look as a direction (\"looks left, out of frame\"). Then pick another take or generate again.",
+   "assistant": "edit: rewrite the shot text without the off-screen person and with the look written as a direction."
+  },
+  {
+   "id": "take.prop_changed",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "东西变样",
+    "变成了",
+    "道具变",
+    "东西不对",
+    "拿的东西",
+    "变了样",
+    "prop changed",
+    "turned into",
+    "object changed",
+    "wrong object",
+    "holding something else"
+   ],
+   "cause": "An object brought in from outside the frame is not in the first frame, so the video invents its look.",
+   "fix": "Put the object into this shot's first frame, or do not show it being brought in during this shot.",
+   "assistant": "edit: change the shot so the object is already in view, or drop the moment it is brought in. Changing the first frame is done by the person."
+  },
+  {
+   "id": "take.sleeve_wrong",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "袖子",
+    "手上的衣服",
+    "手臂的衣服",
+    "手不对",
+    "sleeve",
+    "wrong clothes on the arm",
+    "arm looks wrong"
+   ],
+   "cause": "Only the hand was described, so the video dresses the arm itself.",
+   "fix": "In every shot where an arm reaches into the frame, add one phrase with the character's fixed sleeve from their character card.",
+   "assistant": "edit: add the character's sleeve phrase to the shot text."
+  },
+  {
+   "id": "take.texture_overlay",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "花纹",
+    "纹理",
+    "网格",
+    "盖了一层",
+    "一层东西",
+    "pattern over",
+    "texture over",
+    "grid over",
+    "overlay"
+   ],
+   "cause": "Some takes come out with a texture across the whole frame; another take of the same shot usually does not have it.",
+   "fix": "Pick this shot's other take; generate again only if every take has it.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.wrong_motion",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "方向错",
+    "掀错",
+    "开反了",
+    "门开得",
+    "动得不对",
+    "动作不对",
+    "动错了",
+    "动得很奇怪",
+    "wrong direction",
+    "opens the wrong way",
+    "moves wrong",
+    "moving wrong",
+    "weird movement"
+   ],
+   "cause": "With only a first frame and words, the video decides by itself how objects move.",
+   "fix": "Add a last frame (same camera, only the end state changed) and check the direction in it, then generate with both first and last frame. Anything that does not need to move (a door) should stay the same in both frames.",
+   "assistant": "edit: write in the shot text that things which should not move stay still. The last frame is added by the person, and generating costs credits."
+  },
+  {
+   "id": "take.camera_move_missing",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "镜头没转",
+    "没转过去",
+    "没升起来",
+    "环绕",
+    "升降",
+    "运镜没有",
+    "镜头没动",
+    "camera didn't move",
+    "didn't orbit",
+    "didn't rise",
+    "no crane",
+    "camera move missing"
+   ],
+   "cause": "Orbits and crane moves rarely come out from words alone. Push in, pull out, a backing-away follow and a whip pan do work.",
+   "fix": "Split the move into two shots, each with its own first frame, or use one of the moves that work.",
+   "assistant": "edit: split the shot into two shots, or rewrite the move as a push in, pull out, follow or whip pan."
+  },
+  {
+   "id": "take.sound_out_of_sync",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "声音对不上",
+    "声画不同步",
+    "音效对不上",
+    "撞击声",
+    "响声",
+    "声音早了",
+    "声音晚了",
+    "sound out of sync",
+    "sound is early",
+    "sound is late",
+    "the bang",
+    "sound effect doesn't match"
+   ],
+   "cause": "The video does not time its actions to a sound attached when generating.",
+   "fix": "Generate with only background sound; place the action sounds in the film editor where the picture lands.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.wrong_expression",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "在笑",
+    "笑得",
+    "表情夸张",
+    "表情不对",
+    "赔笑",
+    "太夸张",
+    "咧嘴",
+    "smiling",
+    "grinning",
+    "laughs when",
+    "over the top",
+    "expression is wrong",
+    "too much expression"
+   ],
+   "cause": "Expressions come out one size bigger than written; \"smile\" becomes a broad grin.",
+   "fix": "Do not write smile, teeth or open mouth. Write \"lips pressed together, mouth corners not pulled back\" and describe the brows and eyes. The first frame's expression should be one size smaller than the goal.",
+   "assistant": "edit: rewrite the expression words in the shot text that way."
+  },
+  {
+   "id": "take.other_mouth_moves",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "嘴在动",
+    "别人的嘴",
+    "不是他在说",
+    "不是她在说",
+    "两个人都在说",
+    "对口型",
+    "wrong person talking",
+    "other mouths move",
+    "both are talking",
+    "lip sync on the wrong person"
+   ],
+   "cause": "With several people in the frame, the others' mouths move too.",
+   "fix": "Say in the shot text that only the speaker's mouth moves and everyone else keeps their mouth closed.",
+   "assistant": "edit: add that sentence to the shot text."
+  },
+  {
+   "id": "take.line_misspoken",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "说错字",
+    "念错",
+    "吞字",
+    "口误",
+    "发音不对",
+    "读错",
+    "misspoke",
+    "wrong word",
+    "mispronounced",
+    "swallowed a word"
+   ],
+   "cause": "When the video speaks the line itself it sometimes drops or mispronounces a word.",
+   "fix": "Pick the take that says it right. Keep key lines short and use common words.",
+   "assistant": "edit: offer a shorter wording of the line with common words, and change it only if the person agrees."
+  },
+  {
+   "id": "take.line_late",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "台词太晚",
+    "来得太晚",
+    "说得太晚",
+    "太晚才说",
+    "开口晚",
+    "开口太晚",
+    "说话太晚",
+    "站了好久",
+    "开口前",
+    "半天才说",
+    "line comes late",
+    "starts talking late",
+    "long pause before",
+    "waits before speaking"
+   ],
+   "cause": "The video does not start the line at the written moment; it can start 1.5 to 4 seconds late.",
+   "fix": "In the film editor, trim the clip's start to about 0.3 seconds before the line begins. A late voice from off screen can stay if the picture does not depend on it.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.wrong_line",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "说的不是这句",
+    "说成了",
+    "台词不对",
+    "不是这句话",
+    "说了别的",
+    "says the wrong line",
+    "said something else",
+    "different line",
+    "not the line"
+   ],
+   "cause": "The video occasionally says a different line from the one written.",
+   "fix": "Pick the other take. Short lines come out right more often.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.subtitles",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "字幕",
+    "出现了字",
+    "画面上有字",
+    "下面有字",
+    "有文字",
+    "subtitles",
+    "text on screen",
+    "captions",
+    "words appeared"
+   ],
+   "cause": "The video sometimes adds its own subtitles.",
+   "fix": "Add \"No subtitles, no text on screen.\" to the shot text; pick another take if it has text.",
+   "assistant": "edit: add that sentence to the shot text."
+  },
+  {
+   "id": "take.voice_changes",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "不像同一个人",
+    "声音变了",
+    "声音不一样",
+    "换了个声音",
+    "换了嗓子",
+    "音色不一样",
+    "voice changed",
+    "different person's voice",
+    "voice not consistent",
+    "sounds like someone else"
+   ],
+   "cause": "Shots used different voices for the same character, or a shot was not given the character's voice.",
+   "fix": "Give each speaking character one neutral sample of ordinary talking on their character card and use it in every shot; put the emotion in the delivery note beside the line, not in a new voice.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.stuck_waiting",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "一直排队",
+    "卡住了",
+    "一直在等",
+    "没反应",
+    "等了很久",
+    "一直不动",
+    "stuck",
+    "queued forever",
+    "not starting",
+    "waiting forever",
+    "nothing happens"
+   ],
+   "cause": "Usually there are not enough credits for the job, or the service is busy.",
+   "fix": "Check the credits first, then wait. Do not submit the same shot again while it is waiting.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.failed_with_sound",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "加了声音就失败",
+    "带声音失败",
+    "音频失败",
+    "声音太长",
+    "failed with sound",
+    "failed with audio",
+    "audio too long"
+   ],
+   "cause": "An attached sound is longer than the shot.",
+   "fix": "Make the attached sound no longer than the shot's length, then generate again.",
+   "assistant": "point"
+  },
+  {
+   "id": "take.generation_failed",
+   "status": "proposed",
+   "uses": [
+    "complaint"
+   ],
+   "user_words": [
+    "生成失败",
+    "稍后再试",
+    "失败了",
+    "报错",
+    "generation failed",
+    "try again later",
+    "it failed",
+    "error"
+   ],
+   "cause": "Generation occasionally fails for reasons that have nothing to do with the shot.",
+   "fix": "Generate again. Making two takes per shot usually leaves at least one good one.",
+   "assistant": "point"
+  }
+ ]
+}

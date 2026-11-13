@@ -598,7 +598,12 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             "story-chat-turn",
             user=llm_tracing.person(principal.owner),
             session=project_id,
-            tags=["story-chat", chat.get("language", "zh")],
+            # One tag per matched lesson, so its complaints can be counted (#1237).
+            tags=[
+                "story-chat",
+                chat.get("language", "zh"),
+                *(f"pitfall:{row['id']}" for row in fixes),
+            ],
             input=llm_tracing.clip(text),
             metadata={
                 "machine": principal.machine,
