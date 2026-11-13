@@ -201,6 +201,7 @@ DESIGNED = (
     ("vm-rugged", "粗犷", "Rugged", "male", "adult"),
     ("vm-big-brother", "东北大哥", "Big brother", "male", "adult"),
     ("vm-streetwise", "南方口音", "Street-smart", "male", "adult"),
+    ("vm-honest", "憨厚", "Simple and honest", "male", "adult"),
     ("vm-stubborn", "倔老头", "Stubborn old man", "male", "senior"),
     ("vm-elder", "长者", "Elder", "male", "senior"),
     ("vm-grandpa", "慈祥的爷爷", "Kind grandpa", "male", "senior"),
