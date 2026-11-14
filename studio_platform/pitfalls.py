@@ -15,18 +15,22 @@ An entry:
   ``complaint``: when a person describes the fault, Inky answers with ``cause`` and ``fix``
   (``user_words``, ``cause``, ``fix``, ``assistant``). A person saw the fault, so an entry
   that is only ``proposed`` may still answer.
-  ``prevent``: the shot text is rewritten before shooting (``match``, ``prevent``).
+  ``prevent``: advice before shooting when the shot text matches (``match``, ``prevent``,
+  and optionally ``ask``: a request the person can send to Inky, ``{number}`` being the
+  shot). ``prevent`` and ``ask`` are one text, or ``{"zh": ..., "en": ...}``.
   ``check``: a finished frame or take is checked (``check``: ``stage``, ``how`` = code,
   judge or human, ``question``, ``expected``).
   ``prevent`` and ``check`` change or judge work nobody complained about, so they need
   ``in_use``. Nothing reads these two yet; they are held to the same rule from the start.
 - ``models``: the models and versions the measurement was made on.
-- ``match``: ``shot_text`` (regular expressions), ``film`` (a named rule over the whole
-  story) and ``shot`` (a named rule over one shot).
+- ``match``: ``shot_text`` (regular expressions, any one hits), ``with`` (one of these
+  must also hit) and ``unless`` (none of these may), ``film`` (a named rule over the
+  whole story) and ``shot`` (a named rule over one shot).
 - ``risk``, ``evidence``, ``retest_after``: free text for whoever maintains the entry.
 
-``cause``, ``fix`` and ``assistant`` reach people through Inky: no model names, suppliers,
-prices or internal ids there. A broken table stops the app at import.
+``cause``, ``fix``, ``assistant``, ``prevent`` and ``ask`` reach people through Inky: no
+model names, suppliers, prices or internal ids there. A broken table stops the app at
+import.
 
 Two files, one table. ``pitfalls.json`` ships with the code, and this repository is public,
 so it holds only what may be public. Measured lessons live in a private file in the same
@@ -65,7 +69,7 @@ USES = ("complaint", "prevent", "check")
 HOW = ("code", "judge", "human")
 FIELDS = {
     "id", "status", "uses", "models", "match", "risk", "cause", "prevent", "check",
-    "user_words", "fix", "assistant", "evidence", "measured", "retest_after",
+    "user_words", "fix", "assistant", "evidence", "measured", "retest_after", "ask",
 }  # fmt: skip
 _ID = re.compile(r"^[a-z]+\.[a-z0-9_]+$")
 _DATED = re.compile(r"^20\d\d-\d\d-\d\d \S")
@@ -73,6 +77,20 @@ _DATED = re.compile(r"^20\d\d-\d\d-\d\d \S")
 
 def _text(value):
     return isinstance(value, str) and bool(value.strip())
+
+
+def _said(value):
+    """One text, or the same text in Chinese and English."""
+    if isinstance(value, dict):
+        return set(value) == {"zh", "en"} and all(map(_text, value.values()))
+    return _text(value)
+
+
+def in_language(value, language):
+    """A ``prevent`` or ``ask`` text for a shot written in this language."""
+    if isinstance(value, dict):
+        return value["zh" if language == "zh" else "en"]
+    return value
 
 
 def problems(entry):
@@ -116,7 +134,14 @@ def problems(entry):
     if {"prevent", "check"} & set(uses) and status != "in_use":
         found.append("unmeasured_entry_switched_on")
     if "prevent" in uses:
-        found += [key for key in ("match", "prevent", "risk") if not entry.get(key)]
+        found += [key for key in ("match", "risk") if not entry.get(key)]
+        if not _said(entry.get("prevent")):
+            found.append("prevent")
+        shown = json.dumps([entry.get("prevent"), entry.get("ask")], ensure_ascii=False)
+        if INTERNAL.search(shown):
+            found.append("names_internals")
+    if "ask" in entry and not _said(entry["ask"]):
+        found.append("ask")
     if "check" in uses:
         check = entry.get("check")
         if (
@@ -128,14 +153,20 @@ def problems(entry):
         ):
             found.append("check")
     match = entry.get("match", {})
-    if not isinstance(match, dict) or set(match) - {"shot_text", "film", "shot"}:
+    keys = {"shot_text", "with", "unless", "film", "shot"}
+    if not isinstance(match, dict) or set(match) - keys:
         found.append("match")
     else:
-        for pattern in match.get("shot_text", []):
-            try:
-                re.compile(pattern)
-            except (re.error, TypeError):
-                found.append("match_shot_text")
+        for key in ("shot_text", "with", "unless"):
+            patterns = match.get(key, [])
+            if not isinstance(patterns, list):
+                found.append(f"match_{key}")
+                continue
+            for pattern in patterns:
+                try:
+                    re.compile(pattern)
+                except (re.error, TypeError):
+                    found.append(f"match_{key}")
     return found
 
 

@@ -47,8 +47,8 @@ flowchart TD
 | `uses` | 这条在哪里起作用：`complaint` 用户抱怨时小墨照它回答；`prevent` 开拍前改镜头文字；`check` 拍完后检查 |
 | `measured` | 以日期开头的一行：测了什么、哪个模型、出现率。`proposed` 以外的状态必须有 |
 | `models` | 在哪些模型和版本上测的 |
-| `match` | 触发条件：`shot_text`（正则）、`film`（整个故事的规则名）、`shot`（单个镜头的规则名） |
-| `prevent` / `check` | 开拍前怎么改；拍完怎么查（`how` 是 `code`、`judge` 或 `human`，带问题和期望答案） |
+| `match` | 触发条件：`shot_text`（正则，中一条就算）、`with`（还必须中其中一条）、`unless`（中了就不算）、`film`（整个故事的规则名）、`shot`（单个镜头的规则名） |
+| `prevent` / `ask` / `check` | 开拍前给的建议；用户可以一键发给小墨的请求（`{number}` 是镜头号）；拍完怎么查（`how` 是 `code`、`judge` 或 `human`，带问题和期望答案）。`prevent` 和 `ask` 可以是一段文字，也可以分 `zh` 和 `en` |
 | `user_words` / `cause` / `fix` / `assistant` | 用户会怎么说；原因；修法；小墨能做什么 |
 
 规则只有一条：**凭证据进，复测不过就出。** 没测过的条目只能在用户自己说出毛病时拿来回答（`complaint`）；要改用户没抱怨的镜头（`prevent`）或给镜头下判断（`check`），必须是 `in_use` 并带一行有日期的实测。目前只有 `complaint` 有代码在读，另外两处先按同一条规则立好。

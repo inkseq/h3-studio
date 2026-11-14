@@ -96,6 +96,32 @@ class PitfallFormatTests(unittest.TestCase):
         for entry, problem in cases:
             self.assertIn(problem, pitfalls.problems(entry), problem)
 
+    def test_advice_before_shooting_may_be_in_two_languages_with_narrowing_rules(self):
+        both = {"zh": "把东西放进首帧。", "en": "Put the object in the first frame."}
+        entry = {
+            **RULE,
+            "prevent": both,
+            "ask": {"zh": "帮我改第 {number} 镜", "en": "Fix shot {number} for me"},
+            "match": {"shot_text": ["皮筋"], "with": ["抽|拿"], "unless": ["松开"]},
+        }
+        self.assertEqual(pitfalls.problems(entry), [])
+        self.assertEqual(pitfalls.in_language(both, "zh"), both["zh"])
+        self.assertEqual(pitfalls.in_language(both, "fr"), both["en"])
+        self.assertEqual(pitfalls.in_language("one text", "zh"), "one text")
+        cases = (
+            ({**entry, "prevent": {"zh": "只有中文"}}, "prevent"),
+            ({**entry, "ask": {"zh": "", "en": "x"}}, "ask"),
+            ({**entry, "match": {"shot_text": ["a"], "unless": ["("]}}, "match_unless"),
+            ({**entry, "match": {"shot_text": ["a"], "with": "b"}}, "match_with"),
+            (
+                {**entry, "prevent": {"zh": "换成 Pika 试试", "en": "x"}},
+                "names_internals",
+            ),
+            ({**entry, "ask": "Ask Gemini about shot {number}"}, "names_internals"),
+        )
+        for bad, problem in cases:
+            self.assertIn(problem, pitfalls.problems(bad), problem)
+
     def test_a_broken_table_stops_the_app(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "pitfalls.json"
