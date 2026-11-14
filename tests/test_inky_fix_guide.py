@@ -8,6 +8,7 @@ import unittest
 from fastapi.testclient import TestClient
 
 from studio_platform import inky_fix_guide as guide
+from studio_platform import pitfalls
 from studio_platform.api import create_app
 from studio_platform.prompt_files import text as prompt_text
 from studio_platform.settings import Settings
@@ -44,18 +45,13 @@ ENGLISH = {
     "line_late": "The line comes late, he waits before speaking",
     "extra_person": "Someone appeared behind her, who is that?",
 }
-# Names users must never see (owner: no models, suppliers, prices or internal steps).
-INTERNAL = re.compile(
-    r"H3|Pika|EveryFrame|Vivix|Modal|RunPod|Gemini|Terra|Jev|Eleven|Seedance|Kling|"
-    r"\bL20\d{6}|USD|\$|\.py\b|ASR|识别时间戳|omni",
-    re.I,
-)
+INTERNAL = pitfalls.INTERNAL
 
 
 class FixGuideRowTests(unittest.TestCase):
     def test_every_row_is_found_by_its_complaint(self):
         self.assertEqual(
-            {"take." + name for name in COMPLAINTS}, {row["id"] for row in guide.ROWS}
+            {"take." + name for name in COMPLAINTS}, {row["id"] for row in guide.rows()}
         )
         for row_id, complaint in {**COMPLAINTS, **ENGLISH}.items():
             found = guide.match(complaint)
@@ -63,14 +59,14 @@ class FixGuideRowTests(unittest.TestCase):
             self.assertEqual(found[0]["id"], "take." + row_id, complaint)
 
     def test_every_row_has_chinese_and_english_phrases(self):
-        for row in guide.ROWS:
+        for row in guide.rows():
             phrases = [phrase for phrase, _pattern in row["when"]]
             self.assertTrue(any(re.search(r"[㐀-鿿]", p) for p in phrases), row["id"])
             self.assertTrue(any(re.search(r"[a-z]", p) for p in phrases), row["id"])
 
     def test_rows_and_note_name_no_internals(self):
         said = [
-            f"{row['cause']} {row['fix']} {row['edit'] or ''}" for row in guide.ROWS
+            f"{row['cause']} {row['fix']} {row['edit'] or ''}" for row in guide.rows()
         ]
         text = " ".join(said) + prompt_text("inky_fix_note")
         self.assertIsNone(INTERNAL.search(text), INTERNAL.search(text))
@@ -99,10 +95,8 @@ class FixGuideRowTests(unittest.TestCase):
         self.assertIn("film editor", point)
 
     def test_rows_are_the_table_entries_that_answer_complaints(self):
-        from studio_platform import pitfalls
-
-        answering = [e["id"] for e in pitfalls.ENTRIES if "complaint" in e["uses"]]
-        self.assertEqual([row["id"] for row in guide.ROWS], answering)
+        answering = [e["id"] for e in pitfalls.BASE if "complaint" in e["uses"]]
+        self.assertEqual([row["id"] for row in guide.rows()], answering)
 
 
 class FixGuideTurnTests(unittest.TestCase):

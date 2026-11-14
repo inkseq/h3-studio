@@ -1,9 +1,14 @@
 """The pitfalls table: one format, and an entry acts only as far as its evidence goes (#1237)."""
 
+import contextlib
+import io
 import json
+import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from studio_platform import pitfalls
 
@@ -35,10 +40,10 @@ RULE = {
 
 class PitfallFormatTests(unittest.TestCase):
     def test_the_shipped_table_is_sound_and_ids_are_unique(self):
-        ids = [entry["id"] for entry in pitfalls.ENTRIES]
+        ids = [entry["id"] for entry in pitfalls.BASE]
         self.assertTrue(ids)
         self.assertEqual(len(ids), len(set(ids)))
-        for entry in pitfalls.ENTRIES:
+        for entry in pitfalls.BASE:
             self.assertEqual(pitfalls.problems(entry), [], entry["id"])
 
     def test_sound_entries_pass(self):
@@ -102,7 +107,7 @@ class PitfallFormatTests(unittest.TestCase):
             self.assertEqual(len(pitfalls.load(path)), 2)
 
     def test_used_for_keeps_the_table_order(self):
-        answering = [e["id"] for e in pitfalls.ENTRIES if "complaint" in e["uses"]]
+        answering = [e["id"] for e in pitfalls.BASE if "complaint" in e["uses"]]
         self.assertEqual([e["id"] for e in pitfalls.used_for("complaint")], answering)
         self.assertEqual(pitfalls.used_for("nothing"), ())
 
@@ -110,6 +115,130 @@ class PitfallFormatTests(unittest.TestCase):
         for ignore in (".gitignore", ".dockerignore"):
             text = (REPO / ignore).read_text(encoding="utf-8")
             self.assertIn("!studio_platform/pitfalls.json", text, ignore)
+
+
+class PrivateTableTests(unittest.TestCase):
+    """Measured lessons live outside this public repository and are laid over the table."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.addCleanup(pitfalls.configure, None)
+        self.path = Path(folder.name) / "runtime-secrets" / pitfalls.PRIVATE_NAME
+        self.path.parent.mkdir()
+        # The real reader wants a root-owned file; these tests are about the table.
+        plain = mock.patch.object(
+            pitfalls, "_read_private", lambda path: json.loads(path.read_text("utf-8"))
+        )
+        plain.start()
+        self.addCleanup(plain.stop)
+        every_look = mock.patch.object(pitfalls, "RECHECK_SECONDS", 0)
+        every_look.start()
+        self.addCleanup(every_look.stop)
+        pitfalls.configure(SimpleNamespace(data_dir=folder.name))
+
+    def write(self, entries):
+        self.path.write_text(json.dumps({"entries": entries}), encoding="utf-8")
+        os.utime(self.path, ns=(self.stamp(), self.stamp()))
+
+    def stamp(self):
+        self.tick = getattr(self, "tick", 1_000_000_000) + 1_000_000_000
+        return self.tick
+
+    def test_without_a_private_file_the_public_table_is_in_force(self):
+        self.assertEqual(pitfalls.state(), "absent")
+        self.assertIs(pitfalls.entries(), pitfalls.BASE)
+
+    def test_private_entries_replace_by_id_and_new_ones_follow(self):
+        first = pitfalls.BASE[0]
+        mine = {**first, "fix": "A better fix."}
+        self.write([RULE, mine])
+        self.assertEqual(pitfalls.state(), "loaded")
+        table = pitfalls.entries()
+        self.assertEqual(table[0]["fix"], "A better fix.")
+        self.assertEqual(
+            [e["id"] for e in table[:-1]], [e["id"] for e in pitfalls.BASE]
+        )
+        self.assertEqual(table[-1]["id"], RULE["id"])
+        self.assertEqual([e["id"] for e in pitfalls.used_for("prevent")], [RULE["id"]])
+
+    def test_the_fix_guide_follows_the_table_in_force(self):
+        from studio_platform import inky_fix_guide as guide
+
+        self.assertEqual(guide.match("画面里有只猫头鹰"), [])
+        owl = {**ANSWER, "id": "take.owl", "user_words": ["猫头鹰", "an owl"]}
+        self.write([owl])
+        self.assertEqual(
+            [row["id"] for row in guide.match("画面里有只猫头鹰")], ["take.owl"]
+        )
+        self.path.unlink()
+        self.assertEqual(guide.match("画面里有只猫头鹰"), [])
+        self.assertEqual(pitfalls.state(), "absent")
+
+    def test_an_unsound_private_file_changes_nothing_and_is_logged_without_content(
+        self,
+    ):
+        cases = (
+            [{**ANSWER, "fix": "Use Gemini instead."}],
+            [{**RULE, "status": "proposed"}],
+            [ANSWER, ANSWER],
+            "not a table",
+        )
+        for entries in cases:
+            with self.assertLogs("studio_platform.pitfalls", "WARNING") as logs:
+                self.write(entries)
+                self.assertEqual(pitfalls.state(), "invalid")
+            self.assertIs(pitfalls.entries(), pitfalls.BASE)
+            self.assertNotIn("Gemini", "".join(logs.output))
+        self.write([ANSWER])
+        self.assertEqual(pitfalls.state(), "loaded")
+
+    def test_the_file_is_read_once_per_change(self):
+        reads = []
+
+        def counting(path):
+            reads.append(1)
+            return json.loads(path.read_text("utf-8"))
+
+        with mock.patch.object(pitfalls, "_read_private", counting):
+            self.write([ANSWER])
+            for _ in range(5):
+                pitfalls.entries()
+            self.assertEqual(len(reads), 1)
+            self.write([ANSWER, RULE])
+            self.assertEqual(len(pitfalls.entries()), len(pitfalls.BASE) + 2)
+            self.assertEqual(len(reads), 2)
+
+    @unittest.skipIf(
+        os.name == "nt" or os.geteuid() == 0, "needs a non-root POSIX user"
+    )
+    def test_a_private_file_must_be_root_owned(self):
+        mock.patch.stopall()
+        self.addCleanup(pitfalls.configure, None)
+        with mock.patch.object(pitfalls, "RECHECK_SECONDS", 0):
+            pitfalls.configure(SimpleNamespace(data_dir=str(self.path.parents[1])))
+            self.path.write_text(json.dumps({"entries": [ANSWER]}), encoding="utf-8")
+            with self.assertLogs("studio_platform.pitfalls", "WARNING"):
+                self.assertEqual(pitfalls.state(), "invalid")
+            self.assertIs(pitfalls.entries(), pitfalls.BASE)
+
+    def test_the_check_command(self):
+        def run(*argv):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = pitfalls.main(list(argv))
+            return code, out.getvalue()
+
+        self.assertEqual(run("check", str(pitfalls.PATH))[0], 0)
+        self.write([ANSWER, RULE])
+        code, said = run("check", str(self.path))
+        self.assertEqual(code, 0)
+        self.assertIn("2 entries", said)
+        self.write([{**RULE, "status": "measured"}])
+        code, said = run("check", str(self.path))
+        self.assertEqual(code, 1)
+        self.assertIn("unmeasured_entry_switched_on", said)
+        self.assertEqual(run("install")[0], 2)
 
 
 if __name__ == "__main__":
