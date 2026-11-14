@@ -43,18 +43,27 @@ def _row(entry):
     }
 
 
-ROWS = tuple(_row(entry) for entry in pitfalls.used_for("complaint"))
+_built = (None, ())
+
+
+def rows():
+    """The answering rows of the table in force; rebuilt only when the table changes."""
+    global _built
+    table = pitfalls.entries()
+    if _built[0] is not table:
+        _built = (table, tuple(_row(e) for e in table if "complaint" in e["uses"]))
+    return _built[1]
 
 
 def match(text, limit=LIMIT):
     """Rows whose phrases appear in the message, the longest total match first."""
-    lowered = text.lower()
+    lowered, table = text.lower(), rows()
     scored = []
-    for index, row in enumerate(ROWS):
+    for index, row in enumerate(table):
         score = sum(len(p) for p, pattern in row["when"] if pattern.search(lowered))
         if score:
             scored.append((-score, index))
-    return [ROWS[index] for _score, index in sorted(scored)[:limit]]
+    return [table[index] for _score, index in sorted(scored)[:limit]]
 
 
 def has_take(cards):
