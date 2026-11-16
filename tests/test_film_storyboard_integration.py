@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import shutil
 import unittest
+from unittest import mock
 
 from sqlalchemy import select, func
 
@@ -283,6 +284,18 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
             )
         with self.assertRaises(NotFound):
             app.state.resolve_render_source(principal, 'another-story', source, 'video')
+        import studio_platform.worker as worker_module
+
+        encodes = []
+        real_ffmpeg = worker_module.ffmpeg
+
+        def spy(args, *rest, **options):
+            encodes.append([str(item) for item in args])
+            return real_ffmpeg(args, *rest, **options)
+
+        spy_patch = mock.patch.object(worker_module, 'ffmpeg', side_effect=spy)
+        spy_patch.start()
+        self.addCleanup(spy_patch.stop)
         for job_id in chapter_ids:
             finish(renderer, job_id, POOL)
         self.assertEqual(
@@ -291,6 +304,12 @@ class FilmStoryboardIntegrationTests(unittest.TestCase):
         export_id = value()['export']['job_id']
         self.assertIsNotNone(export_id)
         finish(renderer, export_id, POOL)
+        spy_patch.stop()
+        # The renderer's own CRF-18 output is rewrapped at collection, never
+        # encoded a second time (that doubled export time on a 2 vCPU host).
+        self.assertTrue(encodes)
+        self.assertFalse([args for args in encodes if 'libx264' in args])
+        self.assertTrue([args for args in encodes if 'copy' in args])
         self.assertEqual(
             execution.turn(principal, 'story-one', preview['id']),
             {'terminal': True, 'phase': 'completed'},

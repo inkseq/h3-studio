@@ -188,6 +188,34 @@ def probe(path: Path):
         ) from None
 
 
+def pixel_format(path: Path):
+    """First video stream's pixel format; "" when it cannot be read."""
+    try:
+        result = run_media_process(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                *input_options(path),
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=pix_fmt",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            check=True,
+            memory_bytes=LIGHT_MEDIA_ADDRESS_SPACE_BYTES,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.decode("ascii", "replace").strip()
+
+
 def ffmpeg(args, timeout=180, *, memory_bytes=DEFAULT_ADDRESS_SPACE_BYTES):
     # Scope these input-only restrictions to EVERY input. Restricting protocols
     # alone still permits concat/HLS manifests to read other local files.
