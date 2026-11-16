@@ -772,12 +772,12 @@ test('readiness hints follow the version on screen and skip what the editor alre
 test('shots shorter than the video model makes are named for the fix', async () => {
   const { shotsTooShort, SHORTEST_SHOT_SECONDS } = await import('./storyboard-domain.js');
   const entities = [
-    { id: 'a', type: 'shot', data: { seconds: 3 } },
-    { id: 'b', type: 'shot', data: { seconds: 4 } },
+    { id: 'a', type: 'shot', data: { seconds: 4 } },
+    { id: 'b', type: 'shot', data: { seconds: 5 } },
     { id: 'c', type: 'shot', data: {} },
     { id: 'd', type: 'character', data: { seconds: 1 } },
   ];
-  assert.equal(SHORTEST_SHOT_SECONDS, 4);
+  assert.equal(SHORTEST_SHOT_SECONDS, 5);
   assert.deepEqual(
     shotsTooShort(['a', 'b', 'c', 'd', 'a', 'missing'], entities).map((shot) => shot.id),
     ['a'],

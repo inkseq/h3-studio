@@ -31,6 +31,8 @@ SLOTS_PER_MODEL = 4
 # literally (#918, 2026-11-01); our shots are already split by the storyboard.
 NO_CUT = "Single continuous shot with no cuts, no scene changes and steady lighting."
 RESOLUTIONS = {"480P": "480p", "768P": "768p", "1080P": "1080p", "2K": "2K"}
+# Whole seconds the hosted route makes; a shot outside it waits for one of our machines.
+SECONDS = range(5, 16)
 
 
 @dataclass(frozen=True)
@@ -185,7 +187,7 @@ def vendor_request(compiled, model_id):
     if (
         request.get("resolution") not in model.resolutions
         or request.get("aspect_ratio") not in model.aspects
-        or request.get("duration") not in range(5, 16)
+        or request.get("duration") not in SECONDS
         or not isinstance(prompt, str)
         or not 1 <= len(prompt) <= model.max_prompt - len(NO_CUT) - 1
         or request.get("guides")

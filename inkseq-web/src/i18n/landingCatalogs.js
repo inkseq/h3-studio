@@ -29,7 +29,7 @@ export const landingCatalogs = {
     'landing.v2.assistantName': 'Inky',
     'landing.v2.chat1': 'A girl at a rainy train station receives an old letter.',
     'landing.v2.chat2':
-      'Done: I made the character Lin Lan, the scene Rainy platform and the prop Old letter, in five shots of 4–6 seconds. Filming a Standard version for you now.',
+      'Done: I made the character Lin Lan, the scene Rainy platform and the prop Old letter, in five shots of 5–6 seconds. Filming a Standard version for you now.',
     'landing.v2.chat3': 'Shot 3, 0:02–0:03: she opens the letter too slowly. Keep her expression.',
     'landing.v2.chat4':
       'Redoing only that second of the letter; the character, scene, framing and expression stay. Here it is next to the old one.',
@@ -134,7 +134,7 @@ export const landingCatalogs = {
     'landing.v2.assistantName': '小墨滴',
     'landing.v2.chat1': '我想拍一个女生在雨夜车站，收到一封旧信。',
     'landing.v2.chat2':
-      '好。我建了角色「林岚」、场景「雨夜站台」和道具「旧信」，拆成 5 个镜头，每镜 4–6 秒。先生成普通版本给你看。',
+      '好。我建了角色「林岚」、场景「雨夜站台」和道具「旧信」，拆成 5 个镜头，每镜 5–6 秒。先生成普通版本给你看。',
     'landing.v2.chat3': '第 3 镜 0:02–0:03 拆信太慢了，表情很好，保留。',
     'landing.v2.chat4':
       '只重做这 1 秒的拆信动作；人物、场景、镜头和表情不变。改好了，放在旁边给你比。',

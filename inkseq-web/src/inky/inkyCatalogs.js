@@ -46,6 +46,8 @@ export const inkyCatalogs = {
     'inky.tip.multiple_camera_moves':
       'One shot can follow one camera move. Keep one and move the rest to another shot.',
     'inky.tip.action_too_long': 'This is more than the shot has time for. Keep one or two actions.',
+    'inky.tip.pitfall': 'Before you make this video:',
+    'inky.perch.pitfall': 'Change the words here before making the video.',
     'inky.tip.continuity_mismatch': 'This does not match shot {other}.',
     'inky.tip.continuity_mismatch_card': 'This does not match the card.',
     'inky.tip.continuity_question': 'Does this need explaining after shot {other}?',
@@ -102,6 +104,8 @@ export const inkyCatalogs = {
     'inky.tip.emotion_not_shown': '情绪拍不出来，要写成身体动作，比如低头、攥紧衣角。',
     'inky.tip.multiple_camera_moves': '一个镜头只能做一个运镜，留一个，其余的拆到别的镜头。',
     'inky.tip.action_too_long': '动作太多，这个镜头的时长装不下，留一两个就好。',
+    'inky.tip.pitfall': '生成视频前留意：',
+    'inky.perch.pitfall': '生成视频前，在这里改一下文字。',
     'inky.tip.continuity_mismatch': '和镜头 {other} 对不上。',
     'inky.tip.continuity_mismatch_card': '和卡片上的设定对不上。',
     'inky.tip.continuity_question': '和镜头 {other} 之间要交代一下吗？',
