@@ -10,6 +10,9 @@ const KIND = { characters: 'character', places: 'place', props: 'prop' };
 
 // Pictures drawn at once within one confirm (h3-studio#1246).
 const PICTURES_AT_ONCE = 3;
+// A checked plan admits a batch for 15 minutes; a check is reused only within ten, so a
+// price shown later is never one whose plans have already lapsed (h3-studio#1263).
+const PRICE_REUSE_MS = 600000;
 function cardsFromServer(view) {
   const cards = [];
   for (const [group, kind] of Object.entries(KIND))
@@ -283,6 +286,13 @@ export function planCredits(receipt) {
 
 // What a batch reply says about the priced shots: refused items (credits, limits, a changed
 // shot; a 202 can still refuse some), the shots actually started, and the credits they cost.
+// Every item refused because its plan lapsed (plans hold 15 minutes), not yet checked again.
+const plansLapsed = (quote, refused, started) =>
+  !started.length &&
+  !quote.rechecked &&
+  refused.length > 0 &&
+  refused.every((item) => item.error_code === 'plan_no_longer_valid');
+
 export function batchOutcome(batch, quote) {
   const items = Array.isArray(batch?.items) ? batch.items : [];
   const index = Object.fromEntries((quote.plans || []).map((plan, at) => [plan, at]));
@@ -522,8 +532,10 @@ export function createLiveChat({
       receipt = await api.request(path + '/storyboard/preflights', {
         method: 'POST',
         body: { expected_version: current.version, shot_ids: shots, copies: 1 },
-        // One check per offer and story version: a retry finds the same plans.
-        key: `chat-${quote.id}-v${current.version}`.replace(/[^A-Za-z0-9_-]/g, '').slice(-120),
+        // One check per offer, story version and ten minutes: a retry finds the same plans.
+        key: `chat-${quote.id}-v${current.version}-t${Math.floor(Date.now() / PRICE_REUSE_MS)}`
+          .replace(/[^A-Za-z0-9_-]/g, '')
+          .slice(-120),
         timeoutMs: 180000,
       });
     } catch {
@@ -559,6 +571,14 @@ export function createLiveChat({
       costs: receipt.items.map((item) => item.plan.credits),
       version: receipt.project_version,
     });
+  }
+  // The plans lapsed between the price and the click: check again (h3-studio#1263). The same
+  // price goes ahead; a different one is shown to confirm.
+  async function recheck(chat, quote, emit) {
+    await priceShots(quote, emit);
+    const fresh = extra[quote.id];
+    if (settled[quote.id] === 'priced' && fresh?.credits === quote.credits)
+      await chat.make({ ...quote, ...fresh, rechecked: true }, emit);
   }
   // Watch the offer's shots: "Making…" until each take arrives, then the story is re-read so
   // the finished takes appear. Stops when every shot is finished.
@@ -657,6 +677,7 @@ export function createLiveChat({
       // A 202 can still refuse items (credits, limits, a changed shot): those shots are not
       // being made, so they are not watched, and Works is offered for them.
       const { items, refused, started, spent } = batchOutcome(batch, quote);
+      if (plansLapsed(quote, refused, started)) return recheck(this, quote, emit);
       if (refused.length)
         emit({
           type: 'assistant.message',
