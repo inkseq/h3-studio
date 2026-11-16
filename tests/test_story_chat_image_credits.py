@@ -392,6 +392,19 @@ class RealCreditImageTests(unittest.TestCase):
         self.assertEqual(list(self.images.pictures), [])
         self.assertEqual(self.balance(), (90, 0))
 
+    def test_a_new_picture_starts_the_voice_excerpt_warm_up(self):
+        from unittest import mock
+
+        self.assertIsNotNone(self.app.state.generation_admission)
+        with mock.patch(
+            "studio_platform.generation_admission.warm_excerpts_soon"
+        ) as warm:
+            self.assertEqual(self.draw("pic-warm-0001").status_code, 200)
+            # A replay of a finished picture draws nothing and warms nothing.
+            self.assertEqual(self.draw("pic-warm-0001").status_code, 200)
+        self.assertEqual(warm.call_count, 1)
+        self.assertEqual(warm.call_args.args[2], self.path.split("/")[3])
+
     def test_a_busy_storage_slot_is_waited_for_not_lost(self):
         from unittest import mock
 

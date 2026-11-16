@@ -110,6 +110,10 @@ def create_app(
         try:
             yield
         finally:
+            # A voice excerpt cut killed midway would keep a storage slot busy.
+            admission = getattr(app.state, "generation_admission", None)
+            if admission is not None:
+                await asyncio.to_thread(admission.drain_warmups)
             await app.state.quick_chat_recovery.close()
             capacity = getattr(
                 getattr(app.state, "dstack_operator", None), "capacity", None
