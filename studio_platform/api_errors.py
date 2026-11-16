@@ -117,6 +117,18 @@ def register_handlers(app, *, repository, settings):
         # Closed monetary vocabulary: capacity failures must not masquerade as
         # a depleted account, and exception strings must never expose secrets.
         code = str(error)
+        # The generic reply below hides which limit refused; the log keeps it, by class and a
+        # code from a closed set only, never the message text (h3-studio#1246).
+        import logging
+
+        known = code if code.isascii() and code.replace("_", "").isalnum() else "other"
+        logging.getLogger(__name__).warning(
+            "budget_refusal kind=%s code=%s method=%s path_kind=%s",
+            type(error).__name__,
+            known[:60],
+            _request.method,
+            _request.url.path.rsplit("/", 1)[-1][:40],
+        )
         from .agent_management import record_refusal
 
         record_refusal(

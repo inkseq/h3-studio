@@ -378,3 +378,66 @@ test('oversized Retry-After is surfaced instead of retrying sooner than the serv
   await assert.rejects(api.projects(), (error) => error.status === 429);
   assert.equal(attempts, 1);
 });
+
+test('a keyed write refused at the door is sent again with the same key (h3-studio#1246)', async () => {
+  const door = () =>
+    new Response('{"detail":"busy","code":"request_capacity_busy"}', {
+      status: 429,
+      headers: { 'Retry-After': '0' },
+    });
+  const keys = [];
+  const api = createCloudClient({
+    fetcher: async (_path, options) => {
+      keys.push(options.headers['Idempotency-Key']);
+      return keys.length === 1 ? door() : new Response('{"id":"job-1"}');
+    },
+  });
+  await api.submit('plan-one', 'original-intent');
+  assert.deepEqual(keys, ['original-intent', 'original-intent']);
+  // Any other refusal of a write, or a write without a key, is still never sent again.
+  let count = 0;
+  const unkeyed = createCloudClient({
+    fetcher: async () => {
+      count++;
+      return door();
+    },
+  });
+  await assert.rejects(
+    unkeyed.request('/v1/feedback', { method: 'POST', body: {} }),
+    (error) => error.status === 429,
+  );
+  assert.equal(count, 1);
+});
+
+test('a price check refused for capacity is tried again with the same key; a write is not', async () => {
+  const refuse = () =>
+    new Response('{"detail":"no","code":"capacity_unavailable"}', { status: 429 });
+  const seen = [];
+  const api = createCloudClient({
+    fetcher: async (path, options) => {
+      seen.push([path, options.headers['Idempotency-Key']]);
+      return seen.length === 1 ? refuse() : new Response('{"id":"pf"}');
+    },
+  });
+  await api.request('/v1/projects/p/storyboard/preflights', {
+    method: 'POST',
+    body: {},
+    key: 'check-1',
+  });
+  assert.deepEqual(
+    seen.map(([, key]) => key),
+    ['check-1', 'check-1'],
+  );
+  let batches = 0;
+  const paid = createCloudClient({
+    fetcher: async () => {
+      batches++;
+      return refuse();
+    },
+  });
+  await assert.rejects(
+    paid.request('/v1/batches', { method: 'POST', body: {}, key: 'batch-1' }),
+    (error) => error.status === 429,
+  );
+  assert.equal(batches, 1);
+});
