@@ -1338,23 +1338,23 @@ class FilmTests(unittest.TestCase):
         )
         self.assertEqual(value['snapshot_hash'], request_hash(value['project']))
         finish(value['chapters'][0]['job_id'])
-        self.assertEqual(
-            self.service.turn(self.principal, 'story-one', preview['id'])['phase'],
-            'exporting',
-        )
-        value = self.raw(preview['id'])
-        export = self.repo.get_plan(self.scope, value['export']['plan_id'])
-        self.assertEqual(
-            next(iter(export['request']['sources'].values()))['object']['content_type'],
-            'video/mp4',
-        )
-        finish(value['export']['job_id'])
+        # One chapter already is the film: no film_concat job rewraps it (#1252).
         self.assertEqual(
             self.service.turn(self.principal, 'story-one', preview['id']),
             {'terminal': True, 'phase': 'completed'},
         )
+        value = self.raw(preview['id'])
+        self.assertEqual(
+            value['export'],
+            {
+                'plan_id': None,
+                'job_id': value['chapters'][0]['job_id'],
+                'artifact_id': value['chapters'][0]['artifact_id'],
+            },
+        )
+        self.assertIsNotNone(value['export']['artifact_id'])
         self.service.turn(self.principal, 'story-one', preview['id'])
-        self.assertEqual(len(admitted), 3)
+        self.assertEqual(len(admitted), 2)
         self.assertEqual(
             self.repo.get_document(
                 Scope('tenant', 'owner', '__projects'), 'project', 'story-one'
@@ -1362,7 +1362,7 @@ class FilmTests(unittest.TestCase):
             edited,
         )
 
-    def test_replayed_film_reuses_chapter_and_export_original_ids(self):
+    def test_replayed_single_chapter_film_reuses_its_chapter_as_the_film(self):
         preview = self.preview()
         with patch(
             'studio_platform.spending_limits.check_submission_confirmation',
@@ -1444,29 +1444,25 @@ class FilmTests(unittest.TestCase):
                 version,
             )
             jobs[next(iter(jobs))]['status'] = 'succeeded'
-            self.assertEqual(
-                self.service.turn(self.principal, 'story-one', preview['id'])['phase'],
-                'exporting',
-            )
-            waiting = self.service.get(self.principal, 'story-one', preview['id'])
-            self.assertEqual(waiting['counts']['chapters_completed'], 1)
-            self.assertIsNotNone(waiting['chapters'][0]['artifact_id'])
+            first = self.service.turn(self.principal, 'story-one', preview['id'])
+            self.assertEqual(first, {'terminal': True, 'phase': 'completed'})
+            done = self.service.get(self.principal, 'story-one', preview['id'])
+            self.assertEqual(done['counts']['chapters_completed'], 1)
+            self.assertEqual(done['counts']['export_completed'], 1)
+            final = self.raw(preview['id'])
             version = self.repo.get_document(self.scope, KIND, preview['id'])['version']
-            self.service.turn(self.principal, 'story-one', preview['id'])
+            again = self.service.turn(self.principal, 'story-one', preview['id'])
             self.assertEqual(
                 self.repo.get_document(self.scope, KIND, preview['id'])['version'],
                 version,
             )
-            for job in jobs.values():
-                job['status'] = 'succeeded'
-            first = self.service.turn(self.principal, 'story-one', preview['id'])
-            self.assertEqual(first, {'terminal': True, 'phase': 'completed'})
-            final = self.raw(preview['id'])
-            again = self.service.turn(self.principal, 'story-one', preview['id'])
         self.assertEqual(again, first)
-        self.assertEqual(len(admitted), 2)
-        self.assertEqual(len(jobs), 2)
-        self.assertIsNotNone(final['export']['artifact_id'])
+        self.assertEqual(len(admitted), 1)
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(final['export']['job_id'], final['chapters'][0]['job_id'])
+        self.assertEqual(
+            final['export']['artifact_id'], final['chapters'][0]['artifact_id']
+        )
         self.assertEqual(
             self.repo.get_document(
                 Scope('tenant', 'owner', '__projects'), 'project', 'story-one'
