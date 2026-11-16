@@ -25,9 +25,11 @@ from .generation_admission import SHOT_PHASES, PreflightReads, shot_phases
 from .repository import Conflict, NotFound
 
 LOG = logging.getLogger(__name__)
-# Shots plan in parallel: each one mostly waits on the prompt rewrite and the
-# database. Four keeps one preflight well inside the default connection pool.
-MAX_WORKERS = 4
+# Shots plan in parallel: each one mostly waits on the prompt rewrite (~9 s, a
+# model call) and voice excerpt cuts (~11 s on staging, 2026-11-16, #1246); the
+# database is used only in short transactions. Six plans a typical 5-6 shot story
+# in one round and stays inside the default connection pool (5 + 10 overflow).
+MAX_WORKERS = 6
 # Above this the line is a warning, so it shows with the default log level.
 SLOW_MS = 1000
 CLOSING = {
