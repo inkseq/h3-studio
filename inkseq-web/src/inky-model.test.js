@@ -1,6 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { canRewrite, cornerState, itemHref, openItems, otherHref } from './inky/inky-model.js';
+import {
+  askFor,
+  canRewrite,
+  cornerState,
+  itemHref,
+  openItems,
+  otherHref,
+} from './inky/inky-model.js';
 
 const item = (id, kind = 'vague_action', shot_id = 's1') => ({ id, kind, shot_id });
 
@@ -46,4 +53,26 @@ test('two shots that disagree are for the person to settle, with a way to the ot
   assert.equal(openItems([note]).length, 1);
   assert.match(otherHref(note, 'project-1'), /entity=s1/);
   assert.match(itemHref(note, 'project-1'), /entity=s2/);
+});
+
+test('pre-shoot advice opens the action field, has no draft, and asks in its own words', () => {
+  const tip = {
+    id: 'p',
+    kind: 'pitfall',
+    shot_id: 's2',
+    field: 'action',
+    note: 'Words like "slowly" make the movement slow.',
+    ask: 'Remove the slow words from shot {number}',
+  };
+  assert.equal(openItems([tip]).length, 1);
+  assert.equal(canRewrite('pitfall'), false);
+  assert.equal(itemHref(tip, 'p1').includes('s2'), true);
+  const t = (key, values) => `${key}:${values.number}`;
+  assert.equal(askFor([tip], 's2', 3, t), 'Remove the slow words from shot 3');
+  assert.equal(askFor([tip], 's1', 3, t), '');
+  assert.equal(askFor([{ ...tip, ask: undefined }], 's2', 3, t), '');
+  assert.equal(
+    askFor([{ id: 'v', kind: 'vague_action', shot_id: 's2' }], 's2', 3, t),
+    'inky.ask.vague_action:3',
+  );
 });

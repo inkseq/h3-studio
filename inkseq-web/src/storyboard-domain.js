@@ -14,7 +14,7 @@ const find = (p, id) => p.entities.find((e) => e.id === id);
 const mode = (shot) => shot.data.storyboard?.mode || shot.data.h3?.inputMode || 'fl';
 const list = (value) => (Array.isArray(value) ? value : []);
 // The video model makes nothing shorter; a shorter shot is refused at the generate check.
-export const SHORTEST_SHOT_SECONDS = 4;
+export const SHORTEST_SHOT_SECONDS = 5;
 
 // Shots in a refused check that are shorter than the video model can make (#1091).
 export function shotsTooShort(shotIds, entities) {

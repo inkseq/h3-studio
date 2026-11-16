@@ -11,12 +11,33 @@ export const INKY_KINDS = Object.freeze({
   action_too_long: 'action',
   needs_keyframe: 'frames',
   upload_card: 'cast',
+  // Pre-shoot advice from fixed rules on the shot's own text; the server sends note and ask.
+  pitfall: 'action',
 });
 export const INKY_MAX_OPEN = 3;
 // Advice about the action text: Inky can draft a new version of it.
 // Not when two shots disagree: which one is right is the person's call.
 export const isContinuity = (kind) => kind?.startsWith('continuity_');
-export const canRewrite = (kind) => INKY_KINDS[kind] === 'action' && !isContinuity(kind);
+export const canRewrite = (kind) =>
+  INKY_KINDS[kind] === 'action' && !isContinuity(kind) && kind !== 'pitfall';
+
+// The open tip for the selected shot, written as something the person may ask Inky. Pre-shoot
+// advice brings its own request in the shot's language; sending it is the person's own message.
+const ASKS = [
+  'vague_action',
+  'needs_keyframe',
+  'emotion_not_shown',
+  'multiple_camera_moves',
+  'action_too_long',
+];
+const asks = (item) =>
+  ASKS.includes(item.kind) || (item.kind === 'pitfall' && typeof item.ask === 'string');
+export function askFor(tips, selectedShot, number, t) {
+  const tip = selectedShot && tips.find((item) => item.shot_id === selectedShot && asks(item));
+  if (!tip) return '';
+  if (tip.kind === 'pitfall') return tip.ask.replaceAll('{number}', String(number));
+  return t('inky.ask.' + tip.kind, { number });
+}
 
 const valid = (item) =>
   item &&

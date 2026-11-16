@@ -11,6 +11,7 @@ import { Popover } from '../ui/Popover.jsx';
 import { Button } from '../ui/Button.jsx';
 import { InkyMark } from './InkyMark.jsx';
 import {
+  askFor,
   canRewrite,
   cornerState,
   isContinuity,
@@ -157,20 +158,7 @@ function InkyPerch({ perch, onClose, onRewrite, onApply }) {
 }
 
 // Typing to Inky (#1065). A reply says what changed; the latest change can be undone.
-// The open tip for this shot, written as something to ask Inky; Tab or → fills it in.
-const ASKS = [
-  'vague_action',
-  'needs_keyframe',
-  'emotion_not_shown',
-  'multiple_camera_moves',
-  'action_too_long',
-];
-function askFor(tips, selectedShot, shotNumber, t) {
-  const tip =
-    selectedShot && tips.find((item) => item.shot_id === selectedShot && ASKS.includes(item.kind));
-  return tip ? t('inky.ask.' + tip.kind, { number: shotNumber?.(selectedShot) ?? '' }) : '';
-}
-
+// The open tip for this shot, written as something to ask Inky (askFor); Tab or → fills it in.
 function InkyChat({ tips = [], shotNumber, selectedShot, onSend, onUndo }) {
   const { t } = useI18n();
   const [draft, setDraft] = useState(''),
@@ -209,7 +197,7 @@ function InkyChat({ tips = [], shotNumber, selectedShot, onSend, onUndo }) {
       say({ who: 'inky', text: t('inky.chat.undoFailed') });
     }
   };
-  const ask = askFor(tips, selectedShot, shotNumber, t);
+  const ask = askFor(tips, selectedShot, shotNumber?.(selectedShot) ?? '', t);
   return (
     <div className="inky-chat" data-keep-open>
       {talk.length > 0 && (
