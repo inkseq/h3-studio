@@ -34,8 +34,9 @@ MAX_ACTIONS = 40
 MAX_SCRIPT_ACTIONS = 120
 MAX_SHOTS = 60
 MAX_CARDS = 60
-# The video model's own limit is 4 to 15 seconds; a shorter shot can never be generated.
-SECONDS = (4, 10)
+# No shot is shorter than 5 seconds (owner, 2026-11-16): the hosted video route makes 5 to
+# 15 seconds, and a shorter shot would wait for one of our own machines to start.
+SECONDS = (5, 10)
 KINDS = {"character": "character", "place": "location", "prop": "prop"}
 TURN_ID = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 LANGUAGES = {"zh", "en"}

@@ -284,14 +284,21 @@ class StoryChatTests(unittest.TestCase):
         payload("gemini-3.8-flash", [*history, current], "i" * 6000, 16384, True)
 
     def test_shots_the_assistant_writes_can_be_generated(self):
-        # A 3 s shot passed the chat and failed at Generate (found 2026-11-06).
+        # A 3 s shot passed the chat and failed at Generate (found 2026-11-06). A 4 s shot was
+        # generated, but only on our own machine after a cold start: the hosted route starts
+        # at 5 s (found 2026-11-16). No shot the assistant writes is shorter than that.
         from studio_platform.inference.wangp_compiler import control_schema
+        from studio_platform.providers import hosted_models
         from studio_platform.story_chat import SECONDS, _seconds
 
-        shortest = control_schema()["duration"]["minimum"]
-        self.assertEqual(SECONDS[0], shortest)
-        self.assertEqual(_seconds(3), shortest)
-        self.assertIn(f"Shots are {shortest}-10 seconds", INSTRUCTION)
+        hosted = hosted_models.SECONDS
+        self.assertEqual(SECONDS[0], hosted.start)
+        self.assertIn(SECONDS[1], hosted)
+        self.assertGreaterEqual(SECONDS[0], control_schema()["duration"]["minimum"])
+        self.assertEqual(_seconds(3), SECONDS[0])
+        self.assertEqual(_seconds(4), SECONDS[0])
+        self.assertIn(f"Shots are {SECONDS[0]}-10 seconds", INSTRUCTION)
+        self.assertNotIn("4-5 second", INSTRUCTION)
 
     def test_the_instruction_fits_the_limit_with_pictures_on_and_off(self):
         for enabled in (True, False):
