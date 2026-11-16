@@ -27,6 +27,27 @@ export function shotsTooShort(shotIds, entities) {
     });
 }
 
+// The fast video route makes 5 to 15 seconds; a shot outside it waits for one of our own
+// machines to start (h3-studio#1245). Seconds come from the plan, else the shot.
+export const FAST_SHOT_SECONDS = [5, 15];
+export function slowShots(items, entities) {
+  const byId = new Map((entities || []).map((entity) => [entity.id, entity]));
+  const [low, high] = FAST_SHOT_SECONDS;
+  return [
+    ...new Set(
+      (items || [])
+        .filter((item) => {
+          const planned = item?.plan?.output_spec?.actual_duration;
+          const seconds = Number.isFinite(planned)
+            ? planned
+            : Number(byId.get(item?.shot_id)?.data?.seconds);
+          return Number.isFinite(seconds) && (seconds < low || seconds > high);
+        })
+        .map((item) => item.shot_id),
+    ),
+  ];
+}
+
 export const storyChapters = (project) =>
   children(project, null).filter((e) => e.type === 'chapter');
 // Every shot of the story in reading order: chapter, then scene, then shot.

@@ -75,6 +75,9 @@ export const workbenchCatalogs = {
       "We couldn't read the price yet. Nothing is charged until you confirm.",
     'workbench.timing':
       'A 5-second shot usually takes a few minutes. The first one can take up to 25 minutes.',
+    'workbench.timingFast': 'Shots are usually ready in 2 to 4 minutes.',
+    'workbench.timingSlow':
+      '{shots}: shorter than 5 or longer than 15 seconds, so it waits for a machine to start and can take up to 25 minutes. The other shots are usually ready in 2 to 4 minutes.',
     'workbench.shotN': 'Shot {number}',
     'workbench.shotInvalid': '{shot}: {why}',
     'workbench.notReady':
@@ -175,6 +178,9 @@ export const workbenchCatalogs = {
       '这个镜头的图片或设置暂时不能生成，没有扣费。请检查镜头的参考素材后再试。',
     'workbench.costUnknown': '暂时读不到价格。确认之前不会扣费。',
     'workbench.timing': '一个 5 秒镜头通常几分钟做好。第一个镜头最长约 25 分钟。',
+    'workbench.timingFast': '镜头通常 2 到 4 分钟做好。',
+    'workbench.timingSlow':
+      '{shots}：短于 5 秒或长于 15 秒，要等机器启动，最长约 25 分钟。其他镜头通常 2 到 4 分钟做好。',
     'workbench.shotN': '镜头 {number}',
     'workbench.shotInvalid': '{shot}：{why}',
     'workbench.notReady': '现在暂时接不了这些镜头，所以还不能开始。没有扣费，请过几分钟再试。',

@@ -25,6 +25,7 @@ import {
   expandStoryboard,
   storyboardDrop,
   shotsTooShort,
+  slowShots,
   SHORTEST_SHOT_SECONDS,
 } from './storyboard-domain.js';
 import { applyStoryboardAction } from './storyboard-actions.js';
@@ -157,6 +158,8 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
       setBusy(false);
     }
   };
+  // Shots outside the fast route's lengths are named; the rest take minutes (#1245).
+  const slow = slowShots(receipt.items, s.project.entities);
   return (
     <Dialog
       title={t('workbench.confirm')}
@@ -170,7 +173,16 @@ function WorkbenchConfirmation({ receipt, shotLabels, onClose }) {
       ) : (
         <CreditUsageBar credits={cost.credits} balance={balance} />
       )}
-      <p className="sb-confirm-note">{t('workbench.timing')}</p>
+      <p className="sb-confirm-note">
+        {slow.length
+          ? t('workbench.timingSlow', {
+              shots: slow
+                .map((id) => shotLabels?.[id] || s.project.entities.find((e) => e.id === id)?.title)
+                .filter(Boolean)
+                .join(', '),
+            })
+          : t('workbench.timingFast')}
+      </p>
       {(receipt.items || []).map((item, i) => (
         <section key={item.plan_id || i}>
           <h3>

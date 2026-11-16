@@ -97,15 +97,64 @@ function pictureAction(proposal, cards, requests) {
 }
 
 // The newest reply's proposals become confirm cards: pictures, a new story, generation.
+const pictureRequest = (message, card) =>
+  `pic-${message.id.slice(-14)}-${card.slice(-14)}`.replace(/[^A-Za-z0-9_-]/g, '');
+
+// Shots the reply offers to make: the ones it names, or, when it only suggests pictures,
+// every shot that has no take yet, so the pictures lead straight on to the video.
+function offeredShots(proposal, cards) {
+  if (proposal.shot_ids?.length) return proposal.shot_ids;
+  if (!proposal.picture_card_ids?.length) return [];
+  return cards
+    .filter((card) => card.kind === 'shot' && card.status === 'draft')
+    .map((card) => card.id);
+}
+
+// The video offer, with the pictures it still has to draw: the suggested ones and any card the
+// shots use that has none. A shot whose character has a voice sample but no picture cannot be
+// made (h3-studio#1244), so the offer draws them first, with the same stable request ids.
+function videoQuote(message, offered, { cards, labels, started, draw }) {
+  const proposal = message.proposal || {};
+  const used = new Set(
+    cards.filter((card) => offered.includes(card.id)).flatMap((card) => card.refs || []),
+  );
+  const missing = cards
+    .filter((card) => card.kind !== 'shot' && used.has(card.id) && !card.image)
+    .map((card) => card.id);
+  const wanted = draw ? [...new Set([...(proposal.picture_card_ids || []), ...missing])] : [];
+  const requests = wanted.map((card) => pictureRequest(message, card));
+  const pictures = wanted.filter((_card, index) => !started.has(requests[index]));
+  return {
+    id: `${message.id}-q`,
+    live: true,
+    status: 'open',
+    action: {
+      kind: 'generate',
+      cards: offered,
+      pictures,
+      requests: requests.filter((request) => !started.has(request)),
+      ...(proposal.picture_sources ? { sources: proposal.picture_sources } : {}),
+    },
+    credits:
+      pictures.length && Number.isFinite(labels.imageCredits)
+        ? labels.imageCredits * pictures.length
+        : undefined,
+    label: labels.generate?.(offered.length) || '',
+    risks: riskWarnings(proposal.risk_review, cards),
+  };
+}
+
 function proposalQuotes(message, { cards, labels, messages, quotes, started }) {
+  const proposal = message.proposal || {};
+  const draw = labels.picturesEnabled !== false;
+  const offered = offeredShots(proposal, cards);
   // Suggested card pictures: one confirm card for all of them, drawn one at a time so each
   // follows the first picture's style (#1111). Each card keeps its own stable request id,
   // so a replay never draws or charges twice, and a reload shows it as already confirmed.
-  const pictures = labels.picturesEnabled !== false ? message.proposal?.picture_card_ids || [] : [];
+  // Pictures alone are offered only when there are no shots to make with them.
+  const pictures = draw && !offered.length ? proposal.picture_card_ids || [] : [];
   if (pictures.length) {
-    const requests = pictures.map((card) =>
-      `pic-${message.id.slice(-14)}-${card.slice(-14)}`.replace(/[^A-Za-z0-9_-]/g, ''),
-    );
+    const requests = pictures.map((card) => pictureRequest(message, card));
     const id = pictures.length === 1 ? requests[0] : `pics-${message.id.slice(-20)}`;
     const names = pictures.map((card) => cards.find((item) => item.id === card)?.name || '');
     quotes[id] = {
@@ -132,17 +181,10 @@ function proposalQuotes(message, { cards, labels, messages, quotes, started }) {
     };
     messages.push({ id, role: 'quote', quoteId: id });
   }
-  if (message.proposal?.shot_ids?.length) {
-    const id = `${message.id}-q`;
-    quotes[id] = {
-      id,
-      live: true,
-      status: 'open',
-      action: { kind: 'generate', cards: message.proposal.shot_ids },
-      label: labels.generate?.(message.proposal.shot_ids.length) || '',
-      risks: riskWarnings(message.proposal.risk_review, cards),
-    };
-    messages.push({ id, role: 'quote', quoteId: id });
+  if (offered.length) {
+    const quote = videoQuote(message, offered, { cards, labels, started, draw });
+    quotes[quote.id] = quote;
+    messages.push({ id: quote.id, role: 'quote', quoteId: quote.id });
   }
 }
 
@@ -291,6 +333,7 @@ export function createLiveChat({
         timeoutMs: 180000,
       });
       load(value, emit, [card]);
+      return true;
     } catch (failure) {
       const before = fromServer(view || {}, labels).cards.find((item) => item.id === card)?.image;
       if (
@@ -299,7 +342,7 @@ export function createLiveChat({
           return now && now !== before;
         }, emit)
       )
-        return;
+        return true;
       emit({ type: 'card.status', id: card, status: 'draft' });
       emit({
         type: 'assistant.message',
@@ -307,6 +350,7 @@ export function createLiveChat({
         text: labels.failed?.(failure) || failure.message,
         chips: [],
       });
+      return false;
     }
   }
   return {
@@ -369,9 +413,12 @@ export function createLiveChat({
         emit({ type: 'turn.finished' });
       }
     },
-    // The live proposal opens the story in Works, where generation is confirmed and charged.
+    // The video offer draws the pictures it needs, then opens the story in Works, where the
+    // shots' price is shown and generation is confirmed and charged.
     async settle(quote, accepted, _cards, emit) {
-      settled[quote.id] = accepted ? 'confirmed' : 'declined';
+      const drawFirst =
+        accepted && quote.action.kind === 'generate' && quote.action.pictures?.length;
+      settled[quote.id] = accepted ? (drawFirst ? 'working' : 'confirmed') : 'declined';
       emit({ type: 'quote.settled', id: quote.id, status: settled[quote.id] });
       if (!accepted) return;
       if (quote.action.kind === 'new_story') {
@@ -379,6 +426,19 @@ export function createLiveChat({
         return;
       }
       if (quote.action.kind !== 'image') {
+        if (drawFirst) {
+          const drawn = await Promise.all(
+            quote.action.pictures.map((card, index) =>
+              queued(() =>
+                drawPicture(quote.action.requests[index], card, emit, quote.action.sources?.[card]),
+              ),
+            ),
+          );
+          // A picture that did not arrive leaves the offer open; its error is already shown.
+          settled[quote.id] = drawn.every(Boolean) ? 'confirmed' : 'open';
+          emit({ type: 'quote.settled', id: quote.id, status: settled[quote.id] });
+          if (settled[quote.id] !== 'confirmed') return;
+        }
         labels.openWorks?.(project, quote.action.cards?.[0], { generate: true });
         return;
       }

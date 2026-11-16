@@ -836,3 +836,24 @@ test('library files each file by what it is; only unattached uploads wait in the
   assert.equal(assets.get('loose').inbox, true);
   assert.equal(assets.get('saved-frame').inbox, true);
 });
+
+test('shots outside the fast route lengths are named for the wait note (h3-studio#1245)', async () => {
+  const { slowShots, FAST_SHOT_SECONDS } = await import('./storyboard-domain.js');
+  assert.deepEqual(FAST_SHOT_SECONDS, [5, 15]);
+  const entities = [
+    { id: 'a', type: 'shot', data: { seconds: 4 } },
+    { id: 'b', type: 'shot', data: { seconds: 5 } },
+    { id: 'c', type: 'shot', data: { seconds: 20 } },
+    { id: 'd', type: 'shot', data: {} },
+  ];
+  const items = [
+    { shot_id: 'a' },
+    { shot_id: 'b' },
+    { shot_id: 'c', plan: { output_spec: { actual_duration: 10 } } },
+    { shot_id: 'd' },
+    { shot_id: 'a', index: 1 },
+  ];
+  // The plan's own length wins over the shot's; unknown lengths are not named.
+  assert.deepEqual(slowShots(items, entities), ['a']);
+  assert.deepEqual(slowShots([], entities), []);
+});

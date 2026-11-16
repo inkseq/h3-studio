@@ -47,7 +47,15 @@ function browserStorage() {
 // How the whole film should sound (owner, 2026-10-21). "Each clip's own sound" adds every
 // shot's generated sound track that exists; "As set in the editor" keeps the chapter tracks;
 // "Silent" exports no sound. The choice is saved in the story like any other edit.
-function FilmSoundChoice({ disabled }) {
+// A story with no choice yet gets one as the dialog opens, so Export needs no extra step
+// (h3-studio#1247): the clips' own sound when any shot has one, otherwise silent.
+export function defaultFilmSound(project) {
+  return storyShots(project).some((shot) => !generatedAudioOption(project, shot.id).issue)
+    ? 'clips'
+    : 'silent';
+}
+
+function FilmSoundChoice({ disabled, onSave }) {
   const { t } = useI18n();
   const project = useSyncExternalStore(store.subscribe, () => store.getState().project);
   const [picked, setPicked] = useState('');
@@ -75,6 +83,14 @@ function FilmSoundChoice({ disabled }) {
       p.journey.sound = { ...(p.journey.sound || {}), mode: 'mixed' };
     });
   };
+  const unset = !mode && !disabled;
+  useEffect(() => {
+    if (!unset) return;
+    choose(defaultFilmSound(store.getState().project));
+    void Promise.resolve(onSave?.()).catch(() => {});
+    // Once per opening: a person's later choice is never replaced.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unset]);
   return (
     <label>
       {t('film.sound')}
@@ -301,7 +317,7 @@ export default function StoryFilmControl({
                   <option value="720P">720P</option>
                 </select>
               </label>
-              <FilmSoundChoice disabled={!newAllowed} />
+              <FilmSoundChoice disabled={!newAllowed} onSave={onSave} />
               <label className="film-check">
                 <input
                   type="checkbox"

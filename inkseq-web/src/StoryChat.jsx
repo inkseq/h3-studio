@@ -139,17 +139,48 @@ function QuoteCard({ quote, balance, onSettle }) {
         {quote.status === 'open' && quote.risks?.length > 0 && <QuoteRisks risks={quote.risks} />}
         {quote.status === 'open' ? (
           <div className="sc-quote-actions">
+            {quote.action.pictures?.length > 0 && (
+              <small>
+                {t(
+                  quote.action.pictures.length === 1
+                    ? 'storyChat.videoPictures.one'
+                    : 'storyChat.videoPictures',
+                  { count: quote.action.pictures.length, credits: quote.credits ?? '' },
+                )}
+              </small>
+            )}
             <small>{t('storyChat.liveQuoteHelp')}</small>
-            <Button variant="primary" className="keep-label" onClick={() => onSettle(quote, true)}>
-              {t('storyChat.makeInWorks')}
-            </Button>
+            {affordable ? (
+              <Button
+                variant="primary"
+                className="keep-label"
+                onClick={() => onSettle(quote, true)}
+              >
+                {t(quote.action.pictures?.length ? 'storyChat.makeVideo' : 'storyChat.makeInWorks')}
+              </Button>
+            ) : (
+              <>
+                <small className="sc-short">{t('storyChat.short')}</small>
+                <Button
+                  variant="primary"
+                  className="keep-label"
+                  onClick={() => navigateApp('/pricing')}
+                >
+                  {t('storyChat.buy')}
+                </Button>
+              </>
+            )}
             <Button className="keep-label" onClick={() => onSettle(quote, false)}>
               {t('storyChat.notNow')}
             </Button>
           </div>
         ) : (
           <small className="sc-quote-done">
-            {quote.status === 'confirmed' ? t('storyChat.openedWorks') : t('storyChat.declined')}
+            {quote.status === 'working'
+              ? t('storyChat.videoWorking')
+              : quote.status === 'confirmed'
+                ? t('storyChat.openedWorks')
+                : t('storyChat.declined')}
           </small>
         )}
       </div>

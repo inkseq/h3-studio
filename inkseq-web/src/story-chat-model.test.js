@@ -446,3 +446,125 @@ test('sent photos show on the bubble: at once, after the reply and after a reloa
   assert.deepEqual(replied.messages[1].attachments, local);
   assert.equal(replied.messages[2].text, 'Nice scarf.');
 });
+
+// h3-studio#1244: declining a picture used to strand a story (a voice sample needs a picture),
+// and nothing led on from the pictures to the video. One offer now draws what the shots need.
+const VIDEO_IDS = [
+  'character-0123456789abcdef',
+  'location-0123456789abcde1',
+  'prop-0123456789abcde2',
+];
+const videoView = (proposal, extra = {}) => ({
+  version: 5,
+  project_id: 'p1',
+  messages: [
+    { id: 't1-u', turn_id: 't1', role: 'user', text: 'a lighthouse keeper' },
+    {
+      id: 'turn-abcdef0123456789-a',
+      turn_id: 't1',
+      role: 'assistant',
+      text: 'Built the cards.',
+      changes: [],
+      proposal,
+    },
+  ],
+  cards: {
+    characters: [{ id: VIDEO_IDS[0], name: 'Thomas', text: '' }],
+    places: [{ id: VIDEO_IDS[1], name: 'Shore', text: '' }],
+    props: [{ id: VIDEO_IDS[2], name: 'Bottle', text: '', image_url: '/v1/assets/b/content' }],
+    shots: [
+      {
+        id: 's1',
+        order: 1,
+        text: 'He walks',
+        seconds: 5,
+        cast: [VIDEO_IDS[0]],
+        place: VIDEO_IDS[1],
+        props: [VIDEO_IDS[2]],
+      },
+      {
+        id: 's2',
+        order: 2,
+        text: 'He reads',
+        seconds: 5,
+        cast: [VIDEO_IDS[0]],
+        place: VIDEO_IDS[1],
+        props: [],
+        takes: 1,
+      },
+    ],
+  },
+  ...extra,
+});
+
+test('suggested pictures and shots without a take become one video offer', async () => {
+  const { fromServer } = await import('./story-chat-client.js');
+  const labels = { generate: (count) => `Make ${count}`, imageCredits: 5 };
+  const proposal = { kind: 'image', shot_ids: [], picture_card_ids: [VIDEO_IDS[0]] };
+  const state = fromServer(videoView(proposal), labels);
+  const quotes = Object.values(state.quotes);
+  assert.equal(quotes.length, 1);
+  const [quote] = quotes;
+  assert.equal(quote.live, true);
+  assert.equal(quote.label, 'Make 1');
+  assert.deepEqual(quote.action.cards, ['s1']);
+  // The suggested picture plus the place the shot uses that has none; the bottle has one.
+  assert.deepEqual(quote.action.pictures, [VIDEO_IDS[0], VIDEO_IDS[1]]);
+  assert.equal(quote.credits, 10);
+  for (const request of quote.action.requests) assert.match(request, /^[A-Za-z0-9_-]{8,80}$/);
+  // A reload after one picture started offers only what is left, with the same ids.
+  const later = fromServer(
+    videoView(proposal, { image_requests: quote.action.requests.slice(0, 1) }),
+    labels,
+  ).quotes[quote.id];
+  assert.deepEqual(later.action.pictures, [VIDEO_IDS[1]]);
+  assert.deepEqual(later.action.requests, quote.action.requests.slice(1));
+  assert.equal(later.credits, 5);
+  // With pictures switched off the offer draws nothing.
+  const off = fromServer(videoView(proposal), { ...labels, picturesEnabled: false });
+  assert.deepEqual(Object.values(off.quotes)[0].action.pictures, []);
+});
+
+test('the video offer draws its pictures first, then opens the price in Works', async () => {
+  const { createLiveChat, fromServer } = await import('./story-chat-client.js');
+  const proposal = { kind: 'generate', shot_ids: ['s1'] };
+  let view = videoView(proposal);
+  const calls = [];
+  let refuse = '';
+  const api = {
+    async request(path, options = {}) {
+      if (!path.endsWith('/images')) return view;
+      calls.push(options.body.card_id);
+      if (options.body.card_id === refuse) throw Object.assign(Error('no'), { detail: {} });
+      const drawn = structuredClone(view);
+      for (const group of ['characters', 'places'])
+        for (const card of drawn.cards[group])
+          if (card.id === options.body.card_id) card.image_url = '/v1/assets/new/content';
+      view = drawn;
+      return view;
+    },
+  };
+  const opened = [],
+    events = [];
+  const labels = { openWorks: (...args) => opened.push(args), failed: () => 'failed' };
+  const chat = createLiveChat({ api, projectId: 'p1', labels });
+  const [quote] = Object.values(fromServer(view, labels).quotes);
+  assert.deepEqual(quote.action.pictures, [VIDEO_IDS[0], VIDEO_IDS[1]]);
+  await chat.settle(quote, true, [], (event) => events.push(event));
+  assert.deepEqual(calls, quote.action.pictures);
+  assert.deepEqual(opened, [['p1', 's1', { generate: true }]]);
+  const statuses = events.filter((e) => e.type === 'quote.settled').map((e) => e.status);
+  assert.deepEqual(statuses, ['working', 'confirmed']);
+
+  // A picture that does not arrive keeps the offer open and does not open Works.
+  view = videoView(proposal);
+  refuse = VIDEO_IDS[1];
+  calls.length = 0;
+  opened.length = 0;
+  events.length = 0;
+  const again = createLiveChat({ api, projectId: 'p1', labels });
+  const [open] = Object.values(fromServer(view, labels).quotes);
+  await again.settle(open, true, [], (event) => events.push(event));
+  assert.deepEqual(opened, []);
+  assert.equal(events.filter((e) => e.type === 'quote.settled').at(-1).status, 'open');
+});
