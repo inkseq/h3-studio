@@ -188,6 +188,17 @@ class RenderTests(unittest.TestCase):
         with Image.open(path) as image:
             return image.convert("RGB")
 
+    def test_pixel_format_is_read_for_the_rewrap_check(self):
+        self.video("plain", "red")
+        plain = self.root / "plain.mp4"
+        self.assertEqual(media.pixel_format(plain), "yuv420p")
+        wide = self.root / "wide.mp4"
+        media.ffmpeg(
+            ["-i", plain, "-an", "-c:v", "libx264", "-pix_fmt", "yuv444p", wide]
+        )
+        self.assertEqual(media.pixel_format(wide), "yuv444p")
+        self.assertEqual(media.pixel_format(self.root / "missing.mp4"), "")
+
     def test_default_is_disabled_and_starts_nothing(self):
         path = self.root / "disabled"
         backend = CPURenderBackend(path)

@@ -23,7 +23,7 @@ from .slot_lock import slot_lock
 # Retained import compatibility; the implementation has one owner.
 _slot_lock = slot_lock
 
-from .media import ffmpeg, probe
+from .media import ffmpeg, pixel_format, probe
 from .queue import TaskQueue
 from .providers.registry import (
     CPU_RENDER,
@@ -890,6 +890,12 @@ class WorkerRunner:
                 "yuv420p",
             ]
             args += ["-c:a", "aac", "-ar", "32000", "-ac", "2"] if audio else ["-an"]
+            if delivery is None and self.backend.kind == CPU_RENDER.id:
+                # Our renderer's own CRF/yuv420p/24fps output: rewrap, never re-encode.
+                if pixel_format(paths["video"]) != "yuv420p":
+                    raise BackendError("output_video_verification_failed")
+                args = ["-i", paths["video"], "-map", "0:v:0", "-c", "copy"]
+                args += ["-map", "0:a:0"] if audio else ["-an"]
             if delivery is not None:
                 # Keep the complete native timeline. Both audio deliveries use the
                 # original generated waveform; no trim, pad, fps filter or atempo.
