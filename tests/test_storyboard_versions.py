@@ -1241,6 +1241,36 @@ class StoryboardVersionTests(unittest.TestCase):
         self.assertEqual(counts[1], counts[4])
         self.assertLessEqual(counts[4], 2)
 
+    def test_preflight_timing_names_the_prompt_rewrite_without_story_text(self):
+        # #1246: the line says how long the per-shot prompt rewrite (a model call)
+        # and excerpt cuts took, never what the story says.
+        import re
+        import time as clock
+
+        self.prepare()
+        admission = self.app.state.storyboard_versions.admission
+
+        def slow_rewrite(*args, **kwargs):
+            clock.sleep(0.03)
+            return None
+
+        with (
+            patch.object(admission, 'model_prompt', side_effect=slow_rewrite),
+            self.assertLogs(
+                'studio_platform.storyboard_preflight_plans', level='INFO'
+            ) as logs,
+        ):
+            response = self.preflight(key='phases', copies=2)
+        self.assertEqual(response.status_code, 200, response.text)
+        line = [row for row in logs.output if 'storyboard_preflight_timing' in row][-1]
+        values = dict(re.findall(r'(\w+)_ms=(\d+)', line))
+        self.assertGreaterEqual(int(values['rewrite']), 60)
+        self.assertGreaterEqual(int(values['rewrite_max']), 30)
+        self.assertLess(int(values['rewrite_max']), int(values['rewrite']))
+        self.assertEqual(values['excerpt'], '0')
+        self.assertNotIn('Original action', line)
+        self.assertNotIn('shot-one', line)
+
     def interrupt_planning(self, change):
         """Run ``change`` once, inside the first shot's planning, after the load."""
         import threading

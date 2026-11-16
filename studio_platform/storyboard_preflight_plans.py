@@ -21,7 +21,7 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import contextmanager
 
 from .content_lifecycle import owner_reference_gate
-from .generation_admission import PreflightReads
+from .generation_admission import SHOT_PHASES, PreflightReads, shot_phases
 from .repository import Conflict, NotFound
 
 LOG = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ class PreflightTimer:
         self.ms = dict.fromkeys(self.PHASES, 0.0)
         self.items = self.planned = self.workers = 0
         self.shot_max_ms = 0.0
+        self.shots = {"ms": {}, "max": {}}
 
     @contextmanager
     def phase(self, name):
@@ -71,7 +72,7 @@ class PreflightTimer:
         LOG.log(
             logging.WARNING if total >= SLOW_MS else logging.INFO,
             "storyboard_preflight_timing status=%s items=%d planned=%d workers=%d "
-            "total_ms=%d %s shot_max_ms=%d",
+            "total_ms=%d %s shot_max_ms=%d %s",
             status,
             self.items,
             self.planned,
@@ -79,6 +80,11 @@ class PreflightTimer:
             total,
             " ".join(f"{name}_ms={int(value)}" for name, value in self.ms.items()),
             self.shot_max_ms,
+            " ".join(
+                f"{name}_ms={int(self.shots['ms'].get(name, 0))} "
+                f"{name}_max_ms={int(self.shots['max'].get(name, 0))}"
+                for name in SHOT_PHASES
+            ),
         )
 
 
@@ -240,25 +246,28 @@ def plan_items(service, principal, project_id, scope, ident, value, shared, time
     reads = shared_reads(service, principal, *shared, timer)
     timer.workers = _workers(service, pending)
     plan_start = time.perf_counter()
-    finished = _finished(
-        service, principal, scope, value, pending, reads, timer.workers
-    )
-    try:
-        for item, outcome, error in finished:
-            if error is not None:
-                if not _closes(error):
-                    raise error
-                return _block(service, principal, project_id, scope, ident, error)
-            plan, result, elapsed = outcome
-            if elapsed is not None:
-                timer.planned += 1
-                timer.shot_max_ms = max(timer.shot_max_ms, elapsed)
-            with timer.phase("store"):
-                blocked = _store(service, principal, scope, ident, item, plan, result)
-            if blocked:
-                return service._public_preflight(blocked, principal)
-    finally:
-        finished.close()
-        planning = (time.perf_counter() - plan_start) * 1000
-        timer.ms["plan"] += planning - timer.ms["store"]
+    with shot_phases() as timer.shots:
+        finished = _finished(
+            service, principal, scope, value, pending, reads, timer.workers
+        )
+        try:
+            for item, outcome, error in finished:
+                if error is not None:
+                    if not _closes(error):
+                        raise error
+                    return _block(service, principal, project_id, scope, ident, error)
+                plan, result, elapsed = outcome
+                if elapsed is not None:
+                    timer.planned += 1
+                    timer.shot_max_ms = max(timer.shot_max_ms, elapsed)
+                with timer.phase("store"):
+                    blocked = _store(
+                        service, principal, scope, ident, item, plan, result
+                    )
+                if blocked:
+                    return service._public_preflight(blocked, principal)
+        finally:
+            finished.close()
+            planning = (time.perf_counter() - plan_start) * 1000
+            timer.ms["plan"] += planning - timer.ms["store"]
     return service.get_preflight(principal, project_id, ident)

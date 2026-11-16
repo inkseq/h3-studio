@@ -4,6 +4,10 @@ Extracted from the existing API and aligned with the preserved Quick Chat
 admission boundary. This module does not own a queue, permissions or GPU calls.
 """
 
+from contextlib import contextmanager
+import contextvars
+import threading
+import time
 from typing import NamedTuple
 
 from .capabilities import capabilities
@@ -12,6 +16,35 @@ from .repository import Scope, Conflict, BudgetExceeded
 from .render_plans import RECIPE as RENDER_RECIPE
 from .source_snapshot import source_snapshot
 from .inky_hooks import queue_refresh
+
+# Time inside each shot's planning that a preflight's timing line reports (#1246):
+# the prompt rewrite (a model call) and voice excerpt cuts. Durations only.
+_SHOT_PHASES = contextvars.ContextVar("shot_phases", default=None)
+SHOT_PHASES = ("rewrite", "excerpt")
+
+
+@contextmanager
+def shot_phases():
+    """Collect shot phase durations for the plans made inside this block."""
+    sink = {"lock": threading.Lock(), "ms": {}, "max": {}}
+    token = _SHOT_PHASES.set(sink)
+    try:
+        yield sink
+    finally:
+        _SHOT_PHASES.reset(token)
+
+
+@contextmanager
+def _shot_phase(name):
+    sink, start = _SHOT_PHASES.get(), time.perf_counter()
+    try:
+        yield
+    finally:
+        if sink is not None:
+            ms = (time.perf_counter() - start) * 1000
+            with sink["lock"]:
+                sink["ms"][name] = sink["ms"].get(name, 0.0) + ms
+                sink["max"][name] = max(sink["max"].get(name, 0.0), ms)
 
 
 def managed_project(project):
@@ -168,7 +201,8 @@ class GenerationAdmission:
         def derive(asset_id, start, end):
             self.access.authorize(principal, project_id, "assets:write")
             self.assets.get(principal.owner, asset_id, project_id)
-            receipt = self.assets.derive(principal.owner, asset_id, start, end)
+            with _shot_phase("excerpt"):
+                receipt = self.assets.derive(principal.owner, asset_id, start, end)
             if receipt["status"] != "ready":
                 raise Conflict("asset_not_ready")
             return receipt["asset_id"]
@@ -199,7 +233,8 @@ class GenerationAdmission:
             body["controls"]["seed"] = seed_override
 
         def written(resolved):
-            return self.model_prompt(render_project, shot_id, draft, resolved)
+            with _shot_phase("rewrite"):
+                return self.model_prompt(render_project, shot_id, draft, resolved)
 
         if reads is None:
             latest = self.access.project(principal, project_id, "jobs:write")
