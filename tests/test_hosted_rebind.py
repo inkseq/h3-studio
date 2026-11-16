@@ -78,13 +78,16 @@ class OffloadDecisionTests(unittest.TestCase):
         self.assertEqual(self.ids([job("old", created=1)], tiers=("fast",)), [])
         self.assertEqual(self.ids([job("old", created=1)], tiers=()), [])
 
-    def test_vendor_window_and_owner_share_bound_the_result(self):
+    def test_only_the_vendor_window_bounds_the_result(self):
+        # Owner 2026-11-16: no per-person cap of our own.
         queued = [job(str(i), created=1) for i in range(3)]
         self.assertEqual(self.ids(queued, used={"b": 24}), ["0"])
-        self.assertEqual(self.ids(queued, used={"a": 9}), ["0"])
+        self.assertEqual(self.ids(queued, used={"a": 9}), ["0", "1", "2"])
         self.assertEqual(self.ids(queued, used={"b": 25}), [])
         mixed = [job("a1", created=1), job("b1", created=2, owner="b")]
-        self.assertEqual(self.ids(mixed, used={"a": 10}), ["b1"])
+        self.assertEqual(self.ids(mixed, used={"a": 10}), ["a1", "b1"])
+        many = [job(str(i), created=i) for i in range(20)]
+        self.assertEqual(len(self.ids(many)), 20)
 
     def test_scenario_01_exact_wait_and_grace_boundaries(self):
         for tier, wait in (
@@ -106,7 +109,7 @@ class OffloadDecisionTests(unittest.TestCase):
                         age < wait + 30,
                     )
 
-    def test_scenario_10_full_window_preserves_oldest_first_owner_share(self):
+    def test_scenario_10_full_window_preserves_oldest_first(self):
         queued = [
             job("new", created=4),
             job("old", created=1),
@@ -114,14 +117,14 @@ class OffloadDecisionTests(unittest.TestCase):
         ]
         for used, expected in (
             ({"a": 9, "c": 14}, ["old", "other"]),
-            ({"a": 10, "c": 14}, ["other"]),
+            ({"a": 10, "c": 14}, ["old"]),
             ({"a": 11, "c": 14}, []),
             ({"c": 26}, []),
         ):
             with self.subTest(used=used):
                 self.assertEqual(self.ids(queued, used=used), expected)
 
-    def test_full_window_short_circuits_owner_lookup(self):
+    def test_a_job_without_an_owner_is_still_bounded_by_the_window(self):
         row, profile = job("not-selected", created=1)
         del row["owner_id"]
         self.assertEqual(self.ids([(row, profile)], used={"other": 25}), [])
