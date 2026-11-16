@@ -67,10 +67,11 @@ def dstack_work(queued, covered, rules, machines, now):
 
 # Seconds a job may wait for a machine of ours before going hosted (#918).
 WAIT_LIMITS = {"fast": 30, "standard": 60, "refine": 120, "economy": 0}
-# The vendor allows 40 renders per 15 min per account, shared by every
-# environment; each environment's share comes from its routing file.
+# The vendor allows 40 renders per 15 min per account. Owner 2026-11-16: no
+# share of our own (no per-environment split, no per-person cap); each routing
+# file carries the vendor's own limit, and a render the vendor refuses because
+# the account is full moves on like any refusal (worker._reroute).
 HOSTED_WINDOW_SECONDS = 900
-HOSTED_PER_OWNER = 10
 
 
 def _wait_elapsed(job, tier, enabled_tiers, now, first=False):
@@ -89,21 +90,19 @@ def hosted_offload(
 
     A job goes hosted once it has waited past its tier's limit: a free machine
     of ours would have claimed it by then. With the hosted API `first` nothing
-    waits. `used` is {owner_id: renders in the current window}; the window and
-    per-owner shares bound what is returned.
+    waits. `used` is {owner_id: renders in the current window}; only the
+    vendor's window bounds what is returned.
     """
     total = sum(used.values())
-    owners = dict(used)
     chosen = []
     for job, profile in sorted(queued, key=lambda item: item[0]["created_at"]):
         tier = tier_of(job)
         if not SCENARIOS["occasional_click"].offload(
             job, tier, enabled_tiers, now, first
-        ) or not SCENARIOS["window_full"].offload(total, owners, job, per_window):
+        ) or not SCENARIOS["window_full"].offload(total, per_window):
             continue
         chosen.append((job, profile))
         total += 1
-        owners[job["owner_id"]] = owners.get(job["owner_id"], 0) + 1
     return chosen
 
 
@@ -183,9 +182,7 @@ SCENARIOS = {
     "window_full": Scenario(
         10,
         "scheduling.decide.hosted_offload",
-        offload=lambda total, owners, job, window: (
-            not (total >= window or owners.get(job["owner_id"], 0) >= HOSTED_PER_OWNER)
-        ),
+        offload=lambda total, window: total < window,
     ),
     "backlog_finished": Scenario(
         11,
