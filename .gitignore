@@ -148,6 +148,7 @@ inventory.json
 !studio_platform/media_process.py
 !studio_platform/upload_route.py
 !studio_platform/asset_operation.py
+!studio_platform/asset_excerpts.py
 !studio_platform/asset_recovery.py
 !studio_platform/assets.py
 !studio_platform/batches.py

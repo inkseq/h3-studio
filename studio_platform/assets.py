@@ -1314,16 +1314,10 @@ class AssetService(AssetSourcePreparation):
         }
 
     def derive(self, owner, asset_id, start, end):
-        # The same excerpt (a character's 3 s voice sample) is asked for by every shot
-        # that uses it; each fresh cut took ~12 s on staging (2026-11-07), so twelve
-        # shots needed four minutes to preflight. A finished identical excerpt is
-        # immutable and is reused.
-        existing = self._existing_derivation(owner, asset_id, start, end)
-        if existing is not None:
-            return existing
-        ident = uuid.uuid4().hex
-        with self._operation(ident):
-            return self._derive(ident, owner, asset_id, start, end)
+        # A finished identical excerpt is immutable and reused; one cut per excerpt (#1246).
+        from .asset_excerpts import derive_shared
+
+        return derive_shared(self, owner, asset_id, start, end)
 
     def _existing_derivation(self, owner, asset_id, start, end):
         try:

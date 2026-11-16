@@ -192,6 +192,72 @@ class AssetAdmissionTests(OfflineTest):
     @unittest.skipUnless(
         shutil.which("ffmpeg") and shutil.which("ffprobe"), "requires local CPU FFmpeg"
     )
+    def long_audio(self):
+        original = io.BytesIO()
+        with wave.open(original, "wb") as target:
+            target.setnchannels(1)
+            target.setsampwidth(2)
+            target.setframerate(32000)
+            target.writeframes(b"\x00\x00" * (16 * 32000))
+        return self.service.upload(
+            "owner", "project", io.BytesIO(original.getvalue()), "long.wav"
+        )
+
+    def test_parallel_requests_for_one_excerpt_cut_it_once(self):
+        # Preflight plans shots in parallel and every shot of a character asks for the
+        # same 3 s voice excerpt (#1246); one cut, the others reuse it.
+        parent = self.long_audio()
+        real, cuts = media.derive, []
+
+        def counted(*args, **kwargs):
+            cuts.append(1)
+            time.sleep(0.05)
+            return real(*args, **kwargs)
+
+        with mock.patch.object(media, "derive", counted):
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(
+                    pool.map(
+                        lambda _: self.service.derive("owner", parent["id"], 1, 4),
+                        range(4),
+                    )
+                )
+        self.assertEqual(len(cuts), 1)
+        self.assertEqual(len({r["id"] for r in results}), 1)
+        self.assertTrue(all(r["status"] == "ready" for r in results))
+
+    def test_an_excerpt_waits_for_a_busy_processing_slot(self):
+        # Every slot held for a moment (pictures just drawn): the cut waits, not refuses.
+        from studio_platform import asset_excerpts
+        from studio_platform.storage_asset_journal import AssetQuotaExceeded
+
+        parent = self.long_audio()
+        real, refused = self.service.journal.create, []
+
+        def busy_once(owner, asset):
+            if not refused:
+                refused.append(1)
+                raise AssetQuotaExceeded("busy")
+            return real(owner, asset)
+
+        with (
+            mock.patch.object(asset_excerpts, "WAITS", (0, None)),
+            mock.patch.object(self.service.journal, "create", busy_once),
+        ):
+            excerpt = self.service.derive("owner", parent["id"], 2, 5)
+        self.assertEqual(refused, [1])
+        self.assertEqual(excerpt["status"], "ready")
+        with (
+            mock.patch.object(asset_excerpts, "WAITS", (None,)),
+            mock.patch.object(
+                self.service.journal,
+                "create",
+                mock.Mock(side_effect=AssetQuotaExceeded("busy")),
+            ),
+            self.assertRaises(AssetQuotaExceeded),
+        ):
+            self.service.derive("owner", parent["id"], 6, 9)
+
     def test_derivation_waits_before_copy_or_decode_and_resumes_same_id(self):
         original = io.BytesIO()
         with wave.open(original, "wb") as target:

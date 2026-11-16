@@ -769,15 +769,20 @@ test('a price for an older story version is checked again, never submitted', asy
   chat.close();
 });
 
-test('a picture suggestion never claims that shots are ready', async () => {
+test('a finished story says so instead of offering its pictures again', async () => {
   const { fromServer } = await import('./story-chat-client.js');
+  // Every shot has a take: one "all ready" offer, no picture offer.
   const view = videoView({ kind: 'image', shot_ids: [], picture_card_ids: [VIDEO_IDS[0]] });
   view.cards.shots[0].takes = 1;
   const quotes = Object.values(fromServer(view, { imageCredits: 5 }).quotes);
-  assert.equal(
-    quotes.some((quote) => quote.status === 'made'),
-    false,
-  );
+  assert.equal(quotes.length, 1);
+  assert.equal(quotes[0].status, 'made');
+  assert.equal(quotes[0].action.kind, 'generate');
+  // A shot still without a take: the video offer, never a claim that all are ready.
+  const open = videoView({ kind: 'image', shot_ids: [], picture_card_ids: [VIDEO_IDS[0]] });
+  const [offer] = Object.values(fromServer(open, { imageCredits: 5 }).quotes);
+  assert.equal(offer.status, 'open');
+  assert.deepEqual(offer.action.cards, ['s1']);
   // Named shots that all have takes stay as a finished offer.
   const named = videoView({ kind: 'generate', shot_ids: ['s1', 's2'] });
   named.cards.shots[0].takes = 1;

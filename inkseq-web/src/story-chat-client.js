@@ -148,7 +148,14 @@ function videoQuote(message, offered, { cards, labels, started, draw }) {
 // Every shot the reply offered already has a take: the offer stays, saying so, instead of
 // vanishing the moment the last take arrives.
 function doneQuote(message, proposal, cards, labels) {
-  const named = proposal.shot_ids || [];
+  const shots = cards.filter((card) => card.kind === 'shot');
+  const named = proposal.shot_ids?.length
+    ? proposal.shot_ids
+    : proposal.picture_card_ids?.length &&
+        shots.length &&
+        shots.every((card) => card.status !== 'draft')
+      ? shots.map((card) => card.id)
+      : [];
   if (!named.length) return null;
   return {
     id: `${message.id}-q`,
@@ -172,8 +179,8 @@ function proposalQuotes(message, { cards, labels, messages, quotes, started }) {
   // Suggested card pictures: one confirm card for all of them, drawn one at a time so each
   // follows the first picture's style (#1111). Each card keeps its own stable request id,
   // so a replay never draws or charges twice, and a reload shows it as already confirmed.
-  // Pictures alone are offered only when there are no shots to make with them.
-  const pictures = draw && !offered.length ? proposal.picture_card_ids || [] : [];
+  // Pictures alone are offered only for a story with no shots to make with them.
+  const pictures = draw && !offered.length && !madeQuote ? proposal.picture_card_ids || [] : [];
   if (pictures.length) {
     const requests = pictures.map((card) => pictureRequest(message, card));
     const id = pictures.length === 1 ? requests[0] : `pics-${message.id.slice(-20)}`;
@@ -569,6 +576,7 @@ export function createLiveChat({
     async make(quote, emit) {
       if (!quote.plans?.length) return;
       settled[quote.id] = 'submitting';
+      extra[quote.id] = { ...extra[quote.id], label: quote.label };
       emit({ type: 'quote.settled', id: quote.id, status: 'submitting' });
       // The same gate as Works: the price must be for the story as it is now, and no shot may
       // have been made or started meanwhile (another tab, Works). Otherwise check again.
