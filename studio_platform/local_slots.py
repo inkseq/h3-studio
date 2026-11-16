@@ -1,6 +1,7 @@
 """Existing CPU/hosted slot ownership; still in the controller process (#999)."""
 
 from contextlib import contextmanager
+import logging
 import os
 import stat
 import threading
@@ -102,9 +103,19 @@ class LocalSlotOwner:
         if worker["expires_at"] > self.contexts.repo.clock() and worker[
             "state"
         ] not in {"unknown", "retired"}:
-            slot.runner.control.heartbeat(
-                slot.spec.worker_id, worker["fence"], lease_seconds=3600
-            )
+            try:
+                slot.runner.control.heartbeat(
+                    slot.spec.worker_id, worker["fence"], lease_seconds=3600
+                )
+            except Conflict as error:
+                if str(error) != "worker_registration_lease_lost":
+                    raise
+                # The slot claimed or released a job between the read and this renewal;
+                # both bump the fence and renew the lease themselves. Skipping is safe,
+                # and it must not stop the controller (staging 2026-11-16, twice).
+                logging.getLogger(__name__).warning(
+                    "local_slot_heartbeat_skipped backend=%s", slot.spec.backend
+                )
 
     def heartbeat(self):
         with self.contexts._lock:

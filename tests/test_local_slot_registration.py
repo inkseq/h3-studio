@@ -235,6 +235,29 @@ class LocalRegistrationTests(unittest.TestCase):
                 with self.assertRaises(KeyboardInterrupt):
                     register_local(slots)
 
+    def test_a_lease_lost_race_is_skipped_and_other_conflicts_still_raise(self):
+        # A slot claiming or releasing a job between the read and the renewal bumps
+        # the fence; the controller must keep running (staging 2026-11-16).
+        from studio_platform.repository import Conflict
+
+        slots = self.slots()
+        slots.repo.clock.return_value = 1000
+        control = Mock()
+        control.get.return_value = dict(state="busy", expires_at=2000, fence=7)
+        control.heartbeat.side_effect = Conflict("worker_registration_lease_lost")
+        slots._slots["cpu"] = _Slot(
+            SimpleNamespace(backend="cpu-render", worker_id="cpu"),
+            SimpleNamespace(control=control),
+            None,
+            None,
+        )
+        with self.assertLogs("studio_platform.local_slots", "WARNING") as logs:
+            slots.heartbeat_cpu()
+        self.assertIn("local_slot_heartbeat_skipped backend=cpu-render", logs.output[0])
+        control.heartbeat.side_effect = Conflict("something_else")
+        with self.assertRaisesRegex(Conflict, "something_else"):
+            slots.heartbeat_cpu()
+
     def test_local_heartbeat_keeps_fences_and_does_not_revive_unknown_or_expired(self):
         slots = self.slots()
         slots.repo.clock.return_value = 1000
