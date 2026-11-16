@@ -111,6 +111,39 @@ const EVENTS = {
           quotes: { ...state.quotes, [event.id]: { ...event, status: 'open' } },
           messages: [...state.messages, { id: event.id, role: 'quote', quoteId: event.id }],
         },
+  // The checked price of an offer's shots, and the plans the confirm will submit.
+  'quote.priced': (state, event) =>
+    state.quotes[event.id]
+      ? {
+          ...state,
+          quotes: {
+            ...state.quotes,
+            [event.id]: {
+              ...state.quotes[event.id],
+              status: 'priced',
+              credits: event.credits,
+              receipt: event.receipt,
+              plans: event.plans,
+              priced: event.priced,
+              costs: event.costs,
+              version: event.version,
+            },
+          },
+        }
+      : state,
+  'quote.progress': (state, event) =>
+    state.quotes[event.id]
+      ? {
+          ...state,
+          quotes: {
+            ...state.quotes,
+            [event.id]: {
+              ...state.quotes[event.id],
+              made: { done: event.done, total: event.total, failed: event.failed },
+            },
+          },
+        }
+      : state,
   'quote.settled': (state, event) =>
     state.quotes[event.id]
       ? {
