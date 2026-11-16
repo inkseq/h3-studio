@@ -1478,7 +1478,13 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except Exception as error:
-        _logger.error("dstack_controller_failed error_type=%s", type(error).__name__)
+        from .failure_frames import frames
+
+        _logger.error(
+            "dstack_controller_failed error_type=%s at=%s",
+            type(error).__name__,
+            frames(error),
+        )
         raise SystemExit(
             "dstack_controller_failed; inspect protected service diagnostics"
         ) from None

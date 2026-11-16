@@ -634,6 +634,30 @@ class FilmExecution:
 
         return self._mutate(principal, value["project_id"], value["id"], register)
 
+    def _finish_single_chapter(self, principal, project_id, run_id, value):
+        """One chapter already is the film (same shape, mixed sound, captions).
+
+        A film_concat job would only rewrap it (#1252). Runs that already planned
+        an export keep it, so replay never changes a receipt. The receipt names
+        the job that made the artifact, as review_loop's export proof requires.
+        """
+        made = {
+            "job_id": value["chapters"][0]["job_id"],
+            "artifact_id": value["chapters"][0]["artifact_id"],
+        }
+
+        def finish(current):
+            export = current["export"]
+            if export["plan_id"] or any(
+                export.get(key) not in {None, made[key]} for key in made
+            ):
+                raise Conflict("film_result_identity_conflict")
+            export.update(made)
+            current["phase"] = "completed"
+
+        self._mutate(principal, project_id, run_id, finish)
+        return {"terminal": True, "phase": "completed"}
+
     def _waiting(self, principal, value, phase, error_code=None):
         if value["phase"] != phase or value.get("error_code") != error_code:
             self._mutate(
@@ -842,6 +866,8 @@ class FilmExecution:
             )
             if value.get("render_contract_version") == 5:
                 chapter_results[-1]["render_version"] = 5
+        if len(value["chapters"]) == 1 and not value["export"]["plan_id"]:
+            return self._finish_single_chapter(principal, project_id, run_id, value)
         if not value["export"]["plan_id"]:
             compiled = compile_film_export(project_id, run_id, chapter_results)
             value = self._render_plan(principal, value, "export", compiled, [])
