@@ -265,9 +265,133 @@ test('several suggested pictures are one confirm that stays confirmed after a re
   assert.equal(partly.quotes[quote.id].status, 'open');
 });
 
-test('confirmed pictures are drawn one at a time, in order', async () => {
+test('confirmed pictures: the first alone, the rest a few at a time, shots last (h3-studio#1246)', async () => {
+  const { createLiveChat } = await import('./story-chat-client.js');
+  const ids = [
+    'character-0123456789abcdef',
+    'location-0123456789abcde1',
+    'prop-0123456789abcdef012',
+    'character-0123456789abcde2',
+    'character-0123456789abcde3',
+  ];
+  const shot = 'shot-0123456789abcdef0123';
+  const view = {
+    version: 4,
+    project_id: 'p1',
+    messages: [
+      {
+        id: 'turn-abcdef0123456789-a',
+        role: 'assistant',
+        text: 'Confirm.',
+        changes: [],
+        proposal: null,
+      },
+    ],
+    cards: {
+      characters: [
+        { id: ids[0], name: 'Zib', text: '' },
+        { id: ids[3], name: 'Ko', text: '' },
+        { id: ids[4], name: 'Lu', text: '' },
+      ],
+      places: [{ id: ids[1], name: 'Field', text: '' }],
+      props: [{ id: ids[2], name: 'Pod', text: '' }],
+      shots: [{ id: shot, order: 1, text: 'Zib lands.', seconds: 5, start: 0, end: 5 }],
+    },
+  };
+  let active = 0;
+  const calls = [];
+  const api = {
+    async request(path, options = {}) {
+      if (!path.endsWith('/images')) return view;
+      active += 1;
+      calls.push({ card: options.body.card_id, request: options.body.request_id, active });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      return view;
+    },
+  };
+  const chat = createLiveChat({ api, projectId: 'p1', labels: {} });
+  await chat.open(() => {});
+  // The batch as a picture confirm carries it: cards with their own request ids.
+  const cards = [shot, ...ids];
+  const quote = {
+    id: 'pics-0123456789abcdef',
+    action: {
+      kind: 'image',
+      cards,
+      requests: cards.map((_card, i) => `pic-batch-${i}-0123456789`),
+    },
+  };
+  const single = { id: 'pic-manual-0123456789', action: { kind: 'image', cards: [ids[0]] } };
+  await Promise.all([
+    chat.settle(quote, true, [], () => {}),
+    chat.settle(single, true, [], () => {}),
+  ]);
+  const order = calls.map((call) => call.card);
+  // No card has a picture yet: the first card is drawn alone and sets the style.
+  assert.equal(order[0], ids[0]);
+  assert.equal(calls[0].active, 1);
+  // The other cards together, at most three at once; the shot after all of them.
+  assert.deepEqual(new Set(order.slice(1, 5)), new Set(ids.slice(1)));
+  assert.equal(Math.max(...calls.slice(1, 5).map((call) => call.active)), 3);
+  assert.equal(order[5], shot);
+  assert.equal(calls[5].active, 1);
+  // A later confirm waits for the whole first one.
+  assert.deepEqual(calls[6], { card: ids[0], request: single.id, active: 1 });
+  const requests = Object.fromEntries(
+    quote.action.cards.map((card, index) => [card, quote.action.requests[index]]),
+  );
+  for (const call of calls.slice(0, 6)) assert.equal(call.request, requests[call.card]);
+});
+
+test('a first picture that fails leaves the next one to set the style, alone', async () => {
+  const { createLiveChat } = await import('./story-chat-client.js');
+  const ids = ['character-a', 'character-b', 'character-c', 'character-d'];
+  const view = {
+    version: 4,
+    project_id: 'p1',
+    messages: [],
+    cards: {
+      characters: ids.map((id) => ({ id, name: id, text: '' })),
+      places: [],
+      props: [],
+      shots: [],
+    },
+  };
+  let active = 0;
+  const calls = [];
+  const api = {
+    async request(path, options = {}) {
+      if (!path.endsWith('/images')) return view;
+      active += 1;
+      calls.push({ card: options.body.card_id, active });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active -= 1;
+      if (options.body.card_id === ids[0]) throw new Error('provider failed');
+      return view;
+    },
+  };
+  const chat = createLiveChat({ api, projectId: 'p1', labels: {} });
+  await chat.open(() => {});
+  const quote = {
+    id: 'pics-0123456789abcdef',
+    action: { kind: 'image', cards: ids, requests: ids.map((id) => `pic-${id}-0123456789`) },
+  };
+  await chat.settle(quote, true, [], () => {});
+  assert.deepEqual(
+    calls.slice(0, 2).map((call) => [call.card, call.active]),
+    [
+      [ids[0], 1],
+      [ids[1], 1],
+    ],
+  );
+  assert.deepEqual(new Set(calls.slice(2).map((call) => call.card)), new Set(ids.slice(2)));
+  assert.equal(Math.max(...calls.slice(2).map((call) => call.active)), 2);
+});
+
+test('once the story has a picture, every new card picture starts at once', async () => {
   const { createLiveChat, fromServer } = await import('./story-chat-client.js');
-  const ids = ['character-0123456789abcdef', 'location-0123456789abcde1'];
+  const ids = ['location-0123456789abcde1', 'prop-0123456789abcdef012'];
   const view = {
     version: 4,
     project_id: 'p1',
@@ -281,19 +405,17 @@ test('confirmed pictures are drawn one at a time, in order', async () => {
       },
     ],
     cards: {
-      characters: [{ id: ids[0], name: 'Zib', text: '' }],
-      places: [{ id: ids[1], name: 'Field', text: '' }],
-      props: [],
+      characters: [{ id: 'character-drawn', name: 'Zib', text: '', image_url: '/zib.png' }],
+      places: [{ id: ids[0], name: 'Field', text: '' }],
+      props: [{ id: ids[1], name: 'Pod', text: '' }],
       shots: [],
     },
   };
   let active = 0,
     most = 0;
-  const calls = [];
   const api = {
-    async request(path, options = {}) {
+    async request(path) {
       if (!path.endsWith('/images')) return view;
-      calls.push(options.body);
       active += 1;
       most = Math.max(most, active);
       await new Promise((resolve) => setTimeout(resolve, 5));
@@ -302,24 +424,10 @@ test('confirmed pictures are drawn one at a time, in order', async () => {
     },
   };
   const chat = createLiveChat({ api, projectId: 'p1', labels: {} });
+  await chat.open(() => {});
   const [quote] = Object.values(fromServer(view, {}).quotes);
-  const single = {
-    id: 'pic-manual-0123456789',
-    action: { kind: 'image', cards: [ids[0]] },
-  };
-  await Promise.all([
-    chat.settle(quote, true, [], () => {}),
-    chat.settle(single, true, [], () => {}),
-  ]);
-  assert.equal(most, 1);
-  assert.deepEqual(
-    calls.map((body) => body.card_id),
-    [ids[0], ids[1], ids[0]],
-  );
-  assert.deepEqual(
-    calls.map((body) => body.request_id),
-    [...quote.action.requests, single.id],
-  );
+  await chat.settle(quote, true, [], () => {});
+  assert.equal(most, 2);
 });
 
 test('a picture drawn from attached photos sends them with that card only', async () => {

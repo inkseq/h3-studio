@@ -321,6 +321,119 @@ class RealCreditImageTests(unittest.TestCase):
                 self.assertEqual(self.balance(), (100, 0))
                 self.app.state.guided.mutate = plain_mutate
 
+    def neighbours_commit_first(self, times):
+        """Another picture's commit lands just before each of this one's first commits."""
+        original = self.app.state.guided.mutate
+        project_id = self.path.split("/")[3]
+        project = self.client.get("/v1/projects/" + project_id).json()["project"]
+        shot = next(e for e in project["entities"] if e["type"] == "shot")
+        seen = {}
+
+        def neighbour_then_mutate(principal, project_id, body, key=None, **kwargs):
+            stage = (key or "").startswith("story-chat-image-start-") and "start"
+            stage = stage or (key or "").startswith("story-chat-image-") and "attach"
+            if stage and seen.get(stage, 0) < times:
+                seen[stage] = seen.get(stage, 0) + 1
+                current = self.client.get("/v1/projects/" + project_id).json()
+                edited = self.client.post(
+                    f"/v1/projects/{project_id}/actions",
+                    json={
+                        "expected_version": current["version"],
+                        "actions": [
+                            {
+                                "op": "entity.update",
+                                "entity_id": shot["id"],
+                                "patch": {"description": f"{stage} {seen[stage]}"},
+                            }
+                        ],
+                    },
+                )
+                self.assertEqual(edited.status_code, 200, edited.text)
+            return original(principal, project_id, body, key, **kwargs)
+
+        self.app.state.guided.mutate = neighbour_then_mutate
+        return seen
+
+    def test_other_pictures_committing_around_this_one_are_absorbed(self):
+        # Pictures of one confirm are drawn a few at a time (#1246): four neighbour
+        # commits before the fence and four before the attachment still end in one
+        # drawn, attached and charged picture.
+        self.policy(True)
+        seen = self.neighbours_commit_first(4)
+        response = self.draw("pic-near-0001")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(seen, {"start": 4, "attach": 4})
+        self.assertEqual(len(self.images.calls), 1)
+        self.assertEqual(self.balance(), (95, 0))
+
+    def test_a_sibling_picture_landing_first_keeps_this_ones_style(self):
+        # Mia's picture is attached between Zib's read and Zib's fence. Zib's style
+        # reference would now be Mia's picture; Zib keeps the one it was priced with
+        # (none) instead of being refused (#1246).
+        self.policy(True)
+        mia = self.story["cards"]["characters"][1]["id"]
+        original = self.app.state.guided.mutate
+
+        def sibling_then_mutate(principal, project_id, body, key=None, **kwargs):
+            if key == "story-chat-image-start-pic-zib-00001" and not getattr(
+                self, "_sibling", False
+            ):
+                self._sibling = True
+                sibling = self.client.post(
+                    self.path, json={"request_id": "pic-mia-00001", "card_id": mia}
+                )
+                self.assertEqual(sibling.status_code, 200, sibling.text)
+            return original(principal, project_id, body, key, **kwargs)
+
+        self.app.state.guided.mutate = sibling_then_mutate
+        response = self.draw("pic-zib-00001")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(self.images.calls), 2)
+        self.assertEqual(list(self.images.pictures), [])
+        self.assertEqual(self.balance(), (90, 0))
+
+    def test_a_busy_storage_slot_is_waited_for_not_lost(self):
+        from unittest import mock
+
+        from studio_platform.assets import AssetQuotaExceeded
+
+        self.policy(True)
+        upload, refusals = self.app.state.assets.upload, []
+
+        def busy_twice(*args, **kwargs):
+            if len(refusals) < 2:
+                refusals.append(1)
+                raise AssetQuotaExceeded("busy")
+            return upload(*args, **kwargs)
+
+        with (
+            mock.patch.object(self.app.state.assets, "upload", side_effect=busy_twice),
+            mock.patch("time.sleep") as slept,
+        ):
+            response = self.draw("pic-slot-0001")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual([call.args[0] for call in slept.call_args_list], [1, 2])
+        self.assertEqual(len(self.images.calls), 1)
+        self.assertEqual(self.balance(), (95, 0))
+
+    def test_storage_that_stays_busy_releases_the_hold(self):
+        from unittest import mock
+
+        from studio_platform.assets import AssetQuotaExceeded
+
+        self.policy(True)
+        with (
+            mock.patch.object(
+                self.app.state.assets,
+                "upload",
+                side_effect=AssetQuotaExceeded("busy"),
+            ),
+            mock.patch("time.sleep"),
+        ):
+            response = self.draw("pic-full-0001")
+        self.assertEqual(response.status_code, 429, response.text)
+        self.assertEqual(self.balance(), (100, 0))
+
     def test_settings_saved_during_the_drawing_win_and_nothing_is_charged(self):
         self.policy(True)
         project_id = self.path.split("/")[3]

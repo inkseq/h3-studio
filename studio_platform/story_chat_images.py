@@ -403,8 +403,50 @@ def older_settings_in_use(project, card):
     return any(link.get("target") == card["id"] for link in project.get("links", []))
 
 
-def input_hash(project, card, instruction, photos=()):
-    """What a picture was drawn from; a replay with different material conflicts."""
+# Version-conflict retries for a picture's fence and attachment: pictures of one confirm
+# are drawn a few at a time, so their commits interleave (#1246).
+PICTURE_COMMIT_TRIES = 6
+# Seconds to wait for a free storage slot (two per owner) before trying again; None gives up.
+STORE_WAITS = (1, 2, 4, None)
+
+
+def store_picture(assets, owner, project_id, data, filename, client_asset_id):
+    """Store a drawn picture, waiting briefly when the owner's storage slots are busy.
+
+    Storing holds one of the owner's two processing slots for a moment; a picture
+    finishing next to another (or next to a voice excerpt cut) would otherwise be
+    lost after it was drawn. Nothing is reserved before a slot is free, so a retry
+    starts clean, and the client asset id keeps it one asset.
+    """
+    import io
+    import time
+
+    from .assets import AssetQuotaExceeded
+
+    for wait in STORE_WAITS:
+        try:
+            return assets.upload(
+                owner,
+                project_id,
+                io.BytesIO(data),
+                filename,
+                client_asset_id=client_asset_id,
+            )
+        except AssetQuotaExceeded:
+            if wait is None:
+                raise
+            time.sleep(wait)
+
+
+def input_hash(
+    project, card, instruction, photos=(), *, style_reference=None, frozen=False
+):
+    """What a picture was drawn from; a replay with different material conflicts.
+
+    `frozen` checks a card against the style reference its request started with, so a
+    sibling picture attached meanwhile (pictures of one confirm are drawn together,
+    #1246) never refuses it; the picture is then drawn with that same reference.
+    """
     import hashlib
     import json
 
@@ -427,7 +469,9 @@ def input_hash(project, card, instruction, photos=()):
         }
         value["references"] = reference_cards(project, card)
     else:
-        value["style_reference"] = style_card(project, card)
+        value["style_reference"] = (
+            style_reference if frozen else style_card(project, card)
+        )
     if photos:
         # Attached material photos (#726); absent for every older request.
         lookup = {e["id"]: e for e in project.get("entities", [])}

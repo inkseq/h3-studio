@@ -8,6 +8,8 @@ import { sendTurn } from './story-chat-stream.js';
 
 const KIND = { characters: 'character', places: 'place', props: 'prop' };
 
+// Pictures drawn at once within one confirm (h3-studio#1246).
+const PICTURES_AT_ONCE = 3;
 function cardsFromServer(view) {
   const cards = [];
   for (const [group, kind] of Object.entries(KIND))
@@ -412,14 +414,49 @@ export function createLiveChat({
     );
     return uploaded.map((item) => ({ ...item, cardName: names[item.cardId] || '' }));
   }
-  // One picture at a time: concurrent draws race on the story version and each would miss
-  // the style of the picture before it.
+  // One confirm's pictures at a time: a later confirm waits for the one before (#1112).
   let drawing = Promise.resolve();
   const queued = (task) => {
     const run = drawing.then(task, task);
     drawing = run.catch(() => {});
     return run;
   };
+  // Within a confirm (h3-studio#1246): the story's first picture alone, since every later
+  // card is drawn in its style (#1089); then the other cards a few at a time; then the shot
+  // pictures, which show those cards. The server retries the version races this causes.
+  async function drawBatch(items, emit) {
+    const cards = cardsFromServer(view || {});
+    const kind = (id) => cards.find((card) => card.id === id)?.kind;
+    const batch = new Set(items.map((item) => item.card));
+    // A picture outside this confirm already sets the style.
+    const styled = cards.some((card) => card.kind !== 'shot' && card.image && !batch.has(card.id));
+    const listed = items.map((item, index) => ({ ...item, index }));
+    let others = listed.filter((item) => kind(item.card) !== 'shot');
+    const shots = listed.filter((item) => kind(item.card) === 'shot');
+    const done = new Array(items.length).fill(false);
+    const run = async (group) => {
+      let next = 0;
+      const lane = async () => {
+        while (next < group.length) {
+          const item = group[next++];
+          done[item.index] = await drawPicture(item.request, item.card, emit, item.photos);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(PICTURES_AT_ONCE, group.length) }, lane));
+    };
+    // Without a style yet, one at a time until a picture lands; that one sets it.
+    while (!styled && others.length) {
+      const [head, ...rest] = others;
+      await run([head]);
+      others = rest;
+      if (done[head.index]) break;
+    }
+    await run(others);
+    await run(shots);
+    return done;
+  }
+  const batchOf = (cards, requests, sources) =>
+    cards.map((card, index) => ({ card, request: requests[index], photos: sources?.[card] }));
   async function drawPicture(requestId, card, emit, photos = []) {
     emit({ type: 'card.status', id: card, status: 'generating' });
     try {
@@ -749,11 +786,10 @@ export function createLiveChat({
       }
       if (quote.action.kind !== 'image') {
         if (drawFirst) {
-          const drawn = await Promise.all(
-            quote.action.pictures.map((card, index) =>
-              queued(() =>
-                drawPicture(quote.action.requests[index], card, emit, quote.action.sources?.[card]),
-              ),
+          const drawn = await queued(() =>
+            drawBatch(
+              batchOf(quote.action.pictures, quote.action.requests, quote.action.sources),
+              emit,
             ),
           );
           // A picture that did not arrive leaves the offer open; its error is already shown.
@@ -766,14 +802,11 @@ export function createLiveChat({
       }
       // Confirmed pictures: the server holds the credits, draws, and charges only when the
       // picture is on the card (#461). They queue behind any picture still drawing (#1112).
-      const requests = quote.action.requests || [quote.id];
-      // Queue the whole batch at once so it stays together, in order.
-      await Promise.all(
-        quote.action.cards.map((card, index) =>
-          queued(() =>
-            drawPicture(requests[index] || quote.id, card, emit, quote.action.sources?.[card]),
-          ),
-        ),
+      const requests = quote.action.cards.map(
+        (_card, index) => quote.action.requests?.[index] || quote.id,
+      );
+      await queued(() =>
+        drawBatch(batchOf(quote.action.cards, requests, quote.action.sources), emit),
       );
     },
     propose(action, card, emit) {
