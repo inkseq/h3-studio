@@ -704,7 +704,7 @@ test('the video offer draws its pictures, prices the shots and makes them in the
     quote.action.pictures.length,
   );
   const check = calls.find(([, path]) => path.endsWith('/storyboard/preflights'));
-  assert.match(check[2], /-v9$/);
+  assert.match(check[2], /-v9-t\d+$/);
   assert.deepEqual(opened, []);
   const priced = state.quotes[quote.id];
   assert.equal(priced.status, 'priced');
@@ -875,6 +875,104 @@ test('a price for an older story version is checked again, never submitted', asy
   assert.equal(state.quotes[quote.id].version, 10);
   assert.deepEqual(state.quotes[quote.id].plans, ['plan-10']);
   chat.close();
+});
+
+test('lapsed plans are checked again: the same price goes ahead (h3-studio#1263)', async () => {
+  const { createLiveChat, fromServer } = await import('./story-chat-client.js');
+  const { applyEvent } = await import('./story-chat-model.js');
+  const view = videoView({ kind: 'generate', shot_ids: ['s1'] });
+  for (const card of [...view.cards.characters, ...view.cards.places])
+    card.image_url = '/v1/assets/x/content';
+  let checks = 0,
+    credits = 30;
+  const calls = [];
+  const api = {
+    async request(path, options = {}) {
+      calls.push([options.method || 'GET', path, options.key || '', options.body]);
+      if (path === '/v1/projects/p1') return { version: 9 };
+      if (path.startsWith('/v1/jobs?')) return { jobs: [] };
+      if (path.endsWith('/storyboard/preflights')) {
+        checks += 1;
+        return {
+          id: 'pf-' + checks,
+          project_version: 9,
+          status: 'completed',
+          items: [
+            { shot_id: 's1', plan_id: 'plan-' + checks, plan: { admission: 'credits', credits } },
+          ],
+        };
+      }
+      if (path === '/v1/batches') {
+        const lapsed = options.body.plan_ids[0] === 'plan-1';
+        return {
+          id: 'b-' + checks,
+          items: [
+            lapsed
+              ? {
+                  plan_id: 'plan-1',
+                  job_id: null,
+                  error_code: 'plan_no_longer_valid',
+                  status: 'rejected',
+                }
+              : {
+                  plan_id: options.body.plan_ids[0],
+                  job_id: 'j1',
+                  error_code: null,
+                  status: 'queued',
+                },
+          ],
+        };
+      }
+      return view;
+    },
+  };
+  const labels = {
+    openWorks: () => {},
+    failed: () => 'failed',
+    refused: () => 'refused',
+    pollMs: 1,
+  };
+  let state = { ...fromServer(view, labels) };
+  const said = [];
+  const emit = (event) => {
+    if (event.type === 'assistant.message') said.push(event.text);
+    state = applyEvent(state, event);
+  };
+  const chat = createLiveChat({ api, projectId: 'p1', labels });
+  const [quote] = Object.values(state.quotes);
+  await chat.settle(quote, true, [], emit);
+  const making = chat.make(state.quotes[quote.id], emit);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  chat.close();
+  await making;
+  const batches = calls.filter(([method, path]) => method === 'POST' && path === '/v1/batches');
+  assert.deepEqual(
+    batches.map(([, , key, body]) => [key, body.plan_ids]),
+    [
+      ['chat-batch-pf-1', ['plan-1']],
+      ['chat-batch-pf-2', ['plan-2']],
+    ],
+  );
+  assert.equal(checks, 2);
+  assert.deepEqual(said, []);
+
+  // A changed price is shown to confirm, never submitted.
+  checks = 0;
+  calls.length = 0;
+  let second = { ...fromServer(view, labels) };
+  const emit2 = (event) => (second = applyEvent(second, event));
+  const again = createLiveChat({ api, projectId: 'p1', labels });
+  const [offer] = Object.values(second.quotes);
+  await again.settle(offer, true, [], emit2);
+  credits = 35;
+  await again.make(second.quotes[offer.id], emit2);
+  assert.equal(
+    calls.filter(([method, path]) => method === 'POST' && path === '/v1/batches').length,
+    1,
+  );
+  assert.equal(second.quotes[offer.id].status, 'priced');
+  assert.equal(second.quotes[offer.id].credits, 35);
+  again.close();
 });
 
 test('a finished story says so instead of offering its pictures again', async () => {
