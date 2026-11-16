@@ -67,6 +67,83 @@ class PreflightReads(NamedTuple):
     setting: dict
 
 
+# Voice excerpt warm-up while the story chat draws pictures (#1258). A shot's
+# price check otherwise waits ~11 s on staging for its shared excerpt cut.
+WARM_EVERY_S = 600
+_WARMED, _WARMED_LOCK = {}, threading.Lock()
+_WARM_SLOT = threading.Semaphore(1)  # one warm-up at a time in this process
+# A cut holds one of the owner's storage slots; one killed mid-cut stays busy until
+# an admin recovers it, so shutdown stops new cuts and waits for the running one.
+_CLOSING, _ACTIVE = threading.Event(), set()
+DRAIN_S = 40  # inside the app container's 60 s stop grace period
+
+
+def warm_excerpts_soon(admission, principal, project_id):
+    """Start cutting this story's voice excerpts in the background; at most once
+    per story every ten minutes. Returns whether a warm-up was started."""
+    if _CLOSING.is_set():
+        return False
+    engine = getattr(getattr(admission, "repo", None), "engine", None)
+    if engine is not None and engine.dialect.name == "sqlite":
+        # Local and test databases: a background reader would only contend with
+        # the single SQLite writer. Staging and production run Postgres.
+        return False
+    key, now = (principal.owner, project_id), time.monotonic()
+    with _WARMED_LOCK:
+        if now - _WARMED.get(key, -WARM_EVERY_S) < WARM_EVERY_S:
+            return False
+        _WARMED[key] = now
+        for stale in [k for k, at in _WARMED.items() if now - at >= WARM_EVERY_S]:
+            _WARMED.pop(stale, None)
+    thread = threading.Thread(
+        target=_warm,
+        args=(admission, principal, project_id),
+        name="excerpt-warmup",
+        daemon=True,
+    )
+    with _WARMED_LOCK:
+        _ACTIVE.add(thread)
+    try:
+        thread.start()
+    except Exception:
+        with _WARMED_LOCK:
+            _ACTIVE.discard(thread)
+        return False
+    return True
+
+
+def drain_warmups(timeout=DRAIN_S):
+    """At shutdown: start no new cut and wait for the ones running (bounded)."""
+    _CLOSING.set()
+    deadline = time.monotonic() + timeout
+    with _WARMED_LOCK:
+        running = list(_ACTIVE)
+    for thread in running:
+        try:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        except Exception:
+            continue  # shutdown goes on; nothing else waits on this thread
+
+
+def _warm(admission, principal, project_id):
+    import logging
+
+    try:
+        with _WARM_SLOT:
+            if _CLOSING.is_set():
+                return
+            count = admission.warm_excerpts(principal, project_id)
+        logging.getLogger(__name__).info("excerpt_warmup cuts=%d", count)
+    except Exception as error:
+        # A warm-up is only a head start: the price check cuts what is missing.
+        logging.getLogger(__name__).info(
+            "excerpt_warmup_skipped error_type=%s", type(error).__name__
+        )
+    finally:
+        with _WARMED_LOCK:
+            _ACTIVE.discard(threading.current_thread())
+
+
 class GenerationAdmission:
     def __init__(
         self,
@@ -91,6 +168,68 @@ class GenerationAdmission:
         self.capabilities_provider = capabilities_provider or (
             lambda: capabilities(self.settings)
         )
+
+    @staticmethod
+    def drain_warmups(timeout=DRAIN_S):
+        """App shutdown: see the module's drain_warmups."""
+        drain_warmups(timeout)
+
+    def _render_draft(self, principal, project, shot_id, capabilities, setting):
+        """The project and draft a shot is planned from (defaults, quality tier)."""
+        render_project, defaults_version = project, None
+        if not managed_project(project):
+            from .storyboard_versions import effective_project
+
+            defaults_version = setting["version"]
+            render_project, _ = effective_project(project, shot_id, setting["defaults"])
+        from .quality_authoring import project as resolve_quality_project
+
+        render_project = resolve_quality_project(
+            self.settings, self.repo, principal, render_project, stored=True
+        )
+        draft, _ = read_draft(render_project, shot_id, capabilities=capabilities)
+        return render_project, defaults_version, draft
+
+    def warm_excerpts(self, principal, project_id):
+        """Cut the voice excerpts the story's shots will reference, from the same
+        drafts the price check reads; finished cuts are reused there (#1258)."""
+        project = self.access.project(principal, project_id, "jobs:write")["payload"]
+        caps = self.capabilities_provider()
+        setting = None
+        if not managed_project(project):
+            from .storyboard_versions import preferences
+
+            setting = preferences(self.repo, self.settings.tenant_id, principal.owner)
+        keys = []
+        for shot in project.get("entities", []):
+            if shot.get("type") != "shot":
+                continue
+            try:
+                _, _, draft = self._render_draft(
+                    principal, project, shot["id"], caps, setting
+                )
+            except (ValueError, KeyError, TypeError, Conflict):
+                continue
+            # Voice excerpts only: the cut every shot of a character waits for.
+            for entry in draft["inputs"].get("audios") or []:
+                selected = entry.get("source_range")
+                if selected:
+                    key = (entry["asset_id"], selected["start"], selected["end"])
+                    if key not in keys:
+                        keys.append(key)
+        if keys:
+            self.access.authorize(principal, project_id, "assets:write")
+        cut = 0
+        for asset_id, start, end in keys:
+            if _CLOSING.is_set():
+                break
+            try:
+                self.assets.get(principal.owner, asset_id, project_id)
+                self.assets.derive(principal.owner, asset_id, start, end)
+                cut += 1
+            except Exception:
+                continue  # its price check reports what is wrong with it
+        return cut
 
     def model_prompt(self, project, shot_id, draft, body):
         """English full-reference prompt for our own H3 machines (h3_prompt)."""
@@ -176,24 +315,17 @@ class GenerationAdmission:
         current_capabilities = (
             self.capabilities_provider() if reads is None else reads.capabilities
         )
-        render_project, defaults_version = project, None
+        setting = None
         if not managed_project(project):
-            from .storyboard_versions import preferences, effective_project
+            from .storyboard_versions import preferences
 
             setting = (
                 preferences(self.repo, self.settings.tenant_id, principal.owner)
                 if reads is None
                 else reads.setting
             )
-            defaults_version = setting["version"]
-            render_project, _ = effective_project(project, shot_id, setting["defaults"])
-        from .quality_authoring import project as resolve_quality_project
-
-        render_project = resolve_quality_project(
-            self.settings, self.repo, principal, render_project, stored=True
-        )
-        draft, _ = read_draft(
-            render_project, shot_id, capabilities=current_capabilities
+        render_project, defaults_version, draft = self._render_draft(
+            principal, project, shot_id, current_capabilities, setting
         )
         if any(draft["inputs"].values()):
             self.access.authorize(principal, project_id, "assets:read")

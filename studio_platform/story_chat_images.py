@@ -407,7 +407,8 @@ def older_settings_in_use(project, card):
 # are drawn a few at a time, so their commits interleave (#1246).
 PICTURE_COMMIT_TRIES = 6
 # Seconds to wait for a free storage slot (two per owner) before trying again; None gives up.
-STORE_WAITS = (1, 2, 4, None)
+# A voice excerpt warm-up (#1258) can hold one slot for ~10 s on a small host.
+STORE_WAITS = (1, 2, 4, 8, None)
 
 
 def store_picture(assets, owner, project_id, data, filename, client_asset_id):

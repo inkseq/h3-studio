@@ -951,6 +951,17 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             # Running now (another tab, a double click) or an unknown outcome such as an
             # upstream timeout: never resubmit the same request to the provider.
             _fail("story_chat_image_in_progress", 409)
+        if getattr(app.state, "generation_admission", None) is not None:
+            # While this picture is drawn, cut the voice excerpts the shots' price
+            # check would otherwise wait for (#1258). A head start only.
+            from .generation_admission import warm_excerpts_soon
+
+            try:
+                warm_excerpts_soon(
+                    app.state.generation_admission, principal, project_id
+                )
+            except Exception:
+                pass  # never in the way of this picture or its credit hold
 
         def release(reason):
             # Only the request that created the hold may release it.
