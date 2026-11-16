@@ -755,11 +755,11 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
     @app.post("/v1/story-chats/{project_id}/images")
     def story_chat_image(project_id: str, request: Request, body: dict):
         import copy
-        import io
 
         from .story_chat import now_iso
         from .story_chat_images import (
             KINDS,
+            PICTURE_COMMIT_TRIES,
             REQUEST_ID,
             ImageError,
             aspect_for,
@@ -768,6 +768,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             load_pictures,
             prompt_for,
             reference_cards,
+            store_picture,
             style_card,
         )
 
@@ -901,6 +902,13 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             else input_hash(row["payload"], card or {}, instruction, photo_ids),
             "actor_id": scope.actor_id,
         }
+        # The style reference this request was priced with; used for the fence check
+        # and the drawing even if a sibling picture lands first (#1246).
+        style = (
+            style_card(row["payload"], card)
+            if card is not None and card["type"] != "shot"
+            else None
+        )
 
         def finish(response):
             # Charge only once the picture is durably on the card (attachment receipt).
@@ -962,7 +970,9 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
         # Fence the request durably BEFORE the provider call: whoever commits this keyed
         # receipt first owns the request; everyone else sees it in progress.
         fenced = False
-        for _attempt in range(2):
+        # Pictures of one confirm are drawn a few at a time (#1246); their fences and
+        # attachments commit around this one, so a version conflict is retried a few times.
+        for _attempt in range(PICTURE_COMMIT_TRIES):
             chat_now = chat_of(row["payload"])
             try:
                 app.state.guided.mutate(
@@ -1008,7 +1018,14 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                         nothing_charged=True,
                     )
                 if (
-                    input_hash(row["payload"], card, instruction, photo_ids)
+                    input_hash(
+                        row["payload"],
+                        card,
+                        instruction,
+                        photo_ids,
+                        style_reference=style,
+                        frozen=True,
+                    )
                     != binding["input_hash"]
                 ):
                     # The card changed after the price was frozen: draw nothing rather
@@ -1028,7 +1045,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             rows = (
                 reference_cards(row["payload"], card)
                 if card["type"] == "shot"
-                else [style_card(row["payload"], card)]
+                else [style]
             )
             pictures = load_pictures(
                 app.state.assets, principal, project_id, [r for r in rows if r]
@@ -1045,12 +1062,13 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
             suffix = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}[
                 mime
             ]
-            asset = app.state.assets.upload(
+            asset = store_picture(
+                app.state.assets,
                 principal.owner,
                 project_id,
-                io.BytesIO(data),
+                data,
                 "story-picture" + suffix,
-                client_asset_id="story-chat-image:" + request_id,
+                "story-chat-image:" + request_id,
             )
             if asset.get("status") != "ready":
                 raise ImageError("image_store_failed", 502)
@@ -1060,7 +1078,7 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                 _fail(error.code, error.status, nothing_charged=True)
             raise
         image_id = "image-" + request_id
-        for _attempt in range(3):
+        for _attempt in range(PICTURE_COMMIT_TRIES):
             row = read(principal, project_id, "projects:write")
             project = row["payload"]
             chat = chat_of(project)
