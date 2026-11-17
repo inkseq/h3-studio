@@ -623,8 +623,18 @@ class DstackCommands:
 
     def _state_for_owner(self, owner):
         # Internal read projection: caller must authorize the original actor.
+        return self._state_for_owners({owner})[owner]
+
+    def _state_for_owners(self, owners, *, skip_ended=False):
+        """Every owner's projection from one scan of the machine table.
+
+        The admin view used to rescan every machine once per tenant user, so its
+        cost grew as users x machines and timed out on staging (#1272).
+        `skip_ended` leaves out machines whose stop has finished, before any
+        per-machine query.
+        """
         now = self.repo.clock()
-        result = []
+        results = {owner: [] for owner in owners}
         with self.repo.engine.connect() as connection:
             for node in connection.execute(
                 select(operator_nodes).order_by(operator_nodes.c.updated_at.desc())
@@ -633,9 +643,13 @@ class DstackCommands:
                 if (
                     payload.get("capacity_backend") != BACKEND_MARKER
                     or payload.get("tenant_id") != self.settings.tenant_id
-                    or payload.get("owner_id") != owner
+                    or payload.get("owner_id") not in results
+                    or skip_ended
+                    and node["desired_state"] == "stopped"
+                    and node["runtime_state"] == "stopped"
                 ):
                     continue
+                result = results[payload["owner_id"]]
                 binding = payload["dstack"]
                 observed = binding.get("observed_at")
                 fresh = _finite(observed) and 0 <= now - observed <= self.policy.get(
@@ -765,6 +779,11 @@ class DstackCommands:
                         "version": command_revision(payload),
                     }
                 )
+        return {
+            owner: self._owner_state(owner, nodes) for owner, nodes in results.items()
+        }
+
+    def _owner_state(self, owner, result):
         return {
             "capacity_backend": BACKEND_MARKER,
             "enabled": self.policy.get("enabled") is True,
