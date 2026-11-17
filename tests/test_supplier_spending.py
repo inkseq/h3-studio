@@ -129,7 +129,16 @@ class SupplierSpendingTests(LedgerCase):
 
     def read(self):
         with self.repo.engine.connect() as c:
-            return projection(c, self.scope.tenant_id, self.now)
+            full = projection(c, self.scope.tenant_id, self.now)
+            # Admission's narrowed read must reach the same exposure in every
+            # scenario this suite builds (#1252).
+            narrowed = projection(c, self.scope.tenant_id, self.now, exposure_only=True)
+            self.assertEqual(
+                narrowed['confirmed_exposure_microusd'],
+                full['confirmed_exposure_microusd'],
+            )
+            self.assertEqual(narrowed['admission_blocked'], full['admission_blocked'])
+            return full
 
     def layer(self, account, owner=None, tenant=None):
         self.repo.configure_budget(
@@ -204,6 +213,52 @@ class SupplierSpendingTests(LedgerCase):
         many, value = queries()
         self.assertEqual(value['projected_microusd'], 1_500_000)
         self.assertEqual(few, many)
+
+    def test_admission_reads_only_rentals_that_can_add_today(self):
+        # #1252: admission cost must follow today's rentals, not all history.
+        from sqlalchemy import event
+
+        start = self.read()['period_start']
+        live = self.rental(200_000, identity='live')
+        for index in range(4):
+            self.rental(
+                100_000,
+                state='settled',
+                actual=100_000,
+                created=start - 9_000,
+                settled=start - 1_000,
+                identity=f'old-{index}',
+            )
+        ended = self.rental(150_000, created=start - 9_000, identity='ended')
+        with self.repo.transaction() as c:
+            c.execute(
+                update(instance_intents)
+                .where(instance_intents.c.id == ended)
+                .values(state='destroyed', updated_at=start - 500)
+            )
+        statements = []
+
+        def capture(_conn, _cursor, statement, parameters, *_rest):
+            statements.append((statement, parameters))
+
+        event.listen(self.repo.engine, 'before_cursor_execute', capture)
+        try:
+            with self.repo.engine.connect() as c:
+                narrowed = projection(
+                    c, self.scope.tenant_id, self.now, exposure_only=True
+                )
+        finally:
+            event.remove(self.repo.engine, 'before_cursor_execute', capture)
+        self.assertEqual(narrowed['confirmed_exposure_microusd'], 200_000)
+        node_reads = [
+            str(parameters)
+            for statement, parameters in statements
+            if 'platform_operator_capacity_nodes' in statement
+        ]
+        self.assertEqual(len(node_reads), 1)
+        self.assertIn(live, node_reads[0])
+        self.assertNotIn(ended, node_reads[0])
+        self.assertEqual(self.read()['confirmed_exposure_microusd'], 200_000)
 
     def test_distinct_supplier_allocations_are_additive(self):
         self.rental(200_000, identity='one')
