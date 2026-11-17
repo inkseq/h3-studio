@@ -163,6 +163,119 @@ class RunPodServerlessTests(unittest.TestCase):
         with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
             self.client.get(run_name=RUN)
 
+    def test_a_refused_submit_ends_at_once_and_never_blocks_the_lane(self):
+        # #1268: a 4xx from /run means RunPod made no job; the start fails now
+        # (the next lane is tried) instead of waiting as an unknown allocation.
+        refuse = self.fake.__call__
+
+        def refused(request):
+            if request.url.path.endswith("/run"):
+                return httpx.Response(400, json={"error": "bad input"})
+            return refuse(request)
+
+        client = RunPodServerlessClient(
+            self.config,
+            "inkseq-staging",
+            http=httpx.Client(transport=httpx.MockTransport(refused)),
+        )
+        with (
+            self.assertLogs("studio_platform.runpod_serverless", "WARNING") as logs,
+            self.assertRaisesRegex(DstackError, "dstack_api_rejected"),
+        ):
+            client.apply(spec())
+        self.assertIn("operation=run status=400", logs.output[0])
+        self.assertNotIn("bad input", logs.output[0])
+        run = client.get(run_name=RUN)
+        self.assertEqual(run["status"], "failed")
+        submission = run["latest_job_submission"]
+        self.assertEqual(submission["termination_reason"], "refused")
+        # No job id: the journal names its own allocation, never a RunPod one.
+        self.assertTrue(
+            submission["job_provisioning_data"]["instance_id"].startswith("unbound-")
+        )
+        self.assertNotIn("cost", run)  # never claimed to be zero
+        self.assertEqual(client.provider_inventory(BACKEND)["instance_ids"], [])
+        self.assertEqual(client.stop(RUN), {})
+
+    def test_a_lost_submit_stays_unknown_until_no_job_can_exist(self):
+        now = [1000.0]
+        client = RunPodServerlessClient(
+            self.config,
+            "inkseq-staging",
+            http=httpx.Client(transport=httpx.MockTransport(self.fake)),
+            clock=lambda: now[0],
+        )
+        client._write(
+            RUN,
+            {
+                "run_name": RUN,
+                "run_id": "x",
+                "job_id": None,
+                "spec": spec(),
+                "created_at": now[0],
+            },
+            create=True,
+        )
+        with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
+            client.get(run_name=RUN)
+        with self.assertRaisesRegex(DstackError, "inventory_unconfirmed"):
+            client.provider_inventory(BACKEND)
+        with self.assertRaisesRegex(DstackError, "exact_run_absent"):
+            client.stop(RUN)
+        now[0] += client.UNBOUND_EXPIRY_SECONDS - 1
+        with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
+            client.get(run_name=RUN)
+        now[0] += 1
+        run = client.get(run_name=RUN)
+        self.assertEqual(run["status"], "failed")
+        self.assertEqual(
+            run["latest_job_submission"]["termination_reason"], "unbound_expired"
+        )
+        self.assertNotIn("cost", run)
+        self.assertEqual(client.provider_inventory(BACKEND)["instance_ids"], [])
+        self.assertEqual(client.stop(RUN), {})
+        # The terminal state is journaled once and kept.
+        self.assertEqual(client._read(RUN)["final"], {"status": "UNBOUND_EXPIRED"})
+
+    def test_answers_that_do_not_prove_absence_are_not_refusals(self):
+        # Timeouts, conflicts, early data, rate limits and 5xx stay unknown.
+        for code in (408, 409, 425, 429, 503):
+            with self.subTest(code=code):
+                state = tempfile.TemporaryDirectory()
+                self.addCleanup(state.cleanup)
+
+                def answer(request, code=code):
+                    if request.url.path.endswith("/run"):
+                        return httpx.Response(code)
+                    return self.fake(request)
+
+                client = RunPodServerlessClient(
+                    dict(self.config, state_dir=state.name),
+                    "inkseq-staging",
+                    http=httpx.Client(transport=httpx.MockTransport(answer)),
+                )
+                with self.assertRaisesRegex(DstackError, "dstack_api_unavailable"):
+                    client.apply(spec())
+                with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
+                    client.get(run_name=RUN)
+
+    def test_a_refused_journal_never_hides_a_live_job_from_inventory(self):
+        def refused(request):
+            if request.url.path.endswith("/run"):
+                return httpx.Response(400)
+            return self.fake(request)
+
+        client = RunPodServerlessClient(
+            self.config,
+            "inkseq-staging",
+            http=httpx.Client(transport=httpx.MockTransport(refused)),
+        )
+        with self.assertRaises(DstackError):
+            client.apply(spec())
+        self.fake.jobs["ghost"] = {"status": "IN_PROGRESS"}
+        with self.assertRaisesRegex(DstackError, "inventory_unconfirmed"):
+            client.provider_inventory(BACKEND)
+
     def test_inventory_lists_live_jobs_and_must_match_health(self):
         self.client.apply(spec())
         self.fake.jobs["job-1"].update(status="IN_PROGRESS", workerId="w123")

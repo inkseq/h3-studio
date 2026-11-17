@@ -28,7 +28,12 @@ STATUSES = {
     "FAILED": ("failed", "failed"),
     "TIMED_OUT": ("failed", "failed"),
     "CANCELLED": ("terminated", "terminated"),
+    # Journals whose provider call never returned a job id (#1268): refused
+    # outright, or old enough that no job of it can still exist.
+    "REFUSED": ("failed", "failed"),
+    "UNBOUND_EXPIRED": ("failed", "failed"),
 }
+UNBOUND = frozenset({"REFUSED", "UNBOUND_EXPIRED"})
 LIVE = frozenset({"IN_QUEUE", "IN_PROGRESS"})
 JOB_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
 RUN_NAME = re.compile(r"sixnine-[0-9a-f]{32}")
@@ -62,6 +67,15 @@ def boot_input(spec, backend=RUNPOD_SERVERLESS.id):
 
 class DialoutCapacityClient:
     """Shared journal/compatibility projection; subclasses own only vendor calls."""
+
+    # A rejection by this lane proves nothing was created (a 4xx answer before
+    # any job exists). Lanes whose create errors mix refusals with lost answers
+    # keep False and wait for the expiry below.
+    DEFINITE_REJECTION = False
+    # Past this age an unbound journal's job, if the provider created one, has
+    # ended: a RunPod job lives its execution limit plus a queue TTL of one hour
+    # (_launch), a Modal sandbox at most its timeout. Ten minutes of margin.
+    UNBOUND_EXPIRY_SECONDS = MAX_EXECUTION_SECONDS + 3600 + 600
 
     def __init__(self, config, project, *, clock=time.time):
         self.config = config
@@ -169,7 +183,15 @@ class DialoutCapacityClient:
         }
         # Journal before the provider call; a lost answer stays unbound.
         self._write(run_name, record, create=True)
-        value = self._launch(run_name, job, seconds)
+        try:
+            value = self._launch(run_name, job, seconds)
+        except DstackError as error:
+            if self.DEFINITE_REJECTION and str(error) == "dstack_api_rejected":
+                # Nothing exists to observe or stop: the start fails at once and
+                # the next lane is tried, instead of waiting out the expiry.
+                record["final"] = {"status": "REFUSED"}
+                self._write(run_name, record, create=False)
+            raise
         job_id = value.get("id")
         _require(
             isinstance(job_id, str) and JOB_ID.fullmatch(job_id),
@@ -185,13 +207,39 @@ class DialoutCapacityClient:
         if record is None:
             return None
         if record.get("job_id") is None:
-            # Applied but the job id was never journaled: unknown, not absent.
-            raise DstackError("dstack_apply_requires_reconciliation")
+            final = self._unbound_final(record)
+            if final is None:
+                # Applied but the job id was never journaled: unknown, not absent.
+                raise DstackError("dstack_apply_requires_reconciliation")
+            return self._run(record, final)
         return self._run(record, self._status(record))
+
+    def _unbound_final(self, record):
+        """The terminal status of a journal without a job id, else None (#1268).
+
+        Refused journals are final at once. Others become final only past the
+        expiry, when no job of theirs can still run. Neither claims zero cost:
+        no execution time is reported, so the run's cost stays unknown.
+        """
+        final = record.get("final")
+        if isinstance(final, dict) and final.get("status") in UNBOUND:
+            return final
+        created = record.get("created_at")
+        if (
+            type(created) not in (int, float)
+            or self.clock() - created < self.UNBOUND_EXPIRY_SECONDS
+        ):
+            return None
+        record["final"] = {"status": "UNBOUND_EXPIRED"}
+        self._write(record["run_name"], record, create=False)
+        return record["final"]
 
     def stop(self, run_name):
         record = self._read(run_name)
-        _require(record is not None and record.get("job_id"), "dstack_exact_run_absent")
+        _require(record is not None, "dstack_exact_run_absent")
+        if record.get("job_id") is None and self._unbound_final(record) is not None:
+            return {}  # Nothing was created, or it has long ended: nothing to stop.
+        _require(record.get("job_id"), "dstack_exact_run_absent")
         self._cancel(record["job_id"])
         return {}
 
@@ -206,6 +254,12 @@ class DialoutCapacityClient:
             instance = (
                 worker
                 if isinstance(worker, str) and JOB_ID.fullmatch(worker)
+                # A journal without a job id still names its own allocation, the
+                # same way "job-<id>" names a job whose worker is unknown. The
+                # provider's complete live inventory never lists it, which is
+                # what proves it gone, releases its slot and cools the lane.
+                else "unbound-" + record["run_id"]
+                if raw in UNBOUND
                 else "job-" + record["job_id"]
             )
             submission["job_provisioning_data"] = {
@@ -219,7 +273,7 @@ class DialoutCapacityClient:
                     "resources": self._resources(),
                 },
             }
-        if raw in {"FAILED", "TIMED_OUT", "CANCELLED"}:
+        if raw in {"FAILED", "TIMED_OUT", "CANCELLED", *UNBOUND}:
             submission["termination_reason"] = raw.lower()
         run = {
             "id": record["run_id"],
@@ -239,6 +293,8 @@ class DialoutCapacityClient:
         live = []
         for path in sorted(self.root.glob("sixnine-*.json")):
             record = json.loads(path.read_text())
+            if record.get("job_id") is None and self._unbound_final(record):
+                continue  # Refused or expired: cannot be live (#1268).
             _require(record.get("job_id"), "dstack_provider_inventory_unconfirmed")
             if isinstance(record.get("final"), dict):
                 continue  # Settled; never queried again.

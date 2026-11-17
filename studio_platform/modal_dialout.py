@@ -162,7 +162,9 @@ class ModalDialoutClient(DialoutCapacityClient):
 
     def stop(self, run_name):
         record = self._read(run_name)
-        _require(record is not None and record.get("job_id"), "dstack_exact_run_absent")
+        _require(record is not None, "dstack_exact_run_absent")
+        if record.get("job_id") is None:
+            return super().stop(run_name)  # refused or expired: nothing to stop
         record["cancelled"] = True
         self._write(run_name, record, create=False)
         return super().stop(run_name)
