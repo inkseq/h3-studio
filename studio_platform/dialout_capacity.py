@@ -288,6 +288,15 @@ class RoutedClient:
     def configured_backends(self):
         return frozenset(self.dstack.configured_backends()) | set(self.lanes)
 
+    def lane_price(self, backend):
+        """A serverless lane's own configured rate (micro-USD per hour), else None.
+
+        Serverless bills per second only while it works, so a rented machine's
+        hourly ceiling is not its measure (owner 2026-11-17, #1243).
+        """
+        lane = self.lanes.get(backend)
+        return None if lane is None else lane.config["hourly_microusd"]
+
     def plan(self, spec):
         return self._for_spec(spec).plan(spec)
 

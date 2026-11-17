@@ -1,6 +1,7 @@
 """Lium/CloudRift inventory reads and per-profile fallback backends."""
 
 import copy
+import math
 import json
 import unittest
 
@@ -174,6 +175,77 @@ class FallbackBackendTests(LedgerCase):
         with self.repo.engine.connect() as connection:
             intent = connection.execute(select(instance_intents)).mappings().one()
         self.assertEqual(intent["provider"], "lium")
+
+    def test_a_serverless_lane_is_priced_by_its_own_rate_not_the_pod_ceiling(self):
+        # Owner 2026-11-17 (#1243): serverless bills per second while it works, so
+        # a rented machine's hourly ceiling (0.75 USD here) must not drop it.
+        rate = 4_800_000
+        lane = dict(offer("modal-dialout", "sandbox"), price=rate / 1_000_000)
+        self.stock["modal-dialout"] = [lane]
+        self.client.lane_price = lambda backend: (
+            rate if backend == "modal-dialout" else None
+        )
+        service = self.operator(backend="modal-dialout", fallback_backends=["lium"])
+        # The fleet's hourly total still applies (raised from the fixture's 3 USD).
+        service.policy["max_hourly_cost_microusd"] = 10_000_000
+        preview = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        self.assertEqual(self.planned, ["modal-dialout"])
+        self.assertEqual(
+            {row["backend"] for row in preview["offers"]}, {"modal-dialout"}
+        )
+        self.assertEqual(preview["max_price_microusd"], rate)
+        self.assertEqual(preview["hourly_cost_microusd"], rate)
+        self.assertEqual(
+            preview["reservation_microusd"], math.ceil(rate * (900 + 300) / 3600)
+        )
+        # The start keeps the lane's rate as the run's hourly cost.
+        service.start(self.owner, {"preview_id": preview["preview_id"]}, "lane-1")
+        (applied,) = self.client.applied
+        binding = self.store.load(applied)
+        self.assertEqual(binding["backend"], "modal-dialout")
+        self.assertEqual(
+            binding["run_spec"]["configuration"]["backends"], ["modal-dialout"]
+        )
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents)).mappings().one()
+        self.assertEqual(intent["provider"], "modal-dialout")
+
+    def test_a_rate_that_rounds_up_as_a_float_still_gets_its_offer(self):
+        rate = 2_007_000  # 2.007 * 1e6 rounds up to 2_007_001
+        self.stock["modal-dialout"] = [
+            dict(offer("modal-dialout", "sandbox"), price=rate / 1_000_000)
+        ]
+        self.client.lane_price = lambda backend: (
+            rate if backend == "modal-dialout" else None
+        )
+        service = self.operator(backend="modal-dialout", fallback_backends=["lium"])
+        preview = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        self.assertEqual(
+            {row["backend"] for row in preview["offers"]}, {"modal-dialout"}
+        )
+        self.assertEqual(preview["max_price_microusd"], rate)
+
+    def test_a_pod_fallback_keeps_the_pod_ceiling_after_a_serverless_lane(self):
+        # The lane has no offer; the pod fallback is still bound by 0.75 USD/h.
+        self.client.lane_price = lambda backend: (
+            4_800_000 if backend == "modal-dialout" else None
+        )
+        expensive = dict(offer("lium", "pod-dear"), price=0.9)
+        self.stock["lium"] = [expensive, offer("lium", "pod-a")]
+        service = self.operator(backend="modal-dialout", fallback_backends=["lium"])
+        preview = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        self.assertEqual(self.planned, ["modal-dialout", "lium"])
+        self.assertEqual(preview["max_price_microusd"], 750000)
+        self.assertEqual([row["offer_id"] for row in preview["offers"]], ["pod-a"])
+        self.assertTrue(
+            all(row["hourly_cost_microusd"] <= 750000 for row in preview["offers"])
+        )
 
     def test_a_cooling_primary_lane_is_skipped_for_its_fallback(self):
         from unittest.mock import patch
