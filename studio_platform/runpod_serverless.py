@@ -173,5 +173,12 @@ class RunPodServerlessClient(DialoutCapacityClient):
     def _live(self):
         """The provider's own count of queued plus running jobs."""
         health = self._call("GET", "/health").get("jobs")
-        _require(isinstance(health, dict), "dstack_provider_inventory_unconfirmed")
-        return health.get("inQueue", -1) + health.get("inProgress", -1)
+        _require(
+            isinstance(health, dict)
+            and all(
+                type(health.get(key)) is int and health[key] >= 0
+                for key in ("inQueue", "inProgress")
+            ),
+            "dstack_provider_inventory_unconfirmed",
+        )
+        return health["inQueue"] + health["inProgress"]

@@ -195,7 +195,11 @@ class DialoutCapacityClient:
                 # Nothing exists to observe or stop: the start fails at once and
                 # the next lane is tried, instead of waiting out the expiry.
                 record["final"] = {"status": "REFUSED"}
-                self._write(run_name, record, create=False)
+            else:
+                # The grace counts from the failed answer: a slow timeout must
+                # not use it up before the provider could show a late job.
+                record["failed_at"] = self.clock()
+            self._write(run_name, record, create=False)
             raise
         job_id = value.get("id")
         _require(
@@ -232,10 +236,12 @@ class DialoutCapacityClient:
         created = record.get("created_at")
         if type(created) not in (int, float):
             return None
-        age = self.clock() - created
-        if age >= self.UNBOUND_EXPIRY_SECONDS:
+        now = self.clock()
+        failed = record.get("failed_at")
+        failed = failed if type(failed) in (int, float) else created
+        if now - created >= self.UNBOUND_EXPIRY_SECONDS:
             status = "UNBOUND_EXPIRED"
-        elif age >= self.UNBOUND_GRACE_SECONDS and self._unbound_absent():
+        elif now - failed >= self.UNBOUND_GRACE_SECONDS and self._unbound_absent():
             # Waiting out the expiry blocked every start for hours (#1272).
             status = "UNBOUND_ABSENT"
         else:
@@ -245,7 +251,11 @@ class DialoutCapacityClient:
         return record["final"]
 
     def _unbound_absent(self):
-        """Whether the provider itself proves no job of ours exists; lanes override."""
+        """Whether the provider shows no job of ours queued or running; lanes override.
+
+        This proves nothing live, not that nothing ran: the run's cost stays
+        unknown, as for the expiry.
+        """
         return False
 
     def stop(self, run_name):

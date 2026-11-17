@@ -270,6 +270,47 @@ class RunPodServerlessTests(unittest.TestCase):
         self.assertEqual(client._read(RUN)["final"], {"status": "UNBOUND_ABSENT"})
         self.assertEqual(client.stop(RUN), {})
 
+    def test_absence_needs_a_well_formed_zero_count_after_the_failed_answer(self):
+        now = [1000.0]
+        health = {"value": httpx.Response(200, json={"jobs": {"inProgress": 0}})}
+
+        def lost(request):
+            if request.url.path.endswith("/run"):
+                now[0] += 90  # A slow timeout: the grace starts after it.
+                return httpx.Response(503)
+            if request.url.path.endswith("/health"):
+                return health["value"]
+            return self.fake(request)
+
+        client = RunPodServerlessClient(
+            self.config,
+            "inkseq-staging",
+            http=httpx.Client(transport=httpx.MockTransport(lost)),
+            clock=lambda: now[0],
+        )
+        with self.assertRaises(DstackError):
+            client.apply(spec())
+        now[0] += client.UNBOUND_GRACE_SECONDS - 1
+        with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
+            client.get(run_name=RUN)
+        now[0] += 1
+        for answer in (
+            httpx.Response(200, json={"jobs": {"inProgress": 0}}),
+            httpx.Response(200, json={"jobs": {"inQueue": "0", "inProgress": 0}}),
+            httpx.Response(200, json={"jobs": {"inQueue": -1, "inProgress": 1}}),
+            httpx.Response(503),
+        ):
+            health["value"] = answer
+            with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
+                client.get(run_name=RUN)
+        health["value"] = httpx.Response(
+            200, json={"jobs": {"inQueue": 0, "inProgress": 0}}
+        )
+        self.assertEqual(
+            client.get(run_name=RUN)["latest_job_submission"]["termination_reason"],
+            "unbound_absent",
+        )
+
     def test_declined_requests_are_refusals_timeouts_and_5xx_stay_unknown(self):
         for code in (409, 425, 429):
             with self.subTest(code=code):
