@@ -275,6 +275,33 @@ def removal_proven(node, binding):
     )
 
 
+def never_allocated_proven(node, binding):
+    """A stopped node whose original writer proved it never held a machine.
+
+    ``dstack_ledger`` writes ``no_charge_confirmed`` only with a validated
+    no-allocation proof or an admin review, and settles the intent as destroyed
+    at zero cost. A terminal dstack run never restarts and none had an
+    instance, so re-reading it per capacity count only adds a network round
+    trip; staging held 143 such nodes and each count took ~45 s (#1272).
+    """
+    return (
+        node.get("desired_state") == "stopped"
+        and binding.get("state") == "stopped"
+        and binding.get("dstack_status") == "failed"
+        and binding.get("billing_state") == "no_charge_confirmed"
+        and bool(
+            binding.get("no_allocation_proof") or binding.get("no_allocation_review")
+        )
+        and not binding.get("provider_instance_id")
+        and not binding.get("runtime_incarnation")
+        # A recorded proof belongs to this exact run (hand-edited rows refused).
+        and (
+            not isinstance(binding.get("no_allocation_proof"), dict)
+            or binding["no_allocation_proof"].get("run_id") == binding.get("run_id")
+        )
+    )
+
+
 def live_capacity_usage(
     client, nodes, *, provider_inventory=None, clock=time.time, fresh_seconds=30
 ):
@@ -405,6 +432,9 @@ def live_capacity_usage(
             included, reason = False, "dstack_never_applied"
         elif removal_proven(node, binding):
             included, reason = False, "dstack_provider_removal_proven"
+            status = binding.get("dstack_status")
+        elif never_allocated_proven(node, binding):
+            included, reason = False, "dstack_never_allocated_proven"
             status = binding.get("dstack_status")
         elif (
             foreign := foreign_usage(binding, client, provider_absent, BACKENDS)

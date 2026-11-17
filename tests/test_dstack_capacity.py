@@ -1987,6 +1987,59 @@ class DstackLiveUsageTests(unittest.TestCase):
         self.binding["state"] = "running"
         self.assertEqual(self.usage()["instances"], 1)
 
+    def test_proven_never_allocated_node_is_not_reread(self):
+        # #1272: 143 such staging nodes made every capacity count ~45 s.
+        self.binding.update(
+            state="stopped",
+            dstack_status="failed",
+            billing_state="no_charge_confirmed",
+            no_allocation_proof={"version": 1, "run_id": RUN},
+            provider_instance_id=None,
+        )
+        result = self.usage()
+        self.assertEqual(result["instances"], 0)
+        self.assertEqual(
+            result["observations"][0]["reason_code"], "dstack_never_allocated_proven"
+        )
+        self.client.get.assert_not_called()
+        from studio_platform.modal_capacity import CONFIRMED
+
+        self.assertIn("dstack_never_allocated_proven", CONFIRMED)
+        self.binding["no_allocation_proof"] = {"version": 1, "run_id": "other"}
+        self.usage()
+        self.client.get.assert_called()
+        self.client.get.reset_mock()
+        self.binding.pop("no_allocation_proof")
+        self.binding["no_allocation_review"] = {"reviewed": True}
+        self.assertEqual(
+            self.usage()["observations"][0]["reason_code"],
+            "dstack_never_allocated_proven",
+        )
+        self.client.get.assert_not_called()
+        # Anything short of the settled proof still reads the run.
+        for key, value in (
+            ("no_allocation_review", None),
+            ("billing_state", "unsettled"),
+            ("dstack_status", "terminated"),
+            ("state", "running"),
+            ("provider_instance_id", "1234567"),
+            ("runtime_incarnation", "r1"),
+        ):
+            with self.subTest(key=key):
+                saved = self.binding.get(key)
+                self.binding[key] = value
+                self.client.get.reset_mock()
+                self.assertNotEqual(
+                    self.usage()["observations"][0]["reason_code"],
+                    "dstack_never_allocated_proven",
+                )
+                self.client.get.assert_called()
+                self.binding[key] = saved
+        self.node["desired_state"] = "running"
+        self.client.get.reset_mock()
+        self.usage()
+        self.client.get.assert_called()
+
     def test_unknown_or_unowned_run_never_frees_reserved_capacity(self):
         original = copy.deepcopy(self.run)
         for bad in (
