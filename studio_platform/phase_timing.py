@@ -45,3 +45,9 @@ def lap(name):
     timer = _CURRENT.get()
     if timer is not None:
         timer.lap(name)
+
+
+def lapped(name, value):
+    """lap(name) right after value was computed; returns value unchanged."""
+    lap(name)
+    return value
