@@ -316,6 +316,8 @@ def _admin_download_details(node, now):
 # (~100 historical nodes kept the 2-vCPU host busy). Reuse an ended node's result for
 # ENDED_METRICS_TTL within the same Sydney day; live nodes are always recomputed.
 ENDED_METRICS_TTL = 600
+# Ended machines the site-wide admin list still shows, newest first (#1272).
+ADMIN_ENDED_SHOWN = 30
 _ENDED_METRICS = {}
 DEMAND_SUMMARY_TTL = 15
 
@@ -649,13 +651,13 @@ class DstackWorkspace:
         projected = {}
         # Delegation is read-only and follows an explicit administrator guard.
         # Browser authentication identity remains unchanged on every mutation.
+        states = (
+            self.service._state_for_owners(owners, skip_ended=live_only)
+            if admin
+            else {owner: self.service.state(principal)}
+        )
         for account in sorted(owners):
-            current = (
-                self.service._state_for_owner(account)
-                if admin
-                else self.service.state(principal)
-            )
-            for node in current["nodes"]:
+            for node in states[account]["nodes"]:
                 projected[node["node_id"]] = {**node, "owner_id": account}
         result, groups = [], []
         with self.repo.engine.connect() as connection:
@@ -677,6 +679,26 @@ class DstackWorkspace:
                     and node["runtime_state"] == "stopped"
                 )
             ]
+            ended_omitted = 0
+            if admin:
+                # The site-wide list keeps every live machine and only the most
+                # recent ended ones; staging holds hundreds of ended machines and
+                # each costs metric queries (#1272).
+                ended = sorted(
+                    (
+                        node
+                        for node in originals
+                        if node["desired_state"] == "stopped"
+                        and node["runtime_state"] == "stopped"
+                    ),
+                    key=lambda node: node["updated_at"],
+                    reverse=True,
+                )
+                dropped = {node["intent_id"] for node in ended[ADMIN_ENDED_SHOWN:]}
+                ended_omitted = len(dropped)
+                originals = [
+                    node for node in originals if node["intent_id"] not in dropped
+                ]
             # Readiness may have observed a newer heartbeat while this request
             # was in progress. Timestamp the captured rows after reading them;
             # do not reject a fresh observation as being in this request's future.
@@ -946,7 +968,15 @@ class DstackWorkspace:
             "nodes": result,
             "groups": groups,
             "queue": queue,
-            **({"accounts": accounts, "demand_start": demand_start} if admin else {}),
+            **(
+                {
+                    "accounts": accounts,
+                    "demand_start": demand_start,
+                    "ended_omitted": ended_omitted,
+                }
+                if admin
+                else {}
+            ),
         }
 
     def group_command(self, principal, group_id, body, key, kind):

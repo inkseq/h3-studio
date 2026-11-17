@@ -803,6 +803,36 @@ class WorkspaceTests(LedgerCase):
         self.assertEqual(only, full - {ended})
         self.assertIn(live, only)
 
+    def test_admin_list_is_one_scan_and_keeps_only_the_newest_ended(self):
+        # #1272: staging's admin list timed out by rescanning every machine for
+        # every user and by projecting hundreds of ended machines.
+        live = self.start_node()
+        older, newer = self.start_node(), self.start_node()
+        with self.repo.transaction() as connection:
+            for intent_id, at in ((older, 100), (newer, 200)):
+                connection.execute(
+                    update(operator_nodes)
+                    .where(operator_nodes.c.intent_id == intent_id)
+                    .values(
+                        desired_state="stopped", runtime_state="stopped", updated_at=at
+                    )
+                )
+        with (
+            patch("studio_platform.dstack_workspace.ADMIN_ENDED_SHOWN", 1),
+            patch.object(
+                self.workspace.service,
+                "_state_for_owner",
+                side_effect=AssertionError("per-owner rescan"),
+            ),
+        ):
+            admin = self.workspace.state(self.owner, admin=True)
+        self.assertEqual({n["node_id"] for n in admin["nodes"]}, {live, newer})
+        self.assertEqual(admin["ended_omitted"], 1)
+        # The owner's own view is unchanged and carries no admin field.
+        own = self.workspace.state(self.owner)
+        self.assertEqual({n["node_id"] for n in own["nodes"]}, {live, older, newer})
+        self.assertNotIn("ended_omitted", own)
+
     def test_mode_queue_estimate_stays_unknown_when_one_profile_has_no_capacity(self):
         node = self.start_node()
         self.ready_worker(node)
