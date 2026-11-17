@@ -247,6 +247,109 @@ class FallbackBackendTests(LedgerCase):
             all(row["hourly_cost_microusd"] <= 750000 for row in preview["offers"])
         )
 
+    def test_a_refused_serverless_start_ends_instead_of_staying_unknown(self):
+        # #1268: RunPod answered /run with a 4xx, so no job exists. The start
+        # must not become an unknown allocation that blocks the lane.
+        import tempfile
+
+        import httpx
+
+        from studio_platform.dialout_capacity import RoutedClient
+        from studio_platform.dstack_capacity import DstackCapacity
+        from studio_platform.runpod_serverless import RunPodServerlessClient
+
+        def runpod(request):
+            if request.url.path.endswith("/run"):
+                return httpx.Response(400)
+            return httpx.Response(200, json={"jobs": {"inQueue": 0, "inProgress": 0}})
+
+        state = tempfile.TemporaryDirectory()
+        self.addCleanup(state.cleanup)
+        lane = RunPodServerlessClient(
+            {
+                "api_key": "k" * 32,
+                "endpoint_id": "abc123",
+                "gpu_name": "RTX5090",
+                "gpu_memory_gib": 32,
+                "cpus": 12,
+                "memory_gib": 96,
+                "disk_gib": 128,
+                "hourly_microusd": 700_000,
+                "state_dir": state.name,
+            },
+            self.client.project,
+            http=httpx.Client(transport=httpx.MockTransport(runpod)),
+            clock=self.repo.clock,
+        )
+        capacity = DstackCapacity(
+            RoutedClient(self.client, lane), self.store, clock=self.repo.clock
+        )
+        config = copy.deepcopy(self.config)
+        config["profiles"][0].update(backend="runpod-serverless", transport="dialout")
+        settings = copy.copy(self.settings)
+        settings.public_origin = "https://staging.inkseq.com"
+        service = DstackOperator(self.repo, settings, capacity, config)
+        preview = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        accepted = service.start(
+            self.owner, {"preview_id": preview["preview_id"]}, "refused-1"
+        )
+        observed = self.store.load(accepted["node_id"])
+        # Ended, with its cost still to be settled (never assumed zero).
+        self.assertEqual(
+            (observed["state"], observed["dstack_status"], observed["billing_state"]),
+            ("stopped", "failed", "unsettled"),
+        )
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents)).mappings().one()
+        self.assertNotEqual(intent["state"], "creation_unknown")
+        # It holds no slot or hourly cost, and the refusing lane cools, so the
+        # next start goes to the fallback instead of the same refusal.
+        usage = service.prelaunch_capacity_usage(self.repo.engine.connect())
+        self.assertEqual(
+            (usage["instances"], usage["logical_slots"], usage["hourly_cost_microusd"]),
+            (0, 0, 0),
+        )
+        from studio_platform.scheduling.health import cooling_backends
+
+        with self.repo.engine.connect() as connection:
+            cooling = cooling_backends(
+                connection, self.settings.tenant_id, self.repo.clock()
+            )
+        self.assertIn("runpod-serverless", cooling)
+        # The watchdog stops the refused node at once (a failed start), so its
+        # replacement starts while the lane still cools, not 20 minutes later.
+        from studio_platform.capacity_watchdog import reclaim_node
+        from studio_platform.operator_capacity import operator_nodes
+
+        with self.repo.engine.connect() as connection:
+            node = dict(connection.execute(select(operator_nodes)).mappings().one())
+            intent = dict(connection.execute(select(instance_intents)).mappings().one())
+        outcome = reclaim_node(service, node, intent)
+        self.assertEqual(
+            (outcome["stop_requested"], outcome["reason"]),
+            (True, "capacity_startup_failed"),
+        )
+        # The controller's next observation records the run as stopped again.
+        capacity.observe(intent["id"])
+        with self.repo.engine.connect() as connection:
+            node = connection.execute(select(operator_nodes)).mappings().one()
+            cooling = cooling_backends(
+                connection, self.settings.tenant_id, self.repo.clock()
+            )
+        self.assertEqual(
+            (node["desired_state"], node["runtime_state"]), ("stopped", "stopped")
+        )
+        self.assertIn("runpod-serverless", cooling)
+        self.planned.clear()
+        config["profiles"][0].update(fallback_backends=["lium"])
+        service = DstackOperator(self.repo, settings, capacity, config)
+        retry = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        self.assertEqual({row["backend"] for row in retry["offers"]}, {"lium"})
+
     def test_a_cooling_primary_lane_is_skipped_for_its_fallback(self):
         from unittest.mock import patch
 

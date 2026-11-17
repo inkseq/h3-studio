@@ -72,6 +72,8 @@ OBSERVATION_KEYS = {
     "host_failure",
     "no_allocation_proof",
     "provider_removal_proof",
+    # A serverless lane refused the request outright (#1268): cools the lane.
+    "lane_refused",
 }
 
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}

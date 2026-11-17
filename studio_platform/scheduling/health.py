@@ -1,9 +1,11 @@
 """Per-lane start health (#931 step 2): a failing lane cools down alone.
 
 A machine the provider allocated that stopped before its runtime was ever
-ready is a failed start of its backend. A start the provider never allocated
-keeps the demand start's own no-allocation backoff, and a machine that became
-ready and idled out unserved is a demand question; neither counts here. Each backend backs off on
+ready is a failed start of its backend, and so is a serverless lane refusing the
+request outright (a bad key or a deleted endpoint refuses every time, #1268). A
+start the provider never allocated for want of capacity keeps the demand start's
+own no-allocation backoff, and a machine that became ready and idled out unserved
+is a demand question; neither counts here. Each backend backs off on
 its own, doubling from 5 to 30 minutes and forgetting its failures after 3
 hours without one. These are Kubernetes
 cluster-autoscaler's node-group backoff defaults (ideas only, no code copied).
@@ -25,8 +27,11 @@ def lane(node, now):
     backend = binding.get("backend")
     if (
         isinstance(backend, str)
-        and isinstance(allocated, str)
-        and allocated
+        and (
+            isinstance(allocated, str)
+            and allocated
+            or binding.get("lane_refused") is True
+        )
         and not finite(binding.get("first_runtime_ready_at"), now)
     ):
         return backend

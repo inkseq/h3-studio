@@ -16,6 +16,7 @@ Credentials: a protected JSON file named by the operator config's
  "disk_gib", "hourly_microusd", "state_dir"}.
 """
 
+import logging
 from pathlib import Path
 import re
 import time
@@ -79,10 +80,17 @@ def validate_config(value):
     return value
 
 
+logger = logging.getLogger(__name__)
+# Answers that do not prove RunPod made no job (timeouts, conflicts, rate limits).
+RETRYABLE = frozenset({408, 409, 425, 429})
+
+
 class RunPodServerlessClient(DialoutCapacityClient):
     """RunPod provider calls behind the shared native capacity lifecycle."""
 
     backend = BACKEND
+    # Another 4xx is RunPod refusing before any job exists (#1268).
+    DEFINITE_REJECTION = True
 
     def __init__(self, config, project, *, http=None, clock=time.time):
         super().__init__(validate_config(config), project, clock=clock)
@@ -97,7 +105,15 @@ class RunPodServerlessClient(DialoutCapacityClient):
             raise self._provider_error(
                 "request", "dstack_api_unavailable", error
             ) from None
-        if response.status_code == 429 or response.status_code >= 500:
+        if response.status_code >= 400:
+            # The status code only: response bodies may echo the job input.
+            logger.warning(
+                "capacity_provider_failure backend=%s operation=%s status=%d",
+                self.backend,
+                path.strip("/").split("/")[0],
+                response.status_code,
+            )
+        if response.status_code in RETRYABLE or response.status_code >= 500:
             raise DstackError("dstack_api_unavailable")
         if response.status_code >= 400:
             raise DstackError("dstack_api_rejected")

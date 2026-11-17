@@ -183,6 +183,28 @@ class ModalDialoutTests(unittest.TestCase):
         routed.stop(RUN)
         self.assertEqual(self.modal.terminated, ["sb-1"])
 
+    def test_a_failed_create_waits_for_the_expiry_not_treated_as_refused(self):
+        # Modal create errors mix refusals with lost answers (#1268): a sandbox
+        # may still exist, so the run stays unknown until none can.
+        def broken(*command, **kwargs):
+            raise RuntimeError("lost answer")
+
+        self.modal.Sandbox.create = staticmethod(broken)
+        now = [1000.0]
+        client = ModalDialoutClient(
+            self.config, "inkseq-staging", sdk=self.modal, clock=lambda: now[0]
+        )
+        run_spec = spec()
+        with self.assertRaisesRegex(DstackError, "dstack_api_rejected"):
+            client.apply(run_spec)
+        name = run_spec["run_name"]
+        with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
+            client.get(run_name=name)
+        now[0] += client.UNBOUND_EXPIRY_SECONDS
+        self.assertEqual(client.get(run_name=name)["status"], "failed")
+        self.assertEqual(client.stop(name), {})
+        self.assertEqual(self.modal.terminated, [])
+
     def test_config_is_closed(self):
         for bad in ({"gpu": "H100"}, {"image": "unpinned:latest"}, {"extra": 1}):
             with self.assertRaisesRegex(DstackError, "modal_dialout_config_invalid"):

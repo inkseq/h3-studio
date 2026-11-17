@@ -29,12 +29,17 @@ def _number(value):
 
 
 def _boot_failed(binding):
-    """The one-shot launch ended in a failure with its processes stopped."""
+    """The one-shot launch ended in a failure with its processes stopped.
+
+    A serverless lane that refused the request outright (#1268) also failed to
+    start: stop it at once, so its replacement starts while that lane cools
+    and goes to the next lane, instead of after the 20 minute startup timeout.
+    """
     preparation = binding.get("preparation")
-    return (
-        isinstance(preparation, dict)
+    return binding.get("first_runtime_ready_at") is None and (
+        binding.get("lane_refused") is True
+        or isinstance(preparation, dict)
         and preparation.get("phase") in {"setup_failed", "failed"}
-        and binding.get("first_runtime_ready_at") is None
     )
 
 

@@ -215,7 +215,13 @@ class DstackCapacity:
                     "reason_code": "dstack_runtime_not_observed",
                 },
             )
-        except DstackError:
+        except DstackError as error:
+            # The cause stays visible (#1268): a closed code and the lane only.
+            _logger.warning(
+                "dstack_apply_failed backend=%s error_code=%s",
+                binding.get("backend"),
+                str(error) if str(error).replace("_", "").isalnum() else "other",
+            )
             self.store.record(
                 request.intent_id,
                 {
@@ -520,6 +526,11 @@ class DstackCapacity:
                     "qualified_start_failure": True,
                 }
         if status in TERMINAL:
+            if submission.get("termination_reason") == "refused":
+                # A serverless lane turned the request down before making
+                # anything (#1268): its fault, so the lane cools and the next
+                # start goes elsewhere (scheduling.health.lane).
+                value["lane_refused"] = True
             return self._terminal_observation(run, binding, value, submission)
         if status in {"terminating", "stopping"}:
             value.update(state="stopping", reason_code="dstack_stop_pending")
