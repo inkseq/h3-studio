@@ -199,6 +199,8 @@ class RunPodServerlessTests(unittest.TestCase):
 
     def test_a_lost_submit_stays_unknown_until_no_job_can_exist(self):
         now = [1000.0]
+        # Another job on the endpoint: its count cannot prove ours absent.
+        self.fake.jobs["other"] = {"status": "IN_PROGRESS"}
         client = RunPodServerlessClient(
             self.config,
             "inkseq-staging",
@@ -231,15 +233,68 @@ class RunPodServerlessTests(unittest.TestCase):
         self.assertEqual(
             run["latest_job_submission"]["termination_reason"], "unbound_expired"
         )
+        self.fake.jobs["other"]["status"] = "COMPLETED"
         self.assertNotIn("cost", run)
         self.assertEqual(client.provider_inventory(BACKEND)["instance_ids"], [])
         self.assertEqual(client.stop(RUN), {})
         # The terminal state is journaled once and kept.
         self.assertEqual(client._read(RUN)["final"], {"status": "UNBOUND_EXPIRED"})
 
-    def test_answers_that_do_not_prove_absence_are_not_refusals(self):
-        # Timeouts, conflicts, early data, rate limits and 5xx stay unknown.
-        for code in (408, 409, 425, 429, 503):
+    def test_a_lost_submit_ends_early_when_runpod_shows_no_job(self):
+        # #1272: waiting out the 3 h expiry blocked every start on staging.
+        now = [1000.0]
+
+        def lost(request):
+            if request.url.path.endswith("/run"):
+                return httpx.Response(503)
+            return self.fake(request)
+
+        client = RunPodServerlessClient(
+            self.config,
+            "inkseq-staging",
+            http=httpx.Client(transport=httpx.MockTransport(lost)),
+            clock=lambda: now[0],
+        )
+        with self.assertRaisesRegex(DstackError, "dstack_api_unavailable"):
+            client.apply(spec())
+        now[0] += client.UNBOUND_GRACE_SECONDS - 1
+        with self.assertRaisesRegex(DstackError, "requires_reconciliation"):
+            client.get(run_name=RUN)
+        now[0] += 1
+        run = client.get(run_name=RUN)
+        self.assertEqual(
+            (run["status"], run["latest_job_submission"]["termination_reason"]),
+            ("failed", "unbound_absent"),
+        )
+        self.assertNotIn("cost", run)
+        self.assertEqual(client._read(RUN)["final"], {"status": "UNBOUND_ABSENT"})
+        self.assertEqual(client.stop(RUN), {})
+
+    def test_declined_requests_are_refusals_timeouts_and_5xx_stay_unknown(self):
+        for code in (409, 425, 429):
+            with self.subTest(code=code):
+                state = tempfile.TemporaryDirectory()
+                self.addCleanup(state.cleanup)
+
+                def declined(request, code=code):
+                    if request.url.path.endswith("/run"):
+                        return httpx.Response(code)
+                    return self.fake(request)
+
+                client = RunPodServerlessClient(
+                    dict(self.config, state_dir=state.name),
+                    "inkseq-staging",
+                    http=httpx.Client(transport=httpx.MockTransport(declined)),
+                )
+                with self.assertRaisesRegex(DstackError, "dstack_api_rejected"):
+                    client.apply(spec())
+                self.assertEqual(
+                    client.get(run_name=RUN)["latest_job_submission"][
+                        "termination_reason"
+                    ],
+                    "refused",
+                )
+        for code in (408, 503):
             with self.subTest(code=code):
                 state = tempfile.TemporaryDirectory()
                 self.addCleanup(state.cleanup)

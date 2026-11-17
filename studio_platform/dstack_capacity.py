@@ -526,7 +526,7 @@ class DstackCapacity:
                     "qualified_start_failure": True,
                 }
         if status in TERMINAL:
-            if submission.get("termination_reason") == "refused":
+            if submission.get("termination_reason") in {"refused", "unbound_absent"}:
                 # A serverless lane turned the request down before making
                 # anything (#1268): its fault, so the lane cools and the next
                 # start goes elsewhere (scheduling.health.lane).
