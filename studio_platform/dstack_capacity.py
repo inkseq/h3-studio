@@ -878,6 +878,18 @@ class DstackCapacity:
 
     def stop(self, intent_id):
         binding = self.store.load(intent_id)
+        if (
+            isinstance(binding, dict)
+            and binding.get("apply_started") is True
+            and not binding.get("run_id")
+        ):
+            # A start whose create answer was lost has no run id (#1268). An
+            # exact owned read by its name adopts one; until then the start
+            # stays unknown rather than failing every controller tick.
+            observation = self.observe(intent_id)
+            binding = self.store.load(intent_id)
+            if not binding.get("run_id"):
+                return observation
         _require(
             isinstance(binding, dict) and binding.get("run_id"),
             "dstack_owned_run_id_required",

@@ -350,6 +350,74 @@ class FallbackBackendTests(LedgerCase):
         )
         self.assertEqual({row["backend"] for row in retry["offers"]}, {"lium"})
 
+    def test_a_stop_for_a_start_without_a_run_id_waits_then_ends_it(self):
+        # #1268: a lost /run answer leaves no run id. A watchdog stop must not
+        # fail every tick: it stays unknown until the journal expires, then
+        # adopts the ended run and needs no provider call.
+        import tempfile
+
+        import httpx
+
+        from studio_platform.dialout_capacity import RoutedClient
+        from studio_platform.dstack_capacity import DstackCapacity
+        from studio_platform.runpod_serverless import RunPodServerlessClient
+
+        calls = []
+
+        def runpod(request):
+            calls.append(request.url.path)
+            if request.url.path.endswith("/run"):
+                return httpx.Response(503)
+            return httpx.Response(200, json={"jobs": {"inQueue": 0, "inProgress": 0}})
+
+        state = tempfile.TemporaryDirectory()
+        self.addCleanup(state.cleanup)
+        lane = RunPodServerlessClient(
+            {
+                "api_key": "k" * 32,
+                "endpoint_id": "abc123",
+                "gpu_name": "RTX5090",
+                "gpu_memory_gib": 32,
+                "cpus": 12,
+                "memory_gib": 96,
+                "disk_gib": 128,
+                "hourly_microusd": 700_000,
+                "state_dir": state.name,
+            },
+            self.client.project,
+            http=httpx.Client(transport=httpx.MockTransport(runpod)),
+            clock=self.repo.clock,
+        )
+        capacity = DstackCapacity(
+            RoutedClient(self.client, lane), self.store, clock=self.repo.clock
+        )
+        config = copy.deepcopy(self.config)
+        config["profiles"][0].update(backend="runpod-serverless", transport="dialout")
+        settings = copy.copy(self.settings)
+        settings.public_origin = "https://staging.inkseq.com"
+        service = DstackOperator(self.repo, settings, capacity, config)
+        preview = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        accepted = service.start(
+            self.owner, {"preview_id": preview["preview_id"]}, "lost-1"
+        )
+        node_id = accepted["node_id"]
+        self.assertIsNone(self.store.load(node_id).get("run_id"))
+        waiting = capacity.stop(node_id)
+        self.assertNotEqual(waiting["state"], "stopped")
+        self.assertIsNone(self.store.load(node_id).get("run_id"))
+        self.now += lane.UNBOUND_EXPIRY_SECONDS
+        calls.clear()
+        ended = capacity.stop(node_id)
+        binding = self.store.load(node_id)
+        self.assertEqual(
+            (ended["state"], binding["state"], binding["dstack_status"]),
+            ("stopped", "stopped", "failed"),
+        )
+        self.assertTrue(binding["run_id"])
+        self.assertFalse([path for path in calls if "/cancel/" in path])
+
     def test_a_cooling_primary_lane_is_skipped_for_its_fallback(self):
         from unittest.mock import patch
 
