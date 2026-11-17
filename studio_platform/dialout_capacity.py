@@ -34,6 +34,8 @@ STATUSES = {
     "UNBOUND_EXPIRED": ("failed", "failed"),
     # The provider's own count showed no job at all after the grace (#1272).
     "UNBOUND_ABSENT": ("failed", "failed"),
+    # Queued while the provider had no worker at all, then cancelled (#1272).
+    "NO_CAPACITY": ("failed", "failed"),
 }
 UNBOUND = frozenset({"REFUSED", "UNBOUND_EXPIRED", "UNBOUND_ABSENT"})
 LIVE = frozenset({"IN_QUEUE", "IN_PROGRESS"})
@@ -297,7 +299,7 @@ class DialoutCapacityClient:
                     "resources": self._resources(),
                 },
             }
-        if raw in {"FAILED", "TIMED_OUT", "CANCELLED", *UNBOUND}:
+        if raw in {"FAILED", "TIMED_OUT", "CANCELLED", "NO_CAPACITY", *UNBOUND}:
             submission["termination_reason"] = raw.lower()
         run = {
             "id": record["run_id"],
@@ -306,6 +308,9 @@ class DialoutCapacityClient:
             "status": run_status,
             "latest_job_submission": submission,
         }
+        if status.get("no_worker") is True:
+            # Queued with no worker the provider could start (#1272).
+            run["lane_no_worker"] = True
         if type(executed) in (int, float) and math.isfinite(executed) and executed >= 0:
             run["cost"] = executed / 1000 * self.config["hourly_microusd"] / 3.6e9
         return run

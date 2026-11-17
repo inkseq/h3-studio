@@ -525,8 +525,16 @@ class DstackCapacity:
                     "at": value["observed_at"],
                     "qualified_start_failure": True,
                 }
+        if run.get("lane_no_worker") is True and status not in TERMINAL:
+            # A queued serverless job with no worker anywhere (#1272): the
+            # lane's fault, so it cools and the watchdog stops this start now.
+            value["lane_refused"] = True
         if status in TERMINAL:
-            if submission.get("termination_reason") in {"refused", "unbound_absent"}:
+            if submission.get("termination_reason") in {
+                "refused",
+                "unbound_absent",
+                "no_capacity",
+            }:
                 # A serverless lane turned the request down before making
                 # anything (#1268): its fault, so the lane cools and the next
                 # start goes elsewhere (scheduling.health.lane).

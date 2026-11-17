@@ -94,6 +94,9 @@ class RunPodServerlessClient(DialoutCapacityClient):
     backend = BACKEND
     # Another 4xx is RunPod refusing before any job exists (#1268).
     DEFINITE_REJECTION = True
+    # A cold worker shows as initializing within seconds; four minutes with
+    # none means no GPU the endpoint may use is free (#1272).
+    NO_WORKER_SECONDS = 240
 
     def __init__(self, config, project, *, http=None, clock=time.time):
         super().__init__(validate_config(config), project, clock=clock)
@@ -133,6 +136,23 @@ class RunPodServerlessClient(DialoutCapacityClient):
         if isinstance(final, dict):
             return final
         status = self._call("GET", "/status/" + record["job_id"])
+        raw = status.get("status")
+        if raw == "CANCELLED" and record.get("no_worker_at"):
+            # Our own stop of a job that never got a worker (below).
+            status = {"status": "NO_CAPACITY"}
+        elif raw == "IN_QUEUE" and (
+            record.get("no_worker_at") or self._no_worker(record)
+        ):
+            # RunPod queues a job even when no GPU it may use is free (the
+            # endpoint's data center is pinned by its volume). Waiting out the
+            # 20 min start timeout, then retrying the same lane, left shots
+            # unmade for good on staging (#1272). This read only marks it: the
+            # observation cools the lane and the watchdog stops the node,
+            # whose stop cancels the job. Reads never change the provider.
+            if not record.get("no_worker_at"):
+                record["no_worker_at"] = self.clock()
+                self._write(record["run_name"], record, create=False)
+            status = {**status, "no_worker": True}
         if status.get("status") in STATUSES and status["status"] not in LIVE:
             kept = {
                 k: status[k]
@@ -162,6 +182,25 @@ class RunPodServerlessClient(DialoutCapacityClient):
 
     def _cancel(self, job_id):
         self._call("POST", "/cancel/" + job_id)
+
+    def _no_worker(self, record):
+        """A queued job past NO_WORKER_SECONDS while RunPod has no worker at all."""
+        created = record.get("created_at")
+        if (
+            type(created) not in (int, float)
+            or self.clock() - created < self.NO_WORKER_SECONDS
+        ):
+            return False
+        try:
+            workers = self._call("GET", "/health").get("workers")
+        except DstackError:
+            return False
+        keys = ("initializing", "idle", "ready", "running")
+        return (
+            isinstance(workers, dict)
+            and all(type(workers.get(key)) is int and workers[key] >= 0 for key in keys)
+            and sum(workers[key] for key in keys) == 0
+        )
 
     def _unbound_absent(self):
         # With no job queued or running on our endpoint, a lost submit made none.
