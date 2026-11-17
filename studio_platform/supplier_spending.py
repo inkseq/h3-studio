@@ -101,34 +101,16 @@ def _chunks(values, size=500):
         yield values[index : index + size]
 
 
-def _rental(connection, tenant_id, reference, rows, now, loaded=None):
+def _rental(tenant_id, reference, rows, now, loaded):
     """Return a bound rental, its confirmed test exclusion, or finite problems."""
-    from .operator_capacity import operator_nodes
-
-    intent = (
-        loaded["intents"].get(reference[1])
-        if loaded is not None
-        else connection.execute(
-            select(instance_intents).where(instance_intents.c.id == reference[1])
-        )
-        .mappings()
-        .first()
-    )
+    intent = loaded["intents"].get(reference[1])
     if intent is None:
         return (
             None,
             False,
             [_detail("rental_binding_unconfirmed", reference, "intent_id")],
         )
-    node = (
-        loaded["nodes"].get(reference[1])
-        if loaded is not None
-        else connection.execute(
-            select(operator_nodes).where(operator_nodes.c.intent_id == reference[1])
-        )
-        .mappings()
-        .first()
-    )
+    node = loaded["nodes"].get(reference[1])
     problems, test = [], False
     if node is not None:
         payload = node["payload"]
@@ -163,26 +145,7 @@ def _rental(connection, tenant_id, reference, rows, now, loaded=None):
         )
     # A foreign tenant sharing an original reference cannot be silently treated
     # as another ordinary budget layer of this tenant.
-    if loaded is not None:
-        foreign = reference[1] in loaded["foreign"]
-    else:
-        foreign = (
-            connection.execute(
-                select(budget_accounts.c.tenant_id)
-                .select_from(
-                    budget_reservations.join(
-                        budget_accounts,
-                        budget_accounts.c.id == budget_reservations.c.account_id,
-                    )
-                )
-                .where(
-                    budget_reservations.c.reference_type == reference[0],
-                    budget_reservations.c.reference_id == reference[1],
-                    budget_accounts.c.tenant_id != tenant_id,
-                )
-            ).first()
-            is not None
-        )
+    foreign = reference[1] in loaded["foreign"]
     if foreign:
         problems.append(_detail("supplier_reference_conflict", reference, "tenant_id"))
     return dict(intent), test and not problems, problems
@@ -305,9 +268,7 @@ def projection(connection, tenant_id, now, *, policy=None):
                     )
                 )
             continue
-        intent, excluded, problems = _rental(
-            connection, tenant_id, reference, rows, now, loaded
-        )
+        intent, excluded, problems = _rental(tenant_id, reference, rows, now, loaded)
         if excluded:
             continue
         if intent and intent.get("provider_instance_id"):

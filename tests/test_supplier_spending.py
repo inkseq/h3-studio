@@ -160,6 +160,7 @@ class SupplierSpendingTests(LedgerCase):
         # admission ~2 s. The same rows are now read once per projection.
         from sqlalchemy import event
 
+        self.policy(limit=100_000_000)  # Room for every job in both rounds.
         statements = []
 
         def count(*_args, **_kwargs):
@@ -174,10 +175,30 @@ class SupplierSpendingTests(LedgerCase):
                 event.remove(self.repo.engine, 'before_cursor_execute', count)
             return len(statements), value
 
+        def job():
+            plan = self.plan(
+                cost=1,
+                execution={
+                    'pool': 'test-pool',
+                    'backend': 'mock',
+                    'expected_runtime_s': 1,
+                },
+            )
+            self.repo.create_job(
+                self.scope,
+                plan['id'],
+                str(uuid.uuid4()),
+                budget_account_ids=('owner-budget',),
+            )
+
+        for index in range(3):
+            job()
         for index in range(3):
             self.rental(100_000, identity=f'early-{index}')
         few, value = queries()
         self.assertEqual(value['projected_microusd'], 300_000)
+        for index in range(12):
+            job()
         for index in range(12):
             self.rental(100_000, identity=f'late-{index}')
         many, value = queries()
