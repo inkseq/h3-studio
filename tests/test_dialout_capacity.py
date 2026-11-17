@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -379,3 +380,16 @@ class DialoutCapacityFailures(LedgerCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LanePriceTests(unittest.TestCase):
+    def test_routed_client_reports_only_its_lanes_rates(self):
+        from studio_platform.dialout_capacity import RoutedClient
+
+        lane = SimpleNamespace(
+            backend="modal-dialout", config={"hourly_microusd": 4_800_000}
+        )
+        routed = RoutedClient(SimpleNamespace(), lane)
+        self.assertEqual(routed.lane_price("modal-dialout"), 4_800_000)
+        self.assertIsNone(routed.lane_price("runpod"))
+        self.assertIsNone(routed.lane_price("lium"))

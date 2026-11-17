@@ -438,12 +438,24 @@ class DstackPreview:
         ]
         require(bool(backends), "dstack_lane_backoff")
         store, offers = None, []
+        lane_price = getattr(
+            getattr(self.capacity, "client", None), "lane_price", lambda _backend: None
+        )
         for index, backend in enumerate(backends):
             candidate = (
                 request
                 if backend == request.backend
                 else replace(request, backend=backend, regions=())
             )
+            # A serverless lane is priced by its own configured rate: it bills per
+            # second while a shot renders, so the per-hour ceilings of a rented
+            # machine do not apply to it (owner 2026-11-17, #1243). Its rate still
+            # sizes the reservation; the daily, test and fleet-hourly totals hold.
+            rate = lane_price(backend)
+            if rate is not None:
+                # One micro-USD of slack: the lane offers rate / 1e6 and the offer
+                # filter rounds up, so some exact rates would otherwise drop out.
+                candidate = replace(candidate, max_price_microusd=rate + 1)
             offers = plan_offers(
                 self.capacity.plan(candidate, self.config["ssh_public_key"]),
                 candidate,
@@ -467,6 +479,8 @@ class DstackPreview:
                 if backend != profile["backend"]:
                     profile["backend"] = backend
                     profile.pop("regions", None)
+                if rate is not None:
+                    profile["max_price_microusd"] = rate
                 break
         require(bool(offers), "dstack_no_compatible_offers")
         # Reserve preparation and a complete job from the first paid request,
