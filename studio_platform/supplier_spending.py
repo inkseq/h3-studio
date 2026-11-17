@@ -49,7 +49,38 @@ def _detail(code, reference, field):
     }
 
 
-def _preload(connection, tenant_id, grouped):
+def _intents(connection, instances):
+    found = {}
+    for chunk in _chunks(instances):
+        for row in connection.execute(
+            select(instance_intents).where(instance_intents.c.id.in_(chunk))
+        ).mappings():
+            found[row["id"]] = row
+    return found
+
+
+def _adds_nothing_today(rows, intent, now, start):
+    """True when this rental can only project 0 to today's exposure.
+
+    Mirrors projection: a reference settled/released before today projects 0
+    (or a problem, also 0); an unsettled one whose machine was destroyed
+    before today is skipped (#1034). Anything else is kept.
+    """
+    states = {row["state"] for row in rows}
+    if states <= {"settled", "released"}:
+        return all(
+            _time(row["settled_at"], now) and row["settled_at"] < start for row in rows
+        )
+    return (
+        states <= {"reserved", "invoice_pending"}
+        and intent is not None
+        and intent.get("state") == "destroyed"
+        and _time(intent.get("updated_at"), now)
+        and intent["updated_at"] < start
+    )
+
+
+def _preload(connection, tenant_id, grouped, intents=None):
     """Rows _rental and the job filter read, fetched once for all references.
 
     The projection runs inside every paid admission. Reading them one query
@@ -61,11 +92,10 @@ def _preload(connection, tenant_id, grouped):
     instances = sorted(ref for kind, ref in grouped if kind == "instance")
     job_ids = sorted(ref for kind, ref in grouped if kind == "job")
     loaded = {"intents": {}, "nodes": {}, "foreign": set(), "jobs": {}}
+    if intents is None:
+        intents = _intents(connection, instances)
+    loaded["intents"] = {ref: intents[ref] for ref in instances if ref in intents}
     for chunk in _chunks(instances):
-        for row in connection.execute(
-            select(instance_intents).where(instance_intents.c.id.in_(chunk))
-        ).mappings():
-            loaded["intents"][row["id"]] = row
         for row in connection.execute(
             select(operator_nodes).where(operator_nodes.c.intent_id.in_(chunk))
         ).mappings():
@@ -210,7 +240,16 @@ def _value(reference, rows, now, start):
     return None, amount, problems
 
 
-def projection(connection, tenant_id, now, *, policy=None):
+def projection(connection, tenant_id, now, *, policy=None, exposure_only=False):
+    """Today's supplier exposure for the tenant.
+
+    exposure_only is for admission, which reads only the confirmed exposure.
+    It drops references that can only project 0 (job references, rentals that
+    ended before today) before loading their rows, so admission cost follows
+    today's rentals, not all history (#1252). Its details are incomplete, and
+    its exposure is never lower than the full projection: dropping a 0 can
+    only remove a provider-identity conflict from another reference.
+    """
     start, end = day_window(now)
     policy = policy if policy is not None else read_policy(connection, tenant_id)
     snapshot = admission_snapshot(policy)
@@ -235,7 +274,7 @@ def projection(connection, tenant_id, now, *, policy=None):
         "admission_blocked": False,
     }
     grouped = defaultdict(list)
-    for row in connection.execute(
+    query = (
         select(budget_reservations)
         .select_from(
             budget_reservations.join(
@@ -244,10 +283,21 @@ def projection(connection, tenant_id, now, *, policy=None):
             )
         )
         .where(budget_accounts.c.tenant_id == tenant_id)
-    ).mappings():
+    )
+    if exposure_only:
+        query = query.where(budget_reservations.c.reference_type == "instance")
+    for row in connection.execute(query).mappings():
         grouped[(row["reference_type"], row["reference_id"])].append(row)
+    intents = None
+    if exposure_only:
+        intents = _intents(connection, sorted(ref for _, ref in grouped))
+        grouped = {
+            reference: rows
+            for reference, rows in grouped.items()
+            if not _adds_nothing_today(rows, intents.get(reference[1]), now, start)
+        }
     provider_refs = {}
-    loaded = _preload(connection, tenant_id, grouped)
+    loaded = _preload(connection, tenant_id, grouped, intents)
     for reference, rows in sorted(grouped.items()):
         if reference[0] == "job":
             job = loaded["jobs"].get(reference[1])
@@ -347,7 +397,7 @@ def admit(
     snapshot = admission_snapshot(policy)
     if snapshot is None or test_task:
         return snapshot
-    usage = projection(connection, tenant_id, now, policy=policy)
+    usage = projection(connection, tenant_id, now, policy=policy, exposure_only=True)
     if (
         usage["confirmed_exposure_microusd"] + additional_microusd
         > usage["limit_microusd"]
