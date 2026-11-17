@@ -418,6 +418,105 @@ class FallbackBackendTests(LedgerCase):
         self.assertTrue(binding["run_id"])
         self.assertFalse([path for path in calls if "/cancel/" in path])
 
+    def test_a_serverless_job_with_no_worker_cools_the_lane_and_stops_now(self):
+        # #1272: RunPod queued the job with no GPU free; the same lane was
+        # retried after each 20 min timeout and no shot was ever made.
+        import tempfile
+
+        import httpx
+
+        from studio_platform.capacity_watchdog import reclaim_node
+        from studio_platform.dialout_capacity import RoutedClient
+        from studio_platform.dstack_capacity import DstackCapacity
+        from studio_platform.operator_capacity import operator_nodes
+        from studio_platform.runpod_serverless import RunPodServerlessClient
+        from studio_platform.scheduling.health import cooling_backends
+
+        jobs = {}
+
+        def runpod(request):
+            path = request.url.path
+            if path.endswith("/run"):
+                jobs["job-1"] = "IN_QUEUE"
+                return httpx.Response(200, json={"id": "job-1", "status": "IN_QUEUE"})
+            if "/status/" in path:
+                return httpx.Response(
+                    200, json={"id": "job-1", "status": jobs["job-1"]}
+                )
+            if "/cancel/" in path:
+                jobs["job-1"] = "CANCELLED"
+                return httpx.Response(200, json={"status": "CANCELLED"})
+            live = sum(s in {"IN_QUEUE", "IN_PROGRESS"} for s in jobs.values())
+            return httpx.Response(
+                200,
+                json={
+                    "jobs": {"inQueue": live, "inProgress": 0},
+                    "workers": {"initializing": 0, "idle": 0, "ready": 0, "running": 0},
+                },
+            )
+
+        state = tempfile.TemporaryDirectory()
+        self.addCleanup(state.cleanup)
+        lane = RunPodServerlessClient(
+            {
+                "api_key": "k" * 32,
+                "endpoint_id": "abc123",
+                "gpu_name": "RTX5090",
+                "gpu_memory_gib": 32,
+                "cpus": 12,
+                "memory_gib": 96,
+                "disk_gib": 128,
+                "hourly_microusd": 700_000,
+                "state_dir": state.name,
+            },
+            self.client.project,
+            http=httpx.Client(transport=httpx.MockTransport(runpod)),
+            clock=self.repo.clock,
+        )
+        capacity = DstackCapacity(
+            RoutedClient(self.client, lane), self.store, clock=self.repo.clock
+        )
+        config = copy.deepcopy(self.config)
+        config["profiles"][0].update(backend="runpod-serverless", transport="dialout")
+        settings = copy.copy(self.settings)
+        settings.public_origin = "https://staging.inkseq.com"
+        service = DstackOperator(self.repo, settings, capacity, config)
+        preview = service.preview(
+            self.owner, {"profile_id": "5090-fl", "ttl_seconds": 900}
+        )
+        node_id = service.start(
+            self.owner, {"preview_id": preview["preview_id"]}, "no-worker-1"
+        )["node_id"]
+        self.assertFalse(self.store.load(node_id).get("lane_refused"))
+        self.now += lane.NO_WORKER_SECONDS
+        capacity.observe(node_id)
+        self.assertTrue(self.store.load(node_id)["lane_refused"])
+        self.assertEqual(jobs["job-1"], "IN_QUEUE")  # The read changed nothing.
+        with self.repo.engine.connect() as connection:
+            node = dict(connection.execute(select(operator_nodes)).mappings().one())
+            intent = dict(connection.execute(select(instance_intents)).mappings().one())
+        outcome = reclaim_node(service, node, intent)
+        self.assertEqual(
+            (outcome["stop_requested"], outcome["reason"]),
+            (True, "capacity_startup_failed"),
+        )
+        capacity.stop(node_id)
+        self.assertEqual(jobs["job-1"], "CANCELLED")
+        observed = capacity.observe(node_id)
+        self.assertEqual(
+            (observed["state"], self.store.load(node_id)["lane_refused"]),
+            ("stopped", True),
+        )
+        # Stopped as a failed start of this lane: it cools, so the next start
+        # goes to the fallback instead of queueing on RunPod again.
+        with self.repo.engine.connect() as connection:
+            self.assertIn(
+                "runpod-serverless",
+                cooling_backends(
+                    connection, self.settings.tenant_id, self.repo.clock()
+                ),
+            )
+
     def test_a_cooling_primary_lane_is_skipped_for_its_fallback(self):
         from unittest.mock import patch
 

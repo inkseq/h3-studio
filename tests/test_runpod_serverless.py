@@ -44,7 +44,7 @@ def spec(**changes):
 
 class FakeRunPod:
     def __init__(self):
-        self.jobs, self.calls = {}, []
+        self.jobs, self.calls, self.workers = {}, [], None
 
     def __call__(self, request):
         path = request.url.path
@@ -66,7 +66,11 @@ class FakeRunPod:
                 j["status"] in {"IN_QUEUE", "IN_PROGRESS"} for j in self.jobs.values()
             )
             return httpx.Response(
-                200, json={"jobs": {"inQueue": 0, "inProgress": live}}
+                200,
+                json={
+                    "jobs": {"inQueue": 0, "inProgress": live},
+                    **({"workers": self.workers} if self.workers is not None else {}),
+                },
             )
         return httpx.Response(404)
 
@@ -239,6 +243,48 @@ class RunPodServerlessTests(unittest.TestCase):
         self.assertEqual(client.stop(RUN), {})
         # The terminal state is journaled once and kept.
         self.assertEqual(client._read(RUN)["final"], {"status": "UNBOUND_EXPIRED"})
+
+    def test_a_job_queued_with_no_worker_is_marked_then_ended_by_its_stop(self):
+        # #1272: RunPod queued the job with no GPU free for 20 min, twice.
+        now = [1000.0]
+        client = RunPodServerlessClient(
+            self.config,
+            "inkseq-staging",
+            http=httpx.Client(transport=httpx.MockTransport(self.fake)),
+            clock=lambda: now[0],
+        )
+        client.apply(spec())
+        idle = {"initializing": 0, "idle": 0, "ready": 0, "running": 0}
+        self.fake.workers = {**idle, "throttled": 1, "unhealthy": 0}
+        now[0] += client.NO_WORKER_SECONDS - 1
+        self.assertNotIn("lane_no_worker", client.get(run_name=RUN))
+        now[0] += 1
+        # A worker starting up, or a health answer without counts, keeps waiting.
+        for workers in ({**idle, "initializing": 1}, None, {"running": 0}):
+            self.fake.workers = workers
+            self.assertNotIn("lane_no_worker", client.get(run_name=RUN))
+        self.fake.workers = dict(idle)
+        calls = len(self.fake.calls)
+        run = client.get(run_name=RUN)
+        # The read only marks it: still provisioning, nothing cancelled.
+        self.assertEqual((run["status"], run["lane_no_worker"]), ("provisioning", True))
+        self.assertFalse([c for c in self.fake.calls[calls:] if "/cancel/" in c[1]])
+        self.assertEqual(self.fake.jobs["job-1"]["status"], "IN_QUEUE")
+        # The mark holds without another health read, and counts as live.
+        self.fake.workers = {**idle, "initializing": 3}
+        self.assertTrue(client.get(run_name=RUN)["lane_no_worker"])
+        # A queued job has no instance yet; the inventory still accounts for it.
+        self.assertTrue(client.provider_inventory(BACKEND)["complete"])
+        # Its stop cancels it; the cancelled job reads as no capacity, no cost.
+        client.stop(RUN)
+        run = client.get(run_name=RUN)
+        self.assertEqual(
+            (run["status"], run["latest_job_submission"]["termination_reason"]),
+            ("failed", "no_capacity"),
+        )
+        self.assertNotIn("cost", run)
+        self.assertEqual(client._read(RUN)["final"], {"status": "NO_CAPACITY"})
+        self.assertEqual(client.provider_inventory(BACKEND)["instance_ids"], [])
 
     def test_a_lost_submit_ends_early_when_runpod_shows_no_job(self):
         # #1272: waiting out the 3 h expiry blocked every start on staging.
