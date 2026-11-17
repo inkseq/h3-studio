@@ -245,8 +245,9 @@ def projection(connection, tenant_id, now, *, policy=None, exposure_only=False):
 
     exposure_only is for admission, which reads only the confirmed exposure.
     It drops references that can only project 0 (job references, rentals that
-    ended before today) before loading their rows, so admission cost follows
-    today's rentals, not all history (#1252). Its details are incomplete, and
+    ended before today) before loading job plans and node payloads, the bulk
+    of the cost (#1252); instance reservations and intents are still read in
+    full. Its details are incomplete, and
     its exposure is never lower than the full projection: dropping a 0 can
     only remove a provider-identity conflict from another reference.
     """
