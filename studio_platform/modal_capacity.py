@@ -19,6 +19,8 @@ CONFIRMED = {
     'dstack_capacity_active',
     'dstack_never_applied',
     'dstack_terminal_no_allocation',
+    # The same proof, journaled by the original writer (#1272).
+    'dstack_never_allocated_proven',
     'dstack_terminal_provider_absent',
     # Complete absence recorded by the original writer (#1140 item 6).
     'dstack_provider_removal_proven',
