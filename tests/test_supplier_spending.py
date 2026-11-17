@@ -155,6 +155,56 @@ class SupplierSpendingTests(LedgerCase):
         self.assertEqual(value['projected_microusd'], 300_000)
         self.assertEqual(value['details'], [])
 
+    def test_projection_query_count_does_not_grow_with_history(self):
+        # #1252: one query per reference (~1,700 on staging) made every paid
+        # admission ~2 s. The same rows are now read once per projection.
+        from sqlalchemy import event
+
+        self.policy(limit=100_000_000)  # Room for every job in both rounds.
+        statements = []
+
+        def count(*_args, **_kwargs):
+            statements.append(1)
+
+        def queries():
+            statements.clear()
+            event.listen(self.repo.engine, 'before_cursor_execute', count)
+            try:
+                value = self.read()
+            finally:
+                event.remove(self.repo.engine, 'before_cursor_execute', count)
+            return len(statements), value
+
+        def job():
+            plan = self.plan(
+                cost=1,
+                execution={
+                    'pool': 'test-pool',
+                    'backend': 'mock',
+                    'expected_runtime_s': 1,
+                },
+            )
+            self.repo.create_job(
+                self.scope,
+                plan['id'],
+                str(uuid.uuid4()),
+                budget_account_ids=('owner-budget',),
+            )
+
+        for index in range(3):
+            job()
+        for index in range(3):
+            self.rental(100_000, identity=f'early-{index}')
+        few, value = queries()
+        self.assertEqual(value['projected_microusd'], 300_000)
+        for index in range(12):
+            job()
+        for index in range(12):
+            self.rental(100_000, identity=f'late-{index}')
+        many, value = queries()
+        self.assertEqual(value['projected_microusd'], 1_500_000)
+        self.assertEqual(few, many)
+
     def test_distinct_supplier_allocations_are_additive(self):
         self.rental(200_000, identity='one')
         self.rental(300_000, identity='two')

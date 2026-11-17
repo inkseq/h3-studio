@@ -49,30 +49,68 @@ def _detail(code, reference, field):
     }
 
 
-def _rental(connection, tenant_id, reference, rows, now):
-    """Return a bound rental, its confirmed test exclusion, or finite problems."""
+def _preload(connection, tenant_id, grouped):
+    """Rows _rental and the job filter read, fetched once for all references.
+
+    The projection runs inside every paid admission. Reading them one query
+    per reference (about 1,700 on staging) made each shot's admission ~2 s
+    (#1252). Same rows, same checks; only the round trips are batched.
+    """
     from .operator_capacity import operator_nodes
 
-    intent = (
-        connection.execute(
-            select(instance_intents).where(instance_intents.c.id == reference[1])
+    instances = sorted(ref for kind, ref in grouped if kind == "instance")
+    job_ids = sorted(ref for kind, ref in grouped if kind == "job")
+    loaded = {"intents": {}, "nodes": {}, "foreign": set(), "jobs": {}}
+    for chunk in _chunks(instances):
+        for row in connection.execute(
+            select(instance_intents).where(instance_intents.c.id.in_(chunk))
+        ).mappings():
+            loaded["intents"][row["id"]] = row
+        for row in connection.execute(
+            select(operator_nodes).where(operator_nodes.c.intent_id.in_(chunk))
+        ).mappings():
+            loaded["nodes"][row["intent_id"]] = row
+        loaded["foreign"].update(
+            connection.execute(
+                select(budget_reservations.c.reference_id)
+                .select_from(
+                    budget_reservations.join(
+                        budget_accounts,
+                        budget_accounts.c.id == budget_reservations.c.account_id,
+                    )
+                )
+                .where(
+                    budget_reservations.c.reference_type == "instance",
+                    budget_reservations.c.reference_id.in_(chunk),
+                    budget_accounts.c.tenant_id != tenant_id,
+                )
+            ).scalars()
         )
-        .mappings()
-        .first()
-    )
+    for chunk in _chunks(job_ids):
+        for row in connection.execute(
+            select(jobs.c.id, jobs.c.execution_plan).where(
+                jobs.c.tenant_id == tenant_id, jobs.c.id.in_(chunk)
+            )
+        ).mappings():
+            loaded["jobs"][row["id"]] = row
+    return loaded
+
+
+def _chunks(values, size=500):
+    for index in range(0, len(values), size):
+        yield values[index : index + size]
+
+
+def _rental(tenant_id, reference, rows, now, loaded):
+    """Return a bound rental, its confirmed test exclusion, or finite problems."""
+    intent = loaded["intents"].get(reference[1])
     if intent is None:
         return (
             None,
             False,
             [_detail("rental_binding_unconfirmed", reference, "intent_id")],
         )
-    node = (
-        connection.execute(
-            select(operator_nodes).where(operator_nodes.c.intent_id == reference[1])
-        )
-        .mappings()
-        .first()
-    )
+    node = loaded["nodes"].get(reference[1])
     problems, test = [], False
     if node is not None:
         payload = node["payload"]
@@ -107,21 +145,8 @@ def _rental(connection, tenant_id, reference, rows, now):
         )
     # A foreign tenant sharing an original reference cannot be silently treated
     # as another ordinary budget layer of this tenant.
-    foreign = connection.execute(
-        select(budget_accounts.c.tenant_id)
-        .select_from(
-            budget_reservations.join(
-                budget_accounts,
-                budget_accounts.c.id == budget_reservations.c.account_id,
-            )
-        )
-        .where(
-            budget_reservations.c.reference_type == reference[0],
-            budget_reservations.c.reference_id == reference[1],
-            budget_accounts.c.tenant_id != tenant_id,
-        )
-    ).first()
-    if foreign is not None:
+    foreign = reference[1] in loaded["foreign"]
+    if foreign:
         problems.append(_detail("supplier_reference_conflict", reference, "tenant_id"))
     return dict(intent), test and not problems, problems
 
@@ -222,17 +247,10 @@ def projection(connection, tenant_id, now, *, policy=None):
     ).mappings():
         grouped[(row["reference_type"], row["reference_id"])].append(row)
     provider_refs = {}
+    loaded = _preload(connection, tenant_id, grouped)
     for reference, rows in sorted(grouped.items()):
         if reference[0] == "job":
-            job = (
-                connection.execute(
-                    select(jobs.c.execution_plan).where(
-                        jobs.c.tenant_id == tenant_id, jobs.c.id == reference[1]
-                    )
-                )
-                .mappings()
-                .first()
-            )
+            job = loaded["jobs"].get(reference[1])
             if job and (
                 job["execution_plan"].get("backend") in INTERNAL_BACKENDS
                 or job["execution_plan"].get("simulation") is True
@@ -250,9 +268,7 @@ def projection(connection, tenant_id, now, *, policy=None):
                     )
                 )
             continue
-        intent, excluded, problems = _rental(
-            connection, tenant_id, reference, rows, now
-        )
+        intent, excluded, problems = _rental(tenant_id, reference, rows, now, loaded)
         if excluded:
             continue
         if intent and intent.get("provider_instance_id"):
