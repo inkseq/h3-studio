@@ -32,8 +32,10 @@ STATUSES = {
     # outright, or old enough that no job of it can still exist.
     "REFUSED": ("failed", "failed"),
     "UNBOUND_EXPIRED": ("failed", "failed"),
+    # The provider's own count showed no job at all after the grace (#1272).
+    "UNBOUND_ABSENT": ("failed", "failed"),
 }
-UNBOUND = frozenset({"REFUSED", "UNBOUND_EXPIRED"})
+UNBOUND = frozenset({"REFUSED", "UNBOUND_EXPIRED", "UNBOUND_ABSENT"})
 LIVE = frozenset({"IN_QUEUE", "IN_PROGRESS"})
 JOB_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
 RUN_NAME = re.compile(r"sixnine-[0-9a-f]{32}")
@@ -76,6 +78,9 @@ class DialoutCapacityClient:
     # ended: a RunPod job lives its execution limit plus a queue TTL of one hour
     # (_launch), a Modal sandbox at most its timeout. Ten minutes of margin.
     UNBOUND_EXPIRY_SECONDS = MAX_EXECUTION_SECONDS + 3600 + 600
+    # A lane that can count its own jobs may end an unbound journal this soon,
+    # once that count proves no job exists (_unbound_absent).
+    UNBOUND_GRACE_SECONDS = 120
 
     def __init__(self, config, project, *, clock=time.time):
         self.config = config
@@ -190,7 +195,11 @@ class DialoutCapacityClient:
                 # Nothing exists to observe or stop: the start fails at once and
                 # the next lane is tried, instead of waiting out the expiry.
                 record["final"] = {"status": "REFUSED"}
-                self._write(run_name, record, create=False)
+            else:
+                # The grace counts from the failed answer: a slow timeout must
+                # not use it up before the provider could show a late job.
+                record["failed_at"] = self.clock()
+            self._write(run_name, record, create=False)
             raise
         job_id = value.get("id")
         _require(
@@ -225,14 +234,29 @@ class DialoutCapacityClient:
         if isinstance(final, dict) and final.get("status") in UNBOUND:
             return final
         created = record.get("created_at")
-        if (
-            type(created) not in (int, float)
-            or self.clock() - created < self.UNBOUND_EXPIRY_SECONDS
-        ):
+        if type(created) not in (int, float):
             return None
-        record["final"] = {"status": "UNBOUND_EXPIRED"}
+        now = self.clock()
+        failed = record.get("failed_at")
+        failed = failed if type(failed) in (int, float) else created
+        if now - created >= self.UNBOUND_EXPIRY_SECONDS:
+            status = "UNBOUND_EXPIRED"
+        elif now - failed >= self.UNBOUND_GRACE_SECONDS and self._unbound_absent():
+            # Waiting out the expiry blocked every start for hours (#1272).
+            status = "UNBOUND_ABSENT"
+        else:
+            return None
+        record["final"] = {"status": status}
         self._write(record["run_name"], record, create=False)
         return record["final"]
+
+    def _unbound_absent(self):
+        """Whether the provider shows no job of ours queued or running; lanes override.
+
+        This proves nothing live, not that nothing ran: the run's cost stays
+        unknown, as for the expiry.
+        """
+        return False
 
     def stop(self, run_name):
         record = self._read(run_name)
