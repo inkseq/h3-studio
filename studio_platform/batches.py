@@ -7,6 +7,7 @@ admit previously unfinished items. Provider execution never happens here.
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from sqlalchemy import (
@@ -51,6 +52,9 @@ batches = Table(
     Column("cancel_requested", Float),
     UniqueConstraint("tenant", "owner", "project_id", "actor_id", "idempotency_key"),
 )
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class BatchService:
@@ -349,6 +353,31 @@ class BatchAdmission:
         }
 
     def submit(self, principal, body, idempotency_key):
+        # Phase timing for the wait between Generate and "making" (#1252).
+        timing = {"started": time.perf_counter(), "ms": {}, "max": {}}
+
+        def lap(name, since):
+            spent = (time.perf_counter() - since) * 1000
+            timing["ms"][name] = timing["ms"].get(name, 0) + spent
+            timing["max"][name] = max(timing["max"].get(name, 0), spent)
+            return time.perf_counter()
+
+        try:
+            return self._submit(principal, body, idempotency_key, lap)
+        finally:
+            total = (time.perf_counter() - timing["started"]) * 1000
+            _LOG.log(
+                logging.WARNING if total >= 5000 else logging.INFO,
+                "batch_submit_timing total_ms=%d %s",
+                total,
+                " ".join(
+                    f"{name}_ms={int(value)} {name}_max_ms={int(timing['max'][name])}"
+                    for name, value in timing["ms"].items()
+                ),
+            )
+
+    def _submit(self, principal, body, idempotency_key, lap):
+        since = time.perf_counter()
         if set(body) != {"client_project_id", "plan_ids"}:
             raise HTTPException(422, "批次仅接受项目与已预检计划列表")
         project_id = body["client_project_id"]
@@ -362,6 +391,7 @@ class BatchAdmission:
         record = self.service.reserve(
             principal, project_id, body["plan_ids"], idempotency_key
         )
+        since = lap("reserve", since)
         from .spending_limits import check_submission_confirmation
 
         pending_plans = []
@@ -391,6 +421,7 @@ class BatchAdmission:
                         **({"confirmation_required": True} if check else {}),
                     },
                 )
+        since = lap("confirmation", since)
         for index, item in enumerate(record["items"]):
             if not item["job_id"] and (
                 item["error_code"]
@@ -407,12 +438,14 @@ class BatchAdmission:
                 plan = self.access.plan(principal, item["plan_id"])
                 if plan["project_id"] != project_id:
                     raise NotFound("plan_not_found")
+                since = time.perf_counter()
                 job = self.admission.create(
                     principal,
                     item["plan_id"],
                     f'batch:{record["id"]}:{index}',
                     initial_status="planned",
                 )
+                since = lap("create", since)
                 self.service.record_item(
                     principal,
                     record["id"],
@@ -420,6 +453,7 @@ class BatchAdmission:
                     {"job_id": job["id"], "error_code": None},
                 )
                 self.activate(principal, record, job["id"])
+                lap("activate", since)
             except (
                 NotFound,
                 Conflict,
