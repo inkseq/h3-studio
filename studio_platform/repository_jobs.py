@@ -321,6 +321,8 @@ class JobLedger:
         confirmation_required=False,
         spending_settings_version=None,
     ):
+        from .phase_timing import lap
+
         with self.transaction() as connection:
             from .identity import (
                 ADMISSION_GATE_WAIT_SECONDS,
@@ -328,7 +330,9 @@ class JobLedger:
                 lock_account_gate,
             )
 
+            lap("transaction")
             lock_account_gate(connection, wait_seconds=ADMISSION_GATE_WAIT_SECONDS)
+            lap("account_gate")
             state = account_status(connection, scope.tenant_id, scope.owner_id)
             if state != "active":
                 raise Conflict(
@@ -340,6 +344,7 @@ class JobLedger:
             self._locked(
                 connection, select(capacity_gate).where(capacity_gate.c.id == "global")
             )
+            lap("capacity_gate")
             job = self._job(connection, job_id, scope, lock=True)
             if job["status"] not in ("planned", "blocked") or job["attempt_no"]:
                 raise InvalidTransition("job_not_admissible")
@@ -355,6 +360,7 @@ class JobLedger:
             from .storyboard_versions import check_admission_source
 
             check_admission_source(connection, self, scope, plan["request"])
+            lap("policy_source")
             if plan["expires_at"] <= self.clock():
                 raise Conflict("plan_expired")
             execution = plan["execution_plan"]
@@ -362,6 +368,7 @@ class JobLedger:
                 from .control import require_delivery_configuration
 
                 self._lock_capacity(connection)
+                lap("capacity_lock")
                 require_delivery_configuration(
                     connection,
                     "wangp-worker",
@@ -375,6 +382,7 @@ class JobLedger:
                 plan["request"],
                 scope=scope,
             )
+            lap("pool")
             snapshot = job["execution_plan"].get("capacity_policy_snapshot")
             if snapshot is None:
                 from .supplier_spending import admit_job
@@ -412,6 +420,7 @@ class JobLedger:
                 confirmation_required=confirmation_required,
                 spending_settings_version=spending_settings_version,
             )
+            lap("admit_reserve")
             from .credits import hold as hold_credits
 
             held = hold_credits(connection, self, scope, job, spending_actor)
@@ -437,6 +446,7 @@ class JobLedger:
                 )
             )
             self._emit(connection, "job." + status, job_id, {"job_id": job_id})
+            lap("hold_write")
             return self._job(connection, job_id)
 
     def refresh_unadmitted_plan(self, scope, job_id, plan_id):

@@ -516,28 +516,37 @@ class GenerationAdmission:
         confirmation_required=False,
         spending_settings_version=None,
     ):
-        plan = self.access.plan(principal, job["plan_id"])
-        project = self.access.project(principal, job["project_id"], "jobs:write")[
-            "payload"
-        ]
-        if not business:
-            reject_managed(project)
-        elif not managed_project(project) or job["actor_id"] != "quick-chat-execution":
-            raise Conflict("quick_chat_execution_required")
-        self.planning.check_source(project, plan["request"], principal)
-        self._require_no_maintenance()
-        task_scope = self.task_scope(
-            principal, job["project_id"], job["id"] if business else None
-        )
-        budgets = self.policies.ensure_current(plan, task_scope)
-        return self.repo.enqueue(
-            task_scope,
-            job["id"],
-            budget_account_ids=budgets,
-            spending_actor=principal.actor_id,
-            confirmation_required=confirmation_required,
-            spending_settings_version=spending_settings_version,
-        )
+        from .phase_timing import PhaseTimer
+
+        with PhaseTimer("job_enqueue_timing") as timer:
+            plan = self.access.plan(principal, job["plan_id"])
+            project = self.access.project(principal, job["project_id"], "jobs:write")[
+                "payload"
+            ]
+            timer.lap("load")
+            if not business:
+                reject_managed(project)
+            elif (
+                not managed_project(project)
+                or job["actor_id"] != "quick-chat-execution"
+            ):
+                raise Conflict("quick_chat_execution_required")
+            self.planning.check_source(project, plan["request"], principal)
+            timer.lap("source")
+            self._require_no_maintenance()
+            task_scope = self.task_scope(
+                principal, job["project_id"], job["id"] if business else None
+            )
+            budgets = self.policies.ensure_current(plan, task_scope)
+            timer.lap("policies")
+            return self.repo.enqueue(
+                task_scope,
+                job["id"],
+                budget_account_ids=budgets,
+                spending_actor=principal.actor_id,
+                confirmation_required=confirmation_required,
+                spending_settings_version=spending_settings_version,
+            )
 
     def refresh_planned(self, principal, job_id, plan_id):
         job = self.repo.get_job_for_owner(
