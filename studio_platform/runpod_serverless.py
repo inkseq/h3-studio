@@ -81,8 +81,11 @@ def validate_config(value):
 
 
 logger = logging.getLogger(__name__)
-# Answers that do not prove RunPod made no job (timeouts, conflicts, rate limits).
-RETRYABLE = frozenset({408, 409, 425, 429})
+# An answer that does not prove RunPod made no job: a timeout may come from a
+# proxy after RunPod queued it. Any other 4xx is RunPod declining the request
+# (409 when the endpoint allows no workers, 429 for rate limits): a refusal,
+# so the next lane is tried at once (#1272).
+RETRYABLE = frozenset({408})
 
 
 class RunPodServerlessClient(DialoutCapacityClient):
@@ -160,8 +163,22 @@ class RunPodServerlessClient(DialoutCapacityClient):
     def _cancel(self, job_id):
         self._call("POST", "/cancel/" + job_id)
 
+    def _unbound_absent(self):
+        # With no job queued or running on our endpoint, a lost submit made none.
+        try:
+            return self._live() == 0
+        except DstackError:
+            return False
+
     def _live(self):
         """The provider's own count of queued plus running jobs."""
         health = self._call("GET", "/health").get("jobs")
-        _require(isinstance(health, dict), "dstack_provider_inventory_unconfirmed")
-        return health.get("inQueue", -1) + health.get("inProgress", -1)
+        _require(
+            isinstance(health, dict)
+            and all(
+                type(health.get(key)) is int and health[key] >= 0
+                for key in ("inQueue", "inProgress")
+            ),
+            "dstack_provider_inventory_unconfirmed",
+        )
+        return health["inQueue"] + health["inProgress"]

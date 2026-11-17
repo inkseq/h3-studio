@@ -229,6 +229,8 @@ class DstackRegistration:
                 in {
                     "dstack_terminal_no_allocation",
                     "dstack_terminal_provider_accounted",
+                    # Settled from the same proof without a re-read (#1272).
+                    "dstack_never_allocated_proven",
                 }
                 and intent["provider_instance_id"] is None
                 and original.get("provider_instance_id") is None
