@@ -15,6 +15,11 @@ from studio_platform.providers.registry import LOCAL_BACKENDS, WORKER_BACKENDS
 from studio_platform.settings import Settings
 from test_platform_repository import LedgerCase
 
+from studio_platform.providers.hosted_models import SLOTS_PER_MODEL as SLOTS
+
+# Three models at SLOTS each plus the single-slot vivix model.
+HOSTED = 3 * SLOTS + 1
+
 
 def register_local(slots):
     slots.add_local_slots()
@@ -62,9 +67,9 @@ class LocalRegistrationTests(unittest.TestCase):
         hosted = [
             f"dbos-everyframe-{model}-v1-{index}"
             for model, count in (
-                ("h3-max-turbo", 4),
-                ("pika-h3-flex", 4),
-                ("h3-max-fast", 4),
+                ("h3-max-turbo", SLOTS),
+                ("pika-h3-flex", SLOTS),
+                ("h3-max-fast", SLOTS),
                 ("vivix-w1", 1),
             )
             for index in range(count)
@@ -72,7 +77,7 @@ class LocalRegistrationTests(unittest.TestCase):
         self.assertEqual(
             [slot.spec.worker_id for slot in seen], render + enhance + hosted
         )
-        self.assertEqual(beats, [4, 7, 20])
+        self.assertEqual(beats, [4, 7, 7 + HOSTED])
         for slot in seen:
             value = asdict(slot)
             spec = value.pop("spec")
@@ -148,14 +153,14 @@ class LocalRegistrationTests(unittest.TestCase):
             (
                 "runpod-enhance",
                 "dbos-runpod-enhance-v1-1",
-                19,
-                [4, 19],
+                6 + HOSTED,
+                [4, 6 + HOSTED],
                 "dbos_enhance_slot_unavailable",
             ),
             (
                 "everyframe-render",
                 "dbos-everyframe-pika-h3-flex-v1-1",
-                13,
+                9 + SLOTS,
                 [4, 7],
                 "dbos_everyframe_slot_unavailable",
             ),
@@ -175,7 +180,7 @@ class LocalRegistrationTests(unittest.TestCase):
                 self.assertEqual(out.getvalue(), code + " error_type=ValueError\n")
                 self.assertEqual(
                     sum(s.spec.backend == backend for s in seen),
-                    2 if backend == "runpod-enhance" else 6,
+                    2 if backend == "runpod-enhance" else SLOTS + 2,
                 )
 
     def test_render_failure_propagates_before_later_families(self):
@@ -328,7 +333,7 @@ class HostedRegistrationTests(LedgerCase):
                 redirect_stdout(out),
             ):
                 register_local(slots)
-            self.assertEqual(len(slots._slots), 18)
+            self.assertEqual(len(slots._slots), 5 + HOSTED)
             self.assertEqual(slots.children, {})
             control = WorkerControl(self.repo)
             self.assertEqual(
@@ -350,7 +355,7 @@ class HostedRegistrationTests(LedgerCase):
         settings = Settings(directory, auth_mode="local-test", everyframe_enabled=True)
         with DurableSlots(self.repo, settings, directory / "executor") as slots:
             register_local(slots)
-            self.assertEqual(len(slots._slots), 13)
+            self.assertEqual(len(slots._slots), HOSTED)
             self.assertEqual(slots.children, {})
             for slot in slots._slots.values():
                 self.assertEqual(slot.runner.backend.slot_key, slot.spec.worker_id)

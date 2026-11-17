@@ -26,7 +26,10 @@ PROVIDER = EVERYFRAME_RENDER.provider
 BACKEND = EVERYFRAME_RENDER.id
 POOL = "everyframe"
 RECIPES = ("h3-base-fl2va-v1", "h3-base-ref2va-v1")
-SLOTS_PER_MODEL = 4
+# Our own in-flight cap per hosted model. A story is usually 5-8 shots; at 4
+# the fifth waited a whole shot (~2.5 min, staging 2026-11-18, #1252). The
+# vendor's own limit is enforced by routing (per_window), not here.
+SLOTS_PER_MODEL = 8
 # Turbo and fast insert their own camera cuts and follow lighting words
 # literally (#918, 2026-11-01); our shots are already split by the storyboard.
 NO_CUT = "Single continuous shot with no cuts, no scene changes and steady lighting."
