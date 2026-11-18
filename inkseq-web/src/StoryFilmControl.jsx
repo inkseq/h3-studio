@@ -11,6 +11,7 @@ import {
   createFilmClient,
   createFilmController,
   filmLinkRun,
+  filmPollMs,
   filmReady,
   filmTerminal,
 } from './story-film.js';
@@ -206,7 +207,7 @@ export default function StoryFilmControl({
         !filmTerminal(current.run) &&
         !current.pending
       )
-        timer = setTimeout(read, 10000);
+        timer = setTimeout(read, filmPollMs(current.run));
     };
     read();
     return () => {

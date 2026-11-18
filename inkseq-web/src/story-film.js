@@ -21,6 +21,9 @@ const id = (value) =>
   !/[\x00-\x1f]/.test(value);
 const money = (value) => Number.isSafeInteger(value) && value >= 0;
 export const filmTerminal = (run) => ['completed', 'cancelled'].includes(run?.phase);
+// Joining finished shots takes about a minute; making shots takes minutes.
+// Read the run often enough that a finished film shows within a few seconds.
+export const filmPollMs = (run) => (['chapters', 'exporting'].includes(run?.phase) ? 3000 : 10000);
 const ownerReady = (context) =>
   !!context?.account && context.mode === 'cloud' && context.workspaceAccount === context.account;
 export function filmReady(context) {

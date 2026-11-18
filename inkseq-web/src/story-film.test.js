@@ -4,6 +4,7 @@ import {
   createFilmClient,
   createFilmController,
   filmGrantMatches,
+  filmPollMs,
   filmQuoted,
   filmLinkRun,
   filmReceipt,
@@ -443,4 +444,11 @@ test('real cloud-client grant retry uses original film body/key/account, without
   assert.equal(calls[0].body, calls[2].body);
   assert.equal(calls[2].headers['Idempotency-Key'], 'original-submit-key');
   assert.ok(calls.every((call) => call.headers['X-Expected-Account'] === 'one'));
+});
+
+test('a film being joined is read every 3 s, one still making shots every 10 s', () => {
+  assert.equal(filmPollMs({ phase: 'chapters' }), 3000);
+  assert.equal(filmPollMs({ phase: 'exporting' }), 3000);
+  assert.equal(filmPollMs({ phase: 'generating' }), 10000);
+  assert.equal(filmPollMs(null), 10000);
 });
