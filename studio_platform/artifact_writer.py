@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import stat
@@ -57,6 +58,10 @@ from .content_lifecycle import (
 )
 
 MIB = 1024 * 1024
+# What one collected file of a job can plausibly weigh: a base plus an
+# allowance per second of output. Far above any real encode: crf 18 at 720P
+# is about 0.5 MiB/s, lossless 32 kHz stereo about 0.25 MiB/s.
+ROLE_ALLOWANCE = {"video": (32 * MIB, 8 * MIB), "audio": (8 * MIB, 1 * MIB)}
 _schema = MetaData()
 write_receipts = Table(
     "platform_artifact_write_receipts",
@@ -370,11 +375,40 @@ class ArtifactWriter:
             raise IntegrityError("artifact_staging_changed")
         return size, digest.hexdigest()
 
+    def _staging_bytes(self, job, kinds):
+        """What one collected file per kind of this job can weigh, summed.
+
+        The whole object limit (512 MiB) used to be reserved for every file:
+        1.5-3 GiB of the owner's 10 GiB quota per shot, for takes of about
+        2 MiB. A story's shots finish together, so all but the first few were
+        refused the reservation, waited 30 s and were collected again
+        (staging, 2026-11-18, #1301). The allowance follows the output's
+        length instead and never exceeds the object limit. prepare() settles
+        to the actual bytes and charges any excess under the same quota
+        check; each file is still held to the object limit.
+        """
+        try:
+            from .inference.outputs import _shape, delivery_spec
+
+            duration = float(_shape(job)[2])
+            delivery = delivery_spec(job)
+            if delivery is not None:
+                duration = max(duration, float(delivery["duration_s"]))
+            if not 0 < duration <= 86400:  # Also refuses NaN.
+                raise ValueError
+        except Exception:
+            # A length that cannot be read keeps the old, widest reservation.
+            return self.max_bytes * len(kinds)
+        return sum(
+            min(self.max_bytes, base + math.ceil(duration) * rate)
+            for base, rate in (ROLE_ALLOWANCE[kind] for kind in kinds)
+        )
+
     def begin_staging(self, job, attempt_id, tag, *, kinds=("video",)):
         """Bound collection disk use BEFORE fetch/FFmpeg. No object writes here.
 
         Reserve raw download + verified output + future immutable store object.
-        prepare() later shrinks this to verified actual bytes in one transaction.
+        prepare() later settles this to verified actual bytes in one transaction.
         Crashed/failed staging keeps its receipt and conservative reservation.
         """
         existing = self.get(job, attempt_id, tag)
@@ -393,7 +427,7 @@ class ArtifactWriter:
             phase="staging",
             roles={},
             expected_roles=list(kinds),
-            reserved_bytes=3 * self.max_bytes * len(kinds),
+            reserved_bytes=3 * self._staging_bytes(job, kinds),
         )
         if isinstance(self.store, S3ObjectStore) and self.store.config.provider == "r2":
             record["scratch_policy"] = scratch_retention.POLICY
@@ -476,7 +510,7 @@ class ArtifactWriter:
             roles={},
             collection_route="gpu-r2-v1",
             expected_roles=list(expected),
-            reserved_bytes=self.max_bytes * len(expected),
+            reserved_bytes=self._staging_bytes(job, expected),
             raw_staging_bytes=0,
         )
         self.quota._ensure(record["owner"])
