@@ -23,7 +23,6 @@ from .slot_turns import (
     SlotContexts,
     selected_job_turn,
     run_selected_slot,
-    POLL_SECONDS,
     TERMINAL as TERMINAL,
 )
 from .workflow_schema import (
@@ -33,6 +32,10 @@ from .workflow_schema import (
 )
 
 QUEUE = "inkseq-generation-v1"
+# How often queued workflows are picked up. At 10 s a new shot or a film's
+# render waited ~5 s on average and up to 10 s before its first turn (#1252).
+# This is only the dequeue; a running job's own turns still wait POLL_SECONDS.
+QUEUE_POLL_SECONDS = 2
 WORKFLOW = "inkseq.generation.v1"
 ACTIVE = frozenset(
     {
@@ -390,7 +393,7 @@ class DurableExecutor:
             # The public runtime method needs a launched system DB. The public
             # client can persist the named queue before launch without DDL.
             self.repo.generation_transport.client.register_queue(
-                QUEUE, polling_interval_sec=POLL_SECONDS
+                QUEUE, polling_interval_sec=QUEUE_POLL_SECONDS
             )
             register_generation_workflow(
                 DBOS, self.slots, domain_turns=self.domain_turns

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import threading
 
+from .phase_timing import LapTelemetry, PhaseTimer
 from .repository import Conflict, Scope
 from .providers.registry import CPU_RENDER, LOCAL_BACKENDS
 
@@ -72,6 +73,10 @@ class SlotContexts:
                 if runner is None:
                     context.__exit__(None, None, None)
                     raise Conflict("dbos_slot_disabled")
+                telemetry = getattr(runner, "telemetry", None)
+                if telemetry is not None:
+                    # Finished worker stages also lap the slot turn timer.
+                    runner.telemetry = LapTelemetry(telemetry)
                 current = Slot(slot.spec, runner, context, threading.Lock())
                 self._slots[intent_id] = current
             # The existing controller calls ensure after its fresh native
@@ -258,7 +263,12 @@ def run_selected_slot(slot, job_id, *, local_owner=None):
             if cpu:
                 slot.runner.backend._operation_fence_fd = descriptor
             try:
-                result = slot.runner.run_once(slot.spec.worker_id, slot.spec.pool)
+                # One line for a slow turn (a render, a hosted submit): which
+                # stage took the time (#1252).
+                with PhaseTimer(
+                    "slot_turn_timing backend=" + str(slot.spec.backend), slow_ms=5000
+                ):
+                    result = slot.runner.run_once(slot.spec.worker_id, slot.spec.pool)
             finally:
                 if cpu:
                     slot.runner.backend._operation_fence_fd = None

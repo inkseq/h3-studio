@@ -674,7 +674,9 @@ class FilmExecution:
             "terminal": False,
             "phase": phase,
             "error_code": error_code,
-            "wait_seconds": 10,
+            # Nothing wakes the film when its render job ends. Renders are
+            # short, so look again sooner than while shots generate (#1252).
+            "wait_seconds": 2 if phase in {"chapters", "exporting"} else 10,
         }
 
     def record_business_block(self, principal, project_id, run_id, code):

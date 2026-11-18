@@ -33,6 +33,7 @@ from .render_request import (
 )
 from .providers.registry import CPU_RENDER
 from . import media
+from .phase_timing import lap
 from .caption_server import (
     validate_normalized_subtitles as validate_normalized_subtitles,
 )
@@ -869,6 +870,7 @@ class CPURenderBackend:
                 "render_combined_video_size_limit",
             )
             clips.append(output)
+        lap("render_clips")
         manifest = self._path(directory, "clips.txt")
         # MP4 format duration can be rounded to milliseconds (one 24fps frame
         # becomes .042s). Concat must advance by the validated frame count,
@@ -906,6 +908,7 @@ class CPURenderBackend:
             deadline,
             joined,
         )
+        lap("render_concat")
         if subtitles is not None:
             self._write_subtitles(directory, shape, subtitles, subtitle_style)
             captioned = self._path(directory, "captioned.mp4")
@@ -948,6 +951,7 @@ class CPURenderBackend:
                 captioned,
             )
             joined = captioned
+            lap("render_captions")
         final = self._path(directory, "result.mp4")
         if shape["audio"]:
             args, filters, labels = [], [], []
@@ -1093,6 +1097,7 @@ class CPURenderBackend:
         else:
             # Keep the verified concat checkpoint available after a crash.
             shutil.copyfile(joined, final)
+        lap("render_audio_mux")
         self._verify_outputs(directory, state)
         outputs = {
             "video": "result.mp4",
@@ -1110,6 +1115,7 @@ class CPURenderBackend:
             with self._path(directory, entry["filename"]).open("r+b") as stream:
                 os.fsync(stream.fileno())
         _sync_directory(directory)
+        lap("render_verify")
 
     def _verify_outputs(self, directory, state):
         from fractions import Fraction
