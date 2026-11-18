@@ -7,10 +7,8 @@ SQLite remains a local verification backend with a blocking timeout fallback.
 
 from __future__ import annotations
 
-import faulthandler
 import select
 import socket
-from contextlib import contextmanager
 import time
 
 from sqlalchemy import text
@@ -18,10 +16,6 @@ from sqlalchemy import text
 CHANNEL = "sixnine_business_demand_v1"
 PAYLOAD = "changed"
 IDLE_SAFETY_SECONDS = 900
-# A pass this long gets every thread's stack written to stderr, once. Passes
-# of 56-127 s stalled the pass and all six hosted slot turns together
-# (staging 2026-11-18, #1252); the stacks say what they were all waiting on.
-STALL_DUMP_SECONDS = 30
 TRANSACTION_FLAG = "sixnine_demand_notified"
 
 
@@ -124,20 +118,6 @@ class DemandWakeup:
             self.writer.close()
 
 
-@contextmanager
-def _stall_dump():
-    """Arm the dump for one pass; diagnostics must never stop the loop."""
-    try:
-        faulthandler.dump_traceback_later(STALL_DUMP_SECONDS, exit=False)
-    except Exception:  # e.g. a stderr without a file descriptor
-        yield
-        return
-    try:
-        yield
-    finally:
-        faulthandler.cancel_dump_traceback_later()
-
-
 def run_demand_loop(
     stop,
     wakeup,
@@ -158,10 +138,7 @@ def run_demand_loop(
     while not stop.is_set():
         # One line per pass: hosted turns share this process, so a long pass
         # delays their first claim (#1252).
-        with (
-            _stall_dump(),
-            PhaseTimer("controller_pass_timing", slow_ms=5000) as timer,
-        ):
+        with PhaseTimer("controller_pass_timing", slow_ms=5000) as timer:
             demand = has_demand()
             timer.lap("has_demand")
             if demand:
