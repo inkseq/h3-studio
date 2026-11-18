@@ -318,6 +318,14 @@ class RebindLedgerTests(LedgerCase):
             self.scope, plan["id"], key, budget_account_ids=["owner-budget"]
         )
 
+    def machine_route(self, identity):
+        """Mark the job as the machine route eligible_jobs considers."""
+        plan = dict(self.row(identity)["execution_plan"], dispatch_backend="hatchet-v1")
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(jobs).where(jobs.c.id == identity).values(execution_plan=plan)
+            )
+
     def row(self, identity):
         with self.repo.engine.connect() as connection:
             return dict(
@@ -569,6 +577,10 @@ class RebindLedgerTests(LedgerCase):
 
         self.hosted_control()
         created = self.queued_job()
+        self.assertEqual(
+            fast.new_arrivals(self.service(first=True), set()), set()
+        )  # Not the machine route eligible_jobs considers: no locked look.
+        self.machine_route(created["id"])
         row = self.row(created["id"])
         tier = get_tier(row["request"], execution=row["execution_plan"])
         service = self.service(tiers=(tier,), first=True)
@@ -587,6 +599,7 @@ class RebindLedgerTests(LedgerCase):
         service = self.service()  # Not hosted-first: a new job is not moved.
         service.settings.everyframe_enabled = True
         created = self.queued_job()
+        self.machine_route(created["id"])
         calls = []
 
         def eligible(*_):
@@ -600,9 +613,46 @@ class RebindLedgerTests(LedgerCase):
                 self.turns += 1
                 return self.turns > 3
 
-        fast.run(service, Stop(), eligible=eligible)
+        # Until the vendor balance has been read, nothing is tried or marked.
+        with mock.patch.object(fast, "balance_known", return_value=False):
+            fast.run(service, Stop(), eligible=eligible)
+        self.assertEqual(calls, [])
+        with mock.patch.object(fast, "balance_known", return_value=True):
+            fast.run(service, Stop(), eligible=eligible)
         self.assertEqual(calls, [1])  # Three looks, one offload attempt.
         self.assertEqual(self.row(created["id"])["pool"], "own")
+
+    def test_a_rebind_wakes_the_jobs_workflow_and_survives_a_failed_wake(self):
+        created = self.queued_job()
+        transport = mock.Mock()
+        self.repo.generation_transport = transport
+        self.addCleanup(setattr, self.repo, "generation_transport", None)
+        with self.repo.transaction() as connection:
+            self.assertTrue(
+                rebind(
+                    self.repo,
+                    connection,
+                    self.row(created["id"]),
+                    "h3-max-turbo",
+                    self.now,
+                )
+            )
+        (call,) = transport.job_event.call_args_list
+        self.assertEqual(call.args[1], created["id"])
+        self.assertEqual(call.kwargs["event_type"], "capacity.hosted_route")
+        other = self.queued_job(key="rebind-key-2")
+        transport.job_event.side_effect = RuntimeError("transport down")
+        with self.repo.transaction() as connection:
+            self.assertTrue(
+                rebind(
+                    self.repo,
+                    connection,
+                    self.row(other["id"]),
+                    "h3-max-turbo",
+                    self.now,
+                )
+            )
+        self.assertEqual(self.row(other["id"])["pool"], POOL)
 
     def test_rebound_job_is_claimed_by_the_hosted_slot_with_its_hold_intact(self):
         created = self.queued_job()
