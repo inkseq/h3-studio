@@ -1212,7 +1212,9 @@ class MigrationDeployTests(unittest.TestCase):
                     controller_settings = Settings.from_environment()
 
                 @contextlib.contextmanager
-                def runner_context(config, worker_id, settings, *, repository):
+                def runner_context(
+                    config, worker_id, settings, *, repository, store_factory
+                ):
                     # DBOS uses the same settings object instead of serializing
                     # it into a second polling process. No database/provider I/O.
                     self.assertIs(settings, controller_settings)

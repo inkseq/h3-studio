@@ -146,7 +146,7 @@ class ModalDispatchTests(fixture.ModalAdmissionFixture):
             public_origin='https://staging.inkseq.com',
         )
 
-        def context(config, worker_id, selected_settings, *, repository):
+        def context(config, worker_id, selected_settings, *, repository, store_factory):
             def runner(*args, **kwargs):
                 # Synthetic policy issuer only; real slot/consumer/window/claim/
                 # submission fences below remain enabled throughout this test.

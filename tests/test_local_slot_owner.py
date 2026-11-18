@@ -178,8 +178,9 @@ class LocalSlotBoundaryTests(unittest.TestCase):
         runners = []
 
         @contextmanager
-        def runner_context(config, worker_id, settings, *, repository):
+        def runner_context(config, worker_id, settings, *, repository, store_factory):
             self.assertIs(repository, self.repo)
+            self.assertEqual(store_factory, contexts.shared_store)
             self.assertEqual(config.work_dir, Path(self.folder.name))
             runner = Mock()
             runner.selected_job_id = None

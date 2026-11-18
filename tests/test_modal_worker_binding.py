@@ -74,12 +74,41 @@ class WorkerBindingTests(ModalBudgetCase):
         config, reader = Mock(), Mock()
         config.slot.return_value = slot
         self.bindings.capacity_usage = reader
+        shared = Mock()
         with patch('studio_platform.modal_worker_binding.slot_runner') as runner:
             self.bindings.runner_context(
-                config, slot.spec.worker_id, Mock(), repository=self.repo
+                config,
+                slot.spec.worker_id,
+                Mock(),
+                repository=self.repo,
+                store_factory=shared,
             )
         self.assertIs(runner.call_args.kwargs['capacity_usage'], reader)
         self.assertTrue(callable(runner.call_args.kwargs['backend_factory']))
+        # #1252: the process's one object store reaches Modal slots too.
+        self.assertIs(runner.call_args.kwargs['store_factory'], shared)
+
+    def test_other_providers_keep_the_shared_store_through_this_context(self):
+        # The controller routes every slot through this context once the
+        # Modal extension is loaded; without the store each of 28 slots built
+        # two S3 clients again (57 clients, ~620 MB, 2026-11-18).
+        slot = self.bindings.slot(self.identity)
+        hosted = Mock()
+        hosted.spec.provider = 'everyframe'
+        config, shared = Mock(), Mock()
+        config.slot.return_value = hosted
+        with patch('studio_platform.modal_worker_binding.slot_runner') as runner:
+            self.bindings.runner_context(
+                config,
+                slot.spec.worker_id,
+                Mock(),
+                repository=self.repo,
+                store_factory=shared,
+            )
+        self.assertEqual(
+            runner.call_args.kwargs,
+            {'repository': self.repo, 'store_factory': shared},
+        )
 
     def test_missing_capacity_reader_cannot_fall_back_to_unqualified_registration(self):
         slot = self.bindings.slot(self.identity)
@@ -88,7 +117,11 @@ class WorkerBindingTests(ModalBudgetCase):
         with patch('studio_platform.modal_worker_binding.slot_runner') as runner:
             with self.assertRaises(BudgetExceeded):
                 self.bindings.runner_context(
-                    config, slot.spec.worker_id, Mock(), repository=self.repo
+                    config,
+                    slot.spec.worker_id,
+                    Mock(),
+                    repository=self.repo,
+                    store_factory=Mock(),
                 )
         runner.assert_not_called()
 
