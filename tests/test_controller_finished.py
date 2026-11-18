@@ -40,6 +40,22 @@ class FinishedRevisitTests(unittest.TestCase):
         # The oldest (largest index) were revisited first.
         self.assertEqual(due_left, [f"due-{i:02d}" for i in range(10)])
 
+    def test_a_fully_reported_watchdog_marker_needs_no_report_call(self):
+        from studio_platform.capacity_watchdog import unreported_reclaims
+
+        def node(marker):
+            return {"payload": {"capacity_watchdog": marker}}
+
+        self.assertFalse(unreported_reclaims({"payload": {}}))
+        self.assertFalse(
+            unreported_reclaims(node({"event_ids": ["a"], "reported_event_ids": ["a"]}))
+        )
+        self.assertTrue(unreported_reclaims(node({"event_ids": ["a", "b"]})))
+        self.assertTrue(
+            unreported_reclaims(node({"event_ids": ["a"], "reported_event_ids": []}))
+        )
+        self.assertTrue(unreported_reclaims(node("odd")))  # Original call decides.
+
 
 if __name__ == "__main__":
     unittest.main()
