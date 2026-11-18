@@ -384,7 +384,9 @@ class EveryFrameBackend:
                 "-preset",
                 "veryfast",
                 "-crf",
-                "18",
+                # A requested export quality is applied by collection's own
+                # encode; it keeps the finer intermediate it always had.
+                "18" if request.get("export_crf", 18) == 18 else "16",
                 "-pix_fmt",
                 "yuv420p",
                 *(

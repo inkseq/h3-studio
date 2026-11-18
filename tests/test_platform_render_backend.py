@@ -954,6 +954,34 @@ class RenderTests(unittest.TestCase):
             for index, name in enumerate(names)
         ]
 
+    def renderer_clip(self, source_id, color, *, frames=24, extra=()):
+        # A stored clip in the renderer's own encoding (B-frames, High
+        # profile), as the hosted adapter and the clip encode both write it.
+        from studio_platform.render_copy import CLIP_ENCODER
+
+        path = self.root / (source_id + '.mp4')
+        subprocess.run(
+            [
+                'ffmpeg', '-v', 'error', '-nostdin', '-y', '-f', 'lavfi',
+                '-i', f'testsrc2=s=256x256:r=24:d={frames / 24}',
+                '-vf', f'drawbox=c={color}:t=fill:w=200:h=200:x=28:y=28,setsar=1',
+                '-frames:v', str(frames), '-r', '24', *CLIP_ENCODER, *extra,
+                '-an', str(path),
+            ],
+            check=True,
+            timeout=20,
+        )  # fmt: skip
+        with path.open('rb') as stream:
+            info = self.store.write_new(
+                'owner', source_id, stream, filename=path.name, content_type='video/mp4'
+            )
+        self.sources[source_id] = {
+            'kind': 'video',
+            'object': asdict(info),
+            'simulation': False,
+        }
+        return path
+
     def outputs_of(self, job, tag):
         original, outputs = self.backend._run_process, []
 
@@ -965,20 +993,23 @@ class RenderTests(unittest.TestCase):
             result = self.execute(job, tag)
         return outputs, result
 
-    def test_whole_shots_in_the_films_own_encoding_are_joined_unencoded(self):
+    def test_whole_shots_in_the_renderers_own_encoding_are_joined_unencoded(self):
         # #1252: a first film is whole hosted shots at the film's size; each
         # was decoded and encoded again before the join.
-        self.video('red', 'red', seconds=1, size='256x256')
-        self.video('blue', 'blue', seconds=1, size='256x256')
+        from studio_platform.render_copy import facts, header
+
+        red = self.renderer_clip('red', 'red')
+        self.renderer_clip('blue', 'blue')
+        self.assertEqual(facts(red)['profile'], 'High')
         job = self.job(shots=self.whole_shots('red', 'blue', 'red'), render_version=2)
         outputs, result = self.outputs_of(job, 'joined-whole')
-        self.assertEqual(outputs, ['joined.mp4'])
+        self.assertEqual(outputs, ['header.mp4', 'joined.mp4'])
         self.assertFalse(
             any(self.backend._directory('joined-whole').glob('clip-*.mp4'))
         )
         video = media.probe(result['video'])['streams'][0]
         self.assertEqual((video['nb_frames'], video['avg_frame_rate']), ('72', '24/1'))
-        # The joined stream decodes end to end in order: red, blue, red.
+        # Decodes end to end, in order: red, blue, red.
         media.ffmpeg(['-xerror', '-i', result['video'], '-f', 'null', '-'])
         colours = [
             self.frame(result['video'], at, f'whole-{index}.png').getpixel((128, 128))
@@ -987,43 +1018,49 @@ class RenderTests(unittest.TestCase):
         self.assertGreater(colours[0][0], 200)
         self.assertGreater(colours[1][2], 200)
         self.assertGreater(colours[2][0], 200)
-
-    def test_one_shot_that_needs_the_encoder_sends_every_shot_through_it(self):
-        self.video('red', 'red', seconds=1, size='256x256')
-        self.video('blue', 'blue', seconds=1, size='256x256')
-        # Half of blue: it must be cut, so both get the encoder's header.
+        # A film that had to be encoded carries the same header, so a later
+        # film join of the two chapters is one clean stream.
         shots = self.whole_shots('red', 'blue')
         shots[1]['frames'] = 12
-        outputs, result = self.outputs_of(
+        cut, encoded = self.outputs_of(
             self.job(shots=shots, render_version=2), 'cut-one'
         )
-        self.assertEqual(outputs, ['clip-000.mp4', 'clip-001.mp4', 'joined.mp4'])
+        self.assertEqual(cut, ['clip-000.mp4', 'clip-001.mp4', 'joined.mp4'])
         self.assertEqual(
-            int(media.probe(result['video'])['streams'][0]['nb_frames']), 36
+            int(media.probe(encoded['video'])['streams'][0]['nb_frames']), 36
+        )
+        self.assertEqual(
+            header(facts(result['video'])), header(facts(encoded['video']))
         )
 
-    def test_sources_with_different_stream_headers_are_encoded_as_before(self):
-        self.video('red', 'red', seconds=1, size='256x256')
-        other = self.root / 'other.mp4'
-        subprocess.run(
-            [
-                'ffmpeg', '-v', 'error', '-nostdin', '-y', '-f', 'lavfi',
-                '-i', 'color=c=blue:s=256x256:r=24:d=1',
-                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
-                '-pix_fmt', 'yuv420p', '-an', str(other),
-            ],
-            check=True,
-            timeout=20,
-        )  # fmt: skip
-        with other.open('rb') as stream:
-            info = self.store.write_new(
-                'owner', 'blue', stream, filename='other.mp4', content_type='video/mp4'
-            )
-        self.sources['blue'] = {
-            'kind': 'video',
-            'object': asdict(info),
-            'simulation': False,
-        }
+    def test_another_encoders_header_is_encoded_even_when_every_source_has_it(self):
+        # Whole, same size, one shared header - but not the renderer's
+        # (uploads, or hosted shots made at another quality). Copying them
+        # would put a foreign header next to encoded chapters.
+        self.video('red', 'red', seconds=1, size='256x256', audio=False)
+        self.video('blue', 'blue', seconds=1, size='256x256', audio=False)
+        outputs, _ = self.outputs_of(
+            self.job(shots=self.whole_shots('red', 'blue'), render_version=2),
+            'foreign-header',
+        )
+        self.assertEqual(
+            outputs, ['header.mp4', 'clip-000.mp4', 'clip-001.mp4', 'joined.mp4']
+        )
+        # Another quality alone changes the header (the picture parameters).
+        self.sources.clear()
+        self.renderer_clip('red', 'red', extra=('-crf', '16'))
+        self.renderer_clip('blue', 'blue', extra=('-crf', '16'))
+        outputs, _ = self.outputs_of(
+            self.job(shots=self.whole_shots('red', 'blue'), render_version=2),
+            'other-quality',
+        )
+        self.assertEqual(
+            outputs, ['header.mp4', 'clip-000.mp4', 'clip-001.mp4', 'joined.mp4']
+        )
+
+    def test_sources_with_different_headers_are_encoded_as_before(self):
+        self.video('red', 'red', seconds=1, size='256x256', audio=False)
+        self.renderer_clip('blue', 'blue')
         outputs, _ = self.outputs_of(
             self.job(shots=self.whole_shots('red', 'blue'), render_version=2),
             'two-headers',
@@ -1031,13 +1068,13 @@ class RenderTests(unittest.TestCase):
         self.assertEqual(outputs, ['clip-000.mp4', 'clip-001.mp4', 'joined.mp4'])
 
     def test_only_the_renderers_exact_stream_counts_as_already_encoded(self):
-        from studio_platform.render_copy import _exact, _facts, copyable
+        from studio_platform.render_copy import exact, facts, shared_header
 
-        self.video('red', 'red', seconds=1, size='256x256')
-        path = self.root / 'red.mp4'
-        facts = _facts(path)
-        self.assertTrue(_exact(facts, 256, 256, 24))
+        path = self.renderer_clip('red', 'red')
+        found = facts(path)
+        self.assertTrue(exact(found, 256, 256, 24))
         for change in (
+            {'index': 1},
             {'sample_aspect_ratio': '31090:31079'},
             {'sample_aspect_ratio': 'N/A'},
             {'pix_fmt': 'yuv444p'},
@@ -1049,18 +1086,28 @@ class RenderTests(unittest.TestCase):
             {'nb_frames': '25'},
             {'width': 320},
             {'extradata_hash': ''},
+            # A rotated upload: the encode turns it upright, a copy would not.
+            {'side_data_list': [{'rotation': -90}]},
         ):
             with self.subTest(change=change):
-                self.assertFalse(_exact({**facts, **change}, 256, 256, 24))
-        self.assertIsNone(_facts(self.root / 'missing.mp4'))
+                self.assertFalse(exact({**found, **change}, 256, 256, 24))
+        self.assertIsNone(facts(self.root / 'missing.mp4'))
         shape = {'simulation': False, 'width': 256, 'height': 256}
-        whole = {'shots': self.whole_shots('red')}
-        self.assertTrue(copyable(whole, shape, lambda shot: path))
+        whole = {'shots': self.whole_shots('red', 'red')}
+        size = path.stat().st_size
+
+        def shared(render=whole, shape=shape, limit=2 * size):
+            return shared_header(render, shape, lambda shot: path, limit)
+
+        self.assertEqual(
+            shared(), (found['profile'], found['level'], found['extradata_hash'])
+        )
+        # Whole files count toward the film's size limit; over it the encode
+        # (which may still fit) runs instead of a failed copy.
+        self.assertIsNone(shared(limit=2 * size - 1))
         # The simulation mark is drawn by the encode; a retimed or cut shot
         # needs the encoder too.
-        self.assertFalse(
-            copyable(whole, {**shape, 'simulation': True}, lambda shot: path)
-        )
+        self.assertIsNone(shared(shape={**shape, 'simulation': True}))
         for change in (
             {'source_start_frame': 1},
             {'source_frames': 12},
@@ -1068,7 +1115,27 @@ class RenderTests(unittest.TestCase):
         ):
             with self.subTest(change=change):
                 shots = [{**whole['shots'][0], **change}]
-                self.assertFalse(copyable({'shots': shots}, shape, lambda shot: path))
+                self.assertIsNone(shared(render={'shots': shots}))
+
+    def test_a_second_stream_order_is_encoded_not_copied(self):
+        # The join takes stream 0 of every file: sound first is not a copy.
+        from studio_platform.render_copy import exact, facts
+
+        clip = self.renderer_clip('red', 'red')
+        swapped = self.root / 'swapped.mp4'
+        subprocess.run(
+            [
+                'ffmpeg', '-v', 'error', '-nostdin', '-y', '-f', 'lavfi',
+                '-i', 'sine=frequency=440:sample_rate=32000:duration=1',
+                '-i', str(clip), '-map', '0:a:0', '-map', '1:v:0',
+                '-c:v', 'copy', '-c:a', 'aac', str(swapped),
+            ],
+            check=True,
+            timeout=20,
+        )  # fmt: skip
+        found = facts(swapped)
+        self.assertEqual(found['index'], 1)
+        self.assertFalse(exact(found, 256, 256, 24))
 
     @unittest.skipUnless(os.name == 'posix', 'Inherited POSIX CPU process fence')
     def test_same_original_cpu_resume_reuses_completed_clip_checkpoint(self):

@@ -34,7 +34,7 @@ from .render_request import (
 from .providers.registry import CPU_RENDER
 from . import media
 from .phase_timing import lap
-from .render_copy import copyable
+from . import render_copy
 from .caption_server import (
     validate_normalized_subtitles as validate_normalized_subtitles,
 )
@@ -727,20 +727,36 @@ class CPURenderBackend:
             draw.text((12, 8), "SIMULATION", font=font, fill=(255, 235, 0, 255))
             marker.save(self._path(directory, "simulation.png"))
         clips, total_clip_bytes = [], 0
-        # Whole shots already in the film's exact encoding are joined as they
+        # Whole shots already in the renderer's own encoding are joined as they
         # are (render_copy); the timing line shows which path ran. The check
         # reads the sources, so a cancelled attempt stops before it.
         heartbeat()
         with self._mutex:
             if self._active[tag]["cancelled"].is_set():
                 raise _Cancelled()
-        copied = not _film_concat(render) and copyable(
-            render,
-            shape,
-            lambda shot: self._path(
-                directory, state["inputs"][shot["source_id"]]["filename"]
-            ),
-        )
+
+        def shot_source(shot):
+            return self._path(directory, state["inputs"][shot["source_id"]]["filename"])
+
+        copied, shared = False, None
+        if not _film_concat(render):
+            shared = render_copy.shared_header(
+                render, shape, shot_source, self.max_output_bytes, heartbeat
+            )
+        if shared is not None:
+            # One frame through the clip encoder: the header it would write.
+            reference = self._path(directory, render_copy.REFERENCE)
+            self._run_process(
+                render_copy.reference_args(
+                    shot_source(render["shots"][0]), width, height, reference
+                ),
+                directory,
+                tag,
+                heartbeat,
+                deadline,
+                reference,
+            )
+            copied = render_copy.header(render_copy.facts(reference)) == shared
         lap("render_copy_check")
         for index, shot in enumerate(render["shots"]):
             source = self._path(
@@ -865,16 +881,7 @@ class CPURenderBackend:
                 "24",
                 "-fps_mode",
                 "cfr",
-                "-c:v",
-                "libx264",
-                "-threads",
-                "2",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "18",
-                "-pix_fmt",
-                "yuv420p",
+                *render_copy.CLIP_ENCODER,
                 "-fs",
                 self.max_output_bytes + 1,
                 output,
