@@ -723,6 +723,94 @@ class ArtifactWriterTests(LedgerCase):
             writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 300
         )
 
+    def test_a_storys_shots_can_all_reserve_their_collection_together(self):
+        # #1301: every file reserved the 512 MiB object limit, 1.5-3 GiB per
+        # shot of the owner's 10 GiB, so the shots of one story refused each
+        # other, waited 30 s and were collected again.
+        from studio_platform import artifact_writer
+
+        def shot(seconds, audio):
+            job = self.job(cost=0)
+            job["request"] = {
+                "request": {
+                    "duration": seconds,
+                    "width": 832,
+                    "height": 480,
+                    "generate_audio": audio,
+                },
+                "output_spec": {"width": 832, "height": 480},
+            }
+            return job
+
+        writer = self.writer()
+        reserved = lambda: writer.quota.usage(self.scope.owner_id)["accounted_bytes"]
+        record = writer.begin_staging(shot(5, False), str(uuid.uuid4()), "one")
+        self.assertEqual(record["reserved_bytes"], 3 * (32 + 5 * 8) * MIB)
+        record = writer.begin_staging(
+            shot(5, True), str(uuid.uuid4()), "two", kinds=("video", "audio")
+        )
+        self.assertEqual(record["reserved_bytes"], 3 * (72 + 13) * MIB)
+        for number in range(10):  # Twelve shots of one story in all.
+            writer.begin_staging(
+                shot(5, True),
+                str(uuid.uuid4()),
+                f"more-{number}",
+                kinds=("video", "audio"),
+            )
+        self.assertLess(reserved(), 4 * 1024 * MIB)
+        # An allowance above the object limit is held to it per file, and a
+        # length that cannot be read keeps the widest reservation.
+        with mock.patch.dict(
+            artifact_writer.ROLE_ALLOWANCE, {"video": (500 * MIB, 8 * MIB)}
+        ):
+            self.assertEqual(
+                writer._staging_bytes(shot(5, True), ("video", "audio")),
+                (512 + 13) * MIB,
+            )
+        for seconds in (0, -1, 3600, float("nan"), float("inf"), "long"):
+            self.assertEqual(
+                writer._staging_bytes(shot(seconds, True), ("video", "audio")),
+                2 * 512 * MIB,
+                seconds,
+            )
+        # The remote route reserves one file per kind the same way.
+        self.assertEqual(
+            writer._staging_bytes(shot(5, True), ("video", "audio")), (72 + 13) * MIB
+        )
+
+    def heavier_than_allowed(self, quota):
+        """A 5 s fixture job allowed 4 + 5 x 1 bytes a file, with a 20 byte take."""
+        from studio_platform import artifact_writer
+
+        allowance = mock.patch.dict(artifact_writer.ROLE_ALLOWANCE, {"video": (4, 1)})
+        allowance.start()
+        self.addCleanup(allowance.stop)
+        writer = self.writer(max_object_bytes=100, owner_quota_bytes=quota)
+        job, attempt, tag = self.job(cost=0), str(uuid.uuid4()), "heavy"
+        self.assertEqual(writer.begin_staging(job, attempt, tag)["reserved_bytes"], 27)
+        (self.work / tag).mkdir(parents=True)
+        path = self.work / tag / "verified.mp4"
+        path.write_bytes(b"x" * 20)
+        (self.work / tag / "raw.mp4").write_bytes(b"download")
+        return (
+            lambda: writer.prepare(
+                job, attempt, tag, [("video", path, "video/mp4", {})]
+            ),
+            lambda: writer.quota.usage(self.scope.owner_id)["accounted_bytes"],
+        )
+
+    def test_an_output_heavier_than_its_allowance_is_charged_when_prepared(self):
+        prepare, accounted = self.heavier_than_allowed(quota=100)
+        self.assertEqual(prepare()["reserved_bytes"], 48)
+        self.assertEqual(accounted(), 48)
+
+    def test_an_output_heavier_than_the_quota_left_is_refused_when_prepared(self):
+        # The same check as any reservation; the staging reservation stays.
+        prepare, accounted = self.heavier_than_allowed(quota=40)
+        with self.assertRaises(AssetQuotaExceeded):
+            prepare()
+        self.assertEqual(accounted(), 27)
+
     def test_concurrent_first_constructor_serializes_additive_schema_creation(self):
         from studio_platform.assets import metadata as assets_schema
         from studio_platform.artifact_writer import _schema as writer_schema
