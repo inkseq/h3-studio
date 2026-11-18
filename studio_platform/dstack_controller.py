@@ -18,6 +18,7 @@ import threading
 from sqlalchemy import or_, select
 
 from .control import WorkerControl
+from .phase_timing import lap, lapped
 from .dstack_inventory import known_allocations, read_inventories
 from .dstack_capacity import (
     idle_action,
@@ -1152,6 +1153,7 @@ class DstackController:
         heartbeat_cpu = getattr(self.worker_process, "heartbeat_cpu", None)
         if callable(heartbeat_cpu):
             heartbeat_cpu()
+        lap("tick_heartbeat_cpu")
         results = []
         closed_since_health = False
         health_checked_at = getattr(self, "_health_checked_at", None)
@@ -1163,6 +1165,7 @@ class DstackController:
             or getattr(self.worker_process, "children", None)
         ):
             self._passive_unknown.clear()
+        lap("tick_business_demand")
         for node in self._nodes():
             try:
                 stopped_at = (
@@ -1252,14 +1255,16 @@ class DstackController:
                         "code": code,
                     }
                 )
+        lap("tick_nodes")
+        health = lapped("tick_health", self._health_check(force=closed_since_health))
         result = {
             "state": "running",
             "nodes": results,
-            "health_check": self._health_check(force=closed_since_health),
-            "demand_start": self._demand_start(),
-            "invoice_check": self._invoice_check(),
+            "health_check": health,
+            "demand_start": lapped("tick_demand_start", self._demand_start()),
+            "invoice_check": lapped("tick_invoice", self._invoice_check()),
             # Claim and submission refusals by exact reason since the last tick.
-            "refusals": self._refusals(),
+            "refusals": lapped("tick_refusals", self._refusals()),
         }
         recorder = getattr(self, "recorder", None)
         if recorder is not None:

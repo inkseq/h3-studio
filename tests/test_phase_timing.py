@@ -25,6 +25,32 @@ class PhaseTimingTests(unittest.TestCase):
                     raise ValueError
         self.assertEqual(len(logs.output), 1)
 
+    def test_a_demand_loop_pass_logs_its_phases(self):
+        import threading
+        from studio_platform.demand_wakeup import run_demand_loop
+
+        stop = threading.Event()
+
+        class Wakeup:
+            def subscribe(self):
+                pass
+
+            def wait(self, _seconds):
+                stop.set()
+
+        def work():
+            phase_timing.lap("tick_inner")
+            return {}
+
+        with self.assertLogs("studio_platform.timing", logging.INFO) as logs:
+            run_demand_loop(
+                stop, Wakeup(), lambda: True, work, active_seconds=lambda: 15
+            )
+        (line,) = logs.output
+        for name in ("has_demand", "tick_inner", "recheck", "cadence"):
+            self.assertIn(name + "_ms=", line)
+        self.assertEqual(phase_timing.lapped("outside", 7), 7)
+
 
 if __name__ == "__main__":
     unittest.main()
