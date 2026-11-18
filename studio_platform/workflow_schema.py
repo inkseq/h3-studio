@@ -66,7 +66,7 @@ def dbos_config(database_url, *, executor_id=None):
         notification_listener_polling_interval_sec=WORKFLOW_POLLING_SECONDS,
         scheduler_polling_interval_sec=WORKFLOW_POLLING_SECONDS,
         enable_otlp=False,
-        max_executor_threads=4,
+        max_executor_threads=8,
         sys_db_pool_size=5,
         conductor_key=None,
     )

@@ -325,7 +325,12 @@ class DurableSlots(SlotContexts):
 
 def register_generation_workflow(DBOS, slots, *, domain_turns=None):
     domain_turns = domain_turns or DomainTurns()
-    operation_limit = asyncio.Semaphore(4)
+    # A story is usually 5-8 shots and each first turn uploads its inputs
+    # (~7 s). At 4, shots 5 and 6 started ~13 s after the first four, and a
+    # film render holds one turn for its whole run (#1252). Stays below
+    # workflow_schema's max_executor_threads (8) so film and payment turns
+    # always have a thread.
+    operation_limit = asyncio.Semaphore(6)
 
     @DBOS.step(name="inkseq.generation.domain-turn.v1", retries_allowed=False)
     async def domain_turn(tenant, owner, project, job_id):
