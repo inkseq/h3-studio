@@ -39,23 +39,26 @@ def label(frame):
     return "480P" if min(frame) <= 480 else "720P"
 
 
-def shared_frame(project, shots, source_resolver, aspect):
+def shared_frame(project, shots, source_resolver, aspect, missing=(ValueError,)):
     """The one frame every shot's selected take has, or None.
 
-    None also when a take's size is unknown (an upload), when the size is
-    outside what the renderer writes (768P takes: 1344x768), or when it is
-    not the story's aspect; the export box is used then, as before.
+    `shots` are the whole film's, so two chapters of different sizes share
+    none. None also when a take's size is unknown (an upload), when the size
+    is outside what the renderer writes (768P takes: 1344x768), or when it
+    is not the story's aspect; the export box is used then, as before.
+    `missing` are the resolver's own "no such source" errors, which the
+    compile reports; anything else (a database error) is raised.
     """
     lookup = {entity["id"]: entity for entity in project["entities"]}
     sizes = set()
-    for shot in shots[:50]:
+    for shot in shots:
         entity = lookup.get(shot.get("data", {}).get("selectedAssetId"))
         if entity is None or entity.get("type") != "video":
             return None
         try:
             source = source_resolver(entity, "video")
-        except Exception:
-            return None  # The compile itself reports what is wrong.
+        except missing:
+            return None
         sizes.add((source.get("width"), source.get("height")))
         if len(sizes) > 1:
             return None
@@ -64,26 +67,24 @@ def shared_frame(project, shots, source_resolver, aspect):
     frame = sizes.pop()
     if not valid(frame):
         return None
-    across, down = (int(part) for part in aspect.split(":"))
-    wanted = Fraction(across, down)
+    try:
+        across, down = (int(part) for part in aspect.split(":"))
+        wanted = Fraction(across, down)
+    except (AttributeError, ValueError, ZeroDivisionError):
+        return None
     if abs(Fraction(*frame) - wanted) > wanted * ASPECT_TOLERANCE:
         return None
     return frame
 
 
-def choose(frame, box, project, shots, source_resolver, aspect):
+def choose(frame, box):
     """(width, height, resolution name) for a chapter render.
 
-    `frame` None is the export `box` as asked; "shots" keeps the frame every
-    selected take shares, else the box; a (width, height) is the frame this
-    film already chose.
+    `frame` None is the export `box` as asked; a (width, height) is the
+    frame its film chose (film_runs), never a client's.
     """
     if frame is None:
         return box
-    if frame == "shots":
-        frame = shared_frame(project, shots, source_resolver, aspect)
-        if frame is None:
-            return box
-    elif not valid(frame):
+    if not valid(frame):
         raise ValueError("粗剪画面尺寸无效")
     return frame[0], frame[1], label(frame)

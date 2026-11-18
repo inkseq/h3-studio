@@ -406,7 +406,7 @@ materials, captions and parameters through normal story actions before preflight
 
 | Intent | Method/path | Exact body / result |
 |---|---|---|
-| Freeze and preflight | POST F`/preflights`, saved Idempotency-Key | `{expected_version:VERSION,resolution:"720P",aspect:"16:9",burn_subtitles:false}`; only `expected_version` is required. Resolution defaults720P; aspect may be omitted, burn_subtitles defaultsfalse. Inspect returned run `id`, `project_version`, `snapshot_hash`, `workflow_version`, `generation`, `chapters`, `estimate`, `counts`, `warnings`. |
+| Freeze and preflight | POST F`/preflights`, saved Idempotency-Key | `{expected_version:VERSION,resolution:"720P",aspect:"16:9",burn_subtitles:false}`; only `expected_version` is required. With no resolution the film keeps the frame its shots share (no scaling or side bars), else 720P; aspect may be omitted, burn_subtitles defaultsfalse. Inspect returned run `id`, `project_version`, `snapshot_hash`, `workflow_version`, `generation`, `chapters`, `estimate`, `counts`, `warnings`. |
 | Confirm original run | POST F, separate saved Idempotency-Key | `{preflight_id:RUN_ID,confirm:true,spending_settings_version:CURRENT_SETTINGS_VERSION}`; the settings version is optional but, when supplied, must be current. Response202 is accepted orchestration, not finished video. |
 | Observe | GET F`/RUN_ID` | No body/key; use original run ID. |
 | Request cancellation | POST F`/RUN_ID/cancel` | No body/key. Cancels original work and stops future admission; `cancel_requested` is not yet `cancelled`. |

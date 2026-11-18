@@ -584,6 +584,42 @@ class FilmExecution:
         }
         return "succeeded", {"artifact_id": artifact["id"], "entity": entity}
 
+    def _film_frame(self, principal, project_id, value, project):
+        """The frame of every chapter of this film, or None for the export box.
+
+        No size asked for: the film keeps the frame all its shots share
+        (render_frame), decided over the whole film so the order of chapters
+        never matters. The first chapter planned records the frame actually
+        used with its plan (_render_plan); from then on that is the answer.
+        A run with a plan but no recorded frame was planned before this
+        choice existed and stays on the box.
+        """
+        if value.get("frame"):
+            return value["frame"]
+        if value["options"].get("resolution") is not None or any(
+            chapter["plan_id"] for chapter in value["chapters"]
+        ):
+            return None
+        from .render_frame import shared_frame
+
+        shots = [
+            shot
+            for chapter in value["chapters"]
+            for shot in ordered_chapter(project, chapter["chapter_id"])[2]
+        ]
+        aspect = value["options"].get("aspect") or project.get("journey", {}).get(
+            "brief", {}
+        ).get("aspect", "9:16")
+        return shared_frame(
+            project,
+            shots,
+            lambda entity, kind: self.resolve_source(
+                principal, project_id, entity, kind
+            ),
+            aspect,
+            missing=(ValueError, NotFound),
+        )
+
     def _render_plan(self, principal, value, label, compiled, blockers):
         if blockers:
             raise Conflict("film_render_input_blocked")
@@ -751,6 +787,7 @@ class FilmExecution:
             )
         authoring = frozen_story(value["project"], {}, chapters=value["chapters"])
         project = frozen_story(authoring, results)
+        frame = self._film_frame(principal, project_id, value, project)
         for chapter in value["chapters"]:
             if not chapter["plan_id"]:
                 options = {
@@ -759,10 +796,6 @@ class FilmExecution:
                     if item is not None
                 }
                 burn_subtitles = options.pop("burn_subtitles", False)
-                # No size asked for: the film keeps its shots' frame. The
-                # first chapter planned fixes it for every chapter
-                # (_render_plan), so the final join always has one frame.
-                unsized = "resolution" not in options
                 compiled, _, blockers, _ = compile_render(
                     {
                         "client_ref": {
@@ -776,7 +809,7 @@ class FilmExecution:
                         principal, project_id, entity, kind
                     ),
                     contract_version=value.get("render_contract_version", 3),
-                    frame=value.get("frame") or ("shots" if unsized else None),
+                    frame=frame,
                 )
                 if burn_subtitles:
                     from .caption_server import compile_subtitles

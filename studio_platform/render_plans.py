@@ -250,9 +250,8 @@ def compile_render(
 ):
     """Resolver returns owner/project-checked immutable source and decode metadata.
 
-    `frame` is the film's own choice, never the client's: "shots" keeps the
-    frame every selected take shares (render_frame), a (width, height) is a
-    frame already chosen for this film; None is the export box as before.
+    `frame` is the film's own choice, never the client's: the (width,
+    height) its shots share (render_frame); None is the export box as before.
     """
     if not isinstance(body, dict) or set(body) - {
         "client_ref",
@@ -287,9 +286,7 @@ def compile_render(
     chapter, scenes, shots = ordered_chapter(project, ref["chapter_id"])
     from .render_frame import choose
 
-    width, height, resolution = choose(
-        frame, (width, height, resolution), project, shots, source_resolver, aspect
-    )
+    width, height, resolution = choose(frame, (width, height, resolution))
     from .render_timing import enabled
 
     if contract_version not in (None, 3, 5):
