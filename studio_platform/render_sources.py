@@ -48,6 +48,9 @@ class RenderSources:
             return {
                 "kind": kind,
                 "duration": metadata.get("duration_s"),
+                # Validated at collection; lets a film keep its shots' frame.
+                "width": metadata.get("width"),
+                "height": metadata.get("height"),
                 "source_job_id": row["job_id"],
                 "artifact_id": row["id"],
                 "object": {

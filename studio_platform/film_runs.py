@@ -584,6 +584,42 @@ class FilmExecution:
         }
         return "succeeded", {"artifact_id": artifact["id"], "entity": entity}
 
+    def _film_frame(self, principal, project_id, value, project):
+        """The frame of every chapter of this film, or None for the export box.
+
+        No size asked for: the film keeps the frame all its shots share
+        (render_frame), decided over the whole film so the order of chapters
+        never matters. The first chapter planned records the frame actually
+        used with its plan (_render_plan); from then on that is the answer.
+        A run with a plan but no recorded frame was planned before this
+        choice existed and stays on the box.
+        """
+        if value.get("frame"):
+            return value["frame"]
+        if value["options"].get("resolution") is not None or any(
+            chapter["plan_id"] for chapter in value["chapters"]
+        ):
+            return None
+        from .render_frame import shared_frame
+
+        shots = [
+            shot
+            for chapter in value["chapters"]
+            for shot in ordered_chapter(project, chapter["chapter_id"])[2]
+        ]
+        aspect = value["options"].get("aspect") or project.get("journey", {}).get(
+            "brief", {}
+        ).get("aspect", "9:16")
+        return shared_frame(
+            project,
+            shots,
+            lambda entity, kind: self.resolve_source(
+                principal, project_id, entity, kind
+            ),
+            aspect,
+            missing=(ValueError, NotFound),
+        )
+
     def _render_plan(self, principal, value, label, compiled, blockers):
         if blockers:
             raise Conflict("film_render_input_blocked")
@@ -623,6 +659,9 @@ class FilmExecution:
 
         def register(current):
             current["plan_hashes"][plan_id] = digest
+            if label != "export" and current["options"].get("resolution") is None:
+                spec = compiled["output_spec"]
+                current.setdefault("frame", [spec["width"], spec["height"]])
             target = (
                 current["export"]
                 if label == "export"
@@ -748,6 +787,7 @@ class FilmExecution:
             )
         authoring = frozen_story(value["project"], {}, chapters=value["chapters"])
         project = frozen_story(authoring, results)
+        frame = self._film_frame(principal, project_id, value, project)
         for chapter in value["chapters"]:
             if not chapter["plan_id"]:
                 options = {
@@ -769,6 +809,7 @@ class FilmExecution:
                         principal, project_id, entity, kind
                     ),
                     contract_version=value.get("render_contract_version", 3),
+                    frame=frame,
                 )
                 if burn_subtitles:
                     from .caption_server import compile_subtitles
@@ -927,17 +968,19 @@ class FilmRuns(FilmExecution):
         ):
             raise ValueError("film_preflight_invalid")
         options = {
-            "resolution": body.get("resolution", "720P"),
+            # None: the film keeps its shots' frame (render_frame).
+            "resolution": body.get("resolution"),
             "aspect": body.get("aspect"),
             "burn_subtitles": body.get("burn_subtitles", False),
         }
         from .render_plans import DIMENSIONS
 
         if (
-            options["resolution"] not in DIMENSIONS
+            options["resolution"] is not None
+            and options["resolution"] not in DIMENSIONS
             or type(options["burn_subtitles"]) is not bool
             or options["aspect"] is not None
-            and options["aspect"] not in DIMENSIONS[options["resolution"]]
+            and options["aspect"] not in DIMENSIONS[options["resolution"] or "720P"]
         ):
             raise ValueError("film_output_options_invalid")
         record = self.access.project(principal, project_id, "jobs:write")
