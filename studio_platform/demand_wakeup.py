@@ -131,28 +131,40 @@ def run_demand_loop(
     report=lambda value: None,
 ):
     """One existing actor: fast while obligated, blocked while genuinely idle."""
+    from .phase_timing import PhaseTimer
+
     wakeup.subscribe()  # Commit before subscription is caught by the first scan.
     next_safety = clock()
     while not stop.is_set():
-        if has_demand():
-            report(work())
-        elif safety is not None and clock() >= next_safety:
-            report(safety())
-            next_safety = clock() + IDLE_SAFETY_SECONDS
-        if stop.is_set():
-            break
-        # Re-read after work and before wait. A commit in this gap also leaves
-        # a notification buffered on the already-subscribed connection.
-        active = has_demand()
-        seconds = (
-            (active_seconds() if callable(active_seconds) else active_seconds)
-            if active
-            else max(0, next_safety - clock())
-            if safety
-            else IDLE_SAFETY_SECONDS
-        )
-        if heartbeat is not None:
-            # The loop has finished its scan/work. No timer can mask a stall.
-            heartbeat(active)
-            seconds = min(seconds, 60)
+        # One line per pass: hosted turns share this process, so a long pass
+        # delays their first claim (#1252).
+        with PhaseTimer("controller_pass_timing", slow_ms=5000) as timer:
+            demand = has_demand()
+            timer.lap("has_demand")
+            if demand:
+                report(work())
+                timer.lap("work")
+            elif safety is not None and clock() >= next_safety:
+                report(safety())
+                next_safety = clock() + IDLE_SAFETY_SECONDS
+                timer.lap("safety")
+            if stop.is_set():
+                break
+            # Re-read after work and before wait. A commit in this gap also
+            # leaves a notification buffered on the already-subscribed connection.
+            active = has_demand()
+            timer.lap("recheck")
+            seconds = (
+                (active_seconds() if callable(active_seconds) else active_seconds)
+                if active
+                else max(0, next_safety - clock())
+                if safety
+                else IDLE_SAFETY_SECONDS
+            )
+            timer.lap("cadence")
+            if heartbeat is not None:
+                # The loop has finished its scan/work. No timer can mask a stall.
+                heartbeat(active)
+                seconds = min(seconds, 60)
+                timer.lap("heartbeat")
         wakeup.wait(seconds)
