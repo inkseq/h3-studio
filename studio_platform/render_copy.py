@@ -138,9 +138,10 @@ def shared_header(render, shape, path_of, max_bytes, heartbeat=lambda: None):
             return None
         # Whole files, sound included: over the limit the encode still fits.
         total += path.stat().st_size
-        if total > max_bytes or header(found) != (common or header(found)):
+        mark = header(found)
+        if total > max_bytes or mark is None or mark != (common or mark):
             return None
-        common = header(found)
+        common = mark
     return common
 
 

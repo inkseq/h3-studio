@@ -1108,6 +1108,12 @@ class RenderTests(unittest.TestCase):
         # The simulation mark is drawn by the encode; a retimed or cut shot
         # needs the encoder too.
         self.assertIsNone(shared(shape={**shape, 'simulation': True}))
+        # A stream that does not state its profile has no header to compare.
+        with mock.patch(
+            'studio_platform.render_copy.facts',
+            return_value={key: found[key] for key in found if key != 'profile'},
+        ):
+            self.assertIsNone(shared())
         for change in (
             {'source_start_frame': 1},
             {'source_frames': 12},
