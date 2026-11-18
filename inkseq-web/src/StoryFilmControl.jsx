@@ -123,7 +123,8 @@ export default function StoryFilmControl({
     balance = useCredits(cloudState.account)?.available;
   const [open, setOpen] = useState(false),
     [confirmed, setConfirmed] = useState(false),
-    [resolution, setResolution] = useState('720P'),
+    // '' = the film keeps its shots' own frame: no scaling, no side bars.
+    [resolution, setResolution] = useState(''),
     [captions, setCaptions] = useState(false),
     [notice, setNotice] = useState(''),
     [readError, setReadError] = useState('');
@@ -242,7 +243,9 @@ export default function StoryFilmControl({
       !pending &&
       (!run || run.phase === 'preflight' || filmTerminal(run));
   const optionsMatch =
-    !!run && run.options?.resolution === resolution && run.options?.burn_subtitles === captions;
+    !!run &&
+    (run.options?.resolution ?? '') === resolution &&
+    run.options?.burn_subtitles === captions;
   const call = (fn) => {
     const scope = live.current;
     setNotice('');
@@ -314,6 +317,7 @@ export default function StoryFilmControl({
                   disabled={!newAllowed}
                   onChange={(event) => setResolution(event.target.value)}
                 >
+                  <option value="">{t('film.resolutionShots')}</option>
                   <option value="480P">480P</option>
                   <option value="720P">720P</option>
                 </select>
