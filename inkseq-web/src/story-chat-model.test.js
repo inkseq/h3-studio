@@ -762,6 +762,61 @@ test('the video offer draws its pictures, prices the shots and makes them in the
   );
 });
 
+test('a picture refused by a busy server is asked for once more (h3-studio#1252)', async () => {
+  const { createLiveChat, fromServer } = await import('./story-chat-client.js');
+  const { applyEvent } = await import('./story-chat-model.js');
+  const proposal = { kind: 'generate', shot_ids: ['s1'] };
+  let view = videoView(proposal);
+  let busy = 1;
+  const asked = [];
+  const api = {
+    async request(path, options = {}) {
+      if (path.endsWith('/images')) {
+        const { card_id: card, request_id: request } = options.body;
+        asked.push(card + ' ' + request);
+        if (card === VIDEO_IDS[1] && busy-- > 0)
+          throw Object.assign(Error('busy'), { status: 503, detail: {} });
+        const drawn = structuredClone(view);
+        for (const group of ['characters', 'places'])
+          for (const item of drawn.cards[group])
+            if (item.id === card) item.image_url = '/v1/assets/new/content';
+        view = drawn;
+        return view;
+      }
+      if (path === '/v1/projects/p1') return { version: 9 };
+      if (path.endsWith('/storyboard/preflights'))
+        return {
+          id: 'pf1',
+          project_version: 9,
+          status: 'completed',
+          items: [
+            { shot_id: 's1', plan_id: 'plan-1', plan: { admission: 'credits', credits: 30 } },
+          ],
+        };
+      return view;
+    },
+  };
+  const labels = { openWorks() {}, failed: () => 'failed', pollMs: 1, retryMs: 1 };
+  let state = { ...fromServer(view, labels) };
+  const emit = (event) => (state = applyEvent(state, event));
+  const quote = Object.values(state.quotes)[0];
+  await createLiveChat({ api, projectId: 'p1', labels }).settle(quote, true, [], emit);
+  // The refused picture was asked for twice with the same request, and the offer went on.
+  const twice = asked.filter((item) => item.startsWith(VIDEO_IDS[1] + ' '));
+  assert.equal(twice.length, 2);
+  assert.equal(twice[0], twice[1]);
+  assert.equal(state.quotes[quote.id].status, 'priced');
+  // A server that stays busy is asked twice, then the offer stays open as before.
+  view = videoView(proposal);
+  busy = Infinity;
+  asked.length = 0;
+  state = { ...fromServer(view, labels) };
+  const open = Object.values(state.quotes)[0];
+  await createLiveChat({ api, projectId: 'p1', labels }).settle(open, true, [], emit);
+  assert.equal(asked.filter((item) => item.startsWith(VIDEO_IDS[1] + ' ')).length, 2);
+  assert.equal(state.quotes[open.id].status, 'open');
+});
+
 test("shot progress reads each shot's newest job", async () => {
   const { shotProgress, planCredits } = await import('./story-chat-client.js');
   const jobs = [
