@@ -405,11 +405,14 @@ class ArtifactWriter:
         )
 
     def begin_staging(self, job, attempt_id, tag, *, kinds=("video",)):
-        """Bound collection disk use BEFORE fetch/FFmpeg. No object writes here.
+        """Reserve quota for a collection BEFORE fetch/FFmpeg. No object writes here.
 
-        Reserve raw download + verified output + future immutable store object.
-        prepare() later settles this to verified actual bytes in one transaction.
-        Crashed/failed staging keeps its receipt and conservative reservation.
+        Reserve raw download + verified output + future immutable store object,
+        each at what this job can plausibly weigh (_staging_bytes); the hard
+        bound on scratch disk is the object limit each fetch and encode
+        enforces per file. prepare() later settles this to verified actual
+        bytes in one transaction. Crashed/failed staging keeps its receipt and
+        reservation.
         """
         existing = self.get(job, attempt_id, tag)
         if existing is not None:

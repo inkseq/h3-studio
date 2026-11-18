@@ -758,12 +758,16 @@ class ArtifactWriterTests(LedgerCase):
                 kinds=("video", "audio"),
             )
         self.assertLess(reserved(), 4 * 1024 * MIB)
-        # A long output is still held to the object limit per file, and a
+        # An allowance above the object limit is held to it per file, and a
         # length that cannot be read keeps the widest reservation.
-        self.assertEqual(
-            writer._staging_bytes(shot(3600, False), ("video",)), 512 * MIB
-        )
-        for seconds in (0, -1, float("nan"), float("inf"), "long"):
+        with mock.patch.dict(
+            artifact_writer.ROLE_ALLOWANCE, {"video": (500 * MIB, 8 * MIB)}
+        ):
+            self.assertEqual(
+                writer._staging_bytes(shot(5, True), ("video", "audio")),
+                (512 + 13) * MIB,
+            )
+        for seconds in (0, -1, 3600, float("nan"), float("inf"), "long"):
             self.assertEqual(
                 writer._staging_bytes(shot(seconds, True), ("video", "audio")),
                 2 * 512 * MIB,
