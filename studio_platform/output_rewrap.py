@@ -11,6 +11,7 @@ else is encoded exactly as before.
 
 from fractions import Fraction
 
+from .inference.outputs import _request, _shape
 from .inference.protocol import BackendError
 from .media import pixel_format, probe
 from .providers.registry import CPU_RENDER, EVERYFRAME_RENDER
@@ -48,19 +49,21 @@ def _exact(video, width, height, duration, audio):
         return False
 
 
-def rewrap_args(backend, video, shape):
+def rewrap_args(backend, video, job, audio):
     """ffmpeg arguments that copy the streams, or None to encode as before.
 
-    shape is the worker's (width, height, duration, audio). Our CPU renderer's
-    output is always rewrapped, as it was; a wrong pixel format there is an
-    error, not a reason to encode.
+    Our CPU renderer's output is always rewrapped, as it was; a wrong pixel
+    format there is an error, not a reason to encode. A hosted output is
+    copied only at the default export quality: a requested export_crf is
+    still applied by the encode.
     """
-    width, height, duration, audio = shape
     if backend == CPU_RENDER.id:
         if pixel_format(video) != "yuv420p":
             raise BackendError("output_video_verification_failed")
-    elif backend != EVERYFRAME_RENDER.id or not _exact(
-        video, width, height, duration, audio
+    elif (
+        backend != EVERYFRAME_RENDER.id
+        or _request(job).get("export_crf", 18) != 18
+        or not _exact(video, *_shape(job))
     ):
         return None
     args = ["-i", video, "-map", "0:v:0", "-c", "copy"]

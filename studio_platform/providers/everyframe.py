@@ -336,7 +336,7 @@ class EveryFrameBackend:
             return None
 
     def _normalize(self, job, raw, target, track=None):
-        """Exact output size and at least the planned duration.
+        """Exact output size and the requested duration, as collection checks.
 
         The vendor picks its own canvas per aspect; scale and centre-crop to
         the compiled size, and hold the last frame if its clip is a frame short.
@@ -344,8 +344,13 @@ class EveryFrameBackend:
         """
         output = job["request"]["output_spec"]
         width, height = output["width"], output["height"]
-        duration = output["actual_duration"]
-        audio = bool(job["request"]["request"].get("generate_audio"))
+        # The requested length, which is what collection checks and delivers
+        # (inference.outputs._shape). The native grid's actual_duration is a
+        # few frames longer; encoding to it made collection trim and encode
+        # the whole clip again.
+        request = job["request"]["request"]
+        duration = float(request.get("duration", output["actual_duration"]))
+        audio = bool(request.get("generate_audio"))
         info = probe(raw)
         if (
             audio

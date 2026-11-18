@@ -894,7 +894,7 @@ class WorkerRunner:
             if delivery is None:
                 # Our own exact encode (renderer, hosted normalize): rewrap only.
                 args = (
-                    rewrap_args(self.backend.kind, paths["video"], _shape(job)) or args
+                    rewrap_args(self.backend.kind, paths["video"], job, audio) or args
                 )
             if delivery is not None:
                 # Keep the complete native timeline. Both audio deliveries use the

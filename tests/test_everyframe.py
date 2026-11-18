@@ -338,25 +338,40 @@ class BackendTests(unittest.TestCase):
                     self.assertEqual((info["width"], info["height"]), size)
                     self.assertEqual(info["avg_frame_rate"], "24/1")
                     # #1252: collection copies this encode instead of making a
-                    # second one, because it already passes collection's checks.
+                    # second one. Use the shape collection itself checks, run
+                    # the copy, and run collection's own validation on it.
+                    from studio_platform.inference.outputs import _shape
                     from studio_platform.output_rewrap import rewrap_args
+                    from studio_platform.worker import _validate_video
 
-                    audio = bool(value["request"]["request"].get("generate_audio"))
-                    shape = (size[0], size[1], 5.166667, audio)
-                    copy_args = rewrap_args(plan.BACKEND, paths["video"], shape)
+                    width, height, length, audio = _shape(value)
+                    self.assertEqual((width, height), size)
+                    copy_args = rewrap_args(plan.BACKEND, paths["video"], value, audio)
                     self.assertIsNotNone(copy_args)
-                    self.assertIn("copy", copy_args)
-                    # The vendor's own file, or another size, is still encoded.
-                    self.assertIsNone(rewrap_args(plan.BACKEND, raw, shape))
-                    self.assertIsNone(
-                        rewrap_args(
-                            plan.BACKEND,
-                            paths["video"],
-                            (size[0] + 2, size[1], 5.166667, audio),
-                        )
+                    final = Path(directory) / "verified.mp4"
+                    subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-loglevel",
+                            "error",
+                            *map(str, copy_args),
+                            "-movflags",
+                            "+faststart",
+                            str(final),
+                        ],
+                        check=True,
                     )
+                    _validate_video(final, width, height, length, audio)
+                    # The vendor's own file, another backend, or a requested
+                    # export quality are still encoded as before.
+                    self.assertIsNone(rewrap_args(plan.BACKEND, raw, value, audio))
                     self.assertIsNone(
-                        rewrap_args("wangp-worker", paths["video"], shape)
+                        rewrap_args("wangp-worker", paths["video"], value, audio)
+                    )
+                    custom = copy.deepcopy(value)
+                    custom["request"]["request"]["export_crf"] = 23
+                    self.assertIsNone(
+                        rewrap_args(plan.BACKEND, paths["video"], custom, audio)
                     )
 
     def test_vivix_takes_4_5_but_leaves_21_9_on_our_machines(self):
@@ -533,7 +548,9 @@ class BackendTests(unittest.TestCase):
             )
             video = next(s for s in info["streams"] if s["codec_type"] == "video")
             self.assertEqual((video["width"], video["height"]), (832, 480))
-            self.assertGreaterEqual(float(info["format"]["duration"]), 5.16)
+            # The requested 5 s that collection delivers. It used to be the
+            # native grid's 5.17 s, which collection trimmed with a second encode.
+            self.assertAlmostEqual(float(info["format"]["duration"]), 5.0, delta=0.05)
             self.assertTrue(paths["audio"].is_file())
             self.assertEqual(
                 sorted(p.name for p in target.iterdir()),
