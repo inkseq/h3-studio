@@ -13,6 +13,11 @@ from sqlalchemy import select
 from .repository import budget_reservations, instance_intents, request_hash
 
 RECHECK_SECONDS = 900
+# Due revisits per pass, oldest first. All nodes are remembered in the same
+# pass after a restart, so they all fell due together: one 82 s pass stalled
+# a film export sharing the process (staging 2026-11-18). A clock that went
+# backwards is always due, regardless of this limit.
+REVISITS_PER_PASS = 20
 
 
 def _memo(controller):
@@ -65,10 +70,12 @@ def finished_skips(controller, nodes):
     """Intent ids to skip this pass; one intent read for all remembered nodes."""
     memo = _memo(controller)
     now = controller.repo.clock()
-    for intent_id in [
-        key for key, (_, at) in memo.items() if not 0 <= now - at < RECHECK_SECONDS
-    ]:
-        del memo[intent_id]
+    due = sorted(
+        (at, key) for key, (_, at) in memo.items() if not 0 <= now - at < RECHECK_SECONDS
+    )
+    for index, (at, intent_id) in enumerate(due):
+        if index < REVISITS_PER_PASS or now < at:
+            del memo[intent_id]
     if not memo:
         return set()
     with controller.repo.engine.connect() as connection:
