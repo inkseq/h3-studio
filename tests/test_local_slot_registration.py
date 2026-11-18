@@ -357,6 +357,10 @@ class HostedRegistrationTests(LedgerCase):
             register_local(slots)
             self.assertEqual(len(slots._slots), HOSTED)
             self.assertEqual(slots.children, {})
+            # #1252: one object store for the process, not two per slot.
+            stores = {id(slot.runner.store) for slot in slots._slots.values()}
+            stores |= {id(slot.runner.backend.store) for slot in slots._slots.values()}
+            self.assertEqual(len(stores), 1)
             for slot in slots._slots.values():
                 self.assertEqual(slot.runner.backend.slot_key, slot.spec.worker_id)
                 worker = WorkerControl(self.repo).get(slot.spec.worker_id)

@@ -38,6 +38,23 @@ class SlotContexts:
         # busy queue cannot hold the slot lock forever and keep renewing the
         # registration of a removed host (#1140).
         self._retiring = set()
+        self._store = None
+
+    def shared_store(self, settings):
+        """One object store for every slot in this process.
+
+        Each slot built two S3 clients (its adapter's and its runner's), over
+        10 MB apiece. With 25 hosted slots the controller needed ~950 MB,
+        outgrew its 1 GiB container and swapped: passes of 1-2 minutes on
+        staging (2026-11-18, #1252). The store keeps only its configuration
+        and a thread-safe client with its own connection pool.
+        """
+        with self._lock:
+            if self._store is None:
+                from .fleet import create_store
+
+                self._store = create_store(settings)
+            return self._store
 
     def __enter__(self):
         from .slot_lock import slot_lock
@@ -66,8 +83,18 @@ class SlotContexts:
                 config = FleetConfig(
                     self.work_dir, (slot,), enabled=True, max_children=1
                 )
-                context = (self._runner_context or slot_runner)(
-                    config, slot.spec.worker_id, self.settings, repository=self.repo
+                context = (
+                    self._runner_context(
+                        config, slot.spec.worker_id, self.settings, repository=self.repo
+                    )
+                    if self._runner_context
+                    else slot_runner(
+                        config,
+                        slot.spec.worker_id,
+                        self.settings,
+                        repository=self.repo,
+                        store_factory=self.shared_store,
+                    )
                 )
                 runner = context.__enter__()
                 if runner is None:
