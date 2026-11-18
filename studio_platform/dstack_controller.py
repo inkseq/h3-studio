@@ -17,6 +17,7 @@ import threading
 
 from sqlalchemy import or_, select
 
+from .controller_finished import finished_skips, remember_finished
 from .control import WorkerControl
 from .phase_timing import lap, lapped
 from .dstack_inventory import known_allocations, read_inventories
@@ -94,6 +95,7 @@ class DstackController:
         # settlement or a claim that the original PUT allocated nothing.
         self._passive_unknown = {}
         self._removal_checked_at = {}
+        self._finished = {}  # controller_finished: proven-finished stopped nodes
         self._invoice_checked_at = None
         self._health_checked_at = None
         from .capacity_timeline import CapacityRecorder
@@ -1166,7 +1168,9 @@ class DstackController:
         ):
             self._passive_unknown.clear()
         lap("tick_business_demand")
-        for node in self._nodes():
+        nodes = self._nodes()
+        skip = finished_skips(self, nodes)
+        for node in nodes:
             try:
                 stopped_at = (
                     node.get("payload", {}).get("dstack", {}).get("first_stopped_at")
@@ -1185,7 +1189,7 @@ class DstackController:
                         self.telemetry,
                         self.reclaim_reporter,
                     )
-                if self._passive_matches(node):
+                if node["intent_id"] in skip or self._passive_matches(node):
                     continue
                 # A task terminal is not an invoice or provider destruction proof.
                 if node["runtime_state"] == "stopped":
@@ -1228,6 +1232,7 @@ class DstackController:
                         self._cleanup_pending.discard(node["intent_id"])
                     if removed:
                         reclaim_node(self.service, fresh_node, intent)
+                    remember_finished(self, node, intent, removed, active, unsafe)
                     continue
                 result = self._tick_node(node)
                 results.append(result)

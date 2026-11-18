@@ -1223,6 +1223,50 @@ class DstackControllerTests(fixture.DstackOperatorTests):
         self.assertEqual(len(inventory_calls), original_calls + 2)
         self.assertEqual(len(self.client.applied), 1)
 
+    def test_a_proven_finished_node_is_skipped_until_it_changes_or_is_due(self):
+        # #1252: 382 stopped nodes made every staging pass 15-30 s.
+        from studio_platform import controller_finished
+        from studio_platform.operator_capacity import operator_nodes
+        from sqlalchemy import update
+
+        node = self.start()["node_id"]
+        self.capacity.readiness = None
+        self.running(node)
+        controller = self.controller()
+        self.service.node_command(self.owner, node, {}, "pending-removal-stop")
+        run = self.client.runs[self.store.load(node)["run_name"]]
+        run["status"] = "terminated"
+        self.client.provider_inventory = lambda backend: dict(
+            backend=backend, observed_at=self.now, complete=True, instance_ids=[]
+        )
+        controller.runtime.readiness = lambda *args: self.fail("native launch")
+        controller.runtime.slot = lambda *args: self.fail("slot launch")
+        for _ in range(3):
+            controller.tick()
+            self.now += 31
+        self.assertEqual(self.repo.list_instance_intents()[0]["state"], "destroyed")
+        self.assertTrue(self.store.load(node)["provider_removal_proof"]["absent"])
+        controller.tick()  # The full stopped path runs and remembers it.
+        self.assertIn(node, controller._finished)
+        calls = []
+        original = controller._obligations
+        controller._obligations = lambda intent: calls.append(1) or original(intent)
+        controller.tick()
+        self.assertEqual(calls, [])  # Unchanged: skipped.
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(operator_nodes)
+                .where(operator_nodes.c.intent_id == node)
+                .values(updated_at=self.now + 1)
+            )
+        controller.tick()
+        self.assertEqual(len(calls), 1)  # Changed row: full path again.
+        controller.tick()
+        self.assertEqual(len(calls), 1)
+        self.now += controller_finished.RECHECK_SECONDS
+        controller.tick()
+        self.assertEqual(len(calls), 2)  # Due: full path again.
+
     def test_terminal_allocated_start_journals_identity_before_removal_proof(self):
         from test_dstack_capacity import no_capacity_run
         from studio_platform.dstack_demand_start import _ended_with_proof
