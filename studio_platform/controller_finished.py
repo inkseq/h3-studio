@@ -71,7 +71,9 @@ def finished_skips(controller, nodes):
     memo = _memo(controller)
     now = controller.repo.clock()
     due = sorted(
-        (at, key) for key, (_, at) in memo.items() if not 0 <= now - at < RECHECK_SECONDS
+        (at, key)
+        for key, (_, at) in memo.items()
+        if not 0 <= now - at < RECHECK_SECONDS
     )
     for index, (at, intent_id) in enumerate(due):
         if index < REVISITS_PER_PASS or now < at:
