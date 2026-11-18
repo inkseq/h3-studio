@@ -34,7 +34,7 @@ from .providers.registry import (
 )
 from .repository import Conflict, LeaseLost, Scope, money
 from .storage import ObjectAlreadyExists, ObjectNotFound, StorageWriteUncertain  # noqa: F401 -- public worker compatibility export
-from .telemetry import ERROR_CODES as TELEMETRY_ERROR_CODES, NullStage, NullTelemetry
+from .telemetry import NullStage, NullTelemetry, say_failed, stage_failure_code
 
 # Compatibility exports retain the same objects for existing worker callers.
 from .inference.comfy import ComfyBackend
@@ -240,19 +240,12 @@ class WorkerRunner:
         try:
             yield
         except BaseException as error:
-            code = {
-                "collect": "collection_failed",
-                "validate_output": "artifact_validation_failed",
-                "upload": "upload_failed",
-                "input_transfer": "worker_preparation_failed",
-            }.get(name, "stage_failed")
-            if (
-                len(error.args) == 1
-                and type(error.args[0]) is str
-                and error.args[0] in TELEMETRY_ERROR_CODES
-            ):
-                code = error.args[0]
-            self._stage_finish(stage, "failure", error_code=code)
+            # A failed collection waits 30 s and runs again; without its
+            # reason in the log two walks could not be explained (#1301).
+            say_failed(self.backend, "stage=" + name, error, BackendError)
+            self._stage_finish(
+                stage, "failure", error_code=stage_failure_code(name, error)
+            )
             raise
         else:
             self._stage_finish(stage)
@@ -749,6 +742,7 @@ class WorkerRunner:
             return self._summary(job, "lease_lost_reconcile_required")
         except Exception as error:
             self._generation_note("worker_reconciliation_needed")
+            say_failed(self.backend, "turn", error, BackendError)
             # No raw exception response, URL, request or prompt escapes this worker.
             fresh = self.repo.get_job(self._scope(job), job["id"])
             try:

@@ -206,6 +206,51 @@ class WorkerTelemetryTests(LedgerCase):
         self.assertFalse(self.finished("commit_result"))
         self.assertFalse(self.finished("end_to_end"))
         self.now += 31
+        # #1301: the retry's reason is in the log, as a closed name only.
+        with (
+            patch(
+                "studio_platform.worker.probe",
+                side_effect=RuntimeError("https://vendor.example/secret?token=SECRET"),
+            ),
+            self.assertLogs("studio_platform.telemetry", "WARNING") as logs,
+        ):
+            self.assertEqual(
+                runner.run_once("worker", "worker-test")["state"], "collecting"
+            )
+        said = "\n".join(logs.output)
+        self.assertIn(
+            "worker_failed backend=mock stage=validate_output error=RuntimeError",
+            said,
+        )
+        self.assertIn("worker_failed backend=mock turn error=RuntimeError", said)
+        self.assertNotIn("SECRET", said)
+        self.assertNotIn("vendor", said)
+        self.assertEqual(
+            self.finished("validate_output")[-1]["error_code"],
+            "artifact_validation_failed",
+        )
+        with (
+            patch(
+                "studio_platform.worker.probe",
+                side_effect=BackendError("everyframe_output_unavailable"),
+            ),
+            self.assertLogs("studio_platform.telemetry", "WARNING") as logs,
+        ):
+            self.now += 31
+            runner.run_once("worker", "worker-test")
+        self.assertIn("error=everyframe_output_unavailable", "\n".join(logs.output))
+        with (
+            patch(
+                "studio_platform.worker.probe",
+                side_effect=BackendError("Not a code: https://vendor.example"),
+            ),
+            self.assertLogs("studio_platform.telemetry", "WARNING") as logs,
+        ):
+            self.now += 31
+            runner.run_once("worker", "worker-test")
+        self.assertNotIn("vendor", "\n".join(logs.output))
+        self.assertIn("error=BackendError", "\n".join(logs.output))
+        self.now += 31
         self.assertEqual(runner.run_once("worker", "worker-test")["state"], "succeeded")
         self.assertEqual(self.repo.get_job(self.scope, job["id"])["attempt_no"], 1)
         self.assertEqual(len(self.finished("generate")), 1)
