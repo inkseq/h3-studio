@@ -467,7 +467,7 @@ export function createLiveChat({
   }
   const batchOf = (cards, requests, sources) =>
     cards.map((card, index) => ({ card, request: requests[index], photos: sources?.[card] }));
-  async function drawPicture(requestId, card, emit, photos = []) {
+  async function drawPicture(requestId, card, emit, photos = [], again = true) {
     emit({ type: 'card.status', id: card, status: 'generating' });
     try {
       const value = await api.request(`/v1/story-chats/${encodeURIComponent(project)}/images`, {
@@ -491,6 +491,13 @@ export function createLiveChat({
         }, emit)
       )
         return true;
+      // A busy server (502–504) made nothing: ask once more with the same request, which
+      // the server treats as the same picture. One failed picture used to leave the whole
+      // "make the video" step waiting (h3-studio#1252).
+      if (again && [502, 503, 504].includes(failure?.status) && !closed) {
+        await new Promise((resolve) => setTimeout(resolve, labels.retryMs ?? 3000));
+        return drawPicture(requestId, card, emit, photos, false);
+      }
       emit({ type: 'card.status', id: card, status: 'draft' });
       emit({
         type: 'assistant.message',
