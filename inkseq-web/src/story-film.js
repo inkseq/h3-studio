@@ -333,7 +333,8 @@ export function createFilmController({ api, storage, getContext, keyFactory }) {
           throw Error('film.active');
         const op = commands.begin('film-preflight', {
           expected_version: live.serverVersion,
-          resolution: options.resolution,
+          // No resolution: the server keeps the shots' own frame.
+          ...(options.resolution ? { resolution: options.resolution } : {}),
           aspect: options.aspect,
           burn_subtitles: options.burn_subtitles,
         });

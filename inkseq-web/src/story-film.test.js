@@ -181,6 +181,22 @@ test('preflight is not paid submission; dirty or stale revisions cannot be confi
   assert.equal(h.controller.getState().run.project_version, 7);
 });
 
+test("no resolution chosen leaves the frame to the server: the film keeps its shots' own", async () => {
+  // h3-studio#1252: 832x480 shots exported at 720P were scaled, given side
+  // bars and encoded again. Sending no resolution lets the server keep the
+  // frame every shot shares; a chosen one is sent as before.
+  const h = harness();
+  await h.controller.preflight({ resolution: '', aspect: '16:9', burn_subtitles: false });
+  assert.deepEqual(h.calls[0].body, {
+    expected_version: 7,
+    aspect: '16:9',
+    burn_subtitles: false,
+  });
+  const chosen = harness();
+  await chosen.controller.preflight({ ...options, aspect: '16:9' });
+  assert.equal(chosen.calls[0].body.resolution, '720P');
+});
+
 test('lost preflight response retains original body/key before IO; explicit recovery replays only that operation', async () => {
   const h = harness();
   let original;
