@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 from dataclasses import dataclass, field, replace
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -121,6 +122,53 @@ ERROR_CODES = (
         }
     )
 )
+_STAGE_FAILURES = {
+    "collect": "collection_failed",
+    "validate_output": "artifact_validation_failed",
+    "upload": "upload_failed",
+    "input_transfer": "worker_preparation_failed",
+}
+_CLOSED_NAME = re.compile(r"[a-z][a-z0-9_]{0,79}")
+
+
+def failure_name(error, own=()):
+    """A closed name for a log line: our own stable code, else the error's type.
+
+    `own` are the error classes whose single argument is a stable code
+    (BackendError). Any other message can carry a URL, a response or a prompt
+    and is never written.
+    """
+    args = getattr(error, "args", ())
+    if (
+        len(args) == 1
+        and type(args[0]) is str
+        and (
+            args[0] in ERROR_CODES
+            or (own and isinstance(error, own) and _CLOSED_NAME.fullmatch(args[0]))
+        )
+    ):
+        return args[0]
+    return type(error).__name__
+
+
+def say_failed(backend, where, error, own=()):
+    """One log line for a failed worker stage or turn; closed names only."""
+    logging.getLogger(__name__).warning(
+        "worker_failed backend=%s %s error=%s",
+        getattr(backend, "kind", None),
+        where,
+        failure_name(error, own),
+    )
+
+
+def stage_failure_code(name, error):
+    """The telemetry code of the error that ended stage `name`."""
+    args = getattr(error, "args", ())
+    if len(args) == 1 and type(args[0]) is str and args[0] in ERROR_CODES:
+        return args[0]
+    return _STAGE_FAILURES.get(name, "stage_failed")
+
+
 _LABEL_FIELDS = (
     "stage",
     "provider",
