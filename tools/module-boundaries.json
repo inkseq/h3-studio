@@ -32,7 +32,7 @@
   "platform -> creation": 39,
   "platform -> identity": 36,
   "platform -> jobs": 31,
-  "platform -> media": 33
+  "platform -> media": 34
  },
  "edges": [
   "account_deletion -> artifact_writer",
@@ -416,6 +416,7 @@
   "operator_jobs -> identity",
   "operator_jobs -> job_cancellation",
   "operator_prices -> spending_limits",
+  "output_rewrap -> media",
   "payment_analytics -> identity_schema",
   "payment_schema -> identity_schema",
   "payments -> auth",
