@@ -99,21 +99,33 @@ def missing_packages():
     return packages
 
 
-def cache_key():
-    # No package indexes, credentials or installed binaries are cached. Source
-    # and APT policy changes select a different archive cache automatically.
+PREFIX = "sixnine-ubuntu24-media-"
+UBUNTU_SOURCES = SOURCES[0]
+
+
+def cache_keys():
+    """(key, restore prefixes) of the downloaded package archives.
+
+    APT checks every archive against the signed index before using it, so an
+    archive saved by another runner is either the right file or downloaded
+    again; it is never trusted. The key therefore names only what this helper
+    asks for and the runner image, never the mirror list: that names the
+    runner's region, and a key per region left every new region without a
+    cache and 124 MB to fetch from a slow mirror in each job (2026-11-18).
+    A new image restores the previous image's archives and fetches only what
+    changed. No package indexes, credentials or installed binaries are cached.
+    """
     digest = hashlib.sha256(Path(__file__).read_bytes())
-    for value in (platform.machine(), os.environ.get("ImageOS", ""),
-                  os.environ.get("ImageVersion", "")):
-        digest.update(value.encode()+b"\0")
-    paths = [Path("/etc/os-release"), *map(Path, SOURCES), Path("/etc/apt/apt.conf")]
-    policy = Path("/etc/apt/apt.conf.d")
-    if policy.is_dir():
-        paths += sorted(path for path in policy.iterdir() if path.is_file())
-    for path in paths:
-        if path.is_file():
-            digest.update(str(path).encode()+b"\0"+path.read_bytes()+b"\0")
-    return "sixnine-ubuntu24-media-"+digest.hexdigest()
+    release = Path("/etc/os-release")
+    for value in (
+        platform.machine(),
+        os.environ.get("ImageOS", ""),
+        release.read_text() if release.is_file() else "",
+    ):
+        digest.update(value.encode() + b"\0")
+    stable = PREFIX + digest.hexdigest()[:24] + "-"
+    image = re.sub(r"[^0-9A-Za-z.]", "", os.environ.get("ImageVersion", "")) or "unknown"
+    return stable + image, (stable, PREFIX)
 
 
 def install(cache):
@@ -141,17 +153,30 @@ def install(cache):
         "-o", "Dir::Cache::archives="+str(cache),
         "-o", "APT::Keep-Downloaded-Packages=true",
         "-o", "Binary::apt::APT::Keep-Downloaded-Packages=true"]
+    if Path(UBUNTU_SOURCES).is_file():
+        # Only Ubuntu's own repositories are needed. Any other repository the
+        # image lists (packages.microsoft.com answered 429) failed the whole
+        # update under Error-Mode=any.
+        options += ["-o", "Dir::Etc::sourcelist=" + UBUNTU_SOURCES,
+            "-o", "Dir::Etc::sourceparts=-"]
     run(["sudo", "apt-get", *options, "update"], timeout=180)
     run(["sudo", "apt-get", *options, "install", "-y", "--no-install-recommends", *packages], timeout=480)
     if missing_packages():
         raise RuntimeError("Media tool installation did not satisfy CI requirements")
+    try:
+        # Archives of versions the index no longer offers leave the cache.
+        run(["sudo", "apt-get", *options, "autoclean"], timeout=60)
+    except (OSError, subprocess.SubprocessError) as error:
+        print(f"autoclean skipped: {type(error).__name__}", file=sys.stderr)
 
 
 def main():
     if os.environ.get("GITHUB_ACTIONS") != "true" or sys.platform != "linux":
         raise RuntimeError("This helper only runs in Linux GitHub Actions")
     if sys.argv[1:] == ["cache-key"]:
-        print("key="+cache_key())
+        key, restore = cache_keys()
+        print("key=" + key)
+        print("restore<<END\n" + "\n".join(restore) + "\nEND")
     elif len(sys.argv) == 3 and sys.argv[1] == "install":
         install(sys.argv[2])
     else:

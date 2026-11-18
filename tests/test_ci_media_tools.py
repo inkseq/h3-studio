@@ -121,8 +121,8 @@ class MediaToolTests(unittest.TestCase):
             cache = Path(temp) / "sixnine-ci-apt"
             media.install(cache)
         calls = [call.args[0] for call in run.call_args_list]
-        self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0][-1], "update")
+        self.assertEqual([call[-1] for call in calls][::2], ["update", "autoclean"])
+        self.assertEqual(len(calls), 3)
         self.assertEqual(
             calls[1][-5:],
             ["install", "-y", "--no-install-recommends", "ffmpeg", "fonts-noto-cjk"],
@@ -136,6 +136,69 @@ class MediaToolTests(unittest.TestCase):
                 for arg in call
             )
         )
+
+    def test_only_ubuntus_repositories_are_updated_when_the_image_lists_others(self):
+        # 2026-11-18: packages.microsoft.com answered 429 and failed the update.
+        def options(present):
+            with (
+                tempfile.TemporaryDirectory() as temp,
+                patch.dict(os.environ, {"RUNNER_TEMP": temp}),
+                patch.object(media, "SOURCES", ()),
+                patch.object(
+                    media,
+                    "UBUNTU_SOURCES",
+                    __file__ if present else str(Path(temp) / "absent"),
+                ),
+                patch.object(media, "missing_packages", side_effect=[["ffmpeg"], []]),
+                patch.object(media, "run") as run,
+            ):
+                media.install(Path(temp) / "sixnine-ci-apt")
+            return [call.args[0] for call in run.call_args_list]
+
+        for call in options(True):
+            self.assertIn("Dir::Etc::sourcelist=" + __file__, call)
+            self.assertIn("Dir::Etc::sourceparts=-", call)
+        self.assertFalse(
+            any("Dir::Etc" in arg for call in options(False) for arg in call)
+        )
+
+    def test_housekeeping_of_the_archive_cache_cannot_fail_the_install(self):
+        def run(args, **kwargs):
+            if args[-1] == "autoclean":
+                raise subprocess.TimeoutExpired(args, 60)
+
+        with (
+            tempfile.TemporaryDirectory() as temp,
+            patch.dict(os.environ, {"RUNNER_TEMP": temp}),
+            patch.object(media, "SOURCES", ()),
+            patch.object(media, "missing_packages", side_effect=[["ffmpeg"], []]),
+            patch.object(media, "run", side_effect=run),
+            patch.object(media.sys, "stderr"),
+        ):
+            media.install(Path(temp) / "sixnine-ci-apt")
+
+    def test_the_archive_cache_is_shared_by_every_runner_region_and_image(self):
+        # 2026-11-18: the key held the mirror list, which names the runner's
+        # region; four keys coexisted and new regions fetched 124 MB per job.
+        def keys(**environment):
+            with patch.dict(os.environ, environment):
+                return media.cache_keys()
+
+        key, restore = keys(ImageOS="ubuntu24", ImageVersion="20261116.1.0")
+        with patch.object(media, "SOURCES", ("/nonexistent/another-region",)):
+            self.assertEqual(
+                keys(ImageOS="ubuntu24", ImageVersion="20261116.1.0"), (key, restore)
+            )
+        newer, same = keys(ImageOS="ubuntu24", ImageVersion="20261123.1.0")
+        self.assertNotEqual(newer, key)
+        self.assertEqual(same, restore)
+        # A new image restores the previous image's archives, and a changed
+        # helper any earlier archives; APT still verifies each one.
+        self.assertTrue(key.startswith(restore[0]) and newer.startswith(restore[0]))
+        self.assertTrue(restore[0].startswith(restore[1]))
+        self.assertEqual(restore[1], "sixnine-ubuntu24-media-")
+        self.assertNotEqual(keys(ImageOS="ubuntu26", ImageVersion="1")[1], restore)
+        self.assertRegex(keys(ImageVersion="a b\nc=d")[0], r"-abcd$")
 
     def test_install_failure_and_postcheck_failure_do_not_continue(self):
         with (
@@ -163,6 +226,14 @@ class MediaToolTests(unittest.TestCase):
         ).read_text()
         self.assertEqual(source.count("python tools/ci_media_tools.py cache-key"), 2)
         self.assertEqual(source.count("python tools/ci_media_tools.py install"), 2)
+        # Restored before and saved straight after the install, in both jobs.
+        for step in (
+            "uses: actions/cache/restore@v4\n        id: media-restore",
+            "restore-keys: ${{ steps.media-cache.outputs.restore }}",
+            "uses: actions/cache/save@v4\n"
+            "        if: steps.media-restore.outputs.cache-hit != 'true'",
+        ):
+            self.assertEqual(source.count(step), 2, step)
         self.assertEqual(
             source.count(
                 "Install media test tools from signed Ubuntu repositories\n        timeout-minutes: 10"
