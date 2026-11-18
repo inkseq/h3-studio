@@ -259,7 +259,7 @@ def public_guide():
         "inky": inky_contract(),
         "story_film": {
             "capability": "GET /v1/capabilities → story_film.enabled",
-            "preflight": "POST /v1/projects/{project_id}/films/preflights; Idempotency-Key; {expected_version,resolution,aspect?,burn_subtitles}",
+            "preflight": "POST /v1/projects/{project_id}/films/preflights; Idempotency-Key; {expected_version,resolution?,aspect?,burn_subtitles}",
             "confirm": "POST /v1/projects/{project_id}/films; Idempotency-Key; {preflight_id,confirm:true,spending_settings_version?}",
             "read": "GET /v1/projects/{project_id}/films/{run_id}",
             "cancel": "POST /v1/projects/{project_id}/films/{run_id}/cancel",

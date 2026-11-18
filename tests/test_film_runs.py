@@ -483,6 +483,128 @@ class FilmTests(unittest.TestCase):
             render_source_hash(old_ordered, 'chapter-one', burn_subtitles=True),
         )
 
+    def test_a_film_with_no_size_asked_keeps_its_shots_frame_in_every_chapter(self):
+        # #1252. The first chapter planned fixes the film's frame; later
+        # chapters and the final join then always agree.
+        self.app.state.resolve_render_source = lambda *args: {
+            **source(args[-2], args[-1]),
+            'width': 480,
+            'height': 832,
+        }
+
+        def planned(body, key):
+            preview = self.service.preflight(self.principal, 'story-one', body, key)
+            self.service._mutate(
+                self.principal,
+                'story-one',
+                preview['id'],
+                lambda value: value.update(
+                    accepted_at=self.repo.clock(), phase='chapters'
+                ),
+            )
+            captured = []
+
+            def keep(_principal, _value, _label, compiled, blockers):
+                self.assertEqual(blockers, [])
+                captured.append(compiled)
+                raise StopIteration('Stop before planning')
+
+            with patch.object(self.service, '_render_plan', side_effect=keep):
+                with self.assertRaises(StopIteration):
+                    self.service.turn(self.principal, 'story-one', preview['id'])
+            spec = captured[0]['output_spec']
+            return preview['id'], captured[0], (spec['width'], spec['height'])
+
+        run_id, compiled, frame = planned({'expected_version': 1}, 'own-frame')
+        self.assertIsNone(self.raw(run_id)['options']['resolution'])
+        self.assertEqual(frame, (480, 832))
+        self.assertNotIn('frame', self.raw(run_id))
+        # A size that was asked for is the export box, exactly as before.
+        _, _, boxed = planned({'expected_version': 1, 'resolution': '480P'}, 'box')
+        self.assertEqual(boxed, (480, 854))
+        # Planning the first chapter records the frame with its plan.
+        chapter_id = self.raw(run_id)['chapters'][0]['chapter_id']
+        with (
+            patch.object(
+                self.service,
+                'evaluate_policy',
+                return_value=SimpleNamespace(execution={}, expires_at=None),
+            ),
+            patch('studio_platform.credits_pricing.quote', return_value=None),
+            patch('studio_platform.film_runs.freeze_generation_policy'),
+            patch.object(self.repo, 'create_plan'),
+        ):
+            value = self.service._render_plan(
+                self.principal, self.raw(run_id), chapter_id, compiled, []
+            )
+        self.assertEqual(value['frame'], [480, 832])
+        self.assertEqual(self.raw(run_id)['frame'], [480, 832])
+        # From then on the recorded frame is the answer, whatever the takes.
+        self.app.state.resolve_render_source = lambda *args: source(args[-2], args[-1])
+        stored = self.raw(run_id)
+        self.assertEqual(
+            self.service._film_frame(
+                self.principal, 'story-one', stored, stored['project']
+            ),
+            [480, 832],
+        )
+
+    def test_the_films_frame_is_decided_over_every_chapter_or_not_at_all(self):
+        sizes = {'clip': (480, 832)}
+
+        def sized(*args):
+            width, height = sizes.get(args[-2]['id'], (None, None))
+            return {**source(args[-2], args[-1]), 'width': width, 'height': height}
+
+        self.app.state.resolve_render_source = sized
+        preview = self.service.preflight(
+            self.principal, 'story-one', {'expected_version': 1}, 'whole-film'
+        )
+        value = self.raw(preview['id'])
+        project = value['project']
+
+        def frame(current=value):
+            return self.service._film_frame(
+                self.principal, 'story-one', current, project
+            )
+
+        self.assertEqual(frame(), (480, 832))
+        # A second chapter whose take has another size: no shared frame, the
+        # export box for the whole film - whichever chapter comes first.
+        other = copy.deepcopy(next(e for e in project['entities'] if e['id'] == 'clip'))
+        other.update(id='other')
+        project['entities'].append(other)
+        later = {'id': 'later', 'data': {'selectedAssetId': 'other'}}
+        first = next(e for e in project['entities'] if e['id'] == 'shot-one')
+        two = copy.deepcopy(value)
+        two['chapters'] = [
+            {**value['chapters'][0], 'chapter_id': name} for name in ('one', 'two')
+        ]
+        for order in (
+            {'one': [first], 'two': [later]},
+            {'one': [later], 'two': [first]},
+        ):
+            with patch(
+                'studio_platform.film_runs.ordered_chapter',
+                side_effect=lambda story, name, order=order: (None, None, order[name]),
+            ):
+                sizes['other'] = (544, 960)
+                self.assertIsNone(frame(two))
+                sizes['other'] = (480, 832)
+                self.assertEqual(frame(two), (480, 832))
+        # A size that was asked for, or a chapter planned before this choice
+        # existed (no recorded frame), stays on the box.
+        asked = copy.deepcopy(value)
+        asked['options']['resolution'] = '720P'
+        self.assertIsNone(frame(asked))
+        planned = copy.deepcopy(value)
+        planned['chapters'][0]['plan_id'] = 'planned-by-the-previous-release'
+        self.assertIsNone(frame(planned))
+        # A failing lookup is not mistaken for "no shared frame".
+        self.app.state.resolve_render_source = Mock(side_effect=RuntimeError('db'))
+        with self.assertRaises(RuntimeError):
+            frame()
+
     def test_missing_sound_plan_refuses_before_generation_or_receipt_writes(self):
         planning = Mock(side_effect=AssertionError('No generation planning allowed'))
         self.app.state.storyboard_versions = SimpleNamespace(preflight=planning)

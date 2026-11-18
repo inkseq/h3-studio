@@ -176,6 +176,82 @@ class RenderPlanTests(unittest.TestCase):
         project["entities"][2]["data"]["selectedVideoRange"] = value
         return value
 
+    def test_a_film_keeps_the_frame_its_takes_share(self):
+        # #1252: 832x480 takes exported at a broadcast box were scaled, given
+        # side bars and encoded again. The story here is 9:16: 480x832 takes.
+        from studio_platform.render_frame import shared_frame
+
+        def sized(width, height):
+            return lambda entity, kind: {
+                **source(entity, kind),
+                "width": width,
+                "height": height,
+            }
+
+        project = story()
+        shots = [project["entities"][2]]
+
+        def shared(resolver, aspect="9:16"):
+            return shared_frame(project, shots, resolver, aspect)
+
+        self.assertEqual(shared(sized(480, 832)), (480, 832))
+        for resolver in (
+            source,  # an upload: size unknown
+            sized(768, 1344),  # 768P takes: more than the renderer writes
+            sized(832, 480),  # not the story's aspect
+            sized(481, 832),  # odd
+        ):
+            self.assertIsNone(shared(resolver))
+        self.assertIsNone(shared(sized(480, 832), aspect="wide"))
+        # Two takes of different sizes share no frame, in either order.
+        second = copy.deepcopy(project["entities"][2])
+        second.update(id="second")
+        second["data"]["selectedAssetId"] = "other"
+        other = copy.deepcopy(next(e for e in project["entities"] if e["id"] == "clip"))
+        other.update(id="other")
+        project["entities"].extend([second, other])
+        sizes = {"clip": (480, 832), "other": (544, 960)}
+
+        def mixed(entity, kind):
+            width, height = sizes[entity["id"]]
+            return {**source(entity, kind), "width": width, "height": height}
+
+        for order in (shots + [second], [second] + shots):
+            self.assertIsNone(shared_frame(project, order, mixed, "9:16"))
+        sizes["other"] = (480, 832)
+        self.assertEqual(
+            shared_frame(project, shots + [second], mixed, "9:16"), (480, 832)
+        )
+        # A take that is not there is the compile's to report; any other
+        # failure of the resolver is not hidden as "use the box".
+        second["data"]["selectedAssetId"] = "missing"
+        self.assertIsNone(shared_frame(project, shots + [second], mixed, "9:16"))
+
+        def gone(entity, kind):
+            raise ValueError("source_not_found")
+
+        def broken(entity, kind):
+            raise RuntimeError("database unavailable")
+
+        self.assertIsNone(shared(gone))
+        with self.assertRaises(RuntimeError):
+            shared(broken)
+
+    def test_a_chapter_is_rendered_in_the_frame_its_film_chose(self):
+        def frame_of(**options):
+            compiled, _, blockers, _ = compile_render(BODY, story(), source, **options)
+            self.assertFalse(blockers)
+            spec = compiled["output_spec"]
+            return spec["width"], spec["height"]
+
+        # No frame: the export box exactly as before.
+        self.assertEqual(frame_of(), (480, 854))
+        self.assertEqual(frame_of(frame=None), (480, 854))
+        self.assertEqual(frame_of(frame=[480, 832]), (480, 832))
+        for bad in ([481, 832], [1344, 768], "shots", [480]):
+            with self.assertRaises(ValueError):
+                compile_render(BODY, story(), source, frame=bad)
+
     def test_nonzero_range_is_bound_and_snapped_inward_without_changing_shot(self):
         p = story()
         self.selected_range(p, 1.01, 3.99)
