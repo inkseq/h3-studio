@@ -362,6 +362,14 @@ class BackendTests(unittest.TestCase):
                         check=True,
                     )
                     _validate_video(final, width, height, length, audio)
+                    # A film joins the delivered file unencoded (render_copy):
+                    # square pixels and the renderer's own stream, whatever
+                    # the vendor's canvas was.
+                    from studio_platform.render_copy import _exact, _facts
+
+                    self.assertTrue(
+                        _exact(_facts(final), width, height, round(length * 24))
+                    )
                     # The vendor's own file, another backend, or a requested
                     # export quality are still encoded as before.
                     self.assertIsNone(rewrap_args(plan.BACKEND, raw, value, audio))

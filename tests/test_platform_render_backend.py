@@ -943,6 +943,133 @@ class RenderTests(unittest.TestCase):
         )
         self.assertFalse(any(self.backend._directory('whole-film').glob('clip-*.mp4')))
 
+    def whole_shots(self, *names, frames=24):
+        return [
+            {
+                'shot_id': 'shot-' + name + str(index),
+                'source_id': name,
+                'frames': frames,
+                'source_start_frame': 0,
+            }
+            for index, name in enumerate(names)
+        ]
+
+    def outputs_of(self, job, tag):
+        original, outputs = self.backend._run_process, []
+
+        def run(*args, **kwargs):
+            outputs.append(args[-1].name)
+            return original(*args, **kwargs)
+
+        with mock.patch.object(self.backend, '_run_process', side_effect=run):
+            result = self.execute(job, tag)
+        return outputs, result
+
+    def test_whole_shots_in_the_films_own_encoding_are_joined_unencoded(self):
+        # #1252: a first film is whole hosted shots at the film's size; each
+        # was decoded and encoded again before the join.
+        self.video('red', 'red', seconds=1, size='256x256')
+        self.video('blue', 'blue', seconds=1, size='256x256')
+        job = self.job(shots=self.whole_shots('red', 'blue', 'red'), render_version=2)
+        outputs, result = self.outputs_of(job, 'joined-whole')
+        self.assertEqual(outputs, ['joined.mp4'])
+        self.assertFalse(
+            any(self.backend._directory('joined-whole').glob('clip-*.mp4'))
+        )
+        video = media.probe(result['video'])['streams'][0]
+        self.assertEqual((video['nb_frames'], video['avg_frame_rate']), ('72', '24/1'))
+        # The joined stream decodes end to end in order: red, blue, red.
+        media.ffmpeg(['-xerror', '-i', result['video'], '-f', 'null', '-'])
+        colours = [
+            self.frame(result['video'], at, f'whole-{index}.png').getpixel((128, 128))
+            for index, at in enumerate((0.5, 1.5, 2.5))
+        ]
+        self.assertGreater(colours[0][0], 200)
+        self.assertGreater(colours[1][2], 200)
+        self.assertGreater(colours[2][0], 200)
+
+    def test_one_shot_that_needs_the_encoder_sends_every_shot_through_it(self):
+        self.video('red', 'red', seconds=1, size='256x256')
+        self.video('blue', 'blue', seconds=1, size='256x256')
+        # Half of blue: it must be cut, so both get the encoder's header.
+        shots = self.whole_shots('red', 'blue')
+        shots[1]['frames'] = 12
+        outputs, result = self.outputs_of(
+            self.job(shots=shots, render_version=2), 'cut-one'
+        )
+        self.assertEqual(outputs, ['clip-000.mp4', 'clip-001.mp4', 'joined.mp4'])
+        self.assertEqual(
+            int(media.probe(result['video'])['streams'][0]['nb_frames']), 36
+        )
+
+    def test_sources_with_different_stream_headers_are_encoded_as_before(self):
+        self.video('red', 'red', seconds=1, size='256x256')
+        other = self.root / 'other.mp4'
+        subprocess.run(
+            [
+                'ffmpeg', '-v', 'error', '-nostdin', '-y', '-f', 'lavfi',
+                '-i', 'color=c=blue:s=256x256:r=24:d=1',
+                '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18',
+                '-pix_fmt', 'yuv420p', '-an', str(other),
+            ],
+            check=True,
+            timeout=20,
+        )  # fmt: skip
+        with other.open('rb') as stream:
+            info = self.store.write_new(
+                'owner', 'blue', stream, filename='other.mp4', content_type='video/mp4'
+            )
+        self.sources['blue'] = {
+            'kind': 'video',
+            'object': asdict(info),
+            'simulation': False,
+        }
+        outputs, _ = self.outputs_of(
+            self.job(shots=self.whole_shots('red', 'blue'), render_version=2),
+            'two-headers',
+        )
+        self.assertEqual(outputs, ['clip-000.mp4', 'clip-001.mp4', 'joined.mp4'])
+
+    def test_only_the_renderers_exact_stream_counts_as_already_encoded(self):
+        from studio_platform.render_copy import _exact, _facts, copyable
+
+        self.video('red', 'red', seconds=1, size='256x256')
+        path = self.root / 'red.mp4'
+        facts = _facts(path)
+        self.assertTrue(_exact(facts, 256, 256, 24))
+        for change in (
+            {'sample_aspect_ratio': '31090:31079'},
+            {'sample_aspect_ratio': 'N/A'},
+            {'pix_fmt': 'yuv444p'},
+            {'codec_name': 'hevc'},
+            {'field_order': 'tt'},
+            {'avg_frame_rate': '30/1'},
+            {'start_time': '0.041667'},
+            {'nb_read_packets': '23'},
+            {'nb_frames': '25'},
+            {'width': 320},
+            {'extradata_hash': ''},
+        ):
+            with self.subTest(change=change):
+                self.assertFalse(_exact({**facts, **change}, 256, 256, 24))
+        self.assertIsNone(_facts(self.root / 'missing.mp4'))
+        shape = {'simulation': False, 'width': 256, 'height': 256}
+        whole = {'shots': self.whole_shots('red')}
+        self.assertTrue(copyable(whole, shape, lambda shot: path))
+        # The simulation mark is drawn by the encode; a retimed or cut shot
+        # needs the encoder too.
+        self.assertFalse(
+            copyable(whole, {**shape, 'simulation': True}, lambda shot: path)
+        )
+        for change in (
+            {'source_start_frame': 1},
+            {'source_frames': 12},
+            {'playback_rate': 1.25},
+        ):
+            with self.subTest(change=change):
+                shots = [{**whole['shots'][0], **change}]
+                self.assertFalse(copyable({'shots': shots}, shape, lambda shot: path))
+
     @unittest.skipUnless(os.name == 'posix', 'Inherited POSIX CPU process fence')
     def test_same_original_cpu_resume_reuses_completed_clip_checkpoint(self):
         job = self.job()

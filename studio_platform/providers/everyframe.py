@@ -368,12 +368,15 @@ class EveryFrameBackend:
                 *(["-i", track, "-map", "0:v:0", "-map", "1:a:0"] if sound else []),
                 "-vf",
                 f"scale={width}:{height}:force_original_aspect_ratio=increase,"
-                f"crop={width}:{height},fps=24,tpad=stop_mode=clone:stop_duration=1",
+                f"crop={width}:{height},setsar=1,fps=24,"
+                "tpad=stop_mode=clone:stop_duration=1",
                 *(["-af", "apad"] if audio else ["-an"]),
                 "-t",
                 f"{duration:.6f}",
                 # Exactly what collection checks, so it can copy this encode
-                # instead of making a second one (output_rewrap).
+                # instead of making a second one (output_rewrap), and exactly
+                # the renderer's own clip stream (square pixels, export
+                # quality), so a film can join it unencoded (render_copy).
                 "-frames:v",
                 str(round(duration * 24)),
                 "-c:v",
@@ -381,7 +384,7 @@ class EveryFrameBackend:
                 "-preset",
                 "veryfast",
                 "-crf",
-                "16",
+                "18",
                 "-pix_fmt",
                 "yuv420p",
                 *(
