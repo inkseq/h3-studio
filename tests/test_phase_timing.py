@@ -51,6 +51,26 @@ class PhaseTimingTests(unittest.TestCase):
             self.assertIn(name + "_ms=", line)
         self.assertEqual(phase_timing.lapped("outside", 7), 7)
 
+    def test_a_finished_telemetry_stage_laps_the_current_timer(self):
+        from types import SimpleNamespace
+
+        finished = []
+        inner = SimpleNamespace(
+            start=lambda name, *a, **k: SimpleNamespace(
+                finish=lambda *args, **kwargs: finished.append((name, args, kwargs))
+            ),
+            enabled=True,
+        )
+        telemetry = phase_timing.LapTelemetry(inner)
+        self.assertTrue(telemetry.enabled)  # Everything else passes through.
+        with self.assertLogs("studio_platform.timing", logging.INFO) as logs:
+            with phase_timing.PhaseTimer("turn_timing"):
+                telemetry.start("upload", {}).finish("failure", error_code="x")
+        self.assertIn("upload_ms=", logs.output[0])
+        self.assertEqual(finished, [("upload", ("failure",), {"error_code": "x"})])
+        telemetry.start("collect", {}).finish()  # No timer: still finishes.
+        self.assertEqual(len(finished), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

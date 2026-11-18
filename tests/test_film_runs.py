@@ -1495,6 +1495,9 @@ class FilmTests(unittest.TestCase):
             turn=Mock(
                 side_effect=[
                     {'terminal': False, 'phase': 'generating'},
+                    # A render is short: the turn asks to look again sooner.
+                    {'terminal': False, 'phase': 'chapters', 'wait_seconds': 2},
+                    {'terminal': False, 'phase': 'chapters', 'wait_seconds': 999},
                     {'terminal': True, 'phase': 'completed'},
                 ]
             ),
@@ -1504,7 +1507,8 @@ class FilmTests(unittest.TestCase):
         )
         result = asyncio.run(workflow('tenant', 'owner', 'story-one', 'film-one'))
         self.assertEqual(result['phase'], 'completed')
-        self.assertEqual(waits, [{'topic': 'film_changed', 'timeout_seconds': 10}])
+        self.assertEqual([item['timeout_seconds'] for item in waits], [10, 2, 10])
+        self.assertTrue(all(item['topic'] == 'film_changed' for item in waits))
         self.assertFalse(registration[0]['retries_allowed'])
         self.assertEqual(service.turn.call_args.args[1:], ('story-one', 'film-one'))
 

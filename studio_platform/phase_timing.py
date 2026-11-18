@@ -51,3 +51,28 @@ def lapped(name, value):
     """lap(name) right after value was computed; returns value unchanged."""
     lap(name)
     return value
+
+
+class _LapStage:
+    def __init__(self, stage, name):
+        self._stage, self._name = stage, name
+
+    def finish(self, *args, **kwargs):
+        lap(self._name)
+        return self._stage.finish(*args, **kwargs)
+
+    def __getattr__(self, item):
+        return getattr(self._stage, item)
+
+
+class LapTelemetry:
+    """A telemetry sink whose finished stages also lap the current timer."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def start(self, name, *args, **kwargs):
+        return _LapStage(self._inner.start(name, *args, **kwargs), name)
+
+    def __getattr__(self, item):
+        return getattr(self._inner, item)

@@ -59,7 +59,7 @@ class ClientTransactionTests(unittest.TestCase):
         self.transport = configure_producer(self.repo)
         self.addCleanup(self.transport.close)
         self.transport.client.register_queue(
-            "inkseq-generation-v1", polling_interval_sec=10
+            "inkseq-generation-v1", polling_interval_sec=2
         )
 
     def drop_database(self):

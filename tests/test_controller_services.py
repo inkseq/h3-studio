@@ -146,7 +146,7 @@ class ControllerServicesTests(unittest.TestCase):
         context.assert_called_once_with("tenant", "owner", "project", "run")
         revalidate.assert_called_once_with("owner", grant)
         repo.generation_transport.client.register_queue.assert_called_once_with(
-            "inkseq-film-v1", polling_interval_sec=10
+            "inkseq-film-v1", polling_interval_sec=2
         )
 
 

@@ -11,7 +11,11 @@ from .domain_turns import DomainTurns
 
 
 def setup_controller_film(DBOS, domain_turns, repo, service, auth):
-    repo.generation_transport.client.register_queue(VERSION, polling_interval_sec=10)
+    from .dbos_transport import QUEUE_POLL_SECONDS
+
+    repo.generation_transport.client.register_queue(
+        VERSION, polling_interval_sec=QUEUE_POLL_SECONDS
+    )
 
     def principal_for(tenant, owner, project_id, run_id):
         grant = service.execution_context(tenant, owner, project_id, run_id)
@@ -58,6 +62,10 @@ def register_film_workflows(DBOS, service, principal_for, *, domain_turns=None):
                 return result
             # Native work has its own authoritative observation deadline. This
             # durable wait owns no GPU lease and never polls via time.sleep.
-            await DBOS.recv_async(topic='film_changed', timeout_seconds=10)
+            wait = result.get('wait_seconds', 10)
+            await DBOS.recv_async(
+                topic='film_changed',
+                timeout_seconds=wait if type(wait) is int and 1 <= wait <= 10 else 10,
+            )
 
     return film
