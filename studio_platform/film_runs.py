@@ -623,6 +623,9 @@ class FilmExecution:
 
         def register(current):
             current["plan_hashes"][plan_id] = digest
+            if label != "export" and current["options"].get("resolution") is None:
+                spec = compiled["output_spec"]
+                current.setdefault("frame", [spec["width"], spec["height"]])
             target = (
                 current["export"]
                 if label == "export"
@@ -756,6 +759,10 @@ class FilmExecution:
                     if item is not None
                 }
                 burn_subtitles = options.pop("burn_subtitles", False)
+                # No size asked for: the film keeps its shots' frame. The
+                # first chapter planned fixes it for every chapter
+                # (_render_plan), so the final join always has one frame.
+                unsized = "resolution" not in options
                 compiled, _, blockers, _ = compile_render(
                     {
                         "client_ref": {
@@ -769,6 +776,7 @@ class FilmExecution:
                         principal, project_id, entity, kind
                     ),
                     contract_version=value.get("render_contract_version", 3),
+                    frame=value.get("frame") or ("shots" if unsized else None),
                 )
                 if burn_subtitles:
                     from .caption_server import compile_subtitles
@@ -927,17 +935,19 @@ class FilmRuns(FilmExecution):
         ):
             raise ValueError("film_preflight_invalid")
         options = {
-            "resolution": body.get("resolution", "720P"),
+            # None: the film keeps its shots' frame (render_frame).
+            "resolution": body.get("resolution"),
             "aspect": body.get("aspect"),
             "burn_subtitles": body.get("burn_subtitles", False),
         }
         from .render_plans import DIMENSIONS
 
         if (
-            options["resolution"] not in DIMENSIONS
+            options["resolution"] is not None
+            and options["resolution"] not in DIMENSIONS
             or type(options["burn_subtitles"]) is not bool
             or options["aspect"] is not None
-            and options["aspect"] not in DIMENSIONS[options["resolution"]]
+            and options["aspect"] not in DIMENSIONS[options["resolution"] or "720P"]
         ):
             raise ValueError("film_output_options_invalid")
         record = self.access.project(principal, project_id, "jobs:write")

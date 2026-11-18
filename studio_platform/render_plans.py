@@ -245,8 +245,15 @@ def render_source_hash(
     return request_hash(value)
 
 
-def compile_render(body, project, source_resolver, *, contract_version=None):
-    """Resolver returns owner/project-checked immutable source and decode metadata."""
+def compile_render(
+    body, project, source_resolver, *, contract_version=None, frame=None
+):
+    """Resolver returns owner/project-checked immutable source and decode metadata.
+
+    `frame` is the film's own choice, never the client's: "shots" keeps the
+    frame every selected take shares (render_frame), a (width, height) is a
+    frame already chosen for this film; None is the export box as before.
+    """
     if not isinstance(body, dict) or set(body) - {
         "client_ref",
         "resolution",
@@ -278,6 +285,11 @@ def compile_render(body, project, source_resolver, *, contract_version=None):
         raise ValueError("粗剪支持480P/720P与16:9、9:16、1:1、4:3、3:4")
     width, height = DIMENSIONS[resolution][aspect]
     chapter, scenes, shots = ordered_chapter(project, ref["chapter_id"])
+    from .render_frame import choose
+
+    width, height, resolution = choose(
+        frame, (width, height, resolution), project, shots, source_resolver, aspect
+    )
     from .render_timing import enabled
 
     if contract_version not in (None, 3, 5):
