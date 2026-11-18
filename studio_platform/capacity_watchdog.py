@@ -525,6 +525,23 @@ def provider_removed(binding, intent, now):
     )
 
 
+def unreported_reclaims(node):
+    """False only when this node row shows nothing left for report_reclaims.
+
+    234 of staging's stopped nodes carry a fully reported marker; calling
+    report_reclaims for each cost two reads per node on every pass (#1252).
+    Anything unexpected in the marker keeps the original call.
+    """
+    marker = node.get("payload", {}).get("capacity_watchdog")
+    if not marker:
+        return False
+    try:
+        reported = set(marker.get("reported_event_ids", []))
+        return any(item not in reported for item in marker.get("event_ids", []))
+    except (AttributeError, TypeError):
+        return True
+
+
 def report_reclaims(service, node_id, receipts, telemetry, reporter=None):
     """Retry original alerts until enabled exporters accept them; never tasks."""
     repo = service.repo

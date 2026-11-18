@@ -87,6 +87,7 @@ inventory.json
 !studio_platform/pitfalls.py
 !studio_platform/phase_timing.py
 !studio_platform/controller_finished.py
+!studio_platform/hosted_fast_offload.py
 !studio_platform/pitfalls.json
 !studio_platform/__init__.py
 !studio_platform/modal_credentials.py

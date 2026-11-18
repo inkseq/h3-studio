@@ -336,7 +336,34 @@ def rebind(repo, connection, job, model_id, now):
             job["id"],
             {"model": model_id, "from_pool": job["pool"]},
         )
+        _wake(repo, connection, job["id"])
     return bool(moved)
+
+
+def _wake(repo, connection, job_id):
+    """Tell the job's workflow its route changed, so a hosted slot claims now.
+
+    capacity.hosted_route is not a public job event, so nothing woke the
+    workflow: its turn found no worker in the old pool and slept its 10 s
+    poll (#1252). A hint only; a failed send leaves the move and that poll.
+    """
+    transport = getattr(repo, "generation_transport", None)
+    if transport is None:
+        return
+    import uuid
+
+    try:
+        with connection.begin_nested():
+            transport.job_event(
+                connection,
+                job_id,
+                str(uuid.uuid4()),
+                event_type="capacity.hosted_route",
+            )
+    except Exception as error:
+        print(
+            "hosted_route_wake_failed", "error_type=" + type(error).__name__, flush=True
+        )
 
 
 def offload(service, connection, queued, now):
