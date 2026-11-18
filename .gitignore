@@ -84,6 +84,7 @@ inventory.json
 !studio_platform/prompts/*.md
 !studio_platform/prompt_files.py
 !studio_platform/output_rewrap.py
+!studio_platform/render_copy.py
 !studio_platform/pitfalls.py
 !studio_platform/phase_timing.py
 !studio_platform/controller_finished.py

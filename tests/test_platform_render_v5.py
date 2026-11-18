@@ -32,6 +32,8 @@ class RenderV5Tests(unittest.TestCase):
     video = legacy.RenderTests.video
     job = legacy.RenderTests.job
     execute = legacy.RenderTests.execute
+    renderer_clip = legacy.RenderTests.renderer_clip
+    outputs_of = legacy.RenderTests.outputs_of
 
     def v5(self, shots, tracks=(), stage="chapter"):
         job = self.job(shots=shots, tracks=list(tracks), render_version=5)
@@ -378,6 +380,26 @@ class RenderV5Tests(unittest.TestCase):
         ):
             with self.assertRaises(SubmissionUncertain):
                 restarted.submit(prepared, "unknown-v5")
+
+    def test_whole_unretimed_shots_keep_their_frame_proof_and_skip_the_encode(self):
+        # #1252: the decoded-frame proof still runs for every shot; only the
+        # second encode of an already exact stream is skipped.
+        self.renderer_clip("red", "red")
+        self.renderer_clip("blue", "blue")
+        job = self.v5([self.shot("red", 24, 24, 1), self.shot("blue", 24, 24, 1)])
+        outputs, result = self.outputs_of(job, "whole-v5")
+        self.assertEqual(
+            outputs,
+            ["header.mp4", "source-000.framemd5", "source-001.framemd5", "joined.mp4"],
+        )
+        self.assertEqual(
+            int(media.probe(result["video"])["streams"][0]["nb_frames"]), 48
+        )
+        # A retimed shot sends both through the encoder.
+        slowed = self.v5([self.shot("red", 24, 24, 1), self.shot("blue", 24, 48, 0.5)])
+        outputs, _ = self.outputs_of(slowed, "slowed-v5")
+        self.assertNotIn("header.mp4", outputs)
+        self.assertIn("clip-000.mp4", outputs)
 
     def test_false_long_header_cannot_hide_short_decoded_video(self):
         self.video("red", "red", seconds=1, size="256x256")

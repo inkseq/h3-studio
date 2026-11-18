@@ -362,6 +362,34 @@ class BackendTests(unittest.TestCase):
                         check=True,
                     )
                     _validate_video(final, width, height, length, audio)
+                    # A film joins the delivered file unencoded (render_copy):
+                    # square pixels and the header the renderer's clip encode
+                    # writes for it, whatever the vendor's canvas was.
+                    from studio_platform import render_copy
+
+                    found = render_copy.facts(final)
+                    self.assertTrue(
+                        render_copy.exact(found, width, height, round(length * 24))
+                    )
+                    reference = Path(directory) / "reference.mp4"
+                    subprocess.run(
+                        [
+                            "ffmpeg",
+                            "-loglevel",
+                            "error",
+                            *map(
+                                str,
+                                render_copy.reference_args(
+                                    final, width, height, reference
+                                ),
+                            ),
+                        ],
+                        check=True,
+                    )
+                    self.assertEqual(
+                        render_copy.header(render_copy.facts(reference)),
+                        render_copy.header(found),
+                    )
                     # The vendor's own file, another backend, or a requested
                     # export quality are still encoded as before.
                     self.assertIsNone(rewrap_args(plan.BACKEND, raw, value, audio))
