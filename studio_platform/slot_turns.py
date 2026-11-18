@@ -83,18 +83,14 @@ class SlotContexts:
                 config = FleetConfig(
                     self.work_dir, (slot,), enabled=True, max_children=1
                 )
-                context = (
-                    self._runner_context(
-                        config, slot.spec.worker_id, self.settings, repository=self.repo
-                    )
-                    if self._runner_context
-                    else slot_runner(
-                        config,
-                        slot.spec.worker_id,
-                        self.settings,
-                        repository=self.repo,
-                        store_factory=self.shared_store,
-                    )
+                # One call for every path: a custom context (Modal's) that did
+                # not receive the shared store built two clients per slot again.
+                context = (self._runner_context or slot_runner)(
+                    config,
+                    slot.spec.worker_id,
+                    self.settings,
+                    repository=self.repo,
+                    store_factory=self.shared_store,
                 )
                 runner = context.__enter__()
                 if runner is None:

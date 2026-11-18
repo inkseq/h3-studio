@@ -240,11 +240,17 @@ class ModalWorkerBindings:
             runtime_config_file=str(directory / 'client.json'),
         )
 
-    def runner_context(self, config, worker_id, settings, *, repository):
+    def runner_context(self, config, worker_id, settings, *, repository, store_factory):
         """Inject only private transport; retain the real WorkerRunner/claim/store."""
         slot = config.slot(worker_id)
         if slot.spec.provider != 'modal':
-            return slot_runner(config, worker_id, settings, repository=repository)
+            return slot_runner(
+                config,
+                worker_id,
+                settings,
+                repository=repository,
+                store_factory=store_factory,
+            )
         require(callable(self.capacity_usage))
 
         def factory(selected, directory):
@@ -263,6 +269,7 @@ class ModalWorkerBindings:
             worker_id,
             settings,
             repository=repository,
+            store_factory=store_factory,
             backend_factory=factory,
             capacity_usage=self.capacity_usage,
         )
