@@ -367,6 +367,10 @@ class EveryFrameBackend:
                 *(["-af", "apad"] if audio else ["-an"]),
                 "-t",
                 f"{duration:.6f}",
+                # Exactly what collection checks, so it can copy this encode
+                # instead of making a second one (output_rewrap).
+                "-frames:v",
+                str(round(duration * 24)),
                 "-c:v",
                 "libx264",
                 "-preset",
@@ -375,7 +379,11 @@ class EveryFrameBackend:
                 "16",
                 "-pix_fmt",
                 "yuv420p",
-                *(["-c:a", "aac", "-b:a", "192k"] if audio else []),
+                *(
+                    ["-c:a", "aac", "-b:a", "192k", "-ar", "32000", "-ac", "2"]
+                    if audio
+                    else []
+                ),
                 video,
             ],
             timeout=180,

@@ -337,6 +337,27 @@ class BackendTests(unittest.TestCase):
                     )["streams"][0]
                     self.assertEqual((info["width"], info["height"]), size)
                     self.assertEqual(info["avg_frame_rate"], "24/1")
+                    # #1252: collection copies this encode instead of making a
+                    # second one, because it already passes collection's checks.
+                    from studio_platform.output_rewrap import rewrap_args
+
+                    audio = bool(value["request"]["request"].get("generate_audio"))
+                    shape = (size[0], size[1], 5.166667, audio)
+                    copy_args = rewrap_args(plan.BACKEND, paths["video"], shape)
+                    self.assertIsNotNone(copy_args)
+                    self.assertIn("copy", copy_args)
+                    # The vendor's own file, or another size, is still encoded.
+                    self.assertIsNone(rewrap_args(plan.BACKEND, raw, shape))
+                    self.assertIsNone(
+                        rewrap_args(
+                            plan.BACKEND,
+                            paths["video"],
+                            (size[0] + 2, size[1], 5.166667, audio),
+                        )
+                    )
+                    self.assertIsNone(
+                        rewrap_args("wangp-worker", paths["video"], shape)
+                    )
 
     def test_vivix_takes_4_5_but_leaves_21_9_on_our_machines(self):
         self.assertIsNotNone(
