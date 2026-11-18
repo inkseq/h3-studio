@@ -10,7 +10,7 @@ full every RECHECK_SECONDS, so a missed change is late by at most that much.
 
 from sqlalchemy import select
 
-from .repository import instance_intents, request_hash
+from .repository import budget_reservations, instance_intents, request_hash
 
 RECHECK_SECONDS = 900
 
@@ -25,6 +25,21 @@ def _fingerprint(node, intent):
     return request_hash({"node": dict(node), "intent": dict(intent)})
 
 
+def _reserved_hold(controller, intent_id):
+    """A reserved instance hold may still be released by a later pass."""
+    with controller.repo.engine.connect() as connection:
+        return (
+            connection.execute(
+                select(budget_reservations.c.id).where(
+                    budget_reservations.c.reference_type == "instance",
+                    budget_reservations.c.reference_id == intent_id,
+                    budget_reservations.c.state == "reserved",
+                )
+            ).first()
+            is not None
+        )
+
+
 def remember_finished(controller, node, intent, removed, active, unsafe):
     """Called at the end of the stopped path with what that pass found."""
     finished = (
@@ -35,6 +50,7 @@ def remember_finished(controller, node, intent, removed, active, unsafe):
         and not active
         and not unsafe
         and node["intent_id"] not in controller._cleanup_pending
+        and not _reserved_hold(controller, node["intent_id"])
     )
     if finished:
         _memo(controller)[node["intent_id"]] = (
