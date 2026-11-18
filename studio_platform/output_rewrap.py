@@ -14,6 +14,7 @@ from fractions import Fraction
 from .inference.outputs import _request, _shape
 from .inference.protocol import BackendError
 from .media import pixel_format, probe
+from .phase_timing import lap
 from .providers.registry import CPU_RENDER, EVERYFRAME_RENDER
 
 
@@ -65,6 +66,8 @@ def rewrap_args(backend, video, job, audio):
         or _request(job).get("export_crf", 18) != 18
         or not _exact(video, *_shape(job))
     ):
+        lap("rewrap_declined")  # slot_turn_timing shows which path ran.
         return None
+    lap("rewrap_accepted")
     args = ["-i", video, "-map", "0:v:0", "-c", "copy"]
     return args + (["-map", "0:a:0"] if audio else ["-an"])
