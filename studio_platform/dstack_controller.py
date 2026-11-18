@@ -95,7 +95,6 @@ class DstackController:
         # settlement or a claim that the original PUT allocated nothing.
         self._passive_unknown = {}
         self._removal_checked_at = {}
-        self._finished = {}  # controller_finished: proven-finished stopped nodes
         self._invoice_checked_at = None
         self._health_checked_at = None
         from .capacity_timeline import CapacityRecorder
@@ -1168,8 +1167,7 @@ class DstackController:
         ):
             self._passive_unknown.clear()
         lap("tick_business_demand")
-        nodes = self._nodes()
-        skip = finished_skips(self, nodes)
+        nodes, skip = finished_skips(self)
         for node in nodes:
             try:
                 stopped_at = (
@@ -1179,9 +1177,9 @@ class DstackController:
                     health_checked_at is None or stopped_at > health_checked_at
                 ):
                     closed_since_health = True
-                if node.get("payload", {}).get("capacity_watchdog"):
-                    from .capacity_watchdog import report_reclaims
+                from .capacity_watchdog import report_reclaims, unreported_reclaims
 
+                if unreported_reclaims(node):
                     report_reclaims(
                         self.service,
                         node["intent_id"],
@@ -1414,8 +1412,10 @@ def main(argv=None):
             return 0
         from .demand_wakeup import DemandWakeup, run_demand_loop
         from .controller_idle import IdleCadence
+        from .hosted_fast_offload import start_hosted_fast_offload
 
         wakeup = DemandWakeup(repo, stop)
+        start_hosted_fast_offload(service, stop)
         cadence = IdleCadence()
         from .host_loss import Manifest
 

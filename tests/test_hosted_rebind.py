@@ -563,6 +563,47 @@ class RebindLedgerTests(LedgerCase):
         value["request"]["resolution"] = "480P"
         self.assertFalse(economy_allowed(self.economy_service().settings, value))
 
+    def test_a_new_shot_goes_hosted_without_waiting_for_a_controller_pass(self):
+        # #1252: shots waited for the controller pass in progress (18-100 s).
+        from studio_platform import hosted_fast_offload as fast
+
+        self.hosted_control()
+        created = self.queued_job()
+        row = self.row(created["id"])
+        tier = get_tier(row["request"], execution=row["execution_plan"])
+        service = self.service(tiers=(tier,), first=True)
+        seen = set()
+        fresh = fast.new_arrivals(service, seen)
+        self.assertEqual(fresh, {(row["id"], row["fence"])})
+        moved = fast.offload_once(service, eligible=lambda *_: [(row, {})])
+        self.assertEqual(moved, 1)
+        self.assertEqual(self.row(created["id"])["pool"], POOL)
+        self.assertEqual(fast.new_arrivals(service, seen), set())
+
+    def test_the_fast_loop_considers_a_job_once_and_leaves_the_rest_to_the_pass(self):
+        from studio_platform import hosted_fast_offload as fast
+
+        self.hosted_control()
+        service = self.service()  # Not hosted-first: a new job is not moved.
+        service.settings.everyframe_enabled = True
+        created = self.queued_job()
+        calls = []
+
+        def eligible(*_):
+            calls.append(1)
+            return [(self.row(created["id"]), {})]
+
+        class Stop:
+            turns = 0
+
+            def wait(self, _seconds):
+                self.turns += 1
+                return self.turns > 3
+
+        fast.run(service, Stop(), eligible=eligible)
+        self.assertEqual(calls, [1])  # Three looks, one offload attempt.
+        self.assertEqual(self.row(created["id"])["pool"], "own")
+
     def test_rebound_job_is_claimed_by_the_hosted_slot_with_its_hold_intact(self):
         created = self.queued_job()
         before = self.row(created["id"])

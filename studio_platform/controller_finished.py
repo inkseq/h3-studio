@@ -66,8 +66,13 @@ def remember_finished(controller, node, intent, removed, active, unsafe):
         _memo(controller).pop(node["intent_id"], None)
 
 
-def finished_skips(controller, nodes):
-    """Intent ids to skip this pass; one intent read for all remembered nodes."""
+def finished_skips(controller, nodes=None):
+    """(nodes, intent ids to skip this pass); one intent read for all remembered."""
+    nodes = controller._nodes() if nodes is None else nodes
+    return nodes, _skips(controller, nodes)
+
+
+def _skips(controller, nodes):
     memo = _memo(controller)
     now = controller.repo.clock()
     due = sorted(
