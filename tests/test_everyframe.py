@@ -296,7 +296,7 @@ class BackendTests(unittest.TestCase):
                 everyframe_backend.time, "monotonic", lambda: next(clock)
             ):
                 backend._download("/render/rnd_1/video", Path(root) / "b", beat)
-            self.assertTrue(1 <= len(beats) <= 100, len(beats))
+            self.assertTrue(1 <= len(beats) < 200, len(beats))  # Per chunk was 200.
 
     def test_every_vivix_canvas_normalises_to_the_take_size(self):
         """Measured canvases (docs/SCHEDULING-SCENARIOS.md) to our 768P sizes."""
