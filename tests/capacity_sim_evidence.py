@@ -257,7 +257,11 @@ class Evidence:
                     detail="%d queued, no machine, demand says %s"
                     % (len(queued), world._demand_reason),
                 )
-            if blocked >= 1800:
+            # The alert counts from the stall the demand timeline recorded,
+            # which may trail the truth by DETECT_SECONDS, and needs more than
+            # 1800 s of it. A 30-minute backoff step that ended one tick late
+            # was judged as a missing alert, about one run in eight (#1240).
+            if blocked >= 1800 + DETECT_SECONDS:
                 self.expect(
                     ("blocked_alert", round(since)),
                     "start_blocked_alert",
@@ -268,6 +272,7 @@ class Evidence:
                         and payload.get("code") == "capacity_start_blocked"
                         and bool(payload.get("detail"))
                     ),
+                    bound=BOUND_SECONDS - DETECT_SECONDS,  # Due when it was.
                     detail="blocked %dm, demand says %s"
                     % (blocked // 60, world._demand_reason),
                 )
