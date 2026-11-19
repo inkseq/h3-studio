@@ -10,7 +10,7 @@ from dataclasses import asdict, dataclass
 import math
 import re
 
-from sqlalchemy import and_, case, func, insert, inspect, select, update
+from sqlalchemy import and_, case, func, insert, inspect, literal, select, update
 
 from .queue import TaskQueue
 from .inference.outputs import validate_delivery_policy
@@ -243,34 +243,46 @@ def require_delivery_configuration(
     including expired/revoked/terminal rows. An old bootstrap need not have
     registered yet. Writers must hold the shared global capacity lock before
     checking and recording the binding. IDs remain opaque.
+
+    The database answers whether a row recorded another delivery. Reading every
+    accepted job's execution plan back to compare here took 0.2 s with 108
+    jobs on staging, four times for each shot submitted, and grew with every
+    job made (#1301). A row without the field recorded the empty delivery.
     """
-    rows = connection.execute(
-        select(registered_workers.c.spec).where(
+
+    def differs(payload, *matching):
+        recorded = func.coalesce(payload["output_delivery"].as_string(), "")
+        return (
+            connection.execute(
+                select(literal(1))
+                .select_from(payload.table)
+                .where(*matching, recorded != output_delivery)
+                .limit(1)
+            ).first()
+            is not None
+        )
+
+    if (
+        differs(
+            registered_workers.c.spec,
             registered_workers.c.spec["backend"].as_string() == backend,
             registered_workers.c.spec["configuration_id"].as_string()
             == configuration_id,
         )
-    ).scalars()
-    if any(row.get("output_delivery", "") != output_delivery for row in rows):
-        raise Conflict("configuration_output_delivery_conflict")
-    approvals = connection.execute(
-        select(capacity_approvals.c.payload).where(
+        or differs(
+            capacity_approvals.c.payload,
             capacity_approvals.c.configuration_id == configuration_id,
             func.coalesce(
                 capacity_approvals.c.payload["backend"].as_string(), COMFY_WORKER.id
             )
             == backend,
         )
-    ).scalars()
-    if any(row.get("output_delivery", "") != output_delivery for row in approvals):
-        raise Conflict("configuration_output_delivery_conflict")
-    accepted = connection.execute(
-        select(jobs.c.execution_plan).where(
+        or differs(
+            jobs.c.execution_plan,
             jobs.c.execution_plan["backend"].as_string() == backend,
             jobs.c.execution_plan["configuration_id"].as_string() == configuration_id,
         )
-    ).scalars()
-    if any(row.get("output_delivery", "") != output_delivery for row in accepted):
+    ):
         raise Conflict("configuration_output_delivery_conflict")
 
 
