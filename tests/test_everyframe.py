@@ -361,7 +361,23 @@ class BackendTests(unittest.TestCase):
                         ],
                         check=True,
                     )
-                    _validate_video(final, width, height, length, audio)
+                    # #1301: the output is probed once before the copy and
+                    # once after it, and decoded once, sound included.
+                    from studio_platform import media
+
+                    with mock.patch.object(
+                        media, "run_media_process", wraps=media.run_media_process
+                    ) as started:
+                        probed = media.probe(paths["video"])
+                        self.assertEqual(
+                            rewrap_args(
+                                plan.BACKEND, paths["video"], value, audio, probed
+                            ),
+                            copy_args,
+                        )
+                        _validate_video(final, width, height, length, audio)
+                    tools = [call.args[0][0] for call in started.call_args_list]
+                    self.assertEqual(tools, ["ffprobe", "ffprobe", "ffprobe", "ffmpeg"])
                     # A film joins the delivered file unencoded (render_copy):
                     # square pixels and the header the renderer's clip encode
                     # writes for it, whatever the vendor's canvas was.
