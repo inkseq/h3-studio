@@ -630,7 +630,8 @@ export function createLiveChat({
           return;
         }
       }
-      await new Promise((resolve) => setTimeout(resolve, labels.pollMs ?? 15000));
+      // One small read every 5 s; at 15 s a finished shot showed up to 15 s late (h3-studio#1301).
+      await new Promise((resolve) => setTimeout(resolve, labels.pollMs ?? 5000));
     }
   }
   return {
