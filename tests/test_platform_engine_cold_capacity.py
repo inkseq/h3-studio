@@ -220,6 +220,45 @@ class EngineCapacityTests(capacity_fixture.CapacityTests):
             self.repo.create_job(self.scope, plan["id"], "stale-plan")
         self.assertEqual(self.repo.list_jobs(self.scope), [])
 
+    def test_a_recorded_delivery_is_compared_by_the_database(self):
+        # #1301: the check read every accepted job's plan back to compare it.
+        from studio_platform.control import require_delivery_configuration
+        from studio_platform.inference.outputs import NATIVE_DELIVERY
+        from studio_platform.repository import capacity_approvals
+
+        self.use_wangp()
+        self.approve_wangp(approval_id="no-delivery-recorded")
+        with self.repo.engine.connect() as connection:
+            configuration = connection.execute(
+                select(capacity_approvals.c.configuration_id)
+            ).scalar_one()
+
+            def check(backend, configuration_id, delivery):
+                require_delivery_configuration(
+                    connection, backend, configuration_id, delivery
+                )
+
+            from sqlalchemy import event
+
+            seen = []
+            listen = (self.repo.engine, "before_cursor_execute")
+            note = lambda *args: seen.append(args[2].upper())  # noqa: E731
+            event.listen(*listen, note)
+            try:
+                check("wangp-worker", configuration, "")  # No field: the empty one.
+            finally:
+                event.remove(*listen, note)
+            # Three questions, one row each at most, and no payload read back.
+            self.assertEqual(len(seen), 3, seen)
+            self.assertTrue(all(" LIMIT " in text for text in seen), seen)
+            check("comfy-worker", configuration, NATIVE_DELIVERY)  # Other backend.
+            check("wangp-worker", "another-configuration", NATIVE_DELIVERY)
+            with self.assertRaisesRegex(Conflict, "output_delivery_conflict"):
+                check("wangp-worker", configuration, NATIVE_DELIVERY)
+        self.approve_wangp(approval_id="same-again")
+        with self.assertRaisesRegex(Conflict, "output_delivery_conflict"):
+            self.approve_wangp(approval_id="native", output_delivery=NATIVE_DELIVERY)
+
     def test_opposite_first_approvals_share_the_registration_capacity_lock(self):
         from studio_platform.control import require_delivery_configuration
         from studio_platform.inference.outputs import NATIVE_DELIVERY
