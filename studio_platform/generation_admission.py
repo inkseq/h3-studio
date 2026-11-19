@@ -443,13 +443,23 @@ class GenerationAdmission:
             model_prompt=written,
         )
 
-    def create(
+    def create(self, principal, plan_id, key, **options):
+        from .phase_timing import PhaseTimer
+
+        # Generate waited 0.7 s here and 1.3 s in enqueue for each shot (#1301).
+        with PhaseTimer("job_create_timing", slow_ms=300):
+            return self._create(principal, plan_id, key, **options)
+
+    def _create(
         self, principal, plan_id, key, *, initial_status=None, business_identity=None
     ):
+        from .phase_timing import lap
+
         plan = self.access.plan(principal, plan_id)
         project = self.access.project(principal, plan["project_id"], "jobs:write")[
             "payload"
         ]
+        lap("load")
         if business_identity is None:
             reject_managed(project)
         elif not managed_project(project):
@@ -460,7 +470,9 @@ class GenerationAdmission:
         existing = self.repo.lookup_job_by_idempotency(task_scope, key)
         if existing:
             return self.repo.create_job(task_scope, plan_id, key)
+        lap("lookup")
         self.planning.check_source(project, plan["request"], principal)
+        lap("source")
         execution = plan["execution_plan"]
         if execution.get("budget_error_code") == "budget_exceeded":
             raise BudgetExceeded("budget_exceeded")
@@ -482,6 +494,7 @@ class GenerationAdmission:
         if status in {"queued", "waiting_capacity"}:
             self._require_no_maintenance()
         budgets = self.policies.ensure_current(plan, task_scope) if ready else ()
+        lap("policies")  # What is left of the total is the ledger write.
         return self.repo.create_job(
             task_scope,
             plan_id,
@@ -518,7 +531,7 @@ class GenerationAdmission:
     ):
         from .phase_timing import PhaseTimer
 
-        with PhaseTimer("job_enqueue_timing") as timer:
+        with PhaseTimer("job_enqueue_timing", slow_ms=500) as timer:
             plan = self.access.plan(principal, job["plan_id"])
             project = self.access.project(principal, job["project_id"], "jobs:write")[
                 "payload"
