@@ -288,6 +288,84 @@ class AssetTests(OfflineTest):
         self.assertTrue(order[0].endswith("source.png"), order)
         self.assertEqual(len(order), 4)
 
+    def phases(self, asset):
+        objects = self.service.journal.get("owner", asset["id"])["objects"]
+        return {role: spec["phase"] for role, spec in objects.items()}
+
+    def test_a_copy_never_written_is_read_back_and_nothing_is_put_again(self):
+        self.store.failure = ("thumb-v1.webp", "before")
+        with self.assertRaises(StorageWriteUncertain):
+            self.upload()
+        asset = self.only_asset()
+        self.assertEqual(self.phases(asset)["thumb"], "put_unknown")
+        for _ in range(2):
+            with self.assertRaises(ObjectNotFound):
+                self.make_service().resume("owner", asset["id"])
+        # Its siblings were settled; the missing one is never put under a new key.
+        self.assertEqual(
+            self.phases(asset),
+            {
+                "original": "verified",
+                "model": "verified",
+                "thumb": "put_unknown",
+                "preview": "verified",
+            },
+        )
+        self.assertEqual(len(self.store.calls), 4)
+        self.assertEqual(self.only_asset()["status"], "storage_unknown")
+
+    def test_an_unknown_copy_is_settled_before_any_other_copy_is_put(self):
+        # A receipt left by the one-by-one path: the model copy's put is unknown
+        # and its object is missing; thumb and preview were never started.
+        def one_by_one(service, receipt, *, interrupted=False):
+            for role in ("original", "model", "thumb", "preview"):
+                service._write_object(receipt, role, interrupted=interrupted)
+
+        self.store.failure = ("normalized.png", "before")
+        with mock.patch("studio_platform.assets.write_objects", one_by_one):
+            with self.assertRaises(StorageWriteUncertain):
+                self.upload()
+        asset = self.only_asset()
+        self.assertEqual(self.phases(asset)["thumb"], "planned")
+        with self.assertRaises(ObjectNotFound):
+            self.make_service().resume("owner", asset["id"])
+        self.assertEqual(len(self.store.calls), 2)
+        self.assertEqual(self.phases(asset)["preview"], "planned")
+
+    def test_a_failed_read_back_keeps_its_siblings_and_recovers_without_a_put(self):
+        real, failed = self.service._verify_stored, []
+
+        def verify(spec):
+            if spec["filename"] == "preview-v1.webp" and not failed:
+                failed.append(spec["key"])
+                raise IntegrityError("read-back failed once")
+            return real(spec)
+
+        with mock.patch.object(self.service, "_verify_stored", verify):
+            with self.assertRaises(IntegrityError):
+                self.upload()
+        asset = self.only_asset()
+        self.assertEqual(self.phases(asset)["preview"], "verifying")
+        self.assertEqual(self.phases(asset)["thumb"], "verified")
+        recovered = self.make_service().resume("owner", asset["id"])
+        self.assertEqual(recovered["status"], "ready")
+        self.assertEqual(len(self.store.calls), 4)
+
+    def test_a_stop_during_the_copies_recovers_by_read_back_only(self):
+        self.store.failure = ("thumb-v1.webp", "crash")
+        with self.assertRaises(ProcessStopped):
+            self.upload()
+        asset = self.only_asset()
+        self.assertEqual(
+            {self.phases(asset)[role] for role in ("model", "thumb", "preview")},
+            {"putting"},
+        )
+        recovered = self.make_service().reconcile(
+            "owner", asset["id"], interrupted=True
+        )
+        self.assertEqual(recovered["status"], "ready")
+        self.assertEqual(len(self.store.calls), 4)
+
     def test_second_model_write_can_recover_without_reuploading_either_copy(self):
         self.store.failure = ("normalized.png", "after")
         with self.assertRaises(StorageWriteUncertain):

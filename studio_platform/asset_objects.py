@@ -63,48 +63,55 @@ def _write_copies(service, receipt, roles, interrupted):
             for each in roles:
                 service._write_object(receipt, each, interrupted=interrupted)
             return
+
+    def read_back(names):
+        # Unknown outcomes only read back the existing key. Never new-key retry.
+        read = _together(lambda role: service._verify_stored(objects[role]), names)
+        changed = False
+        for role in names:
+            if not isinstance(read[role], Exception) and role in paths:
+                receipt["asset"][role] = asdict(read[role])
+                objects[role]["phase"] = "verified"
+                changed = True
+        if changed:
+            save(receipt)
+        for role in names:
+            if isinstance(read[role], Exception):
+                raise read[role]
+
     planned = [role for role in paths if objects[role]["phase"] == "planned"]
-    if planned:
-        for role in planned:
-            objects[role].update(
-                key=make_object_key(
-                    receipt["owner"], receipt["id"], objects[role]["filename"]
-                ),
-                phase="putting",
-            )
-        save(receipt)  # Intents committed before the first possible object write.
+    # A copy whose earlier outcome is unknown is settled before a new one is put.
+    read_back([role for role in roles if role not in planned])
+    if not planned:
+        return
+    for role in planned:
+        objects[role].update(
+            key=make_object_key(
+                receipt["owner"], receipt["id"], objects[role]["filename"]
+            ),
+            phase="putting",
+        )
+    save(receipt)  # Intents committed before the first possible object write.
 
-        def put(role):
-            spec = objects[role]
-            try:
-                with paths[role].open("rb") as source:
-                    service.store.put(
-                        spec["key"],
-                        source,
-                        content_type=spec["content_type"],
-                        max_bytes=service.max_bytes,
-                        expected_sha256=spec["sha256"],
-                    )
-            except ObjectAlreadyExists:
-                pass
+    def put(role):
+        spec = objects[role]
+        try:
+            with paths[role].open("rb") as source:
+                service.store.put(
+                    spec["key"],
+                    source,
+                    content_type=spec["content_type"],
+                    max_bytes=service.max_bytes,
+                    expected_sha256=spec["sha256"],
+                )
+        except ObjectAlreadyExists:
+            pass
 
-        outcome = _together(put, planned)
-        unknown = [role for role in planned if outcome[role] is not None]
-        for role in planned:
-            objects[role]["phase"] = "put_unknown" if role in unknown else "verifying"
-        save(receipt)
-        if unknown:
-            raise StorageWriteUncertain(objects[unknown[0]]["key"]) from None
-    # Unknown outcomes only read back the existing key. Never new-key retry.
-    read = _together(lambda role: service._verify_stored(objects[role]), roles)
-    changed = False
-    for role in roles:
-        if not isinstance(read[role], Exception) and role in paths:
-            receipt["asset"][role] = asdict(read[role])
-            objects[role]["phase"] = "verified"
-            changed = True
-    if changed:
-        save(receipt)
-    for role in roles:
-        if isinstance(read[role], Exception):
-            raise read[role]
+    outcome = _together(put, planned)
+    unknown = [role for role in planned if outcome[role] is not None]
+    for role in planned:
+        objects[role]["phase"] = "put_unknown" if role in unknown else "verifying"
+    save(receipt)
+    if unknown:
+        raise StorageWriteUncertain(objects[unknown[0]]["key"]) from None
+    read_back(planned)
