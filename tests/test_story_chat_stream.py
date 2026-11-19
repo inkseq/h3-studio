@@ -150,6 +150,41 @@ class StoryChatStreamTests(unittest.TestCase):
         chat = self.client.get(f"/v1/story-chats/{self.project}").json()
         self.assertEqual(chat.get("turns", chat.get("chat", {}).get("turns", 0)), 0)
 
+    def test_a_withheld_or_cut_off_answer_is_asked_once_more(self):
+        # Staging, 2026-11-19: Gemini stopped an innocent plan for policy in the
+        # middle of its JSON, and the fragment was stored as the reply.
+        cut = '{"reply":"Here is the plan.","actions":[{"tool":"upsert_'
+        for number, first in enumerate(
+            (ChatError("empty_or_blocked", "blocked", 502), cut), start=1
+        ):
+            self.model.plans += [first, CAST]
+            calls = len(self.model.calls)
+            _, _, text = self.stream({"turn_id": f"turn-000{number}", "text": "Hi"})
+            name, done = events(text)[-1]
+            self.assertEqual(name, "done", text)
+            self.assertEqual(len(self.model.calls), calls + 2)
+            self.assertEqual(done["turn"]["turn_id"], f"turn-000{number}")
+            self.assertEqual(len(done["cards"]["characters"]), 2 * number)
+            self.assertNotIn("upsert_", json.dumps(done["messages"]))
+
+    def test_an_answer_withheld_twice_is_an_error_and_writes_nothing(self):
+        cut = '{"reply":"Here is the plan.","actions":[{"tool":"upsert_'
+        for plans, code in (
+            (
+                [ChatError("empty_or_blocked", "blocked", 502)] * 2,
+                "assistant_empty_or_blocked",
+            ),
+            ([cut, cut], "story_chat_plan_invalid"),
+        ):
+            self.model.plans += plans
+            calls = len(self.model.calls)
+            _, _, text = self.stream({"turn_id": "turn-0001", "text": "Hi"})
+            name, data = events(text)[-1]
+            self.assertEqual((name, data["detail"]["code"]), ("error", code))
+            self.assertEqual(len(self.model.calls), calls + 2)
+            chat = self.client.get(f"/v1/story-chats/{self.project}").json()
+            self.assertEqual(chat["messages"], [])
+
 
 class StoryChatStreamWithoutStreamingClientTests(StoryChatStreamTests):
     """A client without generate_stream still works: progress steps only."""
@@ -218,6 +253,47 @@ class GoogleStreamTests(unittest.TestCase):
                 "gemini-3.8-flash", [{"role": "user", "text": "x"}], ""
             )
         self.assertEqual(caught.exception.code, "empty_or_blocked")
+
+    def test_text_before_a_policy_stop_is_not_an_answer(self):
+        def chunks(reason):
+            part = {"content": {"parts": [{"text": '{"reply": "Hel'}]}}
+            return [{"candidates": [part | {"finishReason": reason}]}]
+
+        ask = ("gemini-3.8-flash", [{"role": "user", "text": "x"}], "")
+        for reason in ("PROHIBITED_CONTENT", "SAFETY", "RECITATION", "OTHER"):
+            with self.subTest(reason=reason):
+                with self.assertRaises(ChatError) as caught:
+                    self.client(chunks(reason)).generate_stream(*ask)
+                self.assertEqual(caught.exception.code, "empty_or_blocked")
+        # The caller's own token limit still returns what was written.
+        result = self.client(chunks("MAX_TOKENS")).generate_stream(*ask)
+        self.assertEqual(result["text"], '{"reply": "Hel')
+
+    def test_the_plain_call_treats_a_policy_stop_the_same(self):
+        def client(reason):
+            body = {
+                "candidates": [
+                    {"content": {"parts": [{"text": "Hel"}]}, "finishReason": reason}
+                ]
+            }
+            config = type(
+                "C",
+                (),
+                {
+                    "base_url": "https://generativelanguage.googleapis.com",
+                    "api_key": "k",
+                },
+            )()
+            return GoogleChatClient(
+                loader=lambda: config,
+                transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body)),
+            )
+
+        ask = ("gemini-3.8-flash", [{"role": "user", "text": "x"}], "")
+        with self.assertRaises(ChatError) as caught:
+            client("PROHIBITED_CONTENT").generate(*ask)
+        self.assertEqual(caught.exception.code, "empty_or_blocked")
+        self.assertEqual(client("STOP").generate(*ask)["text"], "Hel")
 
 
 if __name__ == "__main__":

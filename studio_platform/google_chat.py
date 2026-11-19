@@ -113,6 +113,21 @@ def payload(
     return {"contents": contents, "generationConfig": config}
 
 
+# Gemini returns what it wrote before a policy stop (SAFETY, PROHIBITED_CONTENT,
+# RECITATION, ...): a fragment, never an answer. Staging, 2026-11-19: an innocent
+# story idea ended PROHIBITED_CONTENT 98 tokens into its JSON plan, and the same
+# request completed on the next run. MAX_TOKENS is the caller's own limit.
+_ANSWERED = frozenset({"STOP", "MAX_TOKENS", None})
+
+
+def _answered(text, candidate):
+    if not text.strip() or candidate.get("finishReason") not in _ANSWERED:
+        raise ChatError(
+            "empty_or_blocked",
+            "没有收到可展示的文本，可能被拦截或输出额度耗尽；没有自动重试。",
+        )
+
+
 def _image_parts(model, images, last):
     """Inline pictures for the latest user message only; never history."""
     if (
@@ -372,12 +387,8 @@ class GoogleChatClient:
                 "无法完成Google连接，请检查中央配置或网络；没有自动重发。",
                 503,
             ) from None
-        if not text.strip():
-            raise ChatError(
-                "empty_or_blocked",
-                "没有收到可展示的文本，可能被拦截或输出额度耗尽；没有自动重试。",
-            )
         candidate = (last.get("candidates") or [{}])[0]
+        _answered(text, candidate)
         usage = last.get("usageMetadata", {})
         return {
             "model": model,
@@ -412,11 +423,7 @@ class GoogleChatClient:
             for p in parts
             if isinstance(p.get("text"), str) and not p.get("thought")
         )
-        if not text.strip():
-            raise ChatError(
-                "empty_or_blocked",
-                "没有收到可展示的文本，可能被拦截或输出额度耗尽；没有自动重试。",
-            )
+        _answered(text, candidate)
         usage = data.get("usageMetadata", {})
         return {
             "model": model,
