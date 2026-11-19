@@ -238,7 +238,19 @@ class EngineCapacityTests(capacity_fixture.CapacityTests):
                     connection, backend, configuration_id, delivery
                 )
 
-            check("wangp-worker", configuration, "")  # No field is the empty one.
+            from sqlalchemy import event
+
+            seen = []
+            listen = (self.repo.engine, "before_cursor_execute")
+            note = lambda *args: seen.append(args[2].upper())  # noqa: E731
+            event.listen(*listen, note)
+            try:
+                check("wangp-worker", configuration, "")  # No field: the empty one.
+            finally:
+                event.remove(*listen, note)
+            # Three questions, one row each at most, and no payload read back.
+            self.assertEqual(len(seen), 3, seen)
+            self.assertTrue(all(" LIMIT " in text for text in seen), seen)
             check("comfy-worker", configuration, NATIVE_DELIVERY)  # Other backend.
             check("wangp-worker", "another-configuration", NATIVE_DELIVERY)
             with self.assertRaisesRegex(Conflict, "output_delivery_conflict"):
