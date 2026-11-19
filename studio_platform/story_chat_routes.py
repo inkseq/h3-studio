@@ -634,13 +634,11 @@ def register_story_chat_routes(app, *, client=None, image_client=None, billing=N
                     "json_mode": True,
                     "thinking": THINKING,
                 }
-                from .story_chat_stream import call_model
+                from .story_chat_stream import planned
 
-                result = call_model(client, call, options, progress)
-                plan = (
-                    _parse(result["text"], max_actions=MAX_SCRIPT_ACTIONS)
-                    if is_script
-                    else _parse(result["text"])
+                size = {"max_actions": MAX_SCRIPT_ACTIONS} if is_script else {}
+                plan = planned(
+                    client, call, options, progress, lambda text: _parse(text, **size)
                 )
             except ChatError as error:
                 # Nothing was written; the person can simply send again.

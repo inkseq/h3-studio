@@ -115,6 +115,21 @@ def call_model(client, call, options, progress=None):
     return client.generate_stream(*call, **options, on_text=seen)
 
 
+# One more call answers most of these: Gemini stops an innocent answer for
+# policy now and then, and the same request completes on the next run.
+AGAIN = frozenset({"empty_or_blocked", "story_chat_plan_invalid"})
+
+
+def planned(client, call, options, progress, parse):
+    """parse(the model's text); asks once more when the answer was withheld or cut off."""
+    try:
+        return parse(call_model(client, call, options, progress)["text"])
+    except Exception as error:
+        if getattr(error, "code", None) not in AGAIN:
+            raise
+    return parse(call_model(client, call, options, progress)["text"])
+
+
 def stream_turn(run, *, heartbeat=HEARTBEAT_SECONDS):
     """Run `run(progress)` in a worker and yield its events as SSE text.
 
