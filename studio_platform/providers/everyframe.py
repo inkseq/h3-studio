@@ -23,6 +23,7 @@ from pathlib import Path
 
 from .hosted_models import BACKEND, CONFIGURATIONS, PROVIDER, vendor_request
 from .http import VendorHTTP
+from ..phase_timing import lap
 from ..inference.protocol import (
     BackendError,
     NotReady,
@@ -292,6 +293,7 @@ class EveryFrameBackend:
         heartbeat()
         try:
             self._download(url, raw, heartbeat)
+            lap("hosted_download")  # collect_ms that follows is the normalize.
             return self._normalize(job, raw, target, track)
         finally:
             for path in (raw, track):
