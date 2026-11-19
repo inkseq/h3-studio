@@ -16,6 +16,7 @@ import uuid
 from sqlalchemy import Column, Float, MetaData, String, Table, Text, delete, select
 
 from . import media
+from .asset_objects import write_objects
 from .asset_source_preparation import AssetSourcePreparation
 from .media_renditions import (
     ASSET_OBJECT_ROLES,
@@ -58,7 +59,6 @@ from .storage_schema import create_storage_schema
 from .asset_operation import asset_operation_lock
 from . import scratch_retention
 from .content_lifecycle import content_is_deleted, owner_reference_gate
-from .phase_timing import PhaseTimer, lap
 
 UPLOAD_SLOW_MS = 2000
 
@@ -703,7 +703,6 @@ class AssetService(AssetSourcePreparation):
                     phase="putting",
                 )
                 save(receipt)
-                lap("save")
                 try:
                     with path.open("rb") as source:
                         self.store.put(
@@ -719,17 +718,13 @@ class AssetService(AssetSourcePreparation):
                     spec["phase"] = "put_unknown"
                     save(receipt)
                     raise StorageWriteUncertain(spec["key"]) from None
-                lap("put")
                 spec["phase"] = "verifying"
                 save(receipt)
-                lap("save")
             # Unknown outcomes only read back the existing key. Never new-key retry.
             result = self._verify_stored(spec)
-            lap("verify")
         receipt["asset"][role] = asdict(result)
         spec["phase"] = "verified"
         save(receipt)
-        lap("save")
 
     def _run(self, receipt, *, interrupted=False):
         with self._operation(receipt["id"]):
@@ -756,11 +751,8 @@ class AssetService(AssetSourcePreparation):
                         if receipt.get("frame_extraction"):
                             self._prepare_artifact_frame(receipt)
                         self._prepare(receipt)
-            # A 400 KB picture spent 6 to 7 s here on staging (#1301).
-            with phase("store"), PhaseTimer("asset_store_timing", slow_ms=1000):
-                for role in ASSET_OBJECT_ROLES:
-                    if role in receipt["objects"]:
-                        self._write_object(receipt, role, interrupted=interrupted)
+            with phase("store"):
+                write_objects(self, receipt, interrupted=interrupted)
             receipt["asset"]["status"] = "ready"
             with phase("finish"):
                 self.journal.save(receipt)

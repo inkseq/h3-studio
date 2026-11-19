@@ -107,7 +107,7 @@ class RenditionTests(OfflineTest):
                 self.assertEqual(image.getpixel((10, 10))[3], 90)
 
     def test_idempotent_upload_and_unknown_rendition_put_recover_same_key_once(self):
-        self.store.failure = (3, "after")
+        self.store.failure = ("thumb-v1.webp", "after")
         with self.assertRaises(StorageWriteUncertain):
             self.upload()
         value = self.service.list("owner", "project")[0]

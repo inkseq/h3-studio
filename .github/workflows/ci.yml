@@ -879,7 +879,9 @@ jobs:
     if: ${{ !cancelled() && needs.deploy-staging-aws.result == 'success' }}
     needs: [changes, deploy-staging-aws]
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    # The journeys take under 3 min; installing the browser took 3.5 to 7 min on
+    # 2026-11-19 and once ran this job into a 12-minute limit before they started.
+    timeout-minutes: 20
     permissions: {contents: read}
     concurrency: {group: sixnine-staging-deploy, cancel-in-progress: false}
     steps:
