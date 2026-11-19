@@ -292,6 +292,7 @@ class EveryFrameBackend:
         track = self._kept_track(job, target)
         heartbeat()
         try:
+            lap("collect_prepare")  # Staging, the status read and a kept track.
             self._download(url, raw, heartbeat)
             lap("hosted_download")  # collect_ms that follows is the normalize.
             return self._normalize(job, raw, target, track)

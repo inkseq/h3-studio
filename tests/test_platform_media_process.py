@@ -92,13 +92,13 @@ class MediaProcessUnitTests(unittest.TestCase):
         # #1301: the launcher runs before every ffmpeg and ffprobe; importing
         # what only the parent uses cost it about 0.3 s each time.
         code = (
-            "import sys\n"
+            "import os, sys\n"
+            "before = set(sys.modules)\n"
             "source = open(sys.argv[1], encoding='utf-8').read()\n"
             "try:\n"
             "    exec(compile(source, sys.argv[1], 'exec'), {'__name__': '__main__'})\n"
             "except SystemExit as stop:\n"
-            "    names = {'math', 'pathlib', 'shutil', 'subprocess', 'tempfile'}\n"
-            "    print(stop.code, sorted(names & set(sys.modules)))\n"
+            "    print(stop.code, sorted(set(sys.modules) - before))\n"
         )
         result = subprocess.run(
             [sys.executable, "-I", "-S", "-c", code, target.__file__],
@@ -106,7 +106,10 @@ class MediaProcessUnitTests(unittest.TestCase):
             text=True,
             timeout=30,
         )
-        self.assertEqual(result.stdout.strip(), "78 []", result.stderr[-300:])
+        # Too few arguments: the policy exit, having loaded nothing but this.
+        self.assertEqual(
+            result.stdout.strip(), "78 ['__future__']", result.stderr[-300:]
+        )
 
     def test_policy_validation_and_setrlimit_failure_do_not_exec(self):
         with (
