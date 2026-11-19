@@ -17,6 +17,7 @@ import json
 import math
 import os
 import re
+import time
 from contextlib import closing
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -259,7 +260,7 @@ class EveryFrameBackend:
 
     def _download(self, url, target, heartbeat):
         request = self._request("GET", url)
-        count = 0
+        count, beat = 0, time.monotonic()
         try:
             with closing(self._http.send(request)) as response:
                 if response.status_code != 200:
@@ -270,7 +271,11 @@ class EveryFrameBackend:
                         if count > MAX_OUTPUT_BYTES:
                             raise BackendError("everyframe_output_too_large")
                         handle.write(chunk)
-                        heartbeat()
+                        # Chunks are 16 KB and a beat is two transactions: 200
+                        # of them made a 0.3 s download take 7 s (#1301).
+                        if time.monotonic() - beat >= 5:
+                            heartbeat()
+                            beat = time.monotonic()
                     handle.flush()
                     os.fsync(handle.fileno())
         except BackendError:
