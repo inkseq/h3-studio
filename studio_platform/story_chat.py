@@ -354,6 +354,9 @@ def _parse(text, *, max_actions=MAX_ACTIONS):
     try:
         value = json.loads(raw)
     except ValueError:
+        if raw[:1] in ("{", "["):
+            # A plan that stops halfway is not prose; its JSON is never shown.
+            raise StoryChatError("story_chat_plan_invalid", 502) from None
         # Prose without a plan is still a useful reply; nothing is edited.
         return {"reply": text.strip()[:MAX_TEXT_CHARS], "chips": [], "actions": []}
     if not isinstance(value, dict):
