@@ -57,7 +57,12 @@ class FaultStore(LocalObjectStore):
         failure = self.failure
         if isinstance(failure, tuple):
             number, kind = failure
-            if len(self.calls) != number:
+            # A file name picks one object: an asset's copies are put together.
+            if not (
+                key.endswith(number)
+                if isinstance(number, str)
+                else len(self.calls) == number
+            ):
                 return super().put(key, source, **kwargs)
             failure = kind
         self.failure = None
@@ -267,8 +272,24 @@ class AssetTests(OfflineTest):
             self.service.get("owner", asset["id"])["status"], "storage_unknown"
         )
 
+    def test_the_copies_are_stored_together_after_the_original(self):
+        # #1301: an object is about 2 s to the object store; four in a row
+        # made a drawn picture take 6 to 8 s to store.
+        gate, order, put = threading.Barrier(3, timeout=10), [], self.store.put
+
+        def together(key, source, **kwargs):
+            order.append(key)
+            if not key.endswith("source.png"):
+                gate.wait()  # Passes only with all three copies in flight.
+            return put(key, source, **kwargs)
+
+        self.store.put = together
+        self.assertEqual(self.upload()["status"], "ready")
+        self.assertTrue(order[0].endswith("source.png"), order)
+        self.assertEqual(len(order), 4)
+
     def test_second_model_write_can_recover_without_reuploading_either_copy(self):
-        self.store.failure = (2, "after")
+        self.store.failure = ("normalized.png", "after")
         with self.assertRaises(StorageWriteUncertain):
             self.upload()
         asset = self.only_asset()
