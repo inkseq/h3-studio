@@ -3,23 +3,64 @@
 The fresh interpreter sets its own limits before exec replaces it with the tool
 in the same PID. This bounds one process, not the whole container or descendant
 tree. Windows development can run normally, but has no OS memory limit here.
+
+This file is both the module and that interpreter's script. As the script it
+must stop at the `__main__` block below: everything the launcher needs is
+above it and imports only os and sys. The parent's own imports further down
+cost about 0.3 s in an interpreter without cached bytecode (staging,
+2026-11-19: 343 ms against 37 ms), and every ffmpeg and ffprobe paid that,
+thirteen times for one collected shot (#1301).
 """
 
 from __future__ import annotations
 
-import math
 import os
+import sys
+
+DEFAULT_ADDRESS_SPACE_BYTES = 9 * 1024**3 // 4  # 2.25 GiB, not an RSS promise.
+_POLICY_EXIT = 78
+_TOOLS = frozenset({"ffmpeg", "ffprobe"})
+
+
+def _limited_exec(arguments):
+    """Internal child entry, invoked only in a fresh Python interpreter."""
+    try:
+        if (
+            not sys.platform.startswith("linux")
+            or len(arguments) < 4
+            or arguments[0] != "--limited-exec"
+        ):
+            return _POLICY_EXIT
+        amount = int(arguments[1])
+        tool, executable = arguments[2:4]
+        if (
+            not 16 * 1024**2 <= amount <= DEFAULT_ADDRESS_SPACE_BYTES
+            or tool not in _TOOLS
+            or not os.path.isabs(executable)
+            or not os.path.isfile(executable)
+        ):
+            return _POLICY_EXIT
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        resource.setrlimit(resource.RLIMIT_AS, (amount, amount))
+        # Both limits survive exec. The PID remains the subprocess.run child.
+        os.execv(executable, [executable, *arguments[4:]])
+    except (OSError, ValueError, OverflowError, ImportError):
+        return _POLICY_EXIT
+    return _POLICY_EXIT
+
+
+if __name__ == "__main__":
+    raise SystemExit(_limited_exec(sys.argv[1:]))
+
+import math
 from pathlib import Path
 import shutil
 import subprocess
-import sys
 import tempfile
 
-
-DEFAULT_ADDRESS_SPACE_BYTES = 9 * 1024**3 // 4  # 2.25 GiB, not an RSS promise.
 MAX_CAPTURE_BYTES = 1024 * 1024
-_POLICY_EXIT = 78
-_TOOLS = frozenset({"ffmpeg", "ffprobe"})
 
 
 class MediaProcessError(subprocess.SubprocessError):
@@ -155,36 +196,3 @@ def run_media_process(
     finally:
         if captured is not None:
             captured.close()
-
-
-def _limited_exec(arguments):
-    """Internal child entry, invoked only in a fresh Python interpreter."""
-    try:
-        if (
-            not sys.platform.startswith("linux")
-            or len(arguments) < 4
-            or arguments[0] != "--limited-exec"
-        ):
-            return _POLICY_EXIT
-        amount = int(arguments[1])
-        tool, executable = arguments[2:4]
-        if (
-            not 16 * 1024**2 <= amount <= DEFAULT_ADDRESS_SPACE_BYTES
-            or tool not in _TOOLS
-            or not Path(executable).is_absolute()
-            or not Path(executable).is_file()
-        ):
-            return _POLICY_EXIT
-        import resource
-
-        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-        resource.setrlimit(resource.RLIMIT_AS, (amount, amount))
-        # Both limits survive exec. The PID remains the subprocess.run child.
-        os.execv(executable, [executable, *arguments[4:]])
-    except (OSError, ValueError, OverflowError, ImportError):
-        return _POLICY_EXIT
-    return _POLICY_EXIT
-
-
-if __name__ == "__main__":
-    raise SystemExit(_limited_exec(sys.argv[1:]))

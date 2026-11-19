@@ -347,8 +347,11 @@ class WorkerRunner:
             return
         try:
             from .artifact_renditions import ensure
+            from .phase_timing import lap
 
+            lap("collection_cleanup")
             ensure(writer, job, lease.attempt_id, tag)
+            lap("renditions")
         except Exception:
             # Display failures never invalidate acceptance or trigger replay.
             logging.getLogger(__name__).warning(

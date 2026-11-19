@@ -88,6 +88,29 @@ class MediaProcessUnitTests(unittest.TestCase):
             self.assertIn("--limited-exec", run.call_args.args[0])
             self.assertNotIn("private-input", str(caught.exception))
 
+    def test_the_launcher_stops_before_the_parents_imports(self):
+        # #1301: the launcher runs before every ffmpeg and ffprobe; importing
+        # what only the parent uses cost it about 0.3 s each time.
+        code = (
+            "import os, sys\n"
+            "before = set(sys.modules)\n"
+            "source = open(sys.argv[1], encoding='utf-8').read()\n"
+            "try:\n"
+            "    exec(compile(source, sys.argv[1], 'exec'), {'__name__': '__main__'})\n"
+            "except SystemExit as stop:\n"
+            "    print(stop.code, sorted(set(sys.modules) - before))\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", code, target.__file__],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        # Too few arguments: the policy exit, having loaded nothing but this.
+        self.assertEqual(
+            result.stdout.strip(), "78 ['__future__']", result.stderr[-300:]
+        )
+
     def test_policy_validation_and_setrlimit_failure_do_not_exec(self):
         with (
             mock.patch.object(target.sys, "platform", "linux"),
