@@ -58,15 +58,17 @@ from .content_lifecycle import (
 )
 
 MIB = 1024 * 1024
-# What a collection reserves per kind: five times what such an output weighs
-# (owner, 2026-11-19). Measured on staging over about 800 takes and films:
-# video 0.45-0.69 MB per second per megapixel at the median (heaviest 1.94),
-# audio 0.03-0.10 MiB/s (heaviest 0.15). Staging holds up to three copies
-# (download, verified, stored), so a usual take fits with room to spare and
-# a heavy one is charged the difference when prepared.
-VIDEO_ALLOWANCE = 3 * MIB  # per second of output, per megapixel
+# What a collection reserves per kind: room for the heaviest output seen, in
+# the three copies staging can hold (download, verified, stored). Measured on
+# staging over 533 videos and 511 audio tracks (2026-11-19): video 0.56 MiB
+# per second per megapixel at the median, 1.62 at the 99th percentile, 1.85
+# at most; audio 0.095 MiB/s at the median, 0.146 at most. Half this video
+# allowance (five times the median) left 6.6 % of takes to be charged the
+# rest when prepared; at this one none are, and more would only refuse a
+# nearly full account sooner.
+VIDEO_ALLOWANCE = 6 * MIB  # per second of output, per megapixel
 AUDIO_ALLOWANCE = MIB // 2  # per second of output
-ALLOWANCE_FLOOR = MIB  # per file: containers and very short outputs
+ALLOWANCE_FLOOR = MIB  # per kind: containers and very short outputs
 _schema = MetaData()
 write_receipts = Table(
     "platform_artifact_write_receipts",
@@ -381,7 +383,7 @@ class ArtifactWriter:
         return size, digest.hexdigest()
 
     def _staging_bytes(self, job, kinds):
-        """What collecting this job reserves: five times its usual weight per kind.
+        """What collecting this job reserves: its heaviest likely weight, three times.
 
         The whole object limit (512 MiB) used to be reserved for every file:
         1.5-3 GiB of the owner's 10 GiB quota per shot, for takes of about
@@ -419,8 +421,8 @@ class ArtifactWriter:
         """Reserve quota for a collection BEFORE fetch/FFmpeg. No object writes here.
 
         One reservation for the raw download, the verified output and the
-        future immutable store object together: five times what such an
-        output usually weighs (_staging_bytes). The hard bound on scratch
+        future immutable store object together, each at the heaviest such
+        an output has been measured (_staging_bytes). The hard bound on scratch
         disk is the object limit each fetch and encode enforces per file.
         prepare() later settles this to verified actual bytes in one
         transaction. Crashed/failed staging keeps its receipt and reservation.

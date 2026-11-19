@@ -222,7 +222,7 @@ python -m studio_platform.render_cli --enabled --worker-id cpu-one --instance-id
 
 ## 产物配额与上传恢复
 
-`ArtifactWriter.begin_staging`在fetch/FFmpeg前持久预留共享owner/tenant容量：每个预期角色为raw下载+verified暂存+未来对象三份一并预留同类产物通常大小的5倍（视频每秒每百万像素3 MiB，音频每秒0.5 MiB，每角色另加1 MiB，不超过单文件上限；尺寸或时长读不出时按单文件上限。实测依据见`artifact_writer.py`，2026-11-19，#1301）；更重的产物在`prepare`按差额补记，受同一配额检查。此时失败或崩溃仍保留receipt和容量，不因lease过期释放。实际文件验证完成后，`prepare`在同一事务将预留缩减为每个产物对象+verified暂存两份实际大小，再加Comfy仍保留的raw实际大小，因此小视频成功后不会永久占用大上限。默认与素材服务一致为10 GiB/用户、40 GiB/tenant；CPU backend独立attempt缓存另受上述8 GiB限制。零收费粗剪仍受存储配额。
+`ArtifactWriter.begin_staging`在fetch/FFmpeg前持久预留共享owner/tenant容量：每个预期角色为raw下载+verified暂存+未来对象三份一并预留：按实测最重产物的三份（视频每秒每百万像素6 MiB，音频每秒0.5 MiB，每角色另加1 MiB，不超过单文件上限；尺寸或时长读不出时按单文件上限。实测依据见`artifact_writer.py`，2026-11-19，#1301）；更重的产物在`prepare`按差额补记，受同一配额检查。此时失败或崩溃仍保留receipt和容量，不因lease过期释放。实际文件验证完成后，`prepare`在同一事务将预留缩减为每个产物对象+verified暂存两份实际大小，再加Comfy仍保留的raw实际大小，因此小视频成功后不会永久占用大上限。默认与素材服务一致为10 GiB/用户、40 GiB/tenant；CPU backend独立attempt缓存另受上述8 GiB限制。零收费粗剪仍受存储配额。
 
 新表`platform_artifact_write_receipts`保存job/attempt、明确store绑定、固定对象键、摘要、大小和角色状态；`platform_artifact_storage_accounting`按scope/物理键幂等登记旧artifacts，不覆盖现有上传reservation。历史缺失大小/摘要/归属则拒绝新增，不能假设为0；历史对象以已有元信息计数，未通过盘点核实的旧暂存副本仍是待核实项。
 

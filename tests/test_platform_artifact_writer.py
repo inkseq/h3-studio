@@ -726,9 +726,9 @@ class ArtifactWriterTests(LedgerCase):
     def test_a_storys_shots_can_all_reserve_their_collection_together(self):
         # #1301: every file reserved the 512 MiB object limit, 1.5-3 GiB per
         # shot of the owner's 10 GiB, so the shots of one story refused each
-        # other, waited 30 s and were collected again. Now: five times what
-        # such an output weighs (3 MiB per second per megapixel of video,
-        # half a MiB per second of audio, 1 MiB floor per kind).
+        # other, waited 30 s and were collected again. Now: room for three
+        # copies of the heaviest output measured (6 MiB per second per
+        # megapixel of video, half a MiB per second of audio, 1 MiB floor).
         from studio_platform import artifact_writer
 
         def shot(seconds, audio, width=832, height=480):
@@ -745,7 +745,7 @@ class ArtifactWriterTests(LedgerCase):
             return job
 
         writer = self.writer()
-        video, sound = 7329966, 3670016  # 5 s at 832x480; 5 s of audio
+        video, sound = 13611356, 3670016  # 5 s at 832x480; 5 s of audio
         record = writer.begin_staging(shot(5, False), str(uuid.uuid4()), "one")
         self.assertEqual(record["reserved_bytes"], video)
         record = writer.begin_staging(
@@ -760,11 +760,11 @@ class ArtifactWriterTests(LedgerCase):
                 kinds=("video", "audio"),
             )
         self.assertLess(
-            writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 128 * MIB
+            writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 256 * MIB
         )
         # A larger frame is allowed more; the remote route reserves the same.
         self.assertEqual(
-            writer._staging_bytes(shot(5, False, 1344, 768), ("video",)), 17283556
+            writer._staging_bytes(shot(5, False, 1344, 768), ("video",)), 33518531
         )
         self.assertEqual(
             writer._staging_bytes(shot(5, True), ("video", "audio")), video + sound
