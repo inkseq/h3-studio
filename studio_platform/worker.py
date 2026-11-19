@@ -890,9 +890,8 @@ class WorkerRunner:
             args += ["-c:a", "aac", "-ar", "32000", "-ac", "2"] if audio else ["-an"]
             if delivery is None:
                 # Our own exact encode (renderer, hosted normalize): rewrap only.
-                args = (
-                    rewrap_args(self.backend.kind, paths["video"], job, audio) or args
-                )
+                copied = rewrap_args(self.backend.kind, paths["video"], job, audio, raw)
+                args = copied or args
             if delivery is not None:
                 # Keep the complete native timeline. Both audio deliveries use the
                 # original generated waveform; no trim, pad, fps filter or atempo.
@@ -1280,7 +1279,7 @@ def _validate_video(path, width, height, duration, audio, *, timeout=180):
     except (ValueError, KeyError, ZeroDivisionError):
         raise BackendError("output_video_verification_failed") from None
     if audio:
-        _validate_audio(path, duration, timeout=timeout)
+        _validate_audio(path, duration, probed=data)
     elif any(s.get("codec_type") == "audio" for s in data.get("streams", [])):
         raise BackendError("unexpected_output_audio")
     ffmpeg(
@@ -1309,9 +1308,9 @@ def _validate_video(path, width, height, duration, audio, *, timeout=180):
     }
 
 
-def _validate_audio(path, duration, *, flac=False, timeout=180):
+def _validate_audio(path, duration, *, flac=False, timeout=180, probed=None):
     """Verify the requested tolerance and return the file's observed duration."""
-    data = probe(path)
+    data = probed or probe(path)
     stream = next(
         (s for s in data.get("streams", []) if s.get("codec_type") == "audio"), {}
     )
@@ -1328,6 +1327,8 @@ def _validate_audio(path, duration, *, flac=False, timeout=180):
             raise ValueError
     except (ValueError, TypeError, KeyError):
         raise BackendError("output_audio_verification_failed") from None
+    if probed:  # The caller decodes the whole file, sound included, next.
+        return actual
     ffmpeg(
         ["-xerror", "-i", path, "-map", "0:a:0", "-threads", "1", "-f", "null", "-"],
         timeout=timeout,
