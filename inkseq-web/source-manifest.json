@@ -398,7 +398,7 @@
     "src/story-bible.test.js": "d6ad675868efad29ae906688edb4b25f922cf134c84ed49ed92c655cfbe022ca",
     "src/story-chat-attach.js": "1baf1b874074bfde148037ffb1e946f60068fbf40e464cb42d1a8e4b0e67dbf9",
     "src/story-chat-attach.test.js": "fe0f9ed580476bedcfce87de35a6b82b35a092448fe264007f7e0e7fbe5808a2",
-    "src/story-chat-client.js": "de1accbd22e4fd3bf58472fe97f0f8bec9470f01fe44a5d39c4ac08f1ef4a7f4",
+    "src/story-chat-client.js": "cf27ced3ce8e8cc29b7ec6d103b9e55f3934097f3ded419a337cc700934b9cf4",
     "src/story-chat-model.js": "ac239678a6cfc707122755949c464f875431a82b1faff334a348636abd526875",
     "src/story-chat-model.test.js": "c57feae919a8f118be0894bedf2d83d5ce5c8443a25c94a13cd9300d8a178582",
     "src/story-chat-preview.js": "c162a5a19ba48f18c66487082c263e1ba1903d762e799f404343efdb3d34d961",
