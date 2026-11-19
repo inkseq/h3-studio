@@ -638,7 +638,7 @@ class ArtifactWriterTests(LedgerCase):
         from types import SimpleNamespace
         from studio_platform.worker import MockBackend, WorkerRunner
 
-        writer = self.writer(max_object_bytes=10, owner_quota_bytes=20)
+        writer = self.writer(max_object_bytes=10, owner_quota_bytes=9)
         job = self.job(cost=0)
         job["request"] = {
             "request": {
@@ -688,12 +688,12 @@ class ArtifactWriterTests(LedgerCase):
         record = writer.begin_staging(job, attempt, tag)
         self.assertEqual(record["phase"], "staging")
         self.assertEqual(
-            writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 300
+            writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 100
         )
         restarted = self.writer(max_object_bytes=100, owner_quota_bytes=400)
         self.assertEqual(restarted.begin_staging(job, attempt, tag)["id"], record["id"])
         self.assertEqual(
-            restarted.quota.usage(self.scope.owner_id)["accounted_bytes"], 300
+            restarted.quota.usage(self.scope.owner_id)["accounted_bytes"], 100
         )
         (self.work / tag).mkdir(parents=True)
         path = self.work / tag / "verified.mp4"
@@ -712,7 +712,7 @@ class ArtifactWriterTests(LedgerCase):
         )
 
     def test_failed_staging_remains_charged_and_cannot_write_empty_roles(self):
-        writer = self.writer(max_object_bytes=100, owner_quota_bytes=400)
+        writer = self.writer(max_object_bytes=100, owner_quota_bytes=150)
         job, attempt, tag = self.job(cost=0), str(uuid.uuid4()), "staging"
         record = writer.begin_staging(job, attempt, tag)
         with self.assertRaises(ArtifactWritePending):
@@ -720,36 +720,38 @@ class ArtifactWriterTests(LedgerCase):
         with self.assertRaises(AssetQuotaExceeded):
             writer.begin_staging(self.job(cost=0), str(uuid.uuid4()), "second")
         self.assertEqual(
-            writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 300
+            writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 100
         )
 
     def test_a_storys_shots_can_all_reserve_their_collection_together(self):
         # #1301: every file reserved the 512 MiB object limit, 1.5-3 GiB per
         # shot of the owner's 10 GiB, so the shots of one story refused each
-        # other, waited 30 s and were collected again.
+        # other, waited 30 s and were collected again. Now: five times what
+        # such an output weighs (3 MiB per second per megapixel of video,
+        # half a MiB per second of audio, 1 MiB floor per kind).
         from studio_platform import artifact_writer
 
-        def shot(seconds, audio):
+        def shot(seconds, audio, width=832, height=480):
             job = self.job(cost=0)
             job["request"] = {
                 "request": {
                     "duration": seconds,
-                    "width": 832,
-                    "height": 480,
+                    "width": width,
+                    "height": height,
                     "generate_audio": audio,
                 },
-                "output_spec": {"width": 832, "height": 480},
+                "output_spec": {"width": width, "height": height},
             }
             return job
 
         writer = self.writer()
-        reserved = lambda: writer.quota.usage(self.scope.owner_id)["accounted_bytes"]
+        video, sound = 7329966, 3670016  # 5 s at 832x480; 5 s of audio
         record = writer.begin_staging(shot(5, False), str(uuid.uuid4()), "one")
-        self.assertEqual(record["reserved_bytes"], 3 * (32 + 5 * 8) * MIB)
+        self.assertEqual(record["reserved_bytes"], video)
         record = writer.begin_staging(
             shot(5, True), str(uuid.uuid4()), "two", kinds=("video", "audio")
         )
-        self.assertEqual(record["reserved_bytes"], 3 * (72 + 13) * MIB)
+        self.assertEqual(record["reserved_bytes"], video + sound)
         for number in range(10):  # Twelve shots of one story in all.
             writer.begin_staging(
                 shot(5, True),
@@ -757,15 +759,22 @@ class ArtifactWriterTests(LedgerCase):
                 f"more-{number}",
                 kinds=("video", "audio"),
             )
-        self.assertLess(reserved(), 4 * 1024 * MIB)
-        # An allowance above the object limit is held to it per file, and a
-        # length that cannot be read keeps the widest reservation.
-        with mock.patch.dict(
-            artifact_writer.ROLE_ALLOWANCE, {"video": (500 * MIB, 8 * MIB)}
-        ):
+        self.assertLess(
+            writer.quota.usage(self.scope.owner_id)["accounted_bytes"], 128 * MIB
+        )
+        # A larger frame is allowed more; the remote route reserves the same.
+        self.assertEqual(
+            writer._staging_bytes(shot(5, False, 1344, 768), ("video",)), 17283556
+        )
+        self.assertEqual(
+            writer._staging_bytes(shot(5, True), ("video", "audio")), video + sound
+        )
+        # An allowance above the object limit is held to it per kind, and a
+        # shape that cannot be read keeps the widest reservation.
+        with mock.patch.object(artifact_writer, "VIDEO_ALLOWANCE", 400 * MIB):
             self.assertEqual(
                 writer._staging_bytes(shot(5, True), ("video", "audio")),
-                (512 + 13) * MIB,
+                512 * MIB + sound,
             )
         for seconds in (0, -1, 3600, float("nan"), float("inf"), "long"):
             self.assertEqual(
@@ -773,21 +782,22 @@ class ArtifactWriterTests(LedgerCase):
                 2 * 512 * MIB,
                 seconds,
             )
-        # The remote route reserves one file per kind the same way.
-        self.assertEqual(
-            writer._staging_bytes(shot(5, True), ("video", "audio")), (72 + 13) * MIB
-        )
 
     def heavier_than_allowed(self, quota):
-        """A 5 s fixture job allowed 4 + 5 x 1 bytes a file, with a 20 byte take."""
+        """A 5 s fixture job allowed 9 bytes in all, with a 20 byte take."""
         from studio_platform import artifact_writer
 
-        allowance = mock.patch.dict(artifact_writer.ROLE_ALLOWANCE, {"video": (4, 1)})
-        allowance.start()
-        self.addCleanup(allowance.stop)
+        for name, value in (
+            ("VIDEO_ALLOWANCE", 0),
+            ("AUDIO_ALLOWANCE", 0),
+            ("ALLOWANCE_FLOOR", 9),
+        ):
+            allowance = mock.patch.object(artifact_writer, name, value)
+            allowance.start()
+            self.addCleanup(allowance.stop)
         writer = self.writer(max_object_bytes=100, owner_quota_bytes=quota)
         job, attempt, tag = self.job(cost=0), str(uuid.uuid4()), "heavy"
-        self.assertEqual(writer.begin_staging(job, attempt, tag)["reserved_bytes"], 27)
+        self.assertEqual(writer.begin_staging(job, attempt, tag)["reserved_bytes"], 9)
         (self.work / tag).mkdir(parents=True)
         path = self.work / tag / "verified.mp4"
         path.write_bytes(b"x" * 20)
@@ -809,7 +819,7 @@ class ArtifactWriterTests(LedgerCase):
         prepare, accounted = self.heavier_than_allowed(quota=40)
         with self.assertRaises(AssetQuotaExceeded):
             prepare()
-        self.assertEqual(accounted(), 27)
+        self.assertEqual(accounted(), 9)
 
     def test_concurrent_first_constructor_serializes_additive_schema_creation(self):
         from studio_platform.assets import metadata as assets_schema
