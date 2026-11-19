@@ -276,6 +276,28 @@ class BackendTests(unittest.TestCase):
         with self.assertRaises(BackendError):
             backend._call("GET", "/key")
 
+    def test_a_download_beats_by_the_clock_not_per_chunk(self):
+        # #1301: each 16 KB chunk beat the lease, two transactions a beat, and
+        # 200 of them made a 0.3 s download take 7 s on staging.
+        def chunked(_request):
+            return httpx.Response(200, content=(b"x" * 16384 for _ in range(200)))
+
+        with tempfile.TemporaryDirectory() as root:
+            beats = []
+            backend = self.backend([])
+            self.transport.handler = chunked
+            beat = lambda: beats.append(1)  # noqa: E731
+            backend._download("/render/rnd_1/video", Path(root) / "a", beat)
+            self.assertEqual(beats, [])
+            self.assertEqual((Path(root) / "a").stat().st_size, 200 * 16384)
+            # A slow download still beats: here the clock moves 3 s a reading.
+            clock = iter(range(0, 10**6, 3))
+            with mock.patch.object(
+                everyframe_backend.time, "monotonic", lambda: next(clock)
+            ):
+                backend._download("/render/rnd_1/video", Path(root) / "b", beat)
+            self.assertTrue(1 <= len(beats) <= 100, len(beats))
+
     def test_every_vivix_canvas_normalises_to_the_take_size(self):
         """Measured canvases (docs/SCHEDULING-SCENARIOS.md) to our 768P sizes."""
         backend = self.backend([])
