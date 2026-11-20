@@ -79,6 +79,9 @@ OBSERVATION_KEYS = {
 IDENTITY_KEYS = {"run_id", "provider_instance_id", "runtime_incarnation"}
 
 REGISTRATION_REASON_CODES = frozenset({"global_capacity_exceeded"})
+# The control plane would not admit a ready machine's worker (#1321). Kept on
+# the node for health and the watchdog; it is not a public dispatch reason.
+REGISTRATION_REFUSED = "worker_registration_refused"
 
 
 def _actor(tenant, owner):

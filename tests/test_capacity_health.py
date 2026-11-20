@@ -113,38 +113,46 @@ class CapacityHealthTests(unittest.TestCase):
         finding = self.evaluate()[0]
         self.assertEqual(finding["diagnosis"], "dispatch_unobserved")
         self.assertFalse(finding["stop_replace"])
-        # A ready runtime nobody has read lately says nothing (the controller
-        # may have been down), and a busy one is working.
+        # A ready runtime with no worker says nothing by itself (nobody may
+        # have looked: the controller was down), and a busy one is working.
         binding = self.node["payload"]["dstack"]
-        binding.update(state="ready", observed_at=600)
-        self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
-        binding.update(state="busy", observed_at=990)
-        self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
-        # #1321: the controller is reading an idle ready runtime and no worker
-        # of it admits, never registered or retired. Paid 23 minutes on staging.
         binding.update(state="ready", observed_at=990)
-        for workers in ([], [retired]):
-            with self.subTest(ready_without=workers):
+        self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
+        # #1321: the control plane has refused this ready machine's worker on
+        # every pass since 300 and still does. Paid 23 minutes on staging.
+        refused = {
+            "worker_id": self.worker["id"],
+            "reason_code": "worker_registration_refused",
+            "registered": False,
+            "observed_at": 990,
+            "since": 300,
+        }
+        binding["registration_observation"] = refused
+        for workers in ([], [retired], [expired]):
+            with self.subTest(refused_with=workers):
                 finding = self.evaluate(workers=workers)[0]
                 self.assertEqual(
                     (finding["diagnosis"], finding["stop_replace"]),
                     ("worker_unreachable", True),
                 )
-        # Within the grace of becoming ready, or of the last sign of life: wait.
-        binding.update(first_runtime_ready_at=500)
-        self.assertEqual(self.evaluate(workers=[]), [])
+        for change in (
+            {"since": 401},  # Refused for less than the grace window.
+            {"observed_at": 699},  # Nobody has tried for five minutes.
+            {"since": None},
+            {"reason_code": "global_capacity_exceeded"},  # Its own diagnosis.
+            {"reason_code": None, "registered": True},  # Admitted since.
+        ):
+            with self.subTest(change=change):
+                binding["registration_observation"] = {**refused, **change}
+                self.assertFalse(worker_unreachable(binding, [], 1000))
+                self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
+        binding["registration_observation"] = refused
+        self.assertTrue(worker_unreachable(binding, [], 1000))
+        # A worker that admits, or a runtime at work, is not lost whatever is
+        # recorded.
+        self.assertFalse(worker_unreachable(binding, [self.worker], 1000))
+        binding.update(state="busy")
         self.assertFalse(worker_unreachable(binding, [], 1000))
-        binding.update(first_runtime_ready_at=200)
-        self.assertFalse(self.evaluate(workers=[recent])[0]["stop_replace"])
-        # Refused for capacity keeps its own diagnosis and is not stopped.
-        binding["registration_observation"] = {
-            "reason_code": "global_capacity_exceeded"
-        }
-        finding = self.evaluate(workers=[])[0]
-        self.assertEqual(
-            (finding["diagnosis"], finding["stop_replace"]),
-            ("registration_capacity", False),
-        )
         del binding["registration_observation"]
         # A machine that never became ready is the startup watchdog's case.
         self.node["payload"]["dstack"].update(

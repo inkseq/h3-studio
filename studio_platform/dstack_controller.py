@@ -33,6 +33,7 @@ from .dstack_preparation import download_timebox_due, download_too_slow
 from .dstack_operator import (
     BACKEND_MARKER,
 )
+from .dstack_operator_contract import REGISTRATION_REFUSED
 from .operator_capacity import (
     advance_command_revision,
     operator_commands,
@@ -40,6 +41,7 @@ from .operator_capacity import (
 )
 from .repository import (
     BudgetExceeded,
+    Conflict,
     attempts,
     instance_intents,
     jobs,
@@ -1045,26 +1047,30 @@ class DstackController:
         """Restore the same ready/busy consumer; never submit another inference."""
         if binding.get("state") == "ready" and fresh:
             slot = self.runtime.slot(intent_id)
+            record = self.capacity.store.record_registration
             try:
                 registered = self.control.register(slot.spec)
+                if (
+                    (
+                        registered["state"] != "ready"
+                        or registered["expires_at"] <= self.repo.clock()
+                    )
+                    and not registered["current_job_id"]
+                    and not registered["drain_requested"]
+                ):
+                    self.control.mark_ready(
+                        slot.spec.worker_id, upstream_idle_confirmed=True
+                    )
             except BudgetExceeded as error:
                 if error.args == ("global_capacity_exceeded",):
-                    self.capacity.store.record_registration(
-                        intent_id, slot.spec.worker_id, "global_capacity_exceeded"
-                    )
+                    record(intent_id, slot.spec.worker_id, "global_capacity_exceeded")
                 raise
-            self.capacity.store.record_registration(intent_id, slot.spec.worker_id)
-            if (
-                (
-                    registered["state"] != "ready"
-                    or registered["expires_at"] <= self.repo.clock()
-                )
-                and not registered["current_job_id"]
-                and not registered["drain_requested"]
-            ):
-                self.control.mark_ready(
-                    slot.spec.worker_id, upstream_idle_confirmed=True
-                )
+            except Conflict:
+                # The machine is up and its worker may not admit. Say since
+                # when, so a machine that never can is stopped (#1321).
+                record(intent_id, slot.spec.worker_id, REGISTRATION_REFUSED)
+                raise
+            record(intent_id, slot.spec.worker_id)
             if self.worker_process:
                 self.worker_process.ensure(intent_id, slot)
         elif binding.get("state") == "busy" and fresh and workers:

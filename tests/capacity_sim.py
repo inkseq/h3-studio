@@ -213,9 +213,7 @@ class Scenario:
     # demand profile, as the admin start-rules API stores them; None: defaults.
     start_rules: dict | None = None
     expect_starts: int | None = None  # exact number of machines created
-    # Exception types a controller tick is meant to meet in this scenario,
-    # because the script injects the fault itself (worker_conflict: Conflict).
-    scripted_exceptions: tuple = ()
+    expect_stops: dict | None = None  # stop reason -> exact number of machines
     # Every idle stop comes this many seconds after the machine's last job
     # (or readiness), at most one tick late, and at least one happens.
     expect_idle_stop_seconds: float | None = None
@@ -1004,6 +1002,9 @@ class World(LedgerCase):
             model_id=profile["model_id"],
             engine_manifest_digest=manifest.digest,
             output_delivery=profile_output_delivery(operator_fixture.PROFILE),
+            # As a real policy: without it no queued job matches a machine, and
+            # nothing a waiting queue holds open was ever simulated (#1321).
+            deployment_profile_id=operator_fixture.PROFILE,
             qualification=dict(status="accepted", verified_at=1.0, expires_at=None),
             reservation=dict(expected_runtime_s=1800, expires_at=None),
             envelope=dict(max_duration_seconds=4.0),
@@ -1165,17 +1166,19 @@ class World(LedgerCase):
                 message = record.getMessage()
                 if message.startswith("dstack_controller_observation_failed"):
                     kind = message.rsplit("error_type=", 1)[-1]
+                    node = message.split("node_id=", 1)[-1].split(" ", 1)[0]
+                    if kind == "Conflict" and node in world._blocked:
+                        # The script's own fault, on the machine it was put on.
+                        world.reasons["refused_registration"] += 1
+                        return
                     world.reasons["controller_exception:" + kind] += 1
-                    if (
-                        kind not in world._exceptions
-                        and kind not in world.scenario.scripted_exceptions
-                    ):
+                    if kind not in world._exceptions:
                         world._exceptions.add(kind)
                         world.violate("controller_exception", kind)
                 elif message.startswith("dstack_test_budget_row_unconfirmed"):
                     world.reasons["budget_row_unconfirmed"] += 1
 
-        self._exceptions = set()
+        self._exceptions, self._blocked = set(), set()
         for name in (
             "studio_platform.dstack_controller",
             "studio_platform.dstack_test_budget",
@@ -1510,7 +1513,12 @@ class World(LedgerCase):
         return "dstack-" + intent_id.replace("-", "")
 
     def block_worker(self, intent_id):
-        """A retired row under the worker's name: registration conflicts for ever."""
+        """A retired row under the worker's name: registration conflicts for ever.
+
+        As on staging on 2026-11-20 once the worker had been retired: every
+        pass logged worker_registration_conflict for the node.
+        """
+        self._blocked.add(intent_id)
         with self.repo.transaction() as connection:
             connection.execute(
                 insert(registered_workers).values(
@@ -1524,7 +1532,7 @@ class World(LedgerCase):
                     current_job_id=None,
                     drain_requested=1,
                     fence=1,
-                    expires_at=0.0,
+                    expires_at=self.now,
                     updated_at=self.now,
                 )
             )
@@ -2434,6 +2442,13 @@ class World(LedgerCase):
                     "lookahead:%s:%s"
                     % (payload["phase"], payload["decision"]["reason"])
                 ] += 1
+        for reason, count in (scenario.expect_stops or {}).items():
+            if self.reasons["stop:" + reason] != count:
+                self.violate(
+                    "stop_count_mismatch",
+                    "%s stopped %d machines, expected %d"
+                    % (reason, self.reasons["stop:" + reason], count),
+                )
         if (
             scenario.expect_starts is not None
             and len(machines) != scenario.expect_starts

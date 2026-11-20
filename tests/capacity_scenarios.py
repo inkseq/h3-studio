@@ -209,8 +209,9 @@ SCENARIOS = [
         max_machines=1,
         jobs=[JobBatch(0, 2)],
         machines=[MachineScript(worker_conflict=True), MachineScript()],
-        scripted_exceptions=("Conflict",),
-        expect_starts=2,  # Stopped as a lost worker; the next machine serves.
+        expect_starts=2,  # The next machine serves.
+        # Not the idle rule: waiting work that matches the machine holds that off.
+        expect_stops={"capacity_worker_lost": 1},
     ),
     Scenario(
         "engine_rejects_one_request",

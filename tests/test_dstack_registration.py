@@ -677,6 +677,52 @@ class RegistrationCapacityTests(LedgerCase):
         self.assertTrue(node["ready"])
         self.assertEqual(self.snapshot()[1:], before)
 
+    def test_a_refused_worker_is_recorded_since_its_first_refusal_until_admitted(self):
+        # #1321: the machine read ready and mark_ready conflicted on every pass.
+        live = self.node("2000001")
+        self.repo.configure_capacity(max_instances=1, max_physical_gpus=1)
+        controller = self.controller()
+        first = self.now
+
+        def recorded():
+            value = self.store.load(live).get("registration_observation", {})
+            return tuple(
+                value.get(key)
+                for key in ("reason_code", "registered", "since", "observed_at")
+            )
+
+        refusal = Conflict("worker_instance_not_admitting")
+        with patch.object(controller.control, "mark_ready", side_effect=refusal):
+            for step in range(3):
+                self.now = first + 60 * step
+                results = {row["node_id"]: row for row in controller.tick()["nodes"]}
+                self.assertEqual(
+                    results[live]["code"], "dstack_controller_observation_failed"
+                )
+                self.assertEqual(
+                    recorded(), ("worker_registration_refused", False, first, self.now)
+                )
+        node = next(
+            row
+            for row in self.service.state(self.owner)["nodes"]
+            if row["node_id"] == live
+        )
+        # Kept on the node for health and the watchdog, not a public reason.
+        self.assertIsNone(node["registration_reason_code"])
+        self.assertFalse(node["ready"])
+        self.now += 60
+        controller.tick()
+        self.assertEqual(recorded(), (None, True, None, self.now))
+        with self.repo.engine.connect() as connection:
+            receipts = connection.execute(
+                select(scaler_receipts.c.facts).where(
+                    scaler_receipts.c.intent_id == live,
+                    scaler_receipts.c.operation == "registration",
+                )
+            ).all()
+        # One receipt when it was first refused and one when it was admitted.
+        self.assertEqual([row.facts["registered"] for row in receipts], [False, True])
+
     def test_arbitrary_exception_text_never_becomes_public_code(self):
         node = self.node("2000001")
         controller = self.controller()
