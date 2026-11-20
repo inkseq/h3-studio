@@ -36,6 +36,7 @@ from ..media import ffmpeg, probe
 from ..protected_config import read_protected_json
 
 API = "https://api.everyframe.studio/v1"
+REPLAY_ID = "rpl_"  # everyframe_replay.PREFIX: ids only the recording answers.
 FILENAME = "everyframe.json"
 MAX_INPUT_BYTES = 512 * 1024**2
 MAX_OUTPUT_BYTES = 512 * 1024**2
@@ -92,19 +93,30 @@ def cost_microusd(render):
 class Prepared:
     tag: str
     body: bytes = field(repr=False)
+    replay: bool = False  # Answered by the staging recording, never the vendor.
 
 
 class EveryFrameBackend:
     kind = BACKEND
 
     def __init__(
-        self, store, config_file, *, enabled=True, transport=None, slot_key=PROVIDER
+        self,
+        store,
+        config_file,
+        *,
+        enabled=True,
+        transport=None,
+        slot_key=PROVIDER,
+        replay=None,
     ):
         self.store, self.config_file, self.enabled = store, Path(config_file), enabled
         # One local render lock per slot; the vendor's limits are per account.
         self.slot_key = slot_key
         self._config = None
         self._http = VendorHTTP(timeout=60, transport=transport)
+        # everyframe_replay: recorded answers for listed staging accounts.
+        self._replay = replay
+        self._recorded = replay and VendorHTTP(timeout=60, transport=replay.transport)
         self.cost_resolver = self._cost
 
     def __repr__(self):
@@ -127,16 +139,24 @@ class EveryFrameBackend:
         self._http.close()
         self._config = None
 
-    def _request(self, method, path, *, content=None, content_type=None):
+    def _client(self, path, replay=False):
+        """The recording for its own render ids and for a replayed job."""
+        if self._recorded and (replay or path.startswith("/render/" + REPLAY_ID)):
+            return self._recorded
+        return self._http
+
+    def _request(self, method, path, *, content=None, content_type=None, replay=False):
         config = self.config()
         headers = {"Authorization": "Bearer " + config.api_key}
         if content_type:
             headers["Content-Type"] = content_type
-        return self._http.build_request(
+        return self._client(path, replay).build_request(
             method, API + path, headers=headers, content=content
         )
 
-    def _call(self, method, path, body=None, *, raw=None, content_type=None):
+    def _call(
+        self, method, path, body=None, *, raw=None, content_type=None, replay=False
+    ):
         """(status, JSON dict or None). The key and URLs never reach logs or errors."""
         request = self._request(
             method,
@@ -148,16 +168,17 @@ class EveryFrameBackend:
             else json.dumps(body).encode(),
             content_type=content_type
             or ("application/json" if body is not None else None),
+            replay=replay,
         )
         try:
-            return self._http.json(
+            return self._client(path, replay).json(
                 request, limit=MAX_ANSWER_BYTES, parse_error_body=True, empty_body=True
             )
         except Exception:
             print("everyframe_response_unavailable", flush=True)
             raise BackendError("everyframe_response_unavailable") from None
 
-    def _attach(self, item):
+    def _attach(self, item, replay=False):
         obj = item["model"]
         content_type = obj.get("content_type")
         if content_type not in CONTENT_TYPES:
@@ -172,7 +193,11 @@ class EveryFrameBackend:
         if len(data) != info.size_bytes:
             raise BackendError("everyframe_input_changed")
         status, answer = self._call(
-            "POST", "/render/attachment", raw=data, content_type=content_type
+            "POST",
+            "/render/attachment",
+            raw=data,
+            content_type=content_type,
+            replay=replay,
         )
         attachment = (answer or {}).get("attachment") or answer or {}
         if (
@@ -191,22 +216,25 @@ class EveryFrameBackend:
         if mapped is None:
             raise BackendError("everyframe_request_invalid")
         body, asset_ids = mapped
+        replay = bool(self._replay and self._replay.takes(job))
         attachments = []
         for asset_id in asset_ids:
             heartbeat()
             item = compiled.get("assets", {}).get(asset_id)
             if type(item) is not dict or type(item.get("model")) is not dict:
                 raise BackendError("everyframe_input_missing")
-            attachments.append(self._attach(item))
+            attachments.append(self._attach(item, replay))
         if attachments:
             body["attachmentIds"] = attachments
-        return Prepared(tag, json.dumps(body).encode())
+        return Prepared(tag, json.dumps(body).encode(), replay)
 
     def submit(self, prepared, tag):
         if not isinstance(prepared, Prepared) or prepared.tag != tag:
             raise BackendError("everyframe_prepared_identity_mismatch")
         try:
-            status, data = self._call("POST", "/render", json.loads(prepared.body))
+            status, data = self._call(
+                "POST", "/render", json.loads(prepared.body), replay=prepared.replay
+            )
         except BackendError:
             raise SubmissionUncertain("everyframe_render_unknown") from None
         if 400 <= status < 500:
@@ -262,7 +290,7 @@ class EveryFrameBackend:
         request = self._request("GET", url)
         count, beat = 0, time.monotonic()
         try:
-            with closing(self._http.send(request)) as response:
+            with closing(self._client(url).send(request)) as response:
                 if response.status_code != 200:
                     raise BackendError("everyframe_output_unavailable")
                 with target.open("xb") as handle:
@@ -422,5 +450,9 @@ class EveryFrameBackend:
 
 def create(store, settings, slot_key=PROVIDER):
     """The fleet's backend: credentials from the host-installed runtime secret."""
+    from . import everyframe_replay
+
     path = Path(settings.data_dir) / "runtime-secrets" / FILENAME
-    return EveryFrameBackend(store, path, slot_key=slot_key)
+    return EveryFrameBackend(
+        store, path, slot_key=slot_key, replay=everyframe_replay.load(settings)
+    )

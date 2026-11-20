@@ -476,6 +476,7 @@ inventory.json
 !studio_platform/providers/__init__.py
 !studio_platform/providers/registry.py
 !studio_platform/providers/everyframe.py
+!studio_platform/providers/everyframe_replay.py
 !studio_platform/providers/balances.py
 !studio_platform/providers/http.py
 !studio_platform/providers/hosted_models.py

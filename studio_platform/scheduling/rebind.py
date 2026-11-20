@@ -293,6 +293,12 @@ def balance_allows_hosted():
     return SCENARIOS["low_vendor_balance"].offload(_balance["usd"])
 
 
+def _replayed(settings):
+    from ..providers.everyframe_replay import owners
+
+    return owners(settings)
+
+
 def live_configurations(connection, now, *, mid_turn=False):
     """Hosted configurations with a registered, live slot.
 
@@ -395,7 +401,9 @@ def offload(service, connection, queued, now):
     if not getattr(settings, "everyframe_enabled", False):
         return queued
     tiers, window, first = _routing(settings.data_dir)
-    if not tiers or not balance_allows_hosted():
+    # Replayed staging accounts spend no vendor balance, so they still go.
+    funded, replayed = balance_allows_hosted(), _replayed(settings)
+    if not tiers or not (funded or replayed):
         return queued
     live = live_configurations(connection, now)
     used = used_in_window(connection, settings.tenant_id, now)
@@ -416,7 +424,9 @@ def offload(service, connection, queued, now):
     fresh = [
         item
         for item in queued
-        if "hosted_tried" not in item[0]["execution_plan"] and target(item[0])
+        if "hosted_tried" not in item[0]["execution_plan"]
+        and target(item[0])
+        and (funded or item[0].get("owner_id") in replayed)
     ]
     economy = [item for item in fresh if tier_of(item[0]) == "economy"]
     clicks = [item for item in fresh if tier_of(item[0]) != "economy"]
@@ -470,7 +480,7 @@ def hold_for_hosted(settings, connection, job, now):
     if (
         not tiers
         or not window
-        or not balance_allows_hosted()
+        or not (balance_allows_hosted() or job.get("owner_id") in _replayed(settings))
         or not chain(job["request"])
     ):
         return False
