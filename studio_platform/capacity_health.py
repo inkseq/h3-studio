@@ -486,6 +486,14 @@ def snapshot(service, connection, now):
     if blocked is not None:
         findings.append(blocked)
     findings.extend(collect_stuck(connection, job_rows, attempt_rows, now))
+    from .capacity_timeline import demand_key
+    from .scheduling.rebind import balance_alert
+
+    low = balance_alert(service.settings)
+    if low is not None:
+        findings.append(
+            finding("capacity_hosted_balance_low", demand_key(tenant), *low)
+        )
     for value in findings:
         if value["code"] == "capacity_paid_idle_queue":
             reason = top_refusal(connection, value["resource_id"], now)
@@ -689,8 +697,8 @@ def record(service, value, *, policy_version=None):
                 },
             )
             return payload
-        if code == "capacity_start_blocked":
-            # One alert per blocked episode; the resource is the demand stream.
+        if code in ("capacity_start_blocked", "capacity_hosted_balance_low"):
+            # One alert per episode; the resource is the demand stream.
             previous = connection.execute(
                 select(outbox.c.id)
                 .where(
@@ -847,6 +855,14 @@ def pending_reports(service, telemetry, reporter=None):
 def check(service, telemetry, reporter=None):
     """One bounded existing-controller sweep; no provider or task mutations."""
     observe_registered(service)
+    try:
+        # Every 4 h, before any transaction. Demand start reads it too, but
+        # only where it runs: production with no demand never knew (#1319).
+        from .scheduling.rebind import refresh_balance
+
+        refresh_balance(service.settings, service.repo.clock())
+    except Exception:
+        pass
     with service.repo.engine.connect() as connection:
         values, policy = snapshot(service, connection, service.repo.clock())
     recorded = []
