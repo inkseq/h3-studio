@@ -378,6 +378,7 @@ export function createLiveChat({
     for (const [id, status] of Object.entries(settled))
       if (state.quotes[id]) state.quotes[id] = { ...state.quotes[id], ...extra[id], status };
     emit({ type: 'chat.loaded', state, fresh });
+    return state;
   };
   // After a timeout or lost response, re-read the story; true if it shows the outcome.
   async function recovered(done, emit) {
@@ -634,6 +635,28 @@ export function createLiveChat({
       await new Promise((resolve) => setTimeout(resolve, labels.pollMs ?? 5000));
     }
   }
+  // A story opened while its shots are being made (a reload, another tab) says so and keeps
+  // watching, as a click on the offer already did; it used to offer to make them
+  // (h3-studio#1301). Only when every shot of the offer is made or under way.
+  async function resumeMaking(state, emit) {
+    const quote = Object.values(state?.quotes || {}).find(
+      (item) => item.action?.kind === 'generate',
+    );
+    const shots = quote?.action?.cards || [];
+    if (!shots.length || settled[quote.id]) return;
+    let progress;
+    try {
+      progress = shotProgress(await projectJobs(), shots);
+    } catch {
+      return; /* The offer stays as it is; a click checks again. */
+    }
+    const started = progress.making.filter((shot) => progress.statuses[shot] !== 'planned');
+    if (closed || settled[quote.id] || !started.length) return;
+    if (started.length + progress.made.length !== shots.length) return;
+    settled[quote.id] = 'making';
+    emit({ type: 'quote.settled', id: quote.id, status: 'making' });
+    await watch(quote, emit);
+  }
   return {
     live: true,
     balance: Number.NaN,
@@ -741,13 +764,19 @@ export function createLiveChat({
     async open(emit) {
       if (!project) return;
       const path = `/v1/story-chats/${encodeURIComponent(project)}`;
+      let state;
       try {
-        load(await api.request(path), emit);
+        state = load(await api.request(path), emit);
       } catch (failure) {
         // A story made in Works: attach a chat to it so it can be edited by chatting.
         if (failure.detail?.detail?.code !== 'story_chat_not_found') throw failure;
-        load(await api.request(path + '/open', { method: 'POST', body: { language } }), emit);
+        state = load(
+          await api.request(path + '/open', { method: 'POST', body: { language } }),
+          emit,
+        );
       }
+      // Not awaited: the watch runs until the shots are finished.
+      resumeMaking(state, emit).catch(() => {});
     },
     // While a turn runs, a watch does not re-read the story under it (h3-studio#1244).
     async send(input, emit) {
