@@ -691,9 +691,15 @@ class RegistrationCapacityTests(LedgerCase):
                 for key in ("reason_code", "registered", "since", "observed_at")
             )
 
-        refusal = Conflict("worker_instance_not_admitting")
-        with patch.object(controller.control, "mark_ready", side_effect=refusal):
-            for step in range(3):
+        # Whatever the reason: a conflict, a switch turned off, a fault of ours.
+        for step, refusal in enumerate(
+            (
+                Conflict("worker_instance_not_admitting"),
+                BudgetExceeded("pool_disabled"),
+                ValueError("PRIVATE-SECRET"),
+            )
+        ):
+            with patch.object(controller.control, "mark_ready", side_effect=refusal):
                 self.now = first + 60 * step
                 results = {row["node_id"]: row for row in controller.tick()["nodes"]}
                 self.assertEqual(
@@ -722,6 +728,35 @@ class RegistrationCapacityTests(LedgerCase):
             ).all()
         # One receipt when it was first refused and one when it was admitted.
         self.assertEqual([row.facts["registered"] for row in receipts], [False, True])
+
+    def test_a_refusal_counts_from_its_first_unbroken_pass(self):
+        live = self.node("2000001")
+
+        def refused(reason="worker_registration_refused"):
+            self.store.record_registration(live, "known-worker", reason)
+            return self.store.load(live)["registration_observation"]["since"]
+
+        first = self.now
+        self.assertEqual(refused(), first)
+        self.now += 300
+        self.assertEqual(refused(), first)
+        # Nobody asked for longer than a refusal stays current: count again.
+        self.now += 301
+        self.assertEqual(refused(), self.now)
+        # Another answer, or another worker, is another count.
+        self.now += 60
+        self.assertEqual(refused("global_capacity_exceeded"), self.now)
+        self.now += 60
+        again = self.now
+        self.assertEqual(refused(), again)
+        self.now += 60
+        self.assertEqual(refused(), again)
+        self.store.record_registration(
+            live, "another-worker", "worker_registration_refused"
+        )
+        self.assertEqual(
+            self.store.load(live)["registration_observation"]["since"], self.now
+        )
 
     def test_arbitrary_exception_text_never_becomes_public_code(self):
         node = self.node("2000001")

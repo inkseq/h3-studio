@@ -82,6 +82,9 @@ REGISTRATION_REASON_CODES = frozenset({"global_capacity_exceeded"})
 # The control plane would not admit a ready machine's worker (#1321). Kept on
 # the node for health and the watchdog; it is not a public dispatch reason.
 REGISTRATION_REFUSED = "worker_registration_refused"
+# A refusal this recent is the controller still trying to admit the machine;
+# an older one says nothing about now, and a run of refusals ends with it.
+REGISTRATION_REFUSED_FRESH_SECONDS = 300
 
 
 def _actor(tenant, owner):

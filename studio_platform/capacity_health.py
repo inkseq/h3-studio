@@ -13,7 +13,10 @@ import uuid
 from sqlalchemy import func, insert, select, update
 
 from .dstack_demand import _matches
-from .dstack_operator_contract import REGISTRATION_REFUSED
+from .dstack_operator_contract import (
+    REGISTRATION_REFUSED,
+    REGISTRATION_REFUSED_FRESH_SECONDS,
+)
 from .operator_capacity import operator_nodes, operator_policy
 from .repository import (
     attempts,
@@ -35,8 +38,6 @@ STOP_DIAGNOSES = {"host_runtime", "worker_unreachable"}
 # restarts the app and, with it, the tunnel the worker dials (#1140); chisel retries
 # with backoff, so give it a few minutes rather than stopping on the first miss.
 WORKER_LOST_GRACE_SECONDS = 600
-# A refusal this recent is the controller still trying to admit the machine.
-REGISTRATION_REFUSED_FRESH_SECONDS = 300
 # A model download still running this long past the floor-rate time is overdue.
 DOWNLOAD_OVERDUE_SLACK_SECONDS = 300
 # Queued work, no live machine and demand start refusing: alert after 30 min.

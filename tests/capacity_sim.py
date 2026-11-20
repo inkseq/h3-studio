@@ -2442,6 +2442,14 @@ class World(LedgerCase):
                     "lookahead:%s:%s"
                     % (payload["phase"], payload["decision"]["reason"])
                 ] += 1
+        # A refused machine is stopped after the grace: so many passes, no more.
+        most = len(self._blocked) * (600 // scenario.tick_seconds + 2)
+        if self.reasons["refused_registration"] > most:
+            self.violate(
+                "refused_registration_unbounded",
+                "%d refused passes, at most %d expected"
+                % (self.reasons["refused_registration"], most),
+            )
         for reason, count in (scenario.expect_stops or {}).items():
             if self.reasons["stop:" + reason] != count:
                 self.violate(

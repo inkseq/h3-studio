@@ -41,7 +41,6 @@ from .operator_capacity import (
 )
 from .repository import (
     BudgetExceeded,
-    Conflict,
     attempts,
     instance_intents,
     jobs,
@@ -1061,14 +1060,19 @@ class DstackController:
                     self.control.mark_ready(
                         slot.spec.worker_id, upstream_idle_confirmed=True
                     )
-            except BudgetExceeded as error:
-                if error.args == ("global_capacity_exceeded",):
-                    record(intent_id, slot.spec.worker_id, "global_capacity_exceeded")
-                raise
-            except Conflict:
-                # The machine is up and its worker may not admit. Say since
-                # when, so a machine that never can is stopped (#1321).
-                record(intent_id, slot.spec.worker_id, REGISTRATION_REFUSED)
+            except Exception as error:
+                # The machine is up and its worker was not admitted, whatever
+                # the reason. Say since when, so one that never can be is
+                # stopped (#1321). Over the capacity limit keeps its own reason
+                # and is an alert, never a stop.
+                over_limit = isinstance(error, BudgetExceeded) and error.args == (
+                    "global_capacity_exceeded",
+                )
+                record(
+                    intent_id,
+                    slot.spec.worker_id,
+                    "global_capacity_exceeded" if over_limit else REGISTRATION_REFUSED,
+                )
                 raise
             record(intent_id, slot.spec.worker_id)
             if self.worker_process:

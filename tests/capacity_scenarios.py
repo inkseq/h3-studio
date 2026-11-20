@@ -323,6 +323,9 @@ SCENARIOS = [
             MachineScript(tunnel_lost_on_restart="never"),
         ],
         events=[Event(15 * 60, "restart_app")],
+        # One had a job cut off, the other was idle; the waiting queue holds
+        # the idle rule off both, so neither may end by it.
+        expect_stops={"capacity_worker_lost": 1, "capacity_no_progress": 1},
     ),
     Scenario(
         "worker_returns_after_restart",
