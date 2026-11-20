@@ -576,6 +576,30 @@ class SupplierSpendingTests(LedgerCase):
                 )
             )
         self.assertEqual(self.read()['projected_microusd'], 0)
+        # #1301: admission finds this story's rental by asking for it; it used to
+        # read every node ever rented, once for each shot submitted.
+        from sqlalchemy import event
+
+        from studio_platform.supplier_spending import _test_job
+
+        execution = {
+            'backend': 'wangp-worker',
+            'configuration_id': 'test-configuration',
+            'pool': 'inkseq-staging-v6-fl',
+        }
+        who = (self.scope.tenant_id, self.scope.owner_id, payload['project_id'])
+        seen = []
+        note = lambda *args: seen.append(args[2].upper())  # noqa: E731
+        with self.repo.engine.connect() as c:
+            event.listen(self.repo.engine, 'before_cursor_execute', note)
+            try:
+                self.assertTrue(_test_job(c, *who, execution))
+            finally:
+                event.remove(self.repo.engine, 'before_cursor_execute', note)
+            self.assertIn('WHERE', seen[0])
+            self.assertFalse(_test_job(c, who[0], who[1], 'another-story', execution))
+            for name in ('configuration_id', 'pool'):
+                self.assertFalse(_test_job(c, *who, {**execution, name: 'another'}))
         # Merely naming a task or pool does not survive an invalid native tag.
         payload = copy.deepcopy(payload)
         payload['dstack']['run_spec']['configuration']['tags']['inkseq_test_task'] = (
