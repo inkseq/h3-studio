@@ -134,6 +134,7 @@ def sanitized_event(event, hint=None):
                 "capacity_download_upstream_slow",
                 "capacity_start_failures_upstream",
                 "capacity_generate_failures_upstream",
+                "capacity_hosted_balance_low",
             }
             or type(tags.get("diagnosis")) is not str
             or tags["diagnosis"]
@@ -153,6 +154,8 @@ def sanitized_event(event, hint=None):
                 "download_upstream_slow",
                 "start_failures_upstream",
                 "generate_failures_upstream",
+                "hosted_balance_low",
+                "hosted_stopped",
             }
             or "detail" in tags
             and (

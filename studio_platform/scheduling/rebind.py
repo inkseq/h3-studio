@@ -237,7 +237,30 @@ def refresh_balance(settings, now, *, reader=None):
     _balance["usd"] = usd if isinstance(usd, (int, float)) else None
     if _balance["usd"] is not None and _balance["usd"] < HOSTED_BALANCE_WARN_USD:
         print("hosted_balance_low", flush=True)
+    if _balance["usd"] is not None:  # An unknown balance changes nothing.
+        for name, limit in (
+            ("low_since", HOSTED_BALANCE_WARN_USD),
+            ("stopped_since", HOSTED_BALANCE_RESERVE_USD),
+        ):
+            below = _balance["usd"] < limit
+            _balance[name] = (_balance.get(name) or now) if below else None
     return _balance["usd"]
+
+
+def balance_alert(settings):
+    """(since, diagnosis) while the vendor balance is low, or None.
+
+    Under the warning level once, and again when hosted has stopped: on
+    2026-11-20 the balance reached 0.13 USD and the only trace was one log
+    line, while shots waited for our own machines to start (#1319).
+    """
+    if not getattr(settings, "everyframe_enabled", False):
+        return None
+    if _balance.get("stopped_since") is not None:
+        return _balance["stopped_since"], "hosted_stopped"
+    if _balance.get("low_since") is not None:
+        return _balance["low_since"], "hosted_balance_low"
+    return None
 
 
 def balance_observation(settings):

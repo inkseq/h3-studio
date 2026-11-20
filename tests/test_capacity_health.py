@@ -290,6 +290,58 @@ class HealthLedgerTests(LedgerCase):
                 ).mappings()
             )
 
+    def test_a_low_hosted_balance_alerts_once_and_again_when_hosted_stops(self):
+        # #1319, 2026-11-20: the vendor balance reached 0.13 USD, hosted was
+        # off on staging and production, and one log line was the only trace.
+        from studio_platform.scheduling import rebind
+
+        saved = dict(rebind._balance)
+        self.addCleanup(
+            lambda: (rebind._balance.clear(), rebind._balance.update(saved))
+        )
+        rebind._balance.clear()
+        rebind._balance.update(usd=None, read_at=None)
+        vendor = SimpleNamespace(everyframe_enabled=True)
+        step = rebind.BALANCE_READ_SECONDS
+
+        self.service.settings.everyframe_enabled = True
+
+        def read(amount):
+            self.now += step
+            rebind.refresh_balance(vendor, self.now, reader=lambda _settings: amount)
+            # The sweep's own read is not due again for four hours.
+            return check(self.service, NullTelemetry())["new_alerts"]
+
+        self.assertEqual(read(50.0), 0)
+        self.assertEqual(read(6.0), 1)  # Under the warning level.
+        self.assertEqual(read(5.0), 0)  # The same episode.
+        self.assertEqual(read(0.13), 1)  # Hosted has stopped.
+        self.assertEqual(read(0.13), 0)
+        alerts = [
+            row["payload"]
+            for row in self.events("capacity.health_alert")
+            if row["payload"]["code"] == "capacity_hosted_balance_low"
+        ]
+        self.assertEqual(
+            [alert["diagnosis"] for alert in alerts],
+            ["hosted_balance_low", "hosted_stopped"],
+        )
+        self.assertNotIn("0.13", str(alerts))  # No amount leaves the process.
+        self.assertEqual(read(30.0), 0)
+        self.assertIsNone(rebind.balance_alert(vendor))
+        self.assertEqual(read(6.0), 1)  # A new episode after a top-up.
+        # An unreadable balance neither raises nor clears an alert.
+        self.now += step
+        rebind.refresh_balance(vendor, self.now, reader=lambda _settings: None)
+        self.assertEqual(rebind.balance_alert(vendor)[1], "hosted_balance_low")
+        client = Mock()
+        report_capacity_health(client, {**alerts[1], "event_id": alerts[1]["event_id"]})
+        clean = sanitized_event(client.capture_event.call_args.args[0])
+        self.assertEqual(
+            clean["tags"],
+            {"code": "capacity_hosted_balance_low", "diagnosis": "hosted_stopped"},
+        )
+
     def test_queue_alert_is_deduplicated_without_mutating_job_or_hold(self):
         original = self.job()
         before = self.repo.get_job(self.scope, original["id"])
