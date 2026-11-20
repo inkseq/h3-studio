@@ -145,7 +145,13 @@ def node_workers(connection, intent):
             )
         ).mappings()
     )
-    return identity, rows
+    # A later rental can report the same provider instance id; its worker is
+    # named after its own intent and is not this node's to fence (#1321).
+    from .control import other_rentals_worker
+
+    return identity, [
+        row for row in rows if not other_rentals_worker(row["id"], intent["id"])
+    ]
 
 
 def fenced_node_stop(connection, node, intent, *, now=None):
@@ -512,8 +518,9 @@ def provider_removed(binding, intent, now):
         and binding.get("dstack_status") in {"done", "failed", "terminated", "aborted"}
         and _number(proof.get("observed_at"))
         # The writer validated a fresh complete inventory when it recorded the
-        # proof (dstack_ledger). Provider instance ids are never reused, so the
-        # absence stays true: an older proof is still proof. Requiring it to be
+        # proof (dstack_ledger). The proof is for this intent's own rental (a
+        # provider can hand the id to a later one, #1321), so the absence
+        # stays true: an older proof is still proof. Requiring it to be
         # under 30 s old let a job on a removed machine stay "running" forever
         # once ticks were slower than that (#1034 machine_lost_mid_job).
         and 0 <= now - proof["observed_at"]

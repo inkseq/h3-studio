@@ -613,7 +613,11 @@ def worker_window_reason(
             instance_intents.c.provider_instance_id == worker["instance_id"],
         )
     ).mappings()
+    from .control import other_rentals_worker
+
     for intent in intents:
+        if other_rentals_worker(worker["id"], intent["id"]):
+            continue  # An earlier rental that had this provider instance id (#1321).
         node = (
             connection.execute(
                 select(operator_nodes).where(operator_nodes.c.intent_id == intent["id"])

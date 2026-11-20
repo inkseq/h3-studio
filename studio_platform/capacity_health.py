@@ -160,6 +160,8 @@ def node_attempts(node, attempt_rows, workers):
     """Workers and attempts that belong to one original node."""
     binding = node["payload"].get("dstack", {})
     instance = node.get("provider_instance_id", binding.get("provider_instance_id"))
+    from .control import other_rentals_worker
+
     associated = [
         worker
         for worker in workers
@@ -169,6 +171,8 @@ def node_attempts(node, attempt_rows, workers):
             and bool(instance)
             and worker.get("instance_id") == instance
             and worker.get("provider") == node.get("provider")
+            # Not a later or earlier rental on the same provider id (#1321).
+            and not other_rentals_worker(worker["id"], node["intent_id"])
         )
     ]
     worker_ids = {

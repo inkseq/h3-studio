@@ -234,6 +234,61 @@ def worker_spec_payload(spec):
     return canonical(value)
 
 
+def stopping_instances(connection, *matching, now=None):
+    """(provider, provider instance id) pairs that take no new work.
+
+    An instance is stopping while an intent on it is draining or destroying,
+    or (with `now`) is past its hard deadline, and after it was destroyed. A
+    destroyed intent stops counting once a later rental is live on the same
+    provider instance id: RunPod gave a rental the id of one recorded
+    destroyed 47 minutes earlier, and the old row kept its worker from ever
+    admitting while three shots waited on the paid machine (#1321).
+    """
+    stopping, ended, live = set(), set(), set()
+    for provider, identity, state, deadline in connection.execute(
+        select(
+            instance_intents.c.provider,
+            instance_intents.c.provider_instance_id,
+            instance_intents.c.state,
+            instance_intents.c.hard_deadline,
+        ).where(instance_intents.c.provider_instance_id.is_not(None), *matching)
+    ).tuples():
+        key = (provider, identity)
+        if state == "destroyed":
+            ended.add(key)
+        elif state in ("draining", "destroying") or (
+            now is not None and deadline is not None and deadline <= now
+        ):
+            stopping.add(key)
+        elif state in ("creating", "creation_unknown", "starting", "ready", "busy"):
+            live.add(key)
+    return stopping | (ended - live)
+
+
+_RENTAL_WORKER = re.compile(r"dstack-[0-9a-f]{32}")
+
+
+def other_rentals_worker(worker_id, intent_id):
+    """True when the worker is named after a different rental than this intent.
+
+    Workers and intents are matched by provider instance id almost everywhere,
+    and a dstack worker is also named after its own intent. When a provider
+    gives a later rental the same instance id, the name tells them apart.
+    """
+    return bool(_RENTAL_WORKER.fullmatch(worker_id)) and worker_id != (
+        "dstack-" + intent_id.replace("-", "")
+    )
+
+
+def _instance_stopping(connection, worker):
+    key = (worker["provider"], worker["instance_id"])
+    return key in stopping_instances(
+        connection,
+        instance_intents.c.provider == key[0],
+        instance_intents.c.provider_instance_id == key[1],
+    )
+
+
 def require_delivery_configuration(
     connection, backend, configuration_id, output_delivery
 ):
@@ -374,22 +429,7 @@ class WorkerControl:
                 connection = connection.execution_options(
                     isolation_level="REPEATABLE READ", postgresql_readonly=True
                 )
-            stopping = set(
-                connection.execute(
-                    select(
-                        instance_intents.c.provider,
-                        instance_intents.c.provider_instance_id,
-                    ).where(
-                        (
-                            instance_intents.c.state.in_(
-                                ("draining", "destroying", "destroyed")
-                            )
-                        )
-                        | (instance_intents.c.hard_deadline <= now),
-                        instance_intents.c.provider_instance_id.is_not(None),
-                    )
-                ).tuples()
-            )
+            stopping = stopping_instances(connection, now=now)
             # Catalog enumeration stays SELECT-only on SQLite/PostgreSQL.
             if operator_nodes.name in inspect(connection).get_table_names():
                 stopping.update(
@@ -404,6 +444,8 @@ class WorkerControl:
                         )
                         .where(
                             operator_nodes.c.desired_state != "running",
+                            # A destroyed one is stopping_instances' to judge.
+                            instance_intents.c.state != "destroyed",
                             instance_intents.c.provider_instance_id.is_not(None),
                         )
                     ).tuples()
@@ -787,15 +829,7 @@ class WorkerControl:
             worker = self._worker(connection, worker_id, lock=True)
             if worker["state"] == "retired":
                 raise Conflict("worker_not_admitting")
-            if connection.execute(
-                select(instance_intents.c.id).where(
-                    instance_intents.c.provider == worker["provider"],
-                    instance_intents.c.provider_instance_id == worker["instance_id"],
-                    instance_intents.c.state.in_(
-                        ("draining", "destroying", "destroyed")
-                    ),
-                )
-            ).first():
+            if _instance_stopping(connection, worker):
                 raise Conflict("worker_instance_not_admitting")
             if worker["current_job_id"]:
                 job = self.repo._job(connection, worker["current_job_id"], lock=True)
@@ -955,13 +989,7 @@ class WorkerControl:
             or worker["drain_requested"]
         ):
             return "matching_worker_unavailable"
-        if connection.execute(
-            select(instance_intents.c.id).where(
-                instance_intents.c.provider == worker["provider"],
-                instance_intents.c.provider_instance_id == worker["instance_id"],
-                instance_intents.c.state.in_(("draining", "destroying", "destroyed")),
-            )
-        ).first():
+        if _instance_stopping(connection, worker):
             return "worker_capacity_stopping"
         from .capacity import capacity_member_claim_allowed
 
@@ -1101,19 +1129,7 @@ class WorkerControl:
                     .values(state="unknown", updated_at=self.repo.clock())
                 )
                 worker["state"] = "unknown"
-            if (
-                purpose == "generate"
-                and connection.execute(
-                    select(instance_intents.c.id).where(
-                        instance_intents.c.provider == worker["provider"],
-                        instance_intents.c.provider_instance_id
-                        == worker["instance_id"],
-                        instance_intents.c.state.in_(
-                            ("draining", "destroying", "destroyed")
-                        ),
-                    )
-                ).first()
-            ):
+            if purpose == "generate" and _instance_stopping(connection, worker):
                 # Defensive against a stale worker-ready record. Existing
                 # attempts still reconcile/collect, but a stopping host cannot
                 # be revived by an idle observation or take another job.

@@ -171,6 +171,35 @@ SCENARIOS = [
         expect_alerts=("capacity_start_failures_upstream",),
     ),
     Scenario(
+        "provider_reuses_instance_id",
+        "A second rental gets the provider instance id of a finished one.",
+        # #1321, staging 2026-11-20: RunPod gave a rental the id of one recorded
+        # destroyed 47 minutes earlier. The old intent kept the new worker from
+        # ever admitting; three shots waited 23 minutes on a paid idle machine.
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 1), JobBatch(90 * 60, 1)],
+        machines=[
+            MachineScript(instance_id="4390001"),
+            MachineScript(instance_id="4390001"),
+        ],
+        expect_starts=2,  # The second rental serves; no third is needed.
+    ),
+    Scenario(
+        "provider_reuses_id_after_removal",
+        "A machine is removed mid-job; its replacement reports the same id.",
+        # #1321 review: the removed rental's unstopped attempt was matched to
+        # the replacement by instance id, so the replacement could not be
+        # stopped once idle and stayed rented with nothing it could take.
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 3, actual_runtime_s=900)],
+        machines=[
+            MachineScript(removed_at=900, instance_id="4390002"),
+            MachineScript(instance_id="4390002"),
+        ],
+    ),
+    Scenario(
         "engine_rejects_one_request",
         "One request makes the engine fail with its thread alive; four are fine.",
         # #1214, staging 2026-11-10: the same request was retried on three
