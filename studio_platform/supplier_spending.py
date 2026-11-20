@@ -416,14 +416,29 @@ def _test_job(connection, tenant_id, owner_id, project_id, execution):
         "configuration_id"
     ):
         return False
-    for node in connection.execute(select(operator_nodes)).mappings():
+    # The database picks the rentals of this exact story and configuration.
+    # Reading every node ever rented to compare here took 0.2 s with 382 nodes
+    # on staging, once for each shot submitted (#1301).
+    exact = {
+        "tenant_id": tenant_id,
+        "owner_id": owner_id,
+        "project_id": project_id,
+        "configuration_id": execution.get("configuration_id"),
+    }
+    if not all(isinstance(value, str) for value in exact.values()):
+        return False
+    for node in connection.execute(
+        select(operator_nodes).where(
+            *(
+                operator_nodes.c.payload[name].as_string() == value
+                for name, value in exact.items()
+            )
+        )
+    ).mappings():
         payload = node["payload"]
-        if not isinstance(payload, dict) or (
-            payload.get("tenant_id"),
-            payload.get("owner_id"),
-            payload.get("project_id"),
-            payload.get("configuration_id"),
-        ) != (tenant_id, owner_id, project_id, execution.get("configuration_id")):
+        if not isinstance(payload, dict) or any(
+            payload.get(name) != value for name, value in exact.items()
+        ):
             continue
         intent = (
             connection.execute(
