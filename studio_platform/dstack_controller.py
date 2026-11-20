@@ -616,24 +616,11 @@ class DstackController:
                     )
                     now = self.repo.clock()
                     binding = payload.get("dstack", {})
-                    worker_id = "dstack-" + node["intent_id"].replace("-", "")
-                    workers = list(
-                        connection.execute(
-                            select(registered_workers).where(
-                                or_(
-                                    registered_workers.c.id == worker_id,
-                                    (
-                                        registered_workers.c.provider
-                                        == intent["provider"]
-                                    )
-                                    & (
-                                        registered_workers.c.instance_id
-                                        == intent["provider_instance_id"]
-                                    ),
-                                )
-                            )
-                        ).mappings()
-                    )
+                    from .capacity_watchdog import node_workers
+
+                    # Not an earlier rental's retired worker on a reused id,
+                    # which kept the download time box from ever stopping it.
+                    worker_id, workers = node_workers(connection, intent)
                     ids = [worker_id, *[worker["id"] for worker in workers]]
                     record = getattr(self.service, "record_download_timebox", None)
                     if (

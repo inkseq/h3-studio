@@ -669,21 +669,20 @@ class LedgerDstackStore:
                     return False
             elif binding.get("stop_started"):
                 return False
+            from .capacity_watchdog import fenced_node_stop, node_workers
+
+            # This rental's own workers: an earlier rental's unstopped attempt
+            # on a reused provider instance id kept this one rented (#1321).
             workers = (
-                list(
-                    connection.execute(
-                        select(registered_workers).where(
-                            registered_workers.c.provider == intent["provider"],
-                            registered_workers.c.instance_id
-                            == intent["provider_instance_id"],
-                        )
-                    ).mappings()
-                )
+                [
+                    worker
+                    for worker in node_workers(connection, intent)[1]
+                    if worker["instance_id"] == intent["provider_instance_id"]
+                ]
                 if intent.get("provider_instance_id")
                 else []
             )
             worker_ids = [worker["id"] for worker in workers]
-            from .capacity_watchdog import fenced_node_stop
 
             watchdog_stop = fenced_node_stop(connection, node, intent)
             if (

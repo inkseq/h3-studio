@@ -186,6 +186,20 @@ SCENARIOS = [
         expect_starts=2,  # The second rental serves; no third is needed.
     ),
     Scenario(
+        "provider_reuses_id_after_removal",
+        "A machine is removed mid-job; its replacement reports the same id.",
+        # #1321 review: the removed rental's unstopped attempt was matched to
+        # the replacement by instance id, so the replacement could not be
+        # stopped once idle and stayed rented with nothing it could take.
+        hours=4,
+        max_machines=1,
+        jobs=[JobBatch(0, 3, actual_runtime_s=900)],
+        machines=[
+            MachineScript(removed_at=900, instance_id="4390002"),
+            MachineScript(instance_id="4390002"),
+        ],
+    ),
+    Scenario(
         "engine_rejects_one_request",
         "One request makes the engine fail with its thread alive; four are fine.",
         # #1214, staging 2026-11-10: the same request was retried on three

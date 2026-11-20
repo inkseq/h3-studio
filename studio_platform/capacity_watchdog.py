@@ -518,8 +518,9 @@ def provider_removed(binding, intent, now):
         and binding.get("dstack_status") in {"done", "failed", "terminated", "aborted"}
         and _number(proof.get("observed_at"))
         # The writer validated a fresh complete inventory when it recorded the
-        # proof (dstack_ledger). Provider instance ids are never reused, so the
-        # absence stays true: an older proof is still proof. Requiring it to be
+        # proof (dstack_ledger). The proof is for this intent's own rental (a
+        # provider can hand the id to a later one, #1321), so the absence
+        # stays true: an older proof is still proof. Requiring it to be
         # under 30 s old let a job on a removed machine stay "running" forever
         # once ticks were slower than that (#1034 machine_lost_mid_job).
         and 0 <= now - proof["observed_at"]
