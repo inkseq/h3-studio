@@ -592,6 +592,33 @@ class RebindLedgerTests(LedgerCase):
         self.assertEqual(self.row(created["id"])["pool"], POOL)
         self.assertEqual(fast.new_arrivals(service, seen), set())
 
+    def test_a_replayed_staging_account_goes_hosted_whatever_the_vendor_balance(self):
+        # everyframe_replay: its renders are answered from a recording and
+        # spend nothing, so an empty vendor balance does not hold them back.
+        from studio_platform.providers import everyframe_replay
+
+        self.hosted_control()
+        created = self.queued_job()
+        self.machine_route(created["id"])
+        row = self.row(created["id"])
+        tier = get_tier(row["request"], execution=row["execution_plan"])
+        service = self.service(tiers=(tier,), first=True)
+        rebind_module._balance.update(usd=0.13)  # Under the reserve: hosted is off.
+        for listed, left in (
+            (frozenset(), [(row, {})]),
+            (frozenset({"someone-else"}), [(row, {})]),
+            (frozenset({row["owner_id"]}), []),
+        ):
+            with (
+                self.subTest(listed=listed),
+                mock.patch.object(everyframe_replay, "owners", return_value=listed),
+                self.repo.transaction() as connection,
+            ):
+                self.assertEqual(
+                    offload(service, connection, [(row, {})], self.now), left
+                )
+        self.assertEqual(self.row(created["id"])["pool"], POOL)
+
     def test_the_fast_loop_considers_a_job_once_and_leaves_the_rest_to_the_pass(self):
         from studio_platform import hosted_fast_offload as fast
 
