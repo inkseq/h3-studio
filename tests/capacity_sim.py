@@ -111,6 +111,9 @@ class MachineScript:
     # The provider instance id this rental reports. Two scripts with the same
     # one are a provider handing a finished rental's id to a later one (#1321).
     instance_id: str | None = None
+    # The machine comes up and its worker can never register: every controller
+    # pass fails on it while it is paid and work waits (#1321).
+    worker_conflict: bool = False
 
     @classmethod
     def from_fixture(cls, name, **overrides):
@@ -210,6 +213,9 @@ class Scenario:
     # demand profile, as the admin start-rules API stores them; None: defaults.
     start_rules: dict | None = None
     expect_starts: int | None = None  # exact number of machines created
+    # Exception types a controller tick is meant to meet in this scenario,
+    # because the script injects the fault itself (worker_conflict: Conflict).
+    scripted_exceptions: tuple = ()
     # Every idle stop comes this many seconds after the machine's last job
     # (or readiness), at most one tick late, and at least one happens.
     expect_idle_stop_seconds: float | None = None
@@ -553,6 +559,8 @@ class SimProvider(operator_fixture.Client):
             "cost": 0.0,
         }
         self.runs[spec["run_name"]] = value
+        if script.worker_conflict and not self.world._seeding:
+            self.world.block_worker(intent)
         self.world.log("create", machine)
         if not self.world._seeding and script.no_capacity:
             self.world.evidence.create_failed(machine, "no_capacity")
@@ -1158,7 +1166,10 @@ class World(LedgerCase):
                 if message.startswith("dstack_controller_observation_failed"):
                     kind = message.rsplit("error_type=", 1)[-1]
                     world.reasons["controller_exception:" + kind] += 1
-                    if kind not in world._exceptions:
+                    if (
+                        kind not in world._exceptions
+                        and kind not in world.scenario.scripted_exceptions
+                    ):
                         world._exceptions.add(kind)
                         world.violate("controller_exception", kind)
                 elif message.startswith("dstack_test_budget_row_unconfirmed"):
@@ -1497,6 +1508,26 @@ class World(LedgerCase):
 
     def worker_id(self, intent_id):
         return "dstack-" + intent_id.replace("-", "")
+
+    def block_worker(self, intent_id):
+        """A retired row under the worker's name: registration conflicts for ever."""
+        with self.repo.transaction() as connection:
+            connection.execute(
+                insert(registered_workers).values(
+                    id=self.worker_id(intent_id),
+                    pool="blocked",
+                    provider="vast",
+                    instance_id="blocked",
+                    spec={},
+                    spec_hash="0" * 64,
+                    state="retired",
+                    current_job_id=None,
+                    drain_requested=1,
+                    fence=1,
+                    expires_at=0.0,
+                    updated_at=self.now,
+                )
+            )
 
     def machine_for(self, intent_id):
         return next(

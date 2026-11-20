@@ -34,6 +34,8 @@ STOP_DIAGNOSES = {"host_runtime", "worker_unreachable"}
 # restarts the app and, with it, the tunnel the worker dials (#1140); chisel retries
 # with backoff, so give it a few minutes rather than stopping on the first miss.
 WORKER_LOST_GRACE_SECONDS = 600
+# A runtime read this recent is the controller looking at the machine now.
+RUNTIME_READ_FRESH_SECONDS = 120
 # A model download still running this long past the floor-rate time is overdue.
 DOWNLOAD_OVERDUE_SLACK_SECONDS = 300
 # Queued work, no live machine and demand start refusing: alert after 30 min.
@@ -96,10 +98,24 @@ def worker_unreachable(binding, workers, now):
     # Only a runtime the controller read and could not confirm counts as lost.
     # A "ready" binding that is merely old means nobody looked (for example the
     # controller itself was down), never that the worker is gone.
-    if binding.get("state") in {"ready", "busy"}:
-        return False
-    # Stop only once the last sign of life is older than the grace window.
     last = max(lost_since, default=None)
+    if binding.get("state") in {"ready", "busy"}:
+        # Unless the controller is reading an idle runtime now and still no
+        # worker of it admits: one that could never register, or was retired.
+        # Such a machine was paid for 23 minutes with shots waiting (#1321).
+        observed = binding.get("observed_at")
+        if (
+            binding["state"] != "ready"
+            or not finite(observed, now)
+            or now - observed > RUNTIME_READ_FRESH_SECONDS
+            # Refused for capacity is its own diagnosis, and no fault of the host.
+            or binding.get("registration_observation", {}).get("reason_code")
+            == "global_capacity_exceeded"
+        ):
+            return False
+        since = binding["first_runtime_ready_at"] if last is None else last
+        return now - since >= WORKER_LOST_GRACE_SECONDS
+    # Stop only once the last sign of life is older than the grace window.
     return last is None or now - last >= WORKER_LOST_GRACE_SECONDS
 
 

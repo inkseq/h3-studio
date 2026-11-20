@@ -16,6 +16,7 @@ from studio_platform.capacity_health import (
     pending_reports,
     _event,
     queue_episode_ages,
+    worker_unreachable,
 )
 from studio_platform.dstack_demand_policy import policy_key, read_runtime
 from studio_platform.dstack_controller import DstackController
@@ -112,8 +113,39 @@ class CapacityHealthTests(unittest.TestCase):
         finding = self.evaluate()[0]
         self.assertEqual(finding["diagnosis"], "dispatch_unobserved")
         self.assertFalse(finding["stop_replace"])
-        self.node["payload"]["dstack"].update(state="ready", observed_at=990)
+        # A ready runtime nobody has read lately says nothing (the controller
+        # may have been down), and a busy one is working.
+        binding = self.node["payload"]["dstack"]
+        binding.update(state="ready", observed_at=600)
         self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
+        binding.update(state="busy", observed_at=990)
+        self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
+        # #1321: the controller is reading an idle ready runtime and no worker
+        # of it admits, never registered or retired. Paid 23 minutes on staging.
+        binding.update(state="ready", observed_at=990)
+        for workers in ([], [retired]):
+            with self.subTest(ready_without=workers):
+                finding = self.evaluate(workers=workers)[0]
+                self.assertEqual(
+                    (finding["diagnosis"], finding["stop_replace"]),
+                    ("worker_unreachable", True),
+                )
+        # Within the grace of becoming ready, or of the last sign of life: wait.
+        binding.update(first_runtime_ready_at=500)
+        self.assertEqual(self.evaluate(workers=[]), [])
+        self.assertFalse(worker_unreachable(binding, [], 1000))
+        binding.update(first_runtime_ready_at=200)
+        self.assertFalse(self.evaluate(workers=[recent])[0]["stop_replace"])
+        # Refused for capacity keeps its own diagnosis and is not stopped.
+        binding["registration_observation"] = {
+            "reason_code": "global_capacity_exceeded"
+        }
+        finding = self.evaluate(workers=[])[0]
+        self.assertEqual(
+            (finding["diagnosis"], finding["stop_replace"]),
+            ("registration_capacity", False),
+        )
+        del binding["registration_observation"]
         # A machine that never became ready is the startup watchdog's case.
         self.node["payload"]["dstack"].update(
             state="runtime_unconfirmed", observed_at=1, first_runtime_ready_at=None

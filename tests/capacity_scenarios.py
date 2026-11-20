@@ -200,6 +200,19 @@ SCENARIOS = [
         ],
     ),
     Scenario(
+        "worker_cannot_register",
+        "A machine comes up, its worker can never register; the next one is fine.",
+        # #1321, staging 2026-11-20: such a machine was paid and idle for 23
+        # minutes with three shots waiting. Health said dispatch_unobserved and
+        # named no machine to stop; it was stopped by hand.
+        hours=3,
+        max_machines=1,
+        jobs=[JobBatch(0, 2)],
+        machines=[MachineScript(worker_conflict=True), MachineScript()],
+        scripted_exceptions=("Conflict",),
+        expect_starts=2,  # Stopped as a lost worker; the next machine serves.
+    ),
+    Scenario(
         "engine_rejects_one_request",
         "One request makes the engine fail with its thread alive; four are fine.",
         # #1214, staging 2026-11-10: the same request was retried on three
