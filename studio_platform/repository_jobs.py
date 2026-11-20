@@ -54,19 +54,9 @@ class JobLedger:
             or execution.get("admission_state") == "waiting_capacity"
         ):
             return
-        stopping = set(
-            connection.execute(
-                select(
-                    instance_intents.c.provider, instance_intents.c.provider_instance_id
-                ).where(
-                    instance_intents.c.pool == pool,
-                    instance_intents.c.state.in_(
-                        ("draining", "destroying", "destroyed")
-                    ),
-                    instance_intents.c.provider_instance_id.is_not(None),
-                )
-            ).tuples()
-        )
+        from .control import stopping_instances
+
+        stopping = stopping_instances(connection, instance_intents.c.pool == pool)
         if not stopping:
             return
         if execution.get("pool") == pool and execution.get("demand_start") is not None:

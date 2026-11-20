@@ -512,15 +512,10 @@ class DstackController:
         from .worker_admission import matching_dstack_queued_jobs
 
         with self.repo.engine.connect() as connection:
-            workers = list(
-                connection.execute(
-                    select(registered_workers).where(
-                        registered_workers.c.provider == intent["provider"],
-                        registered_workers.c.instance_id
-                        == intent["provider_instance_id"],
-                    )
-                ).mappings()
-            )
+            from .capacity_watchdog import node_workers
+
+            # This rental's own workers, not a later one's on the same id (#1321).
+            workers = node_workers(connection, intent)[1]
             ids = [worker["id"] for worker in workers]
             linked = (
                 list(

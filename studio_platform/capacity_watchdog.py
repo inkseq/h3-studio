@@ -145,7 +145,13 @@ def node_workers(connection, intent):
             )
         ).mappings()
     )
-    return identity, rows
+    # A later rental can report the same provider instance id; its worker is
+    # named after its own intent and is not this node's to fence (#1321).
+    from .control import other_rentals_worker
+
+    return identity, [
+        row for row in rows if not other_rentals_worker(row["id"], intent["id"])
+    ]
 
 
 def fenced_node_stop(connection, node, intent, *, now=None):

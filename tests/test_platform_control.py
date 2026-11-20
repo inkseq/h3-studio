@@ -693,6 +693,62 @@ class ControlTests(LedgerCase):
         self.repo.update_instance(intent["id"], "ready")
         return intent
 
+    def test_a_later_rental_on_a_reused_provider_instance_id_admits(self):
+        # #1321, staging 2026-11-20: RunPod gave a rental the provider instance
+        # id of one recorded destroyed 47 minutes earlier; the old intent kept
+        # the new rental's worker from ever admitting.
+        from studio_platform.control import other_rentals_worker, stopping_instances
+
+        first = self.managed_instance()
+        job = self.controlled_job()
+        key = ("test-only", "fake-instance")
+        for state in ("draining", "destroying"):
+            self.repo.update_instance(first["id"], state)
+            with self.repo.engine.connect() as connection:
+                self.assertIn(key, stopping_instances(connection))
+        self.repo.update_instance(
+            first["id"], "destroyed", destruction_confirmed=True, actual_cost_microusd=0
+        )
+        # Destroyed and nothing live on the id: a worker there stays refused.
+        with self.assertRaisesRegex(Conflict, "worker_instance_not_admitting"):
+            self.control.mark_ready("worker", upstream_idle_confirmed=True)
+        second = self.repo.reserve_instance_intent(
+            self.scope,
+            "control-test",
+            "managed-test-again",
+            provider="test-only",
+            physical_gpus=1,
+            slots=1,
+            hard_deadline=self.now + 3600,
+            reserved_cost_microusd=100_000,
+            budget_account_ids=["owner-budget"],
+            dry_run=False,
+        )
+        self.repo.update_instance(second["id"], "creating")
+        self.repo.update_instance(
+            second["id"], "starting", provider_instance_id="fake-instance"
+        )
+        with self.repo.engine.connect() as connection:
+            self.assertNotIn(key, stopping_instances(connection))
+            # Past its hard deadline the live rental is stopping again.
+            self.assertIn(key, stopping_instances(connection, now=self.now + 7200))
+        self.control.mark_ready("worker", upstream_idle_confirmed=True)
+        # Claiming on the reused id is the simulator's to show
+        # (provider_reuses_instance_id): it needs a worker named after its rental.
+        self.assertEqual(self.repo.get_job(self.scope, job["id"])["status"], "queued")
+        # A rental being torn down stops the id whatever else is recorded on it.
+        self.repo.update_instance(second["id"], "draining")
+        with self.repo.engine.connect() as connection:
+            self.assertIn(key, stopping_instances(connection))
+        ident = "0123abcd-0000-4000-8000-000000000001"
+        self.assertFalse(
+            other_rentals_worker("dstack-0123abcd000040008000000000000001", ident)
+        )
+        self.assertTrue(
+            other_rentals_worker("dstack-ffffffff000040008000000000000001", ident)
+        )
+        self.assertFalse(other_rentals_worker("worker", ident))
+
     def test_managed_draining_host_cannot_resume_idle_worker_or_take_regular_queued_job(
         self,
     ):

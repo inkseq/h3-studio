@@ -108,6 +108,9 @@ class MachineScript:
     # [[from, until, code]] seconds after create in which a run read raises
     # DstackError(code), as recorded by an exported incident.
     read_errors: list | None = None
+    # The provider instance id this rental reports. Two scripts with the same
+    # one are a provider handing a finished rental's id to a later one (#1321).
+    instance_id: str | None = None
 
     @classmethod
     def from_fixture(cls, name, **overrides):
@@ -272,7 +275,7 @@ class Machine:
     def __init__(self, script, *, intent_id, run_name, created_at, index):
         self.script, self.intent_id, self.run_name = script, intent_id, run_name
         self.created_at, self.index = created_at, index
-        self.instance_id = str(4_300_000 + index)
+        self.instance_id = script.instance_id or str(4_300_000 + index)
         self.offer_id = str(10_000 + index)
         self.machine_id = str(19_000 + index)
         self.stop_requested_at = None
@@ -290,6 +293,8 @@ class Machine:
 
     def incarnation(self):
         """The native runtime identity; one per machine in these scripts."""
+        if self.script.instance_id:  # A reused id is still a new runtime.
+            return request_hash({"instance": self.instance_id, "at": self.index})[:32]
         return request_hash({"instance": self.instance_id})[:32]
 
     def elapsed(self, now):
@@ -495,8 +500,14 @@ class SimProvider(operator_fixture.Client):
 
     def vast_instance_identity(self, identity):
         self.world.provider_wait("vast_instance_identity")
+        # The newest rental with this id: a provider may hand an id out again.
         machine = next(
-            (m for m in self.machines.values() if m.instance_id == identity), None
+            (
+                m
+                for m in reversed(list(self.machines.values()))
+                if m.instance_id == identity
+            ),
+            None,
         )
         return {
             "provider_instance_id": identity,
