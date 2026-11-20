@@ -884,6 +884,57 @@ test('a shot with a take or one still being made is not offered or made again', 
   assert.equal(state.quotes[quote.id].status, 'made');
 });
 
+test('a story opened while its shots are being made says so and keeps watching', async () => {
+  const { createLiveChat } = await import('./story-chat-client.js');
+  const { applyEvent } = await import('./story-chat-model.js');
+  // h3-studio#1301: after a reload the offer said "Make 3 shots" while they were queued.
+  const view = videoView({ kind: 'generate', shot_ids: ['s1', 's2'] });
+  for (const card of [...view.cards.characters, ...view.cards.places])
+    card.image_url = '/v1/assets/x/content';
+  const labels = { openWorks: () => {}, failed: () => 'failed', pollMs: 1 };
+  const calls = [];
+  let status = 'queued';
+  const api = {
+    async request(path, options = {}) {
+      calls.push([options.method || 'GET', path]);
+      if (path.startsWith('/v1/jobs?'))
+        return { jobs: [{ client_ref: { shot_id: 's1' }, status }] };
+      return view;
+    },
+  };
+  let state = null;
+  const seen = [];
+  const emit = (event) => {
+    state = event.type === 'chat.loaded' ? event.state : applyEvent(state, event);
+    if (event.type === 'quote.settled') seen.push(event.status);
+  };
+  const chat = createLiveChat({ api, projectId: 'p1', labels });
+  await chat.open(emit);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  assert.deepEqual(seen, ['making']);
+  status = 'succeeded';
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(seen, ['making', 'made']);
+  assert.equal(
+    calls.some(([method]) => method === 'POST'),
+    false,
+  );
+  chat.close?.();
+  // A shot that only got as far as "planned", or no job at all, leaves the offer alone.
+  for (const jobs of [[], [{ client_ref: { shot_id: 's1' }, status: 'planned' }]]) {
+    const quiet = [];
+    const idle = createLiveChat({
+      api: { request: async (path) => (path.startsWith('/v1/jobs?') ? { jobs } : view) },
+      projectId: 'p1',
+      labels,
+    });
+    await idle.open((event) => event.type === 'quote.settled' && quiet.push(event.status));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.deepEqual(quiet, []);
+    idle.close?.();
+  }
+});
+
 test('a price for an older story version is checked again, never submitted', async () => {
   const { createLiveChat, fromServer } = await import('./story-chat-client.js');
   const { applyEvent } = await import('./story-chat-model.js');
