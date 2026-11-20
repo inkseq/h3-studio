@@ -132,6 +132,14 @@ def _economy():
     return jobs.c.request["priority_class"].as_string() == "economy"
 
 
+def _vendor_render(attempts):
+    """Not a staging replay (everyframe_replay): those never reach the vendor,
+    so they neither use its window nor show that it is taking work."""
+    return ~func.coalesce(attempts.c.upstream_task_id, "").startswith(
+        "rpl_", autoescape=True
+    )
+
+
 def used_in_window(connection, tenant, now, *, clicks_only=False):
     """{owner_id: hosted renders in the vendor window, plus any about to start}.
 
@@ -158,6 +166,7 @@ def used_in_window(connection, tenant, now, *, clicks_only=False):
             jobs.c.tenant_id == tenant,
             attempts.c.worker_id.like("dbos-everyframe-%"),
             attempts.c.submission_started_at >= now - HOSTED_WINDOW_SECONDS,
+            _vendor_render(attempts),
         )
     ):
         used[owner] = used.get(owner, 0) + 1
@@ -332,6 +341,7 @@ def hosted_draining(connection, tenant, now):
         .where(
             jobs.c.tenant_id == tenant,
             attempts.c.worker_id.like("dbos-everyframe-%"),
+            _vendor_render(attempts),
         )
     ).scalar_one()
     return latest is not None and now - latest < HOSTED_STALL_SECONDS

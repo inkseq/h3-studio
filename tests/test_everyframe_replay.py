@@ -50,15 +50,20 @@ class FenceTests(unittest.TestCase):
         )
         patcher.start()
         self.addCleanup(patcher.stop)
-        replay._owners.update(read_at=None, value=frozenset())
+        replay._state.update(read_at=None, replay=None)
+        self.addCleanup(replay._state.update, read_at=None, replay=None)
+
+    def current(self, where):
+        replay._state.update(read_at=None)  # As after the half minute.
+        return replay.current(where)
 
     def write(self, **changes):
         self.file.write_text(json.dumps({**self.value, **changes}), encoding="utf-8")
 
     def test_only_staging_with_a_valid_host_file_replays(self):
-        self.assertIsNone(replay.load(settings(self.root)))  # No file.
+        self.assertIsNone(self.current(settings(self.root)))  # No file.
         self.write()
-        self.assertIsNotNone(replay.load(settings(self.root)))
+        self.assertIsNotNone(self.current(settings(self.root)))
         # Production never replays, whatever is on its disk.
         for target, origin in (
             ("production", "https://inkseq.com"),
@@ -67,8 +72,7 @@ class FenceTests(unittest.TestCase):
         ):
             with self.subTest(target=target, origin=origin):
                 other = settings(self.root, target, origin)
-                self.assertIsNone(replay.load(other))
-                replay._owners.update(read_at=None)
+                self.assertIsNone(self.current(other))
                 self.assertEqual(replay.owners(other), frozenset())
         for changes in (
             {"version": 2},
@@ -78,13 +82,15 @@ class FenceTests(unittest.TestCase):
             {"videos": {}},
             {"videos": {"480p|16:9|5": "../a.mp4"}},
             {"videos": {"anything": "a.mp4"}},
+            {"version": True},
+            {"attachment_seconds": 61},
             {"extra": 1},
         ):
             with self.subTest(changes=changes):
                 self.write(**changes)
-                self.assertIsNone(replay.load(settings(self.root)))
+                self.assertIsNone(self.current(settings(self.root)))
 
-    def test_owners_are_read_from_the_file_at_most_every_half_minute(self):
+    def test_routing_and_slots_get_one_answer_read_every_half_minute(self):
         self.write()
         clock = iter([0, 10, 29, 31]).__next__
         here = settings(self.root)
@@ -93,6 +99,12 @@ class FenceTests(unittest.TestCase):
         self.assertEqual(replay.owners(here, clock=clock), {"qa-credit"})
         self.assertEqual(replay.owners(here, clock=clock), {"qa-credit"})
         self.assertEqual(replay.owners(here, clock=clock), frozenset())
+        # The same object while the file is unchanged; a new one when it changes.
+        self.write()
+        first = self.current(here)
+        self.assertIs(self.current(here), first)
+        self.write(owners=["qa-credit", "qa-user"])
+        self.assertIsNot(self.current(here), first)
 
 
 @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
@@ -125,7 +137,7 @@ class ReplayedRenderTests(unittest.TestCase):
             "attachment_seconds": 5,
             "videos": {shape(value): "take.mp4"},
         }
-        recording = replay.Replay(
+        self.recording = replay.Replay(
             config, self.root, clock=lambda: self.now, sleep=self.slept.append
         )
 
@@ -134,7 +146,10 @@ class ReplayedRenderTests(unittest.TestCase):
             return httpx.Response(201, json={"attachment": {"id": "att_live"}})
 
         self.backend = EveryFrameBackend(
-            Store(), "/unused", transport=httpx.MockTransport(vendor), replay=recording
+            Store(),
+            "/unused",
+            transport=httpx.MockTransport(vendor),
+            replay=lambda: self.recording,
         )
         self.backend._config = Config("key-1")
 
@@ -175,6 +190,24 @@ class ReplayedRenderTests(unittest.TestCase):
         self.assertEqual(self.backend.poll("t", "rpl_zz_0_abc").state, "running")
         self.assertEqual(self.backend.poll("t", "rpl_zz_9_abc").state, "unknown")
         self.assertEqual(self.live, [])
+
+    def test_the_slot_follows_the_file_and_a_replay_id_never_reaches_the_vendor(self):
+        # Review of #1324: routing re-read the file while a slot kept what it
+        # loaded when it opened, so an account added later was routed to the
+        # hosted lane and then rendered for money.
+        work, recording = self.job("qa-credit"), self.recording
+        self.recording = None  # No file yet when the slot opened.
+        self.assertFalse(self.backend.prepare(work, "t", None, lambda: None).replay)
+        self.assertEqual(len(self.live), 1)
+        self.recording = recording  # The file arrives; no restart.
+        prepared = self.backend.prepare(work, "t", None, lambda: None)
+        task = self.backend.submit(prepared, "t")
+        self.assertTrue(prepared.replay and task.startswith("rpl_"))
+        self.recording = None  # The file is taken away with a render in flight.
+        self.assertEqual(self.backend.poll("t", task).state, "unknown")
+        with self.assertRaises(Exception):
+            self.backend.submit(prepared, "t")
+        self.assertEqual(len(self.live), 1)  # Still only the first, unreplayed call.
 
 
 if __name__ == "__main__":

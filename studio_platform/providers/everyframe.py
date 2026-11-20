@@ -114,9 +114,9 @@ class EveryFrameBackend:
         self.slot_key = slot_key
         self._config = None
         self._http = VendorHTTP(timeout=60, transport=transport)
-        # everyframe_replay: recorded answers for listed staging accounts.
-        self._replay = replay
-        self._recorded = replay and VendorHTTP(timeout=60, transport=replay.transport)
+        # everyframe_replay: a callable giving the staging recording in force,
+        # or None. Asked each time, as routing asks, so both always agree.
+        self._replay, self._tape = replay, (None, None)
         self.cost_resolver = self._cost
 
     def __repr__(self):
@@ -137,13 +137,33 @@ class EveryFrameBackend:
 
     def close(self):
         self._http.close()
-        self._config = None
+        if self._tape[1] is not None:
+            self._tape[1].close()
+        self._config, self._tape = None, (None, None)
+
+    def _recording(self):
+        recording = self._replay() if self._replay else None
+        if recording is not self._tape[0]:
+            if self._tape[1] is not None:
+                self._tape[1].close()
+            self._tape = (
+                recording,
+                recording and VendorHTTP(timeout=60, transport=recording.transport),
+            )
+        return self._tape
 
     def _client(self, path, replay=False):
-        """The recording for its own render ids and for a replayed job."""
-        if self._recorded and (replay or path.startswith("/render/" + REPLAY_ID)):
-            return self._recorded
-        return self._http
+        """The recording for a replayed job and for its render ids, else the vendor.
+
+        A replayed request with no recording in force is an error here: it is
+        never sent to the vendor.
+        """
+        if not replay and not path.startswith("/render/" + REPLAY_ID):
+            return self._http
+        tape = self._recording()[1]
+        if tape is None:
+            raise BackendError("everyframe_replay_unavailable")
+        return tape
 
     def _request(self, method, path, *, content=None, content_type=None, replay=False):
         config = self.config()
@@ -216,7 +236,8 @@ class EveryFrameBackend:
         if mapped is None:
             raise BackendError("everyframe_request_invalid")
         body, asset_ids = mapped
-        replay = bool(self._replay and self._replay.takes(job))
+        recording = self._recording()[0]
+        replay = bool(recording and recording.takes(job))
         attachments = []
         for asset_id in asset_ids:
             heartbeat()
@@ -454,5 +475,8 @@ def create(store, settings, slot_key=PROVIDER):
 
     path = Path(settings.data_dir) / "runtime-secrets" / FILENAME
     return EveryFrameBackend(
-        store, path, slot_key=slot_key, replay=everyframe_replay.load(settings)
+        store,
+        path,
+        slot_key=slot_key,
+        replay=lambda: everyframe_replay.current(settings),
     )

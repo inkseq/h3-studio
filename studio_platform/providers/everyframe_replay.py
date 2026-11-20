@@ -55,11 +55,13 @@ def _validated(value):
         type(value) is not dict
         or set(value)
         != {"version", "owners", "render_seconds", "attachment_seconds", "videos"}
+        or type(value["version"]) is not int
         or value["version"] != 1
         or type(value["owners"]) is not list
         or not 1 <= len(value["owners"]) <= 8
         or any(type(o) is not str or not _NAME.fullmatch(o) for o in value["owners"])
         or any(type(s) not in (int, float) or not 0 <= s <= 600 for s in seconds)
+        or seconds[1] > 60  # Slept on the worker's thread.
         or type(value["videos"]) is not dict
         or not 1 <= len(value["videos"]) <= 32
         or any(
@@ -81,46 +83,48 @@ def _config(settings):
         or getattr(settings, "public_origin", None) != STAGING_ORIGIN
     ):
         return None
-    path = Path(settings.data_dir) / "runtime-secrets" / FILENAME
-    if not path.is_file():
-        return None
     try:
+        path = Path(settings.data_dir) / "runtime-secrets" / FILENAME
+        if not path.is_file():
+            return None
         return _validated(read_protected_json(path, _Invalid))
     except Exception:
         print("everyframe_replay_config_invalid", flush=True)
         return None
 
 
-def load(settings):
-    """A Replay for a hosted slot of this process, or None."""
-    config = _config(settings)
-    if config is None:
-        return None
-    print("everyframe_replay_configured", flush=True)
-    return Replay(config, Path(settings.data_dir) / DIRECTORY)
+_state = {"read_at": None, "replay": None}
 
 
-_owners = {"read_at": None, "value": frozenset()}
+def current(settings, *, clock=time.monotonic):
+    """The Replay in force, or None; the host file is read at most every 30 s.
 
-
-def owners(settings, *, clock=time.monotonic):
-    """Accounts whose jobs are replayed; read from the file at most every 30 s.
-
-    Routing asks this for every queued job: these accounts go to the hosted
-    route whatever the vendor balance is, since they spend none of it.
+    One answer for routing and for every hosted slot of the process: an
+    account that is routed to the hosted lane because it is replayed is
+    replayed by the slot that takes its job, and neither needs a restart to
+    see the file come or go.
     """
     now = clock()
-    if _owners["read_at"] is None or not 0 <= now - _owners["read_at"] < 30:
-        config = _config(settings)
-        _owners.update(
-            read_at=now, value=frozenset(config["owners"]) if config else frozenset()
-        )
-    return _owners["value"]
+    if _state["read_at"] is None or not 0 <= now - _state["read_at"] < 30:
+        config, replay = _config(settings), _state["replay"]
+        if config is None:
+            replay = None
+        elif replay is None or replay.config != config:
+            replay = Replay(config, Path(settings.data_dir) / DIRECTORY)
+            print("everyframe_replay_configured", flush=True)
+        _state.update(read_at=now, replay=replay)
+    return _state["replay"]
+
+
+def owners(settings, **options):
+    """Accounts whose jobs are replayed: they spend no vendor balance."""
+    replay = current(settings, **options)
+    return replay.owners if replay else frozenset()
 
 
 class Replay:
     def __init__(self, config, directory, *, clock=time.time, sleep=time.sleep):
-        self.owners = frozenset(config["owners"])
+        self.config, self.owners = config, frozenset(config["owners"])
         self.render_seconds = config["render_seconds"]
         self.attachment_seconds = config["attachment_seconds"]
         self.videos = dict(sorted(config["videos"].items()))
