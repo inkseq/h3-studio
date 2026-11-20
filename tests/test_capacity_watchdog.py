@@ -907,6 +907,54 @@ class NodeWatchdogTests(LedgerCase):
         self.assertEqual(len(self.client.stopped), 1)
         self.assertEqual(self.repo.get_job(self.scope, queued["id"]), original)
 
+    def test_ready_machine_whose_worker_is_refused_is_stopped_after_the_grace(self):
+        # #1321: a machine read ready, the control plane refused its worker on
+        # every pass, and the waiting queue held off the idle stop: 23 minutes
+        # paid on staging until it was stopped by hand.
+        node_id, controller = self._continuing_ready()
+        queued = self._queued_native("fl")
+        original = self.repo.get_job(self.scope, queued["id"])
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers).values(state="retired", expires_at=self.now)
+            )
+        first = self.now
+        for step in range(10):
+            self.now = first + 60 * step
+            controller.tick()
+            node, intent = self.node(node_id)
+            refused = node["payload"]["dstack"]["registration_observation"]
+            self.assertEqual(
+                (node["desired_state"], refused["reason_code"], refused["since"]),
+                ("running", "worker_registration_refused", first),
+            )
+        # Refused for capacity is an alert of its own, never a stop: the same
+        # stored node, refused for twice the grace, only the reason different.
+        capacity = copy.deepcopy(node["payload"])
+        capacity["dstack"]["registration_observation"].update(
+            reason_code="global_capacity_exceeded", since=first - 600
+        )
+        for payload, stop in ((capacity, False), (node["payload"], False)):
+            with self.repo.transaction() as connection:
+                connection.execute(
+                    update(operator_nodes)
+                    .where(operator_nodes.c.intent_id == node_id)
+                    .values(payload=payload)
+                )
+            self.assertEqual(
+                reclaim_node(self.service, *self.node(node_id))["stop_requested"], stop
+            )
+        self.now = first + 600
+        controller.tick()
+        node = self.node(node_id)[0]
+        self.assertEqual(
+            (node["desired_state"], node["payload"]["capacity_watchdog"]["reason"]),
+            ("stopped", "capacity_worker_lost"),
+        )
+        controller.tick()
+        self.assertEqual(len(self.client.stopped), 1)
+        self.assertEqual(self.repo.get_job(self.scope, queued["id"]), original)
+
     def test_removed_idle_retired_worker_releases_only_its_ghost_device_once(self):
         node_id, controller = self.ready()
         self.now += 1

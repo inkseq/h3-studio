@@ -13,6 +13,10 @@ import uuid
 from sqlalchemy import func, insert, select, update
 
 from .dstack_demand import _matches
+from .dstack_operator_contract import (
+    REGISTRATION_REFUSED,
+    REGISTRATION_REFUSED_FRESH_SECONDS,
+)
 from .operator_capacity import operator_nodes, operator_policy
 from .repository import (
     attempts,
@@ -97,7 +101,19 @@ def worker_unreachable(binding, workers, now):
     # A "ready" binding that is merely old means nobody looked (for example the
     # controller itself was down), never that the worker is gone.
     if binding.get("state") in {"ready", "busy"}:
-        return False
+        # Unless the control plane has refused to admit an idle runtime's
+        # worker on every pass for the whole grace window and is still
+        # refusing. Such a machine was paid for 23 minutes with shots waiting,
+        # the queue itself holding off its idle stop (#1321).
+        refused = binding.get("registration_observation") or {}
+        return (
+            binding["state"] == "ready"
+            and refused.get("reason_code") == REGISTRATION_REFUSED
+            and finite(refused.get("observed_at"), now)
+            and now - refused["observed_at"] <= REGISTRATION_REFUSED_FRESH_SECONDS
+            and finite(refused.get("since"), now)
+            and now - refused["since"] >= WORKER_LOST_GRACE_SECONDS
+        )
     # Stop only once the last sign of life is older than the grace window.
     last = max(lost_since, default=None)
     return last is None or now - last >= WORKER_LOST_GRACE_SECONDS

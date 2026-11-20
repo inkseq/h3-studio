@@ -200,6 +200,20 @@ SCENARIOS = [
         ],
     ),
     Scenario(
+        "worker_cannot_register",
+        "A machine comes up, its worker can never register; the next one is fine.",
+        # #1321, staging 2026-11-20: such a machine was paid and idle for 23
+        # minutes with three shots waiting. Health said dispatch_unobserved and
+        # named no machine to stop; it was stopped by hand.
+        hours=3,
+        max_machines=1,
+        jobs=[JobBatch(0, 2)],
+        machines=[MachineScript(worker_conflict=True), MachineScript()],
+        expect_starts=2,  # The next machine serves.
+        # Not the idle rule: waiting work that matches the machine holds that off.
+        expect_stops={"capacity_worker_lost": 1},
+    ),
+    Scenario(
         "engine_rejects_one_request",
         "One request makes the engine fail with its thread alive; four are fine.",
         # #1214, staging 2026-11-10: the same request was retried on three
@@ -309,6 +323,9 @@ SCENARIOS = [
             MachineScript(tunnel_lost_on_restart="never"),
         ],
         events=[Event(15 * 60, "restart_app")],
+        # One had a job cut off, the other was idle; the waiting queue holds
+        # the idle rule off both, so neither may end by it.
+        expect_stops={"capacity_worker_lost": 1, "capacity_no_progress": 1},
     ),
     Scenario(
         "worker_returns_after_restart",

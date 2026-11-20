@@ -111,6 +111,9 @@ class MachineScript:
     # The provider instance id this rental reports. Two scripts with the same
     # one are a provider handing a finished rental's id to a later one (#1321).
     instance_id: str | None = None
+    # The machine comes up and its worker can never register: every controller
+    # pass fails on it while it is paid and work waits (#1321).
+    worker_conflict: bool = False
 
     @classmethod
     def from_fixture(cls, name, **overrides):
@@ -210,6 +213,7 @@ class Scenario:
     # demand profile, as the admin start-rules API stores them; None: defaults.
     start_rules: dict | None = None
     expect_starts: int | None = None  # exact number of machines created
+    expect_stops: dict | None = None  # stop reason -> exact number of machines
     # Every idle stop comes this many seconds after the machine's last job
     # (or readiness), at most one tick late, and at least one happens.
     expect_idle_stop_seconds: float | None = None
@@ -553,6 +557,8 @@ class SimProvider(operator_fixture.Client):
             "cost": 0.0,
         }
         self.runs[spec["run_name"]] = value
+        if script.worker_conflict and not self.world._seeding:
+            self.world.block_worker(intent)
         self.world.log("create", machine)
         if not self.world._seeding and script.no_capacity:
             self.world.evidence.create_failed(machine, "no_capacity")
@@ -996,6 +1002,9 @@ class World(LedgerCase):
             model_id=profile["model_id"],
             engine_manifest_digest=manifest.digest,
             output_delivery=profile_output_delivery(operator_fixture.PROFILE),
+            # As a real policy: without it no queued job matches a machine, and
+            # nothing a waiting queue holds open was ever simulated (#1321).
+            deployment_profile_id=operator_fixture.PROFILE,
             qualification=dict(status="accepted", verified_at=1.0, expires_at=None),
             reservation=dict(expected_runtime_s=1800, expires_at=None),
             envelope=dict(max_duration_seconds=4.0),
@@ -1157,6 +1166,11 @@ class World(LedgerCase):
                 message = record.getMessage()
                 if message.startswith("dstack_controller_observation_failed"):
                     kind = message.rsplit("error_type=", 1)[-1]
+                    node = message.split("node_id=", 1)[-1].split(" ", 1)[0]
+                    if kind == "Conflict" and node in world._blocked:
+                        # The script's own fault, on the machine it was put on.
+                        world.reasons["refused_registration"] += 1
+                        return
                     world.reasons["controller_exception:" + kind] += 1
                     if kind not in world._exceptions:
                         world._exceptions.add(kind)
@@ -1164,7 +1178,7 @@ class World(LedgerCase):
                 elif message.startswith("dstack_test_budget_row_unconfirmed"):
                     world.reasons["budget_row_unconfirmed"] += 1
 
-        self._exceptions = set()
+        self._exceptions, self._blocked = set(), set()
         for name in (
             "studio_platform.dstack_controller",
             "studio_platform.dstack_test_budget",
@@ -1497,6 +1511,31 @@ class World(LedgerCase):
 
     def worker_id(self, intent_id):
         return "dstack-" + intent_id.replace("-", "")
+
+    def block_worker(self, intent_id):
+        """A retired row under the worker's name: registration conflicts for ever.
+
+        As on staging on 2026-11-20 once the worker had been retired: every
+        pass logged worker_registration_conflict for the node.
+        """
+        self._blocked.add(intent_id)
+        with self.repo.transaction() as connection:
+            connection.execute(
+                insert(registered_workers).values(
+                    id=self.worker_id(intent_id),
+                    pool="blocked",
+                    provider="vast",
+                    instance_id="blocked",
+                    spec={},
+                    spec_hash="0" * 64,
+                    state="retired",
+                    current_job_id=None,
+                    drain_requested=1,
+                    fence=1,
+                    expires_at=self.now,
+                    updated_at=self.now,
+                )
+            )
 
     def machine_for(self, intent_id):
         return next(
@@ -2403,6 +2442,21 @@ class World(LedgerCase):
                     "lookahead:%s:%s"
                     % (payload["phase"], payload["decision"]["reason"])
                 ] += 1
+        # A refused machine is stopped after the grace: so many passes, no more.
+        most = len(self._blocked) * (600 // scenario.tick_seconds + 2)
+        if self.reasons["refused_registration"] > most:
+            self.violate(
+                "refused_registration_unbounded",
+                "%d refused passes, at most %d expected"
+                % (self.reasons["refused_registration"], most),
+            )
+        for reason, count in (scenario.expect_stops or {}).items():
+            if self.reasons["stop:" + reason] != count:
+                self.violate(
+                    "stop_count_mismatch",
+                    "%s stopped %d machines, expected %d"
+                    % (reason, self.reasons["stop:" + reason], count),
+                )
         if (
             scenario.expect_starts is not None
             and len(machines) != scenario.expect_starts

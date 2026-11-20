@@ -31,6 +31,8 @@ from .dstack_operator_contract import (
     OBSERVATION_KEYS,
     IDENTITY_KEYS,
     REGISTRATION_REASON_CODES,
+    REGISTRATION_REFUSED,
+    REGISTRATION_REFUSED_FRESH_SECONDS,
     _finite,
 )
 
@@ -598,7 +600,11 @@ class LedgerDstackStore:
         """
         require(
             safe_id(worker_id)
-            and (reason_code is None or reason_code in REGISTRATION_REASON_CODES),
+            and (
+                reason_code is None
+                or reason_code in REGISTRATION_REASON_CODES
+                or reason_code == REGISTRATION_REFUSED
+            ),
             "dstack_registration_observation_invalid",
         )
         with self.repo.transaction() as connection:
@@ -633,6 +639,20 @@ class LedgerDstackStore:
                 "registered": reason_code is None,
                 "observed_at": self.repo.clock(),
             }
+            if reason_code is not None:
+                # Since when this has been the only answer, pass after pass. A
+                # gap in which nobody asked starts the count again.
+                now, last = observation["observed_at"], previous.get("observed_at")
+                unbroken = (
+                    all(
+                        previous.get(key) == observation[key]
+                        for key in ("worker_id", "reason_code")
+                    )
+                    and _finite(previous.get("since"))
+                    and _finite(last)
+                    and 0 <= now - last <= REGISTRATION_REFUSED_FRESH_SECONDS
+                )
+                observation["since"] = previous["since"] if unbroken else now
             payload["dstack"]["registration_observation"] = observation
             self._save(connection, node, payload)
             if any(

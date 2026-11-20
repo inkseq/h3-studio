@@ -16,6 +16,7 @@ from studio_platform.capacity_health import (
     pending_reports,
     _event,
     queue_episode_ages,
+    worker_unreachable,
 )
 from studio_platform.dstack_demand_policy import policy_key, read_runtime
 from studio_platform.dstack_controller import DstackController
@@ -112,8 +113,47 @@ class CapacityHealthTests(unittest.TestCase):
         finding = self.evaluate()[0]
         self.assertEqual(finding["diagnosis"], "dispatch_unobserved")
         self.assertFalse(finding["stop_replace"])
-        self.node["payload"]["dstack"].update(state="ready", observed_at=990)
+        # A ready runtime with no worker says nothing by itself (nobody may
+        # have looked: the controller was down), and a busy one is working.
+        binding = self.node["payload"]["dstack"]
+        binding.update(state="ready", observed_at=990)
         self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
+        # #1321: the control plane has refused this ready machine's worker on
+        # every pass since 300 and still does. Paid 23 minutes on staging.
+        refused = {
+            "worker_id": self.worker["id"],
+            "reason_code": "worker_registration_refused",
+            "registered": False,
+            "observed_at": 990,
+            "since": 300,
+        }
+        binding["registration_observation"] = refused
+        for workers in ([], [retired], [expired]):
+            with self.subTest(refused_with=workers):
+                finding = self.evaluate(workers=workers)[0]
+                self.assertEqual(
+                    (finding["diagnosis"], finding["stop_replace"]),
+                    ("worker_unreachable", True),
+                )
+        for change in (
+            {"since": 401},  # Refused for less than the grace window.
+            {"observed_at": 699},  # Nobody has tried for five minutes.
+            {"since": None},
+            {"reason_code": "global_capacity_exceeded"},  # Its own diagnosis.
+            {"reason_code": None, "registered": True},  # Admitted since.
+        ):
+            with self.subTest(change=change):
+                binding["registration_observation"] = {**refused, **change}
+                self.assertFalse(worker_unreachable(binding, [], 1000))
+                self.assertFalse(self.evaluate(workers=[])[0]["stop_replace"])
+        binding["registration_observation"] = refused
+        self.assertTrue(worker_unreachable(binding, [], 1000))
+        # A worker that admits, or a runtime at work, is not lost whatever is
+        # recorded.
+        self.assertFalse(worker_unreachable(binding, [self.worker], 1000))
+        binding.update(state="busy")
+        self.assertFalse(worker_unreachable(binding, [], 1000))
+        del binding["registration_observation"]
         # A machine that never became ready is the startup watchdog's case.
         self.node["payload"]["dstack"].update(
             state="runtime_unconfirmed", observed_at=1, first_runtime_ready_at=None
