@@ -34,6 +34,7 @@ from .repository import (
 from .providers.registry import VASTAI
 from .operator_capacity import (
     ACTIVE_COMMANDS,
+    rental_workers,
     advance_command_revision,
     operator_commands,
     operator_nodes,
@@ -113,15 +114,18 @@ def snapshot(repo, conn, tenant, kind, identity, *, reviewed=False):
         value["node"] = dict(node)
         value["workers"] = [
             dict(r)
-            for r in conn.execute(
-                select(registered_workers)
-                .where(
-                    registered_workers.c.provider == row["provider"],
-                    registered_workers.c.instance_id == row["provider_instance_id"],
-                )
-                .order_by(registered_workers.c.id)
-                .with_for_update()
-            ).mappings()
+            for r in rental_workers(
+                conn.execute(
+                    select(registered_workers)
+                    .where(
+                        registered_workers.c.provider == row["provider"],
+                        registered_workers.c.instance_id == row["provider_instance_id"],
+                    )
+                    .order_by(registered_workers.c.id)
+                    .with_for_update()
+                ).mappings(),
+                row["id"],
+            )
         ]
         worker_ids = [w["id"] for w in value["workers"]]
         value["attempts"] = (
@@ -571,7 +575,9 @@ def removed_host(conn, worker_id):
             registered_workers.c.id == worker_id
         )
     ).first()
-    if worker is not None and worker.instance_id:
+    if worker is not None and worker.instance_id and not match:
+        # Only a worker not named after its rental is found by instance id: a
+        # later rental on the same id is not this worker's host (#1327).
         hosts.append(
             and_(
                 instance_intents.c.provider == worker.provider,
@@ -664,7 +670,7 @@ def release_removed_instance(repo, conn, identity):
     )
     if row is None or row["state"] != "destroyed" or not row["provider_instance_id"]:
         return
-    workers = list(
+    workers = rental_workers(
         conn.execute(
             select(registered_workers)
             .where(
@@ -672,7 +678,8 @@ def release_removed_instance(repo, conn, identity):
                 registered_workers.c.instance_id == row["provider_instance_id"],
             )
             .with_for_update()
-        ).mappings()
+        ).mappings(),
+        row["id"],
     )
     if any(w["current_job_id"] is not None for w in workers):
         return

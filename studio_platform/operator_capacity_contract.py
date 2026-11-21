@@ -27,6 +27,31 @@ from .repository import (
 )
 from .capacity_types import LaunchSpec, REMOVAL_CHECK_INTERVAL_SECONDS
 
+_RENTAL_WORKER = re.compile(r"dstack-[0-9a-f]{32}")
+
+
+def other_rentals_worker(worker_id, intent_id):
+    """True when the worker is named after a different rental than this intent.
+
+    Workers and intents are matched by provider instance id almost everywhere,
+    and a dstack worker is also named after its own intent. When a provider
+    gives a later rental the same instance id, the name tells them apart.
+    """
+    return bool(_RENTAL_WORKER.fullmatch(worker_id)) and worker_id != (
+        "dstack-" + intent_id.replace("-", "")
+    )
+
+
+def rental_workers(rows, intent_id):
+    """Worker rows found by provider instance id, without other rentals' workers.
+
+    Use it wherever workers are selected by (provider, instance id) for one
+    rental: a later rental on a reused id must not lend its live work, history
+    or bill to an earlier one, nor the reverse (#1321, #1327).
+    """
+    return [row for row in rows if not other_rentals_worker(row["id"], intent_id)]
+
+
 operator_policy = Table(
     "platform_operator_capacity_policy",
     metadata,

@@ -903,6 +903,30 @@ class NodeWatchdogTests(LedgerCase):
         )
         self.assertTrue(stop_unserved_node(self.service, node_id))
         self.assertEqual(self.node(node_id)[0]["desired_state"], "stopped")
+        # #1327: the committed decision replays whatever the runtime reads now.
+        # The stop moved the retired worker's expiry to the stop itself, which
+        # the old re-check read as a worker lost only a moment ago.
+        for after in (0, 30, 900):
+            with self.subTest(after=after):
+                self.now += after
+                node, intent = self.node(node_id)
+                with self.repo.engine.connect() as connection:
+                    self.assertTrue(fenced_node_stop(connection, node, intent))
+        # A worker that comes back after the decision still cancels the replay.
+        decided = self.node(node_id)[0]["payload"]["capacity_watchdog"]["at"]
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers).values(
+                    state="ready", expires_at=decided + 60
+                )
+            )
+        node, intent = self.node(node_id)
+        with self.repo.engine.connect() as connection:
+            self.assertFalse(fenced_node_stop(connection, node, intent))
+        with self.repo.transaction() as connection:
+            connection.execute(
+                update(registered_workers).values(state="retired", expires_at=decided)
+            )
         controller.tick()
         self.assertEqual(len(self.client.stopped), 1)
         self.assertEqual(self.repo.get_job(self.scope, queued["id"]), original)

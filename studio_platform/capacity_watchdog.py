@@ -154,6 +154,16 @@ def node_workers(connection, intent):
     ]
 
 
+def _worker_came_back(workers, decision_at):
+    """A worker admitting again after a committed stop decision."""
+    return any(
+        worker["state"] in {"ready", "busy"}
+        and _number(worker["expires_at"])
+        and worker["expires_at"] > decision_at
+        for worker in workers
+    )
+
+
 def fenced_node_stop(connection, node, intent, *, now=None):
     """Exact recovery command plus absence of any unfenced execution obligation."""
     marker = node["payload"].get("capacity_watchdog")
@@ -271,7 +281,15 @@ def fenced_node_stop(connection, node, intent, *, now=None):
                 or not 0 <= decision_at - observed <= 120
             )
             or diagnosis == "worker_unreachable"
-            and not worker_unreachable(binding, workers, decision_at)
+            and (
+                # Replaying the committed decision: the stop moved the retired
+                # workers' expiry to itself, so the rule would now read them as
+                # lost a moment ago and refuse for ever (#1327). Re-check only
+                # that none came back, as the worker-lost replay does.
+                _worker_came_back(workers, decision_at)
+                if node["desired_state"] == "stopped"
+                else not worker_unreachable(binding, workers, decision_at)
+            )
             or node["desired_state"] == "running"
             and not matching_dstack_queued_jobs(connection, intent, node)
         ):
@@ -289,12 +307,7 @@ def fenced_node_stop(connection, node, intent, *, now=None):
             # Replaying the committed decision: retiring the workers moved their
             # expiry to the stop itself, so only re-check that none came back.
             observed = binding.get("observed_at")
-            if any(
-                worker["state"] in {"ready", "busy"}
-                and _number(worker["expires_at"])
-                and worker["expires_at"] > decision_at
-                for worker in workers
-            ) or (
+            if _worker_came_back(workers, decision_at) or (
                 binding.get("state") in {"ready", "busy"}
                 and _number(observed)
                 and 0 <= decision_at - observed <= 120

@@ -419,6 +419,35 @@ class OperatorBillingTests(LedgerCase):
             )
         )
 
+    def test_a_later_rental_on_the_same_instance_id_is_billed_apart(self):
+        # #1327: the provider gave a later rental the instance id of an
+        # earlier one (#1321). The earlier bill read the later rental's busy
+        # worker as its own and was blocked; its jobs could have been allocated
+        # across both rentals.
+        bills = []
+        for _ in range(2):
+            ident, worker = self.instance(provider_id="pid-reused")
+            named = "dstack-" + ident.replace("-", "")
+            with self.repo.transaction() as conn:
+                conn.execute(
+                    update(registered_workers)
+                    .where(registered_workers.c.id == worker)
+                    .values(id=named)
+                )
+            bills.append((ident, named))
+        (earlier, _), (later, later_worker) = bills
+        with self.repo.transaction() as conn:
+            conn.execute(
+                update(registered_workers)
+                .where(registered_workers.c.id == later_worker)
+                .values(current_job_id="unrelated-job")
+            )
+        views = self.views()
+        self.assertIsNone(views[("instance", earlier)]["block_reason"])
+        self.assertEqual(
+            views[("instance", later)]["block_reason"], "billing_upstream_unconfirmed"
+        )
+
     def test_terminal_pending_corruption_and_busy_worker_fail_closed(self):
         instance, worker = self.instance()
         job = self.completed_job(worker)

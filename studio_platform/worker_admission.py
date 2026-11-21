@@ -236,10 +236,20 @@ def admission_runtime(connection, intent, expected_runtime_s):
         return expected_runtime_s
     if not intent.get("provider") or not intent.get("provider_instance_id"):
         return expected_runtime_s
-    workers = select(registered_workers.c.id).where(
-        registered_workers.c.provider == intent["provider"],
-        registered_workers.c.instance_id == intent["provider_instance_id"],
-    )
+    from .control import rental_workers
+
+    workers = [
+        row["id"]
+        for row in rental_workers(
+            connection.execute(
+                select(registered_workers.c.id).where(
+                    registered_workers.c.provider == intent["provider"],
+                    registered_workers.c.instance_id == intent["provider_instance_id"],
+                )
+            ).mappings(),
+            intent["id"],
+        )
+    ]
     output_at = (
         select(func.min(artifacts.c.created_at))
         .where(artifacts.c.attempt_id == attempts.c.id)
@@ -550,13 +560,16 @@ def matching_dstack_queued_jobs(connection, intent, node, *, admittable_at=None)
 
 
 def _dstack_idle_reason(connection, intent, node, now):
-    workers = list(
+    from .control import rental_workers
+
+    workers = rental_workers(
         connection.execute(
             select(registered_workers.c.id, registered_workers.c.current_job_id).where(
                 registered_workers.c.provider == intent["provider"],
                 registered_workers.c.instance_id == intent["provider_instance_id"],
             )
-        ).mappings()
+        ).mappings(),
+        intent["id"],
     )
     worker_ids = [worker["id"] for worker in workers]
     related = list(
