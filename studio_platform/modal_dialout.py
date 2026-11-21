@@ -15,6 +15,7 @@ Credentials: a protected JSON file named by the operator config's
 The Modal SDK is loaded on first provider use only.
 """
 
+import importlib.util
 from pathlib import Path
 import re
 import time
@@ -87,6 +88,21 @@ class ModalDialoutClient(DialoutCapacityClient):
     def instance_name(self):
         return self.config["app_name"]
 
+    def launchable(self):
+        """Whether this process can create a sandbox at all.
+
+        Manual starts run in the app, whose image has no Modal SDK; demand
+        starts run in the controller, whose image has it. A lane this process
+        cannot launch makes no offer, so the start goes to the next lane
+        (#1326).
+        """
+        return self._sdk is not None or importlib.util.find_spec("modal") is not None
+
+    def plan(self, spec):
+        if not self.launchable():
+            return {"run_spec": spec, "job_plans": [{"offers": []}]}
+        return super().plan(spec)
+
     def _modal(self):
         """(sdk, client, app), created on first provider use only."""
         if self._app is None:
@@ -103,9 +119,13 @@ class ModalDialoutClient(DialoutCapacityClient):
                     c["app_name"], create_if_missing=True, client=self._client
                 )
             except Exception as error:
-                raise self._provider_error(
+                failure = self._provider_error(
                     "initialize", "dstack_api_unavailable", error
-                ) from None
+                )
+                # Before any sandbox call: nothing of this start can exist, so
+                # it fails at once instead of waiting out the expiry (#1326).
+                failure.nothing_sent = True
+                raise failure from None
         return self._sdk, self._client, self._app
 
     def _launch(self, run_name, job, seconds):

@@ -21,16 +21,14 @@ RESET_SECONDS = 10800
 def lane(node, now):
     """The backend to blame for this start, or None if it is not a lane fault."""
     from ..capacity_health import finite
+    from ..dialout_capacity import allocated_identity
 
     binding = node["payload"].get("dstack", {})
-    allocated = node.get("provider_instance_id") or binding.get("provider_instance_id")
     backend = binding.get("backend")
     if (
         isinstance(backend, str)
         and (
-            isinstance(allocated, str)
-            and allocated
-            or binding.get("lane_refused") is True
+            allocated_identity(node) is not None or binding.get("lane_refused") is True
         )
         and not finite(binding.get("first_runtime_ready_at"), now)
     ):

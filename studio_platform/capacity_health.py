@@ -280,9 +280,9 @@ def evaluate(
         # A start the provider never allocated keeps demand start's own
         # no-allocation backoff; it is not a start/stop loop (#1034
         # two_no_capacity_starts paused demand for the whole tenant).
-        allocated = node.get("provider_instance_id") or binding.get(
-            "provider_instance_id"
-        )
+        from .dialout_capacity import allocated_identity
+
+        allocated = allocated_identity(node)
         if (
             demand_enabled
             and cycle is not None

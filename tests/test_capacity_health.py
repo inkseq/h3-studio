@@ -284,6 +284,51 @@ class CapacityHealthTests(unittest.TestCase):
             self.evaluate(nodes=nodes, demand_enabled=True, attempts=[attempt]), []
         )
 
+    def test_serverless_starts_stopped_while_queued_are_not_a_loop(self):
+        # Review of #1329: a serverless job that never ran is recorded under
+        # its own placeholder name (job-<id>, unbound-<run id>) so its removal
+        # can be proven (#1328). That name is no allocation: two such stops
+        # must not pause demand for the whole tenant as our own start loop.
+        nodes = []
+        for identity, started, ended, name in (
+            ("a" * 32, 100, 200, "job-1"),
+            ("b" * 32, 300, 400, "unbound-" + "c" * 8),
+        ):
+            node = copy.deepcopy(self.node)
+            node.update(
+                intent_id=identity,
+                runtime_state="stopped",
+                desired_state="stopped",
+                provider_instance_id=name,
+            )
+            node["payload"]["dstack"].update(
+                backend="runpod-serverless",
+                provider_instance_id=name,
+                apply_started_at=started,
+                first_stopped_at=ended,
+                first_runtime_ready_at=None,
+            )
+            nodes.append(node)
+        loop = lambda: [  # noqa: E731
+            f["code"]
+            for f in self.evaluate(
+                nodes=nodes, demand_enabled=True, demand_enabled_since=50
+            )
+        ]
+        self.assertNotIn("capacity_demand_start_loop", loop())
+        # A worker's own id is an allocation: the start failed on its lane,
+        # which cools alone (scheduling.health), and is still no tenant loop.
+        from studio_platform.scheduling.health import lane
+
+        self.assertEqual([lane(node, 1000) for node in nodes], [None, None])
+        for node, worker in zip(nodes, ("w1", "w2")):
+            node["provider_instance_id"] = worker
+            node["payload"]["dstack"]["provider_instance_id"] = worker
+        self.assertEqual(
+            [lane(node, 1000) for node in nodes], ["runpod-serverless"] * 2
+        )
+        self.assertNotIn("capacity_demand_start_loop", loop())
+
     def test_repeated_poll_and_single_original_cycle_cannot_create_loop(self):
         node = copy.deepcopy(self.node)
         node.update(runtime_state="stopped", desired_state="stopped")
