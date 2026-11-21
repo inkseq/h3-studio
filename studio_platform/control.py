@@ -12,6 +12,10 @@ import re
 
 from sqlalchemy import and_, case, func, insert, inspect, literal, select, update
 
+from .operator_capacity_contract import (
+    other_rentals_worker as other_rentals_worker,
+    rental_workers as rental_workers,
+)
 from .queue import TaskQueue
 from .inference.outputs import validate_delivery_policy
 from .providers.registry import (
@@ -263,21 +267,6 @@ def stopping_instances(connection, *matching, now=None):
         elif state in ("creating", "creation_unknown", "starting", "ready", "busy"):
             live.add(key)
     return stopping | (ended - live)
-
-
-_RENTAL_WORKER = re.compile(r"dstack-[0-9a-f]{32}")
-
-
-def other_rentals_worker(worker_id, intent_id):
-    """True when the worker is named after a different rental than this intent.
-
-    Workers and intents are matched by provider instance id almost everywhere,
-    and a dstack worker is also named after its own intent. When a provider
-    gives a later rental the same instance id, the name tells them apart.
-    """
-    return bool(_RENTAL_WORKER.fullmatch(worker_id)) and worker_id != (
-        "dstack-" + intent_id.replace("-", "")
-    )
 
 
 def _instance_stopping(connection, worker):

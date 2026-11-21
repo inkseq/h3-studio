@@ -748,6 +748,17 @@ class ControlTests(LedgerCase):
             other_rentals_worker("dstack-ffffffff000040008000000000000001", ident)
         )
         self.assertFalse(other_rentals_worker("worker", ident))
+        from studio_platform.control import rental_workers
+
+        rows = [
+            {"id": "dstack-0123abcd000040008000000000000001"},
+            {"id": "dstack-ffffffff000040008000000000000001"},
+            {"id": "worker"},
+        ]
+        self.assertEqual(
+            [row["id"] for row in rental_workers(rows, ident)],
+            ["dstack-0123abcd000040008000000000000001", "worker"],
+        )
 
     def test_managed_draining_host_cannot_resume_idle_worker_or_take_regular_queued_job(
         self,

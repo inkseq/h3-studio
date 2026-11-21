@@ -104,6 +104,64 @@ class TerminalHoldTests(LedgerCase):
         )
         return {hold["id"] for hold in snapshot["terminal_reservations"]}
 
+    def rental(self, key, instance):
+        """A host on a given provider instance id, its worker named after it."""
+        intent = self.repo.reserve_instance_intent(
+            self.scope,
+            "test-pool",
+            key,
+            reserved_cost_microusd=50_000,
+            hard_deadline=self.now + 86400,
+            budget_account_ids=["owner-budget"],
+            dry_run=False,
+            provider="vast",
+        )
+        self.repo.update_instance(intent["id"], "creating")
+        self.repo.update_instance(
+            intent["id"], "starting", provider_instance_id=instance
+        )
+        worker = "dstack-" + intent["id"].replace("-", "")
+        with self.repo.transaction() as conn:
+            conn.execute(
+                insert(registered_workers).values(
+                    id=worker,
+                    pool="test-pool",
+                    provider="vast",
+                    instance_id=instance,
+                    spec={},
+                    spec_hash="a" * 64,
+                    state="ready",
+                    current_job_id=None,
+                    drain_requested=0,
+                    fence=1,
+                    expires_at=self.now + 900,
+                    updated_at=self.now,
+                )
+            )
+        return intent["id"], worker
+
+    def test_a_later_rental_on_the_same_instance_id_holds_nothing_of_the_earlier(self):
+        # #1327: the provider gave a later rental the instance id of an earlier
+        # one (#1321). The earlier rental's holds waited on the later one's
+        # live work, because workers were matched by instance id alone.
+        first, first_worker = self.rental("first", "pid-reused")
+        job = self.job()
+        self.lose(self.submitted(job, first_worker), reason="capacity_owner_recovery")
+        self.remove(first)
+        second, second_worker = self.rental("second", "pid-reused")
+        busy = self.job()
+        self.submitted(busy, second_worker)
+        # The earlier host is removed; the later one is live and working.
+        self.assertEqual(
+            self.repo.request_cancel(self.scope, job["id"])["status"], "cancelled"
+        )
+        release_removed_holds(self.repo, first, [job["id"]])
+        self.assertEqual(self.states("job", job["id"]), {("invoice_pending", None)})
+        self.assertEqual(self.states("instance", first), {("invoice_pending", None)})
+        # The later rental keeps its own hold while it works.
+        self.assertEqual(self.states("instance", second), {("reserved", None)})
+        self.assertEqual(self.states("job", busy["id"]), {("reserved", None)})
+
     def test_job_done_after_attempt_lost_on_removed_host_waits_for_invoice(self):
         # Staging 881a2328: the first host vanished, the job then succeeded on
         # another host, and its hold stayed reserved for weeks.

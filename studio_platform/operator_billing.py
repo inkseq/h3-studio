@@ -180,16 +180,22 @@ def _reference(repo, conn, tenant, owner, kind, ident, *, lock=False):
             ).mappings()
         ]
     else:
+        from .settlement_recovery import rental_workers
+
+        # A later rental on the same provider instance id is billed apart (#1327).
         workers = [
             dict(r)
-            for r in conn.execute(
-                select(registered_workers)
-                .where(
-                    registered_workers.c.provider == row["provider"],
-                    registered_workers.c.instance_id == row["provider_instance_id"],
-                )
-                .order_by(registered_workers.c.id)
-            ).mappings()
+            for r in rental_workers(
+                conn.execute(
+                    select(registered_workers)
+                    .where(
+                        registered_workers.c.provider == row["provider"],
+                        registered_workers.c.instance_id == row["provider_instance_id"],
+                    )
+                    .order_by(registered_workers.c.id)
+                ).mappings(),
+                row["id"],
+            )
         ]
         history = [
             dict(r)

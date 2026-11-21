@@ -29,6 +29,8 @@ from .repository import (
 from .operator_extensions import OperatorExtensions
 
 from .operator_capacity_contract import (
+    other_rentals_worker as other_rentals_worker,
+    rental_workers as rental_workers,
     operator_policy as operator_policy,
     operator_previews as operator_previews,
     operator_commands as operator_commands,

@@ -309,10 +309,21 @@ def read_snapshot(
             lifecycle = node["lifecycle"] if isinstance(node["lifecycle"], dict) else {}
             if identity(node["id"]) is None:
                 raise ValueError("alert_gpu_identity_invalid")
-            worker_ids = select(registered_workers.c.id).where(
-                registered_workers.c.provider == node["provider"],
-                registered_workers.c.instance_id == node["provider_instance_id"],
-            )
+            from .operator_capacity import rental_workers
+
+            worker_ids = [
+                row["id"]
+                for row in rental_workers(
+                    connection.execute(
+                        select(registered_workers.c.id).where(
+                            registered_workers.c.provider == node["provider"],
+                            registered_workers.c.instance_id
+                            == node["provider_instance_id"],
+                        )
+                    ).mappings(),
+                    node["id"],
+                )
+            ]
             # Aggregate historical activity and unresolved submissions in SQL;
             # retired workers and terminal jobs still carry obligations.
             related_ids = select(attempts.c.job_id).where(
