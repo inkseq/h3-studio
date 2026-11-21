@@ -193,7 +193,9 @@ class DialoutCapacityClient:
         try:
             value = self._launch(run_name, job, seconds)
         except DstackError as error:
-            if self.DEFINITE_REJECTION and str(error) == "dstack_api_rejected":
+            if getattr(error, "nothing_sent", False) or (
+                self.DEFINITE_REJECTION and str(error) == "dstack_api_rejected"
+            ):
                 # Nothing exists to observe or stop: the start fails at once and
                 # the next lane is tried, instead of waiting out the expiry.
                 record["final"] = {"status": "REFUSED"}
@@ -307,6 +309,10 @@ class DialoutCapacityClient:
             "run_spec": record["spec"],
             "status": run_status,
             "latest_job_submission": submission,
+            # dstack's shape: one job, one submission. A job that ended before
+            # any running read names its allocation only here; without it the
+            # run never proved its removal and its reservation stayed (#1328).
+            "jobs": [{"job_submissions": [submission]}],
         }
         if status.get("no_worker") is True:
             # Queued with no worker the provider could start (#1272).
