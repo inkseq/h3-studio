@@ -287,7 +287,9 @@ def fenced_node_stop(connection, node, intent, *, now=None):
                 # lost a moment ago and refuse for ever (#1327). Re-check only
                 # that none came back, as the worker-lost replay does.
                 _worker_came_back(workers, decision_at)
-                if node["desired_state"] == "stopped"
+                # Only a replay (no new clock): a new decision on a node an
+                # operator stopped meanwhile still runs the whole rule.
+                if node["desired_state"] == "stopped" and now is None
                 else not worker_unreachable(binding, workers, decision_at)
             )
             or node["desired_state"] == "running"

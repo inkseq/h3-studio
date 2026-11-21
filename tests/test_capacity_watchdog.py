@@ -912,6 +912,18 @@ class NodeWatchdogTests(LedgerCase):
                 node, intent = self.node(node_id)
                 with self.repo.engine.connect() as connection:
                     self.assertTrue(fenced_node_stop(connection, node, intent))
+        # A new decision (its own clock) on a node already stopped runs the whole
+        # rule: the retired worker was lost a moment ago, so it is refused.
+        node, intent = self.node(node_id)
+        with self.repo.engine.connect() as connection:
+            self.assertFalse(
+                fenced_node_stop(
+                    connection,
+                    node,
+                    intent,
+                    now=node["payload"]["capacity_watchdog"]["at"] + 1,
+                )
+            )
         # A worker that comes back after the decision still cancels the replay.
         decided = self.node(node_id)[0]["payload"]["capacity_watchdog"]["at"]
         with self.repo.transaction() as connection:
