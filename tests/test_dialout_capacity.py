@@ -404,6 +404,44 @@ class DialoutCapacityFailures(LedgerCase):
 
         self.assertEqual(self.ended_without_running(no_worker), "job-job-1")
 
+    def lane_of(self, node):
+        from studio_platform.scheduling.health import lane
+
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents)).mappings().one()
+        row = {
+            "payload": {"dstack": self.store.load(node)},
+            "provider_instance_id": intent["provider_instance_id"],
+        }
+        return lane(row, self.now)
+
+    def test_a_job_stopped_while_queued_never_cools_its_lane(self):
+        # Review of #1329: the placeholder name a queued job gets once it ends
+        # read as an allocation, so stopping a start while it was still queued
+        # (the queue drained, the user cancelled) cooled the RunPod lane.
+        def cancelled(lane, node):
+            self.service.node_command(self.owner, node, {}, "stop-1")
+            self.capacity.stop(node)
+            self.now += 1
+            self.capacity.observe_terminal(node)
+
+        self.assertEqual(self.ended_without_running(cancelled), "job-job-1")
+        with self.repo.engine.connect() as connection:
+            node = connection.execute(select(operator_nodes.c.intent_id)).scalar_one()
+        self.assertIsNone(self.lane_of(node))
+
+    def test_a_job_a_worker_took_that_never_got_ready_still_cools_its_lane(self):
+        lane = self.configure(self.rp.backend)
+        node = self.start()["node_id"]
+        self.runpod.jobs["job-1"].update(status="IN_PROGRESS", workerId="w123")
+        self.capacity.observe(node)
+        self.service.node_command(self.owner, node, {}, "stop-1")
+        self.capacity.stop(node)
+        self.now += 1
+        self.capacity.observe_terminal(node)
+        self.assertEqual(self.store.load(node)["provider_instance_id"], "w123")
+        self.assertEqual(self.lane_of(node), lane.backend)
+
     def test_a_job_cancelled_from_the_queue_or_failed_ends_the_same_way(self):
         for status in ("CANCELLED", "FAILED"):
             with self.subTest(status=status):
