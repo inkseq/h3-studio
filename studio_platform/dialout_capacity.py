@@ -17,7 +17,7 @@ import uuid
 
 from .dstack_capacity import DstackError
 from .capacity_interface import CapacityTransport
-from .providers.registry import RUNPOD_SERVERLESS
+from .providers.registry import MODAL_DIALOUT, RUNPOD_SERVERLESS
 
 logger = logging.getLogger(__name__)
 # Retained adapter status vocabulary, not a new persisted state machine.
@@ -43,6 +43,28 @@ JOB_ID = re.compile(r"[A-Za-z0-9-]{1,128}")
 RUN_NAME = re.compile(r"sixnine-[0-9a-f]{32}")
 BOOT_ENV = frozenset({"INKSEQ_BOOT_URL", "INKSEQ_INTENT", "INKSEQ_BOOT_TOKEN"})
 MAX_EXECUTION_SECONDS = 7200
+DIALOUT_BACKENDS = frozenset({RUNPOD_SERVERLESS.id, MODAL_DIALOUT.id})
+
+
+# Names a dial-out run gives itself when no worker was ever reported: enough to
+# prove it gone from the lane's live list (#1328), never proof that the provider
+# allocated a machine.
+PLACEHOLDER = re.compile(r"(?:job|unbound)-[A-Za-z0-9-]{1,140}")
+
+
+def allocated_identity(node):
+    """The provider instance id that proves an allocation, or None.
+
+    A dial-out run's own placeholder name is not one: a job stopped while it
+    was still queued must not count as a failed start of its lane.
+    """
+    binding = node["payload"].get("dstack", {})
+    identity = node.get("provider_instance_id") or binding.get("provider_instance_id")
+    if not isinstance(identity, str) or not identity:
+        return None
+    if binding.get("backend") in DIALOUT_BACKENDS and PLACEHOLDER.fullmatch(identity):
+        return None
+    return identity
 
 
 def _require(condition, code):
@@ -193,7 +215,9 @@ class DialoutCapacityClient:
         try:
             value = self._launch(run_name, job, seconds)
         except DstackError as error:
-            if self.DEFINITE_REJECTION and str(error) == "dstack_api_rejected":
+            if getattr(error, "nothing_sent", False) or (
+                self.DEFINITE_REJECTION and str(error) == "dstack_api_rejected"
+            ):
                 # Nothing exists to observe or stop: the start fails at once and
                 # the next lane is tried, instead of waiting out the expiry.
                 record["final"] = {"status": "REFUSED"}
@@ -307,6 +331,10 @@ class DialoutCapacityClient:
             "run_spec": record["spec"],
             "status": run_status,
             "latest_job_submission": submission,
+            # dstack's shape: one job, one submission. A job that ended before
+            # any running read names its allocation only here; without it the
+            # run never proved its removal and its reservation stayed (#1328).
+            "jobs": [{"job_submissions": [submission]}],
         }
         if status.get("no_worker") is True:
             # Queued with no worker the provider could start (#1272).

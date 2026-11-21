@@ -20,6 +20,7 @@ from studio_platform.repository import (
     BudgetExceeded,
     budget_accounts,
     budget_reservations,
+    instance_intents,
 )
 from studio_platform.operator_capacity import operator_nodes
 from studio_platform.runpod_serverless import RoutedClient, RunPodServerlessClient
@@ -167,6 +168,45 @@ class DialoutCapacityFailures(LedgerCase):
         self.assert_unknown_original(node, lane)
         self.assertEqual(len(self.modal.created), 1)
         self.assertEqual(self.runpod.calls, [])
+
+    def test_a_process_without_the_modal_sdk_never_offers_the_modal_lane(self):
+        # Staging, 2026-11-20: a manual start from the app, whose image has no
+        # Modal SDK, was offered the Modal lane and held a capacity slot for
+        # three hours as an unknown outcome (#1326).
+        lane = self.configure(self.md.backend)
+        app = ModalDialoutClient(lane.config, lane.project, clock=self.repo.clock)
+        with patch("importlib.util.find_spec", return_value=None):
+            self.assertFalse(app.launchable())
+            plan = app.plan(spec(backends=[app.backend]))
+        self.assertEqual(plan["job_plans"], [{"offers": []}])
+        # Where the SDK is there (the controller), the lane offers as before.
+        self.assertTrue(lane.launchable())
+        self.assertEqual(
+            len(lane.plan(spec(backends=[lane.backend]))["job_plans"][0]["offers"]),
+            1,
+        )
+
+    def test_a_modal_start_that_fails_before_any_sandbox_call_ends_at_once(self):
+        lane = self.configure(self.md.backend)
+        with patch.object(
+            self.modal.Client,
+            "from_credentials",
+            side_effect=ModuleNotFoundError("synthetic"),
+        ):
+            node = self.start()["node_id"]
+        run_name = self.store.load(node)["run_name"]
+        self.assertEqual(lane._read(run_name)["final"], {"status": "REFUSED"})
+        observed = self.capacity.observe(node)
+        self.assertEqual(
+            (observed["dstack_status"], observed["lane_refused"]), ("failed", True)
+        )
+        self.assertEqual(self.modal.created, [])
+        # Ended and its slot freed by the lane's own live list (#1328).
+        self.now += 60
+        self.capacity.observe_terminal(node)
+        with self.repo.engine.connect() as connection:
+            state = connection.execute(select(instance_intents.c.state)).scalar_one()
+        self.assertEqual(state, "destroyed")
 
     def check_failed_journal_write(self, backend):
         lane = self.configure(backend)
@@ -316,6 +356,117 @@ class DialoutCapacityFailures(LedgerCase):
 
     def test_modal_lost_stop_after_exit_is_not_replayed_or_zero_billed(self):
         self.check_lost_stop(self.md.backend, True)
+
+    def ended_without_running(self, end):
+        """A start whose job ended before any running read (#1328)."""
+        lane = self.configure(self.rp.backend)
+        node = self.start()["node_id"]
+        self.capacity.observe(node)
+        # Queued: no worker, so no instance id yet.
+        self.assertIsNone(self.store.load(node).get("provider_instance_id"))
+        end(lane, node)
+        for _ in range(2):
+            self.now += 60
+            self.capacity.observe_terminal(node)
+        binding = self.store.load(node)
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents)).mappings().one()
+        # Removal proven by the provider's own complete live list, as for a
+        # job that ran: the reservation leaves "reserved" and the slot frees.
+        self.assertEqual(intent["state"], "destroyed")
+        self.assertEqual(
+            binding["provider_removal_proof"]["provider_instance_id"],
+            intent["provider_instance_id"],
+        )
+        # Not claimed free: the bill stays to come, as for any ended run.
+        self.assert_reserved("invoice_pending")
+        self.assertEqual(sum(path.endswith("/run") for _, path in self.runpod.calls), 1)
+        return intent["provider_instance_id"]
+
+    def test_a_job_that_never_got_a_worker_ends_and_releases_its_reservation(self):
+        # Staging, 11-17 to 11-20: five such starts stayed "destroying" with
+        # their reservations held, because no instance id was ever recorded.
+        def no_worker(lane, node):
+            self.runpod.workers = {
+                "initializing": 0,
+                "idle": 0,
+                "ready": 0,
+                "running": 0,
+                "throttled": 1,
+                "unhealthy": 0,
+            }
+            self.now += lane.NO_WORKER_SECONDS + 1
+            self.assertTrue(self.capacity.observe(node)["lane_refused"])
+            self.service.node_command(self.owner, node, {}, "stop-1")
+            self.capacity.stop(node)
+            self.now += 1
+            self.capacity.observe_terminal(node)
+
+        self.assertEqual(self.ended_without_running(no_worker), "job-job-1")
+
+    def lane_of(self, node):
+        from studio_platform.scheduling.health import lane
+
+        with self.repo.engine.connect() as connection:
+            intent = connection.execute(select(instance_intents)).mappings().one()
+        row = {
+            "payload": {"dstack": self.store.load(node)},
+            "provider_instance_id": intent["provider_instance_id"],
+        }
+        return lane(row, self.now)
+
+    def test_a_job_stopped_while_queued_never_cools_its_lane(self):
+        # Review of #1329: the placeholder name a queued job gets once it ends
+        # read as an allocation, so stopping a start while it was still queued
+        # (the queue drained, the user cancelled) cooled the RunPod lane.
+        def cancelled(lane, node):
+            self.service.node_command(self.owner, node, {}, "stop-1")
+            self.capacity.stop(node)
+            self.now += 1
+            self.capacity.observe_terminal(node)
+
+        self.assertEqual(self.ended_without_running(cancelled), "job-job-1")
+        with self.repo.engine.connect() as connection:
+            node = connection.execute(select(operator_nodes.c.intent_id)).scalar_one()
+        self.assertIsNone(self.lane_of(node))
+
+    def test_a_job_a_worker_took_that_never_got_ready_still_cools_its_lane(self):
+        lane = self.configure(self.rp.backend)
+        node = self.start()["node_id"]
+        self.runpod.jobs["job-1"].update(status="IN_PROGRESS", workerId="w123")
+        self.capacity.observe(node)
+        self.service.node_command(self.owner, node, {}, "stop-1")
+        self.capacity.stop(node)
+        self.now += 1
+        self.capacity.observe_terminal(node)
+        self.assertEqual(self.store.load(node)["provider_instance_id"], "w123")
+        self.assertEqual(self.lane_of(node), lane.backend)
+
+    def test_a_job_cancelled_from_the_queue_or_failed_ends_the_same_way(self):
+        for status in ("CANCELLED", "FAILED"):
+            with self.subTest(status=status):
+                self.setUp()
+
+                def ended(lane, node, status=status):
+                    self.runpod.jobs["job-1"]["status"] = status
+                    self.capacity.observe_terminal(node)
+
+                self.assertEqual(self.ended_without_running(ended), "job-job-1")
+                self.tearDown()
+
+    def test_a_lost_submit_ends_once_no_job_of_it_can_exist(self):
+        def lost(lane, node):
+            # The create's answer never came: no job id in the journal.
+            run_name = self.store.load(node)["run_name"]
+            record = lane._read(run_name)
+            record["job_id"] = None
+            lane._write(run_name, record, create=False)
+            self.runpod.jobs.clear()
+            self.now += lane.UNBOUND_EXPIRY_SECONDS
+            self.capacity.observe_terminal(node)
+
+        identity = self.ended_without_running(lost)
+        self.assertTrue(identity.startswith("unbound-"), identity)
 
     def test_unbound_first_lane_journal_does_not_fall_through_to_other_original(self):
         self.rp._write(
